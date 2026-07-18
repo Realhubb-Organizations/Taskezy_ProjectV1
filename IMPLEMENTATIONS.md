@@ -15,6 +15,10 @@ This file is the running source of truth for **what has actually been built**, a
 - No auth provider wired up yet — `src/app/auth/login` is a UI shell
 - No payment/provisioning backend wired up yet — `src/app/checkout` and `src/app/provisioning` are UI shells
 
+## Deployment
+- GitHub: `main` branch at `https://github.com/realhubbmktg-hue/Taskezy_ProjectV1` is the source of truth — pushed and kept in sync with local work.
+- Hosting: Netlify, building from that `main` branch via `npm run build` (`@netlify/plugin-nextjs`). Netlify's build runs Next.js's production lint pass, which is stricter than `next dev` — ESLint *errors* (not warnings) fail the build.
+
 ## Reference Docs
 
 - `ARCHITECTURAL_BLUEPRINT.md` — target SRS/architecture (PostgreSQL, multi-tenant, OAuth 2.0, AWS, Capacitor mobile). Describes the end-state, not current code.
@@ -159,6 +163,12 @@ This file is the running source of truth for **what has actually been built**, a
 - Decisions made (and why): Manage Users' add/edit account logic (`addTeamMember`/`updateUserFields`/`deleteTeamMember`) and form fields were adapted from the existing `src/app/dashboard/admin/page.tsx` roster page rather than rebuilt from scratch — same underlying data/actions, just restyled as cards with a per-user credential-reveal toggle instead of a wide table, per the requested layout. `admin/page.tsx` itself was left as-is (not deleted) since removing it wasn't requested and it's still reachable/functional independently.
 - Known issues / TODO follow-ups: Settings' Manage Users and `/dashboard/admin` are now two separate UIs over the same user data — worth deciding later whether `/dashboard/admin` should redirect into Settings' Manage Users tab to avoid maintaining two editors for the same thing.
 - Next up: none outstanding for Settings.
+
+### 2026-07-14 — Pushed to GitHub, connected to Netlify, fixed production build failure
+- What was done: Committed all uncommitted session work (49 files) and pushed to `https://github.com/realhubbmktg-hue/Taskezy_ProjectV1` on `main`. Netlify was connected to build from that branch. First Netlify build failed with `react/no-unescaped-entities` ESLint errors (literal `"`/`'` characters in JSX text across 8 files) — `next build` runs ESLint and fails on errors, unlike `next dev` which doesn't lint-block, so this hadn't surfaced locally until deploy. Fixed all 8 files (escaped to `&quot;`/`&apos;`) and verified with a full local `npm run build` before pushing again.
+- Files touched: `src/app/dashboard/settings/page.tsx`, `src/components/crm/LeadDetailDrawer.tsx`, `src/components/crm/TopMetricsCards.tsx`, `src/components/dashboard/AttendanceWidget.tsx`, `src/components/dashboard/KpiGrid.tsx`, `src/components/dashboard/MarketingOperations.tsx`, `src/components/dashboard/SalesTelemetry.tsx`, `src/components/reports/ManagerReports.tsx`.
+- Known issues / TODO follow-ups: Remaining (non-blocking) build warnings: several `<img>` tags should migrate to `next/image` for LCP/bandwidth (`auth/login`, `dashboard/layout`, root `page.tsx`), and `provisioning/page.tsx`'s `useEffect` has a missing-dependency warning (`provisionTenant`, `router`, `steps.length`). Neither fails the build; both are optional cleanup.
+- Next up: address the `<img>` → `next/image` migration and the `useEffect` deps warning if/when a lint-clean build (zero warnings) is wanted, not required for deployment to keep working.
 
 <!--
 TEMPLATE FOR NEW ENTRIES — copy this block and fill in for each work session:
