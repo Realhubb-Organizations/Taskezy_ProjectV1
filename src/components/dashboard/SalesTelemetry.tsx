@@ -52,7 +52,7 @@ export default function SalesTelemetry({
           className="bg-slate-50/50 hover:bg-slate-50 p-4 rounded-xl border border-slate-200/60 hover:border-slate-300 transition-all duration-200 cursor-pointer flex flex-col justify-between group relative"
         >
           <div className="flex justify-between items-start">
-            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Today's Calls</span>
+            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Today&apos;s Calls</span>
             <SubActionsMenu actions={getSubActions("Today's Calls", "/dashboard/crm")} />
           </div>
           <div className="mt-4">

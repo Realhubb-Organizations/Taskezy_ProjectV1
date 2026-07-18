@@ -71,7 +71,7 @@ export default function MarketingOperations({
               <p className="text-base font-black text-slate-800 mt-1">₹{formatCurrency(metaTotalSpend)}</p>
             </div>
             <div className="p-3.5 bg-white border border-slate-100 rounded-xl">
-              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Today's Spend</span>
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Today&apos;s Spend</span>
               <p className="text-base font-black text-slate-800 mt-1">₹{formatCurrency(metaTodaySpend)}</p>
             </div>
           </div>
@@ -103,7 +103,7 @@ export default function MarketingOperations({
               <p className="text-base font-black text-slate-805 mt-1">₹{formatCurrency(googleTotalSpend)}</p>
             </div>
             <div className="p-3.5 bg-white border border-slate-100 rounded-xl">
-              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Today's Spend</span>
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Today&apos;s Spend</span>
               <p className="text-base font-black text-slate-805 mt-1">₹{formatCurrency(googleTodaySpend)}</p>
             </div>
           </div>

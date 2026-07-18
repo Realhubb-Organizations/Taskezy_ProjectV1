@@ -67,7 +67,7 @@ export default function KpiGrid({
           <SubActionsMenu actions={getKpiActions("Today's Leads", "/dashboard/crm")} />
         </div>
         <div className="mt-4">
-          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Today's Leads</span>
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Today&apos;s Leads</span>
           <p className="text-2xl font-black text-slate-805 mt-1">{leadsToday}</p>
         </div>
         <div className="mt-2 flex items-center gap-1">
@@ -90,7 +90,7 @@ export default function KpiGrid({
           <SubActionsMenu actions={getKpiActions("Site Visits", "/dashboard/crm")} />
         </div>
         <div className="mt-4">
-          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Today's Visits</span>
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Today&apos;s Visits</span>
           <p className="text-2xl font-black text-slate-805 mt-1">{visitsToday}</p>
         </div>
         <div className="mt-2 flex items-center gap-1">

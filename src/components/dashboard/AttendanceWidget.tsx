@@ -97,7 +97,7 @@ export default function AttendanceWidget({ users, timesheets }: AttendanceWidget
 
       {/* Bottom Portion: Employee Roster Grid */}
       <div className="mt-5 space-y-2">
-        <span className="text-[9px] font-extrabold text-slate-400 uppercase tracking-wider block">Today's Presence Grid</span>
+        <span className="text-[9px] font-extrabold text-slate-400 uppercase tracking-wider block">Today&apos;s Presence Grid</span>
         <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-2 lg:grid-cols-3 gap-2.5 max-h-40 overflow-y-auto pr-1">
           {employeeList.map((emp) => {
             const hasCheckedIn = timesheets.some(ts => ts.userId === emp.id && ts.date === todayStr);

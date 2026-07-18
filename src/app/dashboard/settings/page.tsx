@@ -350,7 +350,7 @@ export default function SettingsPage() {
           <div className="space-y-2.5">
             {filteredUsers.length === 0 ? (
               <div className="text-center py-10 text-xs text-slate-400 border border-dashed border-slate-200 rounded-xl">
-                No users match "{searchQuery}".
+                No users match &quot;{searchQuery}&quot;.
               </div>
             ) : (
               filteredUsers.map(user => {

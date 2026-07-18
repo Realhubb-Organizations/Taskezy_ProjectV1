@@ -91,7 +91,7 @@ export default function TopMetricsCards({
             <ArrowUpRight className="h-3.5 w-3.5 text-slate-400 group-hover:scale-110 transition-transform" />
           </div>
           <div className="mt-3">
-            <span className="text-[8px] font-bold text-slate-400 uppercase tracking-wider block">Today's Ingest</span>
+            <span className="text-[8px] font-bold text-slate-400 uppercase tracking-wider block">Today&apos;s Ingest</span>
             <p className="text-xl font-black text-slate-805 mt-0.5">{leadsToday}</p>
           </div>
         </div>
@@ -109,7 +109,7 @@ export default function TopMetricsCards({
             <ArrowUpRight className="h-3.5 w-3.5 text-slate-400 group-hover:scale-110 transition-transform" />
           </div>
           <div className="mt-3">
-            <span className="text-[8px] font-bold text-slate-400 uppercase tracking-wider block">Today's Visits</span>
+            <span className="text-[8px] font-bold text-slate-400 uppercase tracking-wider block">Today&apos;s Visits</span>
             <p className="text-xl font-black text-slate-805 mt-0.5">{visitsToday}</p>
           </div>
         </div>

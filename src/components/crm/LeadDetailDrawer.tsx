@@ -190,7 +190,7 @@ export default function LeadDetailDrawer({
                 <div className="min-w-0">
                   <span className="text-[9px] font-bold text-slate-450 uppercase block">Form Response Summary</span>
                   <p className="text-[10px] text-slate-500 font-medium leading-relaxed mt-0.5">
-                    "Looking for a 3BHK flat near Coimbatore outer ring road. Budget around ₹85 Lakhs. Prefer higher floors."
+                    &quot;Looking for a 3BHK flat near Coimbatore outer ring road. Budget around ₹85 Lakhs. Prefer higher floors.&quot;
                   </p>
                 </div>
               </div>

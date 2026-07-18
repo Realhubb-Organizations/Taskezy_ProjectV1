@@ -86,8 +86,8 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
     <div className="space-y-6 animate-fade-in">
       <div className="glass-card p-4 rounded-xl">
         <p className="text-[11px] text-slate-500 leading-relaxed">
-          Missed = a lead assigned to that person with no status update within the 20-minute SLA window. "Individual" reports only the
-          leads assigned directly to the manager (their own spend and ROI); "Team" rolls up every direct report under them; "Combined"
+          Missed = a lead assigned to that person with no status update within the 20-minute SLA window. &quot;Individual&quot; reports only the
+          leads assigned directly to the manager (their own spend and ROI); &quot;Team&quot; rolls up every direct report under them; &quot;Combined&quot;
           is individual + team together.
         </p>
       </div>
