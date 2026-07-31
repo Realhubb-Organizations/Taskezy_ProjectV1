@@ -1,0 +1,12 @@
+# The Next.js app moved into frontend/ during a monorepo restructure
+# (frontend/ + Taskezy-Server/ as siblings under this repo root).
+# This file tells Netlify where the app actually lives now, so the existing
+# site keeps building correctly without needing a manual dashboard change.
+
+[build]
+  base = "frontend"
+  command = "npm run build"
+  publish = ".next"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"

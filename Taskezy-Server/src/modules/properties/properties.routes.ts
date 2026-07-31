@@ -1,0 +1,61 @@
+import { Router } from "express";
+import { requireAuth, requireRole } from "../../middleware/auth";
+import { validate } from "../../middleware/validate";
+import { asyncHandler } from "../../utils/asyncHandler";
+import { sendOk } from "../../utils/apiResponse";
+import { ApiError } from "../../utils/ApiError";
+import { createPropertySchema, editPropertySchema, propertyIdParamSchema } from "./properties.schema";
+import * as repo from "./properties.repository";
+
+export const propertiesRouter = Router();
+
+propertiesRouter.use(requireAuth);
+
+propertiesRouter.get(
+  "/",
+  asyncHandler(async (_req, res) => sendOk(res, await repo.findAll()))
+);
+
+propertiesRouter.get(
+  "/:id",
+  validate({ params: propertyIdParamSchema }),
+  asyncHandler(async (req, res) => {
+    const property = await repo.findById(req.params.id);
+    if (!property) throw ApiError.notFound("Property not found");
+    sendOk(res, property);
+  })
+);
+
+// Writes are ADMIN-only, matching the frontend's existing admin-only edit gate.
+propertiesRouter.post(
+  "/",
+  requireRole("ADMIN"),
+  validate({ body: createPropertySchema }),
+  asyncHandler(async (req, res) => {
+    const id = await repo.create(req.body);
+    sendOk(res, await repo.findById(id), 201);
+  })
+);
+
+propertiesRouter.patch(
+  "/:id",
+  requireRole("ADMIN"),
+  validate({ params: propertyIdParamSchema, body: editPropertySchema }),
+  asyncHandler(async (req, res) => {
+    const existing = await repo.findById(req.params.id);
+    if (!existing) throw ApiError.notFound("Property not found");
+    await repo.update(req.params.id, req.body);
+    sendOk(res, await repo.findById(req.params.id));
+  })
+);
+
+propertiesRouter.delete(
+  "/:id",
+  requireRole("ADMIN"),
+  validate({ params: propertyIdParamSchema }),
+  asyncHandler(async (req, res) => {
+    const deleted = await repo.remove(req.params.id);
+    if (!deleted) throw ApiError.notFound("Property not found");
+    sendOk(res, { deleted: true });
+  })
+);
