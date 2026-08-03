@@ -277,6 +277,15 @@ export default function LoginPage() {
                 >
                   {isSubmitting ? "Signing in..." : "Continue"}
                 </button>
+
+                <div className="text-center mt-4">
+                  <p className="text-[11px] sm:text-xs text-gray-500 font-light">
+                    Need to create a new tenant?{" "}
+                    <Link href="/checkout" className="text-blue-500 hover:underline font-normal">
+                      Configure a subscription plan
+                    </Link>
+                  </p>
+                </div>
               </form>
 
             </div>
