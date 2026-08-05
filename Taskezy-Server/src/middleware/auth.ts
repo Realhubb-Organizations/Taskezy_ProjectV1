@@ -7,6 +7,8 @@ declare global {
   namespace Express {
     interface Request {
       user?: AccessTokenPayload;
+      /** Raw request body bytes, captured by express.json()'s verify hook — needed for Meta's X-Hub-Signature-256 check (a re-serialized JSON body would not match the signature). */
+      rawBody?: Buffer;
     }
   }
 }

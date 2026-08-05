@@ -20,7 +20,19 @@ const envSchema = z.object({
   CORS_ALLOWED_ORIGINS: z.string().default(""),
 
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60000),
-  RATE_LIMIT_MAX: z.coerce.number().int().positive().default(120)
+  RATE_LIMIT_MAX: z.coerce.number().int().positive().default(120),
+
+  // Meta (Facebook/Instagram) Lead Ads real-time integration — see src/modules/meta.
+  META_APP_ID: z.string().min(1, "META_APP_ID is required"),
+  META_APP_SECRET: z.string().min(1, "META_APP_SECRET is required"),
+  META_WEBHOOK_VERIFY_TOKEN: z.string().min(1, "META_WEBHOOK_VERIFY_TOKEN is required"),
+  META_OAUTH_REDIRECT_URI: z.string().url("META_OAUTH_REDIRECT_URI must be a full URL, e.g. https://api.taskezy.in/api/v1/meta/callback"),
+  META_GRAPH_API_VERSION: z.string().default("v25.0"),
+  // 32 raw bytes, base64-encoded — generate with:
+  //   node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+  TOKEN_ENCRYPTION_KEY: z.string().min(1, "TOKEN_ENCRYPTION_KEY is required"),
+  // Where to send the admin's browser back to after the OAuth callback finishes, e.g. https://taskezy.in/dashboard/settings
+  FRONTEND_URL: z.string().url("FRONTEND_URL is required")
 });
 
 const parsed = envSchema.safeParse(process.env);

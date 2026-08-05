@@ -1,0 +1,77 @@
+import { pool, withTransaction } from "../../db/pool";
+import { logger } from "../../utils/logger";
+import { insertLeadLog } from "../leads/leads.repository";
+import { isUniqueViolation } from "../users/users.repository";
+import { MetaLeadData } from "./meta-client";
+
+function firstFieldValue(fieldData: MetaLeadData["field_data"], keys: string[]): string | undefined {
+  for (const datum of fieldData) {
+    if (keys.includes(datum.name.toLowerCase()) && datum.values[0]) return datum.values[0];
+  }
+  return undefined;
+}
+
+/** leads.phone is CHECK'd to a bare 10-digit Indian mobile — strip formatting/country code before insert. */
+function normalizeIndianMobile(raw: string): string | undefined {
+  const last10 = raw.replace(/\D/g, "").slice(-10);
+  return /^[6-9][0-9]{9}$/.test(last10) ? last10 : undefined;
+}
+
+/**
+ * Turns one Meta leadgen event into a `leads` row. New Meta leads land as
+ * UNASSIGNED (per product decision — no auto-assignment via the existing
+ * round-robin/percentage property rule) but leads.assigned_agent_id is
+ * NOT NULL, so they're placed on the connecting admin's name until a
+ * manager routes them via the existing reassign flow.
+ */
+export async function ingestMetaLead(leadData: MetaLeadData, connectingAdminId: string): Promise<void> {
+  const combinedFirstLast = [firstFieldValue(leadData.field_data, ["first_name"]), firstFieldValue(leadData.field_data, ["last_name"])]
+    .filter(Boolean)
+    .join(" ");
+  const rawName = firstFieldValue(leadData.field_data, ["full_name", "name"]) ?? (combinedFirstLast || undefined);
+  const rawPhone = firstFieldValue(leadData.field_data, ["phone_number", "phone"]);
+  const email = firstFieldValue(leadData.field_data, ["email"]);
+
+  if (!rawPhone) {
+    logger.warn({ leadgenId: leadData.id }, "Meta lead has no phone_number field — skipped, leads.phone is required");
+    return;
+  }
+  const phone = normalizeIndianMobile(rawPhone);
+  if (!phone) {
+    logger.warn({ leadgenId: leadData.id }, "Meta lead phone did not normalize to a valid 10-digit Indian mobile — skipped");
+    return;
+  }
+
+  const name = rawName || "Meta Lead";
+  const campaign = leadData.campaign_name || leadData.form_id || "Meta Lead Ads";
+
+  try {
+    await pool.query(
+      `INSERT INTO leads (name, phone, email, source, campaign, assigned_agent_id, status_code, assigned_at, meta_leadgen_id)
+       VALUES ($1, $2, $3, 'Meta Ads', $4, $5, 'UNASSIGNED', now(), $6)
+       ON CONFLICT (meta_leadgen_id) DO NOTHING`,
+      [name, phone, email ?? null, campaign, connectingAdminId, leadData.id]
+    );
+  } catch (err) {
+    // The only remaining unique constraint this insert can hit is leads.phone
+    // (meta_leadgen_id conflicts are already absorbed by ON CONFLICT above) —
+    // an existing customer submitted the form again. Note it, don't duplicate.
+    if (isUniqueViolation(err)) {
+      logger.info({ leadgenId: leadData.id }, "Meta lead phone already exists in leads — logging a note instead of creating a duplicate");
+      await withTransaction(async (client) => {
+        const { rows } = await client.query<{ id: string }>(`SELECT id FROM leads WHERE phone = $1`, [phone]);
+        if (rows[0]) {
+          await insertLeadLog(
+            client,
+            rows[0].id,
+            connectingAdminId,
+            "Meta Ads Webhook",
+            `New Meta lead (leadgen ID ${leadData.id}) submitted for this phone number again — not duplicated.`
+          );
+        }
+      });
+      return;
+    }
+    throw err;
+  }
+}

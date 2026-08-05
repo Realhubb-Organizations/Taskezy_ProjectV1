@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import React, { useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useApp, User, Role } from "@/context/AppContext";
+import { apiDisconnectMeta, apiGetMetaConnectUrl, apiListMetaConnections, ApiMetaConnection } from "@/lib/apiClient";
 import {
   Settings,
   Plus,
@@ -43,12 +44,15 @@ function initialsFor(name: string): string {
 
 export default function SettingsPage() {
   const router = useRouter();
-  const { users, leads, activeRole, logout, updateUserFields, addTeamMember, deleteTeamMember } = useApp();
+  const searchParams = useSearchParams();
+  const { users, leads, activeRole, logout, updateUserFields, addTeamMember, deleteTeamMember, refreshMetaConnectionStatus } = useApp();
   const [activeTab, setActiveTab] = useState<Tab>("Connected Apps");
 
   // --- Connected Apps ---
+  // Every entry other than Meta Ads is still a placeholder — no backend
+  // integration exists for them yet, unlike Meta which is wired to the real
+  // meta_connections table / OAuth flow below.
   const [integrations, setIntegrations] = useState([
-    { name: "Meta Ads", status: "Inactive", description: "Capture leads from Facebook & Instagram advertising campaigns" },
     { name: "Google Ads", status: "Inactive", description: "Capture leads from Google Search & Display campaigns" },
     { name: "99acres", status: "Inactive", description: "Capture leads from 99acres property listings" },
     { name: "LinkedIn", status: "Inactive", description: "Capture B2B leads from LinkedIn Lead Gen Forms" },
@@ -65,6 +69,72 @@ export default function SettingsPage() {
       return item;
     }));
   };
+
+  // --- Meta Ads: real OAuth connection ---
+  const [metaConnections, setMetaConnections] = useState<ApiMetaConnection[]>([]);
+  const [metaLoading, setMetaLoading] = useState(false);
+  const [metaBanner, setMetaBanner] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+
+  const loadMetaConnections = async () => {
+    if (activeRole !== "ADMIN") return;
+    try {
+      setMetaConnections(await apiListMetaConnections());
+    } catch (err) {
+      console.warn("Could not load Meta connections:", err);
+    }
+  };
+
+  useEffect(() => {
+    loadMetaConnections();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeRole]);
+
+  // Handles the redirect back from /api/v1/meta/callback (?meta_connected=N or ?meta_error=...)
+  useEffect(() => {
+    const connected = searchParams.get("meta_connected");
+    const error = searchParams.get("meta_error");
+    if (connected) {
+      setMetaBanner({ kind: "success", text: `Connected ${connected} Meta Page${connected === "1" ? "" : "s"} — new leads will start arriving in real time.` });
+      loadMetaConnections();
+      refreshMetaConnectionStatus();
+      router.replace("/dashboard/settings");
+    } else if (error) {
+      const messages: Record<string, string> = {
+        no_pages: "That Facebook account doesn't manage any Pages — connect an account that's an admin on at least one Page.",
+        invalid_state: "The connection request expired or was tampered with — please try connecting again.",
+        "1": "Something went wrong connecting to Meta — please try again."
+      };
+      setMetaBanner({ kind: "error", text: messages[error] || messages["1"] });
+      router.replace("/dashboard/settings");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
+  const handleConnectMeta = async () => {
+    setMetaLoading(true);
+    try {
+      const { url } = await apiGetMetaConnectUrl();
+      window.location.href = url;
+    } catch (err) {
+      setMetaBanner({ kind: "error", text: "Could not start the Meta connection — please try again." });
+      console.warn("Meta connect failed:", err);
+      setMetaLoading(false);
+    }
+  };
+
+  const handleDisconnectMeta = async (connectionId: string, pageName: string) => {
+    if (!confirm(`Disconnect "${pageName}"? New leads from this Page will stop arriving until you reconnect it.`)) return;
+    try {
+      await apiDisconnectMeta(connectionId);
+      await loadMetaConnections();
+      await refreshMetaConnectionStatus();
+    } catch (err) {
+      alert("Could not disconnect this Page. Please try again.");
+      console.warn("Meta disconnect failed:", err);
+    }
+  };
+
+  const activeMetaConnections = metaConnections.filter(c => c.status === "ACTIVE");
 
   // --- Leads source breakdown ---
   const leadSourceRows = useMemo(() => {
@@ -224,6 +294,15 @@ export default function SettingsPage() {
         </div>
       )}
 
+      {metaBanner && (
+        <div className={`p-3.5 rounded-xl border text-xs font-bold flex items-center gap-2 shadow-sm animate-fade-in ${
+          metaBanner.kind === "success" ? "bg-emerald-50 border-emerald-105 text-emerald-700" : "bg-red-50 border-red-150 text-red-700"
+        }`}>
+          {metaBanner.kind === "success" ? <CheckCircle className="h-4.5 w-4.5" /> : <AlertTriangle className="h-4.5 w-4.5" />}
+          <span>{metaBanner.text}</span>
+        </div>
+      )}
+
       {/* Tabs Menu */}
       <div className="flex border-b border-slate-200 gap-6 text-xs font-bold text-slate-500 mb-6">
         {TABS.map((t) => (
@@ -242,6 +321,56 @@ export default function SettingsPage() {
       {/* 1. Connected Apps */}
       {activeTab === "Connected Apps" && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-fade-in">
+          {/* Meta Ads — real OAuth connection, one card per connected Page */}
+          <div className="glass-card p-5 rounded-2xl flex flex-col justify-between border border-slate-200 md:col-span-2 lg:col-span-1">
+            <div className="space-y-2">
+              <div className="flex justify-between items-center">
+                <h4 className="text-sm font-bold text-slate-800">Meta Ads</h4>
+                <span className={`text-[9px] font-bold border px-1.5 py-0.5 rounded-full ${
+                  activeMetaConnections.length > 0
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-150"
+                    : "bg-slate-100 text-slate-450 border-slate-200"
+                }`}>
+                  {activeMetaConnections.length > 0 ? `Active (${activeMetaConnections.length} Page${activeMetaConnections.length === 1 ? "" : "s"})` : "Inactive"}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 leading-normal">
+                Capture leads from Facebook &amp; Instagram Lead Ads in real time via a webhook.
+              </p>
+              {activeMetaConnections.length > 0 && (
+                <div className="pt-1 space-y-1">
+                  {activeMetaConnections.map(c => (
+                    <div key={c.id} className="flex items-center justify-between text-[10px] bg-slate-50 border border-slate-150 rounded-lg px-2 py-1.5">
+                      <span className="font-bold text-slate-700 truncate">{c.page_name}</span>
+                      {activeRole === "ADMIN" && (
+                        <button
+                          onClick={() => handleDisconnectMeta(c.id, c.page_name)}
+                          className="text-red-600 hover:text-red-700 font-bold shrink-0 ml-2"
+                        >
+                          Disconnect
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="pt-4 flex justify-end">
+              {activeRole === "ADMIN" ? (
+                <button
+                  onClick={handleConnectMeta}
+                  disabled={metaLoading}
+                  className="px-3 py-1 rounded text-[10px] font-bold border bg-brand-50 border-brand-200 text-brand-700 hover:bg-brand-700 hover:text-white transition-all disabled:opacity-50"
+                >
+                  {metaLoading ? "Redirecting…" : activeMetaConnections.length > 0 ? "Connect Another Page" : "Connect App"}
+                </button>
+              ) : (
+                <span className="text-[10px] text-slate-400 italic">Only an Admin can manage this connection.</span>
+              )}
+            </div>
+          </div>
+
           {integrations.map((item, idx) => (
             <div key={idx} className="glass-card p-5 rounded-2xl flex flex-col justify-between border border-slate-200">
               <div className="space-y-2">

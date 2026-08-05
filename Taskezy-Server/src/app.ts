@@ -23,6 +23,7 @@ import { invoicesRouter } from "./modules/invoices/invoices.routes";
 import { notificationsRouter } from "./modules/notifications/notifications.routes";
 import { calendarEventsRouter } from "./modules/calendar-events/calendar-events.routes";
 import { adSpendRouter } from "./modules/ad-spend/ad-spend.routes";
+import { metaRouter } from "./modules/meta/meta.routes";
 
 export function createApp(): Express {
   const app = express();
@@ -46,7 +47,16 @@ export function createApp(): Express {
     })
   );
   app.use(compression());
-  app.use(express.json({ limit: "1mb" })); // bounded body size — cheap DoS mitigation
+  app.use(
+    express.json({
+      limit: "1mb", // bounded body size — cheap DoS mitigation
+      // Meta's X-Hub-Signature-256 webhook signature is computed over the exact
+      // bytes they sent — stash them here since req.body below is parsed/re-orderable.
+      verify: (req, _res, buf) => {
+        (req as Express.Request & { rawBody?: Buffer }).rawBody = buf;
+      }
+    })
+  );
   app.use(cookieParser());
   app.use(pinoHttp({ logger, autoLogging: { ignore: (req) => req.url === "/health" } }));
 
@@ -66,6 +76,7 @@ export function createApp(): Express {
   app.use("/api/v1/notifications", notificationsRouter);
   app.use("/api/v1/calendar-events", calendarEventsRouter);
   app.use("/api/v1/ad-spend", adSpendRouter);
+  app.use("/api/v1/meta", metaRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

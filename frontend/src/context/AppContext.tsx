@@ -41,6 +41,7 @@ import {
   apiCreateCalendarEvent,
   apiDeleteCalendarEvent,
   apiListAdSpend,
+  apiListMetaConnections,
   apiListTimesheets,
   apiPunchIn,
   apiPunchOut,
@@ -416,6 +417,7 @@ interface AppState {
 }
 
 interface AppActions {
+  refreshMetaConnectionStatus: () => Promise<void>;
   // SaaS actions
   setSeats: (role: Role, count: number) => void;
   processPayment: () => Promise<boolean>;
@@ -791,7 +793,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Real backend integration (Taskezy-Server) — every domain below is fetched
   // from the real database. Nothing in this file falls back to mock data.
-  const loadAllRealData = async () => {
+  const loadAllRealData = async (role?: Role) => {
     try {
       const [apiLeads, apiUsers, apiProperties, apiResaleUnits, apiFollowups, apiAttendance, apiReimbursements, apiInvoices, apiNotifications, apiCalendarEvents, apiAdSpend, apiTimesheets] = await Promise.all([
         apiListAllLeads(),
@@ -819,6 +821,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setCalendarEvents(apiCalendarEvents.map(mapApiCalendarEventToFrontend));
       setAdSpendRecords(apiAdSpend.map(mapApiAdSpendToFrontend));
       setTimesheets(apiTimesheets.map(mapApiTimesheetToFrontend));
+
+      // /api/v1/meta/connections is ADMIN-only — only attempt it for admins,
+      // other roles keep the default false rather than eating a guaranteed 403.
+      if (role === "ADMIN") {
+        try {
+          const connections = await apiListMetaConnections();
+          setMetaConnected(connections.some(c => c.status === "ACTIVE"));
+        } catch {
+          // Non-fatal — Connected Apps tab will still show real state on its own fetch.
+        }
+      }
     } catch (err) {
       // Server unreachable or session invalid. Nothing to fall back to
       // anymore — surfaced as empty lists in the UI, not fake data.
@@ -840,7 +853,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setCurrentUser(mapped);
         setActiveRole(mapped.role);
         setActiveSystem(getDefaultSystem(mapped));
-        await loadAllRealData();
+        await loadAllRealData(mapped.role);
       })
       .catch(() => clearApiSession())
       .finally(() => setAuthLoading(false));
@@ -851,9 +864,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isOnline, setIsOnline] = useState(true);
   const [pendingSyncQueue, setPendingSyncQueue] = useState<any[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
-  // Defaults false — the real Meta OAuth connection isn't built yet; flips true
-  // once that integration lands and actually verifies a live connection.
+  // Reflects whether any meta_connections row is ACTIVE — set on initial load
+  // for ADMINs (see loadAllRealData) and refreshed after Connect/Disconnect.
   const [metaConnected, setMetaConnected] = useState(false);
+
+  const refreshMetaConnectionStatus = async () => {
+    try {
+      const connections = await apiListMetaConnections();
+      setMetaConnected(connections.some(c => c.status === "ACTIVE"));
+    } catch {
+      // Non-admin or unreachable — leave metaConnected as-is.
+    }
+  };
 
   // Update online state event listener
   useEffect(() => {
@@ -1026,7 +1048,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setCurrentUser(mapped);
       setActiveRole(mapped.role);
       setActiveSystem(getDefaultSystem(mapped));
-      await loadAllRealData();
+      await loadAllRealData(mapped.role);
       return mapped;
     } catch (err) {
       // Any failure — bad credentials (401), inactive account, or the API
@@ -1716,6 +1738,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         pendingSyncCount: pendingSyncQueue.length,
         isSyncing,
         metaConnected,
+        refreshMetaConnectionStatus,
         setSeats,
         processPayment,
         provisionTenant,

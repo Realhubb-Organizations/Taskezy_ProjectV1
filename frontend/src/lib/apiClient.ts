@@ -572,6 +572,32 @@ export function apiListAdSpend(): Promise<ApiAdSpendRow[]> {
   return request<ApiAdSpendRow[]>("/api/v1/ad-spend");
 }
 
+// --- Meta (Facebook/Instagram) Lead Ads connection — ADMIN only ---
+export interface ApiMetaConnection {
+  id: string;
+  page_id: string;
+  page_name: string;
+  ad_account_id: string | null;
+  status: "ACTIVE" | "DISCONNECTED";
+  connected_by: string;
+  created_at: string;
+}
+
+export function apiListMetaConnections(): Promise<ApiMetaConnection[]> {
+  return request<ApiMetaConnection[]>("/api/v1/meta/connections");
+}
+
+// Returns the Meta OAuth dialog URL — the caller navigates the browser there
+// itself (window.location.href), since a plain page navigation can't carry
+// this request's Authorization header.
+export function apiGetMetaConnectUrl(): Promise<{ url: string }> {
+  return request<{ url: string }>("/api/v1/meta/connect");
+}
+
+export function apiDisconnectMeta(connectionId: string): Promise<{ disconnected: boolean }> {
+  return request<{ disconnected: boolean }>(`/api/v1/meta/connections/${connectionId}`, { method: "DELETE" });
+}
+
 // --- Timesheets (HRMS punch in/out + regularization) ---
 export interface ApiTimesheetRow {
   id: string;
