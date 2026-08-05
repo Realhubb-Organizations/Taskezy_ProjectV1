@@ -1,19 +1,5 @@
 import { Lead, AdSpendRecord, LeadStatus } from "@/context/AppContext";
 
-// Name-based sales hierarchy for manager/team roll-ups. The seeded roster only has 3 managers + a
-// handful of agents, and some agent names appear in lead data without a matching seeded user record —
-// mapping by name keeps manager-level reports correct regardless of that mock-data gap.
-export const SALES_HIERARCHY: Record<string, string> = {
-  "Akhil Raj Singh": "Gautham Karanam",
-  "Bibhuti Kumar": "Gautham Karanam",
-  "Bicky Roy": "Santosh Ray",
-  "Neha Chourey": "Santosh Ray",
-  "Himesh Sengupta": "Sanjeev Kumar",
-  "Santhosh Reddy B": "Sanjeev Kumar"
-};
-
-export const SALES_MANAGERS = ["Gautham Karanam", "Santosh Ray", "Sanjeev Kumar"];
-
 const BUYER_STATUSES = new Set<LeadStatus>([
   "Interested", "Follow up", "Follow-ups", "Call Back", "Meeting Scheduled", "Meeting Done",
   "Site Visit Scheduled", "Site Visit Done", "Site Visit", "In Negotiation",

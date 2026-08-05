@@ -11,13 +11,11 @@ import {
   computeROIMultiple,
   computeAllocatedSpend,
   isMissedLead,
-  formatCurrency,
-  SALES_HIERARCHY,
-  SALES_MANAGERS
+  formatCurrency
 } from "@/lib/reportMetrics";
 
 export default function ManagerReports({ dateRange }: { dateRange: DateRange }) {
-  const { leads, adSpendRecords } = useApp();
+  const { leads, adSpendRecords, users } = useApp();
   const [expanded, setExpanded] = useState<string | null>(null);
 
   const rangeLeads = useMemo(() => filterLeadsByRange(leads, dateRange.from, dateRange.to), [leads, dateRange]);
@@ -25,10 +23,15 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
   const totalSpend = rangeSpend.reduce((sum, r) => sum + r.spend, 0);
   const totalLeadsCount = rangeLeads.length;
 
+  // Real reporting-line grouping via users.managerId (see Settings → Manage
+  // Users → "Reports To") — previously this grouped leads against a hardcoded
+  // name-string lookup with no connection to the actual roster.
+  const managers = useMemo(() => users.filter(u => u.role_type === "Manager"), [users]);
+
   const managerRows = useMemo(() => {
-    return SALES_MANAGERS.map(manager => {
-      const teamMembers = Object.keys(SALES_HIERARCHY).filter(agent => SALES_HIERARCHY[agent] === manager);
-      const individualLeads = rangeLeads.filter(l => l.assignedAgent === manager);
+    return managers.map(manager => {
+      const teamMembers = users.filter(u => u.managerId === manager.id).map(u => u.name);
+      const individualLeads = rangeLeads.filter(l => l.assignedAgent === manager.name);
       const teamLeads = rangeLeads.filter(l => teamMembers.includes(l.assignedAgent));
       const allLeads = [...individualLeads, ...teamLeads];
 
@@ -65,7 +68,7 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
       });
 
       return {
-        manager,
+        manager: manager.name,
         individualLeadsCount: individualLeads.length,
         individualSpend,
         individualROI,
@@ -80,7 +83,7 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
         memberBreakdown
       };
     });
-  }, [rangeLeads, totalSpend, totalLeadsCount]);
+  }, [managers, users, rangeLeads, totalSpend, totalLeadsCount]);
 
   return (
     <div className="space-y-6 animate-fade-in">

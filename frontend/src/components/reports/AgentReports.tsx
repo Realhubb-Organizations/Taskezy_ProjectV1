@@ -13,9 +13,7 @@ import {
   computeAllocatedSpend,
   getMissedInfo,
   formatCurrency,
-  formatMinutes,
-  SALES_HIERARCHY,
-  SALES_MANAGERS
+  formatMinutes
 } from "@/lib/reportMetrics";
 
 export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
@@ -26,19 +24,31 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
   const totalSpend = rangeSpend.reduce((sum, r) => sum + r.spend, 0);
   const totalLeadsCount = rangeLeads.length;
 
+  // Real reporting-line lookup (see Settings → Manage Users → "Reports To"),
+  // not the old hardcoded name-string SALES_HIERARCHY table.
+  const managerNames = useMemo(() => new Set(users.filter(u => u.role_type === "Manager").map(u => u.name)), [users]);
+  const reportsToByName = useMemo(() => {
+    const map = new Map<string, string>();
+    users.forEach(u => { if (u.managerName) map.set(u.name, u.managerName); });
+    return map;
+  }, [users]);
+
   const agentNames = useMemo(() => {
-    const names = new Set<string>([...Object.keys(SALES_HIERARCHY), ...rangeLeads.map(l => l.assignedAgent)]);
-    SALES_MANAGERS.forEach(m => names.delete(m));
+    const names = new Set<string>([
+      ...users.filter(u => u.role_type !== "Manager").map(u => u.name),
+      ...rangeLeads.map(l => l.assignedAgent)
+    ]);
+    managerNames.forEach(m => names.delete(m));
     return Array.from(names).sort();
-  }, [rangeLeads]);
+  }, [users, managerNames, rangeLeads]);
 
   const [selectedAgent, setSelectedAgent] = useState<string>(agentNames[0] || "");
   const activeAgent = agentNames.includes(selectedAgent) ? selectedAgent : agentNames[0] || "";
 
   const agentSalesTeamOptions = useMemo(() => {
-    const names = new Set<string>([...agentNames, ...SALES_MANAGERS]);
+    const names = new Set<string>([...agentNames, ...Array.from(managerNames)]);
     return Array.from(names).sort();
-  }, [agentNames]);
+  }, [agentNames, managerNames]);
 
   const agentLeads = rangeLeads.filter(l => l.assignedAgent === activeAgent);
   const allocatedSpend = computeAllocatedSpend(agentLeads.length, totalLeadsCount, totalSpend);
@@ -71,7 +81,7 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
             ) : (
               agentNames.map(name => {
                 const count = rangeLeads.filter(l => l.assignedAgent === name).length;
-                const isManagedBy = SALES_HIERARCHY[name];
+                const isManagedBy = reportsToByName.get(name);
                 return (
                   <button
                     key={name}
@@ -112,7 +122,7 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                 <div>
                   <p className="text-sm font-bold text-slate-800">{activeAgent}</p>
                   <p className="text-[10px] text-slate-500">
-                    {SALES_HIERARCHY[activeAgent] ? `Reports to ${SALES_HIERARCHY[activeAgent]}` : "Sales Manager / TL"}
+                    {reportsToByName.get(activeAgent) ? `Reports to ${reportsToByName.get(activeAgent)}` : "Sales Manager / TL"}
                   </p>
                 </div>
               </div>

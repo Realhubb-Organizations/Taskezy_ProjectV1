@@ -29,6 +29,9 @@ usersRouter.post(
   requireRole("ADMIN"),
   validate({ body: createUserSchema }),
   asyncHandler(async (req, res) => {
+    if (req.body.managerId && !(await repo.isActiveManager(req.body.managerId))) {
+      throw ApiError.badRequest("managerId must be an active user with roleType MANAGER.");
+    }
     const passwordHash = await hashPassword(req.body.password);
     try {
       const id = await repo.create({ ...req.body, passwordHash });
@@ -57,6 +60,13 @@ usersRouter.patch(
       if (remainingAdmins === 0) {
         throw ApiError.badRequest("Cannot deactivate the last active administrator account.");
       }
+    }
+
+    if (req.body.managerId === req.params.id) {
+      throw ApiError.badRequest("A user cannot report to themselves.");
+    }
+    if (req.body.managerId && !(await repo.isActiveManager(req.body.managerId))) {
+      throw ApiError.badRequest("managerId must be an active user with roleType MANAGER.");
     }
 
     await repo.update(req.params.id, req.body);

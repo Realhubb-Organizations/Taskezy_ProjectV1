@@ -125,6 +125,8 @@ export interface User {
   employment_type?: "FULL TIME" | "FREELANCER" | "INTERN" | "AGENCY";
   department?: "SALES" | "TECH" | "MARKETING" | "FINANCE";
   status?: "ACTIVE" | "INACTIVE";
+  managerId?: string; // real reporting-line relationship — who this person reports to
+  managerName?: string;
   password_hash?: string;
   created_at?: string;
   updated_at?: string;
@@ -426,7 +428,8 @@ interface AppActions {
     passwordHash: string,
     designation: string,
     roleType: "Manager" | "Member",
-    status: "ACTIVE" | "INACTIVE"
+    status: "ACTIVE" | "INACTIVE",
+    managerId?: string | null
   ) => void;
   setCurrentUserPasswordActive: () => void;
   // Now async: tries the real API server first (Taskezy-Server) and falls back to
@@ -543,6 +546,8 @@ function mapApiUserDirectoryEntryToFrontendUser(row: ApiUserDirectoryEntry): Use
     designation: row.designation || undefined,
     role_type: row.role_type === "MANAGER" ? "Manager" : row.role_type === "MEMBER" ? "Member" : undefined,
     department: (row.department as User["department"]) || undefined,
+    managerId: row.manager_id || undefined,
+    managerName: row.manager_name || undefined,
     status: "ACTIVE"
   };
 }
@@ -974,8 +979,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     passwordHash: string,
     designation: string,
     roleType: "Manager" | "Member",
-    status: "ACTIVE" | "INACTIVE"
+    status: "ACTIVE" | "INACTIVE",
+    managerId?: string | null
   ) => {
+    const managerName = managerId ? users.find(u => u.id === managerId)?.name : undefined;
     setUsers(prev => prev.map(u => {
       if (u.id === userId) {
         return {
@@ -988,6 +995,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           designation,
           role_type: roleType,
           status,
+          ...(managerId !== undefined ? { managerId: managerId || undefined, managerName } : {}),
           updated_at: new Date().toISOString()
         };
       }
@@ -1000,7 +1008,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         lastName,
         designation,
         roleType: roleType === "Manager" ? "MANAGER" : "MEMBER",
-        status
+        status,
+        managerId: managerId !== undefined ? (managerId || null) : undefined
       }).catch((err) => console.warn("Could not persist user edit to the database:", err));
       // passwordHash here is really a plaintext password typed by the admin —
       // resetting it goes through the dedicated password endpoint, not the
@@ -1575,6 +1584,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         roleType: u.role_type === "Manager" ? "MANAGER" : u.role_type === "Member" ? "MEMBER" : undefined,
         employmentType: u.employment_type ? EMPLOYMENT_TYPE_TO_API[u.employment_type] : undefined,
         department: u.department,
+        managerId: u.managerId,
         password: u.tempPassword
       })
         .then((created) => {

@@ -9,14 +9,19 @@ export interface UserDirectoryRow {
   department: string | null;
   role_type: string | null;
   designation: string | null;
+  manager_id: string | null;
+  manager_name: string | null;
 }
 
 // Read-only directory (no password_hash) — used by other modules to resolve
 // a real user UUID (e.g. leads.assigned_agent_id) instead of guessing one.
 export async function findAllActive(): Promise<UserDirectoryRow[]> {
   const { rows } = await query<UserDirectoryRow>(
-    `SELECT id, first_name, last_name, email, role, department, role_type, designation
-     FROM users WHERE status = 'ACTIVE' ORDER BY first_name, last_name`
+    `SELECT u.id, u.first_name, u.last_name, u.email, u.role, u.department, u.role_type, u.designation,
+            u.manager_id, m.first_name || COALESCE(' ' || m.last_name, '') AS manager_name
+     FROM users u
+     LEFT JOIN users m ON m.id = u.manager_id
+     WHERE u.status = 'ACTIVE' ORDER BY u.first_name, u.last_name`
   );
   return rows;
 }
@@ -29,14 +34,25 @@ export interface FullUserRow extends UserDirectoryRow {
 }
 
 const FULL_SELECT = `
-  SELECT id, first_name, last_name, email, phone_number, role, department, role_type,
-         employment_type, designation, status, created_at
-  FROM users
+  SELECT u.id, u.first_name, u.last_name, u.email, u.phone_number, u.role, u.department, u.role_type,
+         u.employment_type, u.designation, u.status, u.created_at, u.manager_id,
+         m.first_name || COALESCE(' ' || m.last_name, '') AS manager_name
+  FROM users u
+  LEFT JOIN users m ON m.id = u.manager_id
 `;
 
 export async function findById(id: string): Promise<FullUserRow | undefined> {
-  const { rows } = await query<FullUserRow>(`${FULL_SELECT} WHERE id = $1`, [id]);
+  const { rows } = await query<FullUserRow>(`${FULL_SELECT} WHERE u.id = $1`, [id]);
   return rows[0];
+}
+
+/** True if `id` refers to an ACTIVE user with role_type MANAGER — the only valid managerId target. */
+export async function isActiveManager(id: string): Promise<boolean> {
+  const { rows } = await query<{ ok: boolean }>(
+    `SELECT true AS ok FROM users WHERE id = $1 AND status = 'ACTIVE' AND role_type = 'MANAGER'`,
+    [id]
+  );
+  return rows.length > 0;
 }
 
 export async function countAdmins(excludingId?: string): Promise<number> {
@@ -60,17 +76,19 @@ export interface CreateUserInput {
   roleType?: string;
   employmentType?: string;
   department?: string;
+  managerId?: string;
   passwordHash: string; // already hashed by users.service.ts — never plaintext here
 }
 
 export async function create(input: CreateUserInput): Promise<string> {
   const { rows } = await pool.query(
-    `INSERT INTO users (first_name, last_name, email, company_email, phone_number, designation, role, role_type, employment_type, department, password_hash)
-     VALUES ($1,$2,$3,$3,$4,$5,$6,$7,$8,$9,$10)
+    `INSERT INTO users (first_name, last_name, email, company_email, phone_number, designation, role, role_type, employment_type, department, manager_id, password_hash)
+     VALUES ($1,$2,$3,$3,$4,$5,$6,$7,$8,$9,$10,$11)
      RETURNING id`,
     [
       input.firstName, input.lastName ?? null, input.email, input.phoneNumber ?? null, input.designation ?? null,
-      input.role, input.roleType ?? null, input.employmentType ?? null, input.department ?? null, input.passwordHash
+      input.role, input.roleType ?? null, input.employmentType ?? null, input.department ?? null,
+      input.managerId ?? null, input.passwordHash
     ]
   );
   return rows[0].id;
@@ -83,6 +101,7 @@ export interface EditUserInput {
   roleType?: string;
   department?: string;
   status?: string;
+  managerId?: string | null;
 }
 
 export async function update(id: string, input: EditUserInput): Promise<void> {
@@ -90,7 +109,7 @@ export async function update(id: string, input: EditUserInput): Promise<void> {
   const params: unknown[] = [];
   const columnMap: Record<string, string> = {
     firstName: "first_name", lastName: "last_name", designation: "designation",
-    roleType: "role_type", department: "department", status: "status"
+    roleType: "role_type", department: "department", status: "status", managerId: "manager_id"
   };
 
   for (const [field, value] of Object.entries(input)) {

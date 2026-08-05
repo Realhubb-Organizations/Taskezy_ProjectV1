@@ -228,6 +228,8 @@ export interface ApiUserDirectoryEntry {
   department: string | null;
   role_type: string | null;
   designation: string | null;
+  manager_id: string | null;
+  manager_name: string | null;
 }
 
 export function apiListUsers(): Promise<ApiUserDirectoryEntry[]> {
@@ -251,6 +253,7 @@ export interface CreateUserApiInput {
   roleType?: "MANAGER" | "MEMBER";
   employmentType?: "FULL_TIME" | "FREELANCER" | "INTERN" | "AGENCY";
   department?: "SALES" | "TECH" | "MARKETING" | "FINANCE";
+  managerId?: string;
   password: string;
 }
 
@@ -265,6 +268,7 @@ export interface EditUserApiInput {
   roleType?: "MANAGER" | "MEMBER";
   department?: "SALES" | "TECH" | "MARKETING" | "FINANCE";
   status?: "ACTIVE" | "INACTIVE";
+  managerId?: string | null;
 }
 
 export function apiEditUser(userId: string, input: EditUserApiInput): Promise<ApiFullUser> {

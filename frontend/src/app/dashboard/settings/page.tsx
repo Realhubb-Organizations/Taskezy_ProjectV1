@@ -92,6 +92,7 @@ export default function SettingsPage() {
   const [status, setStatus] = useState<"ACTIVE" | "INACTIVE">("ACTIVE");
   const [passwordHash, setPasswordHash] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [managerId, setManagerId] = useState<string>("");
 
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [addFirstName, setAddFirstName] = useState("");
@@ -104,6 +105,14 @@ export default function SettingsPage() {
   const [addRole, setAddRole] = useState<Role>("AGENT");
   const [addPassword, setAddPassword] = useState("");
   const [addShowPassword, setAddShowPassword] = useState(false);
+  const [addManagerId, setAddManagerId] = useState<string>("");
+
+  // Only active MANAGER-role_type users are valid "Reports To" targets —
+  // matches the server-side check in users.routes.ts.
+  const managerOptions = useMemo(
+    () => users.filter(u => u.role_type === "Manager" && u.status !== "INACTIVE"),
+    [users]
+  );
 
   const userCounts = useMemo(() => ({
     admin: users.filter(u => u.role === "ADMIN").length,
@@ -132,6 +141,7 @@ export default function SettingsPage() {
     setStatus(user.status || "ACTIVE");
     setPasswordHash(user.password_hash || user.tempPassword || "password123");
     setShowPassword(false);
+    setManagerId(user.managerId || "");
   };
 
   const handleEditorSubmit = (e: React.FormEvent) => {
@@ -141,7 +151,7 @@ export default function SettingsPage() {
       alert("Password must be at least 4 characters.");
       return;
     }
-    updateUserFields(selectedUser.id, firstName, lastName, passwordHash, designation, roleType, status);
+    updateUserFields(selectedUser.id, firstName, lastName, passwordHash, designation, roleType, status, managerId || null);
     setSuccessMsg(`Successfully updated credentials and profile for ${firstName} ${lastName}.`);
     setSelectedUser(null);
     setTimeout(() => setSuccessMsg(""), 5000);
@@ -168,6 +178,7 @@ export default function SettingsPage() {
       role_type: addRoleType,
       employment_type: "FULL TIME",
       department: addDepartment,
+      managerId: addManagerId || undefined,
       status: "ACTIVE"
     });
     setSuccessMsg(`Successfully created account for ${addFirstName} ${addLastName}.`);
@@ -182,6 +193,7 @@ export default function SettingsPage() {
     setAddRole("AGENT");
     setAddPassword("");
     setAddShowPassword(false);
+    setAddManagerId("");
     setTimeout(() => setSuccessMsg(""), 5000);
   };
 
@@ -372,6 +384,9 @@ export default function SettingsPage() {
                         <p className="text-[10px] text-slate-500 truncate">{user.designation || "—"}</p>
                         <p className="text-[10px] text-slate-500 font-mono truncate">{user.email}</p>
                         <p className="text-[10px] text-slate-500 font-mono">+91-{user.phone_number || "9876543210"}</p>
+                        {user.managerName && (
+                          <p className="text-[10px] text-brand-600 font-semibold truncate">Reports to {user.managerName}</p>
+                        )}
                       </div>
                     </div>
 
@@ -578,6 +593,23 @@ export default function SettingsPage() {
               </div>
 
               <div>
+                <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Reports To</label>
+                <select
+                  value={addManagerId}
+                  onChange={(e) => setAddManagerId(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none"
+                >
+                  <option value="">No manager / top-level</option>
+                  {managerOptions.map(m => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
+                {managerOptions.length === 0 && (
+                  <p className="text-[9px] text-slate-400 mt-1">No Manager-role_type users exist yet — add one first if this person should report to someone.</p>
+                )}
+              </div>
+
+              <div>
                 <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Initial Password</label>
                 <div className="relative">
                   <input
@@ -686,6 +718,22 @@ export default function SettingsPage() {
                     <option value="INACTIVE">INACTIVE</option>
                   </select>
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 mb-1.5 uppercase">Reports To</label>
+                <select
+                  value={managerId}
+                  onChange={(e) => setManagerId(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none"
+                >
+                  <option value="">No manager / top-level</option>
+                  {managerOptions
+                    .filter(m => m.id !== selectedUser?.id)
+                    .map(m => (
+                      <option key={m.id} value={m.id}>{m.name}</option>
+                    ))}
+                </select>
               </div>
 
               <div>

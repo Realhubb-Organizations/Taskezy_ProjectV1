@@ -12,6 +12,10 @@ export const createUserSchema = z.object({
   roleType: z.enum(["MANAGER", "MEMBER"]).optional(),
   employmentType: z.enum(["FULL_TIME", "FREELANCER", "INTERN", "AGENCY"]).optional(),
   department: z.enum(["SALES", "TECH", "MARKETING", "FINANCE"]).optional(),
+  // Who this person reports to — nullable-by-omission (top-level managers/
+  // admins have no manager). Not enforced to be role_type=MANAGER at the
+  // schema level; the service layer checks that, since it needs a DB lookup.
+  managerId: z.string().uuid().optional(),
   // Never accept a pre-hashed password from the client — this is always the
   // plaintext initial password, hashed server-side in users.service.ts.
   password: z.string().min(8, "Password must be at least 8 characters")
@@ -23,7 +27,10 @@ export const editUserSchema = z.object({
   designation: z.string().max(200).optional(),
   roleType: z.enum(["MANAGER", "MEMBER"]).optional(),
   department: z.enum(["SALES", "TECH", "MARKETING", "FINANCE"]).optional(),
-  status: z.enum(["ACTIVE", "INACTIVE"]).optional()
+  status: z.enum(["ACTIVE", "INACTIVE"]).optional(),
+  // null clears it (e.g. promoting someone to no longer report to anyone);
+  // omitted leaves it unchanged, same convention as leads' editLeadSchema.
+  managerId: z.string().uuid().nullable().optional()
 }).refine((data) => Object.keys(data).length > 0, { message: "At least one field must be provided" });
 
 export const resetPasswordSchema = z.object({
