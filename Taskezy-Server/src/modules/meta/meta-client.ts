@@ -55,7 +55,7 @@ export function getOAuthDialogUrl(state: string): string {
   url.searchParams.set("state", state);
   // pages_show_list + pages_manage_metadata: enumerate/subscribe Pages.
   // leads_retrieval: read submitted lead field data. All three need Meta App Review before going live.
-  url.searchParams.set("scope", "pages_show_list,pages_manage_metadata,leads_retrieval,ads_management");
+  url.searchParams.set("scope", "pages_show_list,pages_manage_metadata,pages_read_engagement,leads_retrieval,ads_management,business_management");
   url.searchParams.set("response_type", "code");
   return url.toString();
 }

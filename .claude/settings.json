@@ -60,7 +60,9 @@
       "PowerShell(Get-CimInstance Win32_Process -Filter \"Name='node.exe'\")",
       "PowerShell(Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Select-Object ProcessId, ParentProcessId, CommandLine | Where-Object { $_.CommandLine -match \"npm-cli|next dev|start-server\" } | Format-Table ProcessId, ParentProcessId, CommandLine -AutoSize -Wrap)",
       "Bash(curl -s -o /dev/null -w \"login: HTTP %{http_code}\\\\n\" http://localhost:3000/auth/login)",
-      "WebFetch(domain:claude.ai)"
+      "WebFetch(domain:claude.ai)",
+      "Bash(npm view *)",
+      "Bash(curl -s https://api.github.com/repos/Realhubb-Organizations/Taskezy_ProjectV1/commits/main)"
     ]
   }
 }
