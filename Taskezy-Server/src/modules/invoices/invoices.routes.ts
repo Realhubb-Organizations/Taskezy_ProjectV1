@@ -28,25 +28,88 @@ invoicesRouter.get(
 
 const idParamSchema = z.object({ id: z.string().uuid() });
 
-// Generating/marking-paid/deleting invoices is ADMIN/FINANCE-only — matches
-// the frontend's Finance-module-only billing workflow.
+function isForeignKeyViolation(err: unknown): boolean {
+  return typeof err === "object" && err !== null && "code" in err && (err as { code: string }).code === "23503";
+}
+
+function isUniqueViolation(err: unknown): boolean {
+  return typeof err === "object" && err !== null && "code" in err && (err as { code: string }).code === "23505";
+}
+
+const createInvoiceSchema = z.object({
+  leadId: z.string().uuid(),
+  clientName: z.string().min(1),
+  baseAmount: z.number().min(0),
+  dueDate: z.string().optional(),
+  developerName: z.string().optional(),
+  projectName: z.string().optional(),
+  unitNo: z.string().optional(),
+  unitDimension: z.string().optional(),
+  brokerageType: z.enum(["PERCENTAGE", "FLAT"]).optional(),
+  brokerageRate: z.number().optional()
+});
+
+// Creating/generating/marking-paid/deleting invoices is ADMIN/FINANCE-only —
+// matches the frontend's Finance-module-only billing workflow.
+invoicesRouter.post(
+  "/",
+  requireRole("ADMIN", "FINANCE"),
+  validate({ body: createInvoiceSchema }),
+  asyncHandler(async (req, res) => {
+    const dueDate = req.body.dueDate ?? new Date(Date.now() + 15 * 86400000).toISOString().slice(0, 10);
+    let insertedId: string;
+    try {
+      const { rows } = await pool.query(
+        `INSERT INTO invoices (
+           lead_id, client_name, base_amount, due_date, developer_name, project_name,
+           unit_no, unit_dimension, brokerage_type, brokerage_rate
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+         RETURNING id`,
+        [
+          req.body.leadId, req.body.clientName, req.body.baseAmount, dueDate,
+          req.body.developerName ?? null, req.body.projectName ?? null, req.body.unitNo ?? null,
+          req.body.unitDimension ?? null, req.body.brokerageType ?? null, req.body.brokerageRate ?? null
+        ]
+      );
+      insertedId = rows[0].id;
+    } catch (err) {
+      if (isForeignKeyViolation(err)) throw ApiError.badRequest("That lead doesn't exist.");
+      throw err;
+    }
+    const { rows: created } = await query(`${SELECT} WHERE id = $1`, [insertedId]);
+    sendOk(res, created[0], 201);
+  })
+);
+
+// Assigns the authoritative invoice number + GST — a separate step from
+// payment (see /mark-paid below), not the same action. Retries on a rare
+// invoice_number collision instead of surfacing a raw 500.
 invoicesRouter.patch(
   "/:id/generate",
   requireRole("ADMIN", "FINANCE"),
   validate({ params: idParamSchema }),
   asyncHandler(async (req, res) => {
-    const invoiceNumber = `INV-2026-${Math.floor(1000 + Math.random() * 9000)}`;
-    const { rows } = await pool.query(
-      `UPDATE invoices
-       SET invoice_number = $1,
-           cgst = ROUND(base_amount * 0.09, 2),
-           sgst = ROUND(base_amount * 0.09, 2),
-           status = 'PAID'
-       WHERE id = $2
-       RETURNING id`,
-      [invoiceNumber, req.params.id]
-    );
-    if (rows.length === 0) throw ApiError.notFound("Invoice not found");
+    const MAX_ATTEMPTS = 5;
+    let succeeded = false;
+    for (let attempt = 0; attempt < MAX_ATTEMPTS && !succeeded; attempt++) {
+      const invoiceNumber = `INV-2026-${Math.floor(1000 + Math.random() * 9000)}`;
+      try {
+        const { rows } = await pool.query(
+          `UPDATE invoices
+           SET invoice_number = $1,
+               cgst = ROUND(base_amount * 0.09, 2),
+               sgst = ROUND(base_amount * 0.09, 2)
+           WHERE id = $2
+           RETURNING id`,
+          [invoiceNumber, req.params.id]
+        );
+        if (rows.length === 0) throw ApiError.notFound("Invoice not found");
+        succeeded = true;
+      } catch (err) {
+        if (isUniqueViolation(err) && attempt < MAX_ATTEMPTS - 1) continue;
+        throw err;
+      }
+    }
     const { rows: updated } = await query(`${SELECT} WHERE id = $1`, [req.params.id]);
     sendOk(res, updated[0]);
   })

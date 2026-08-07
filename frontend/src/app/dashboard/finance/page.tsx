@@ -31,6 +31,7 @@ export default function FinancePage() {
     rejectClaim,
     markInvoicePaid,
     updateLeadStatus,
+    addInvoice,
     generateInvoice,
     deleteInvoice,
     deleteClaim,
@@ -54,6 +55,7 @@ export default function FinancePage() {
   const [baseAmount, setBaseAmount] = useState("");
   const [projectName, setProjectName] = useState("");
   const [leadId, setLeadId] = useState("");
+  const [newInvoiceError, setNewInvoiceError] = useState("");
 
   // Calendar tab state
   const todayStr0 = new Date().toISOString().split("T")[0];
@@ -64,30 +66,22 @@ export default function FinancePage() {
 
   const handleCreateInvoice = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!clientName || !baseAmount) return;
+    setNewInvoiceError("");
+    if (!clientName || !baseAmount || !leadId) {
+      setNewInvoiceError("Client name, base value, and an associated lead are all required.");
+      return;
+    }
 
-    // Simulate adding invoice directly to global list
-    const amt = Number(baseAmount);
-    const newInv: Invoice = {
-      id: `inv-${Date.now()}`,
-      invoiceNumber: `INV-2026-${Math.floor(1000 + Math.random() * 9000)}`,
-      leadId: leadId || "l-manual",
-      clientName,
-      baseAmount: amt,
-      cgst: amt * 0.09,
-      sgst: amt * 0.09,
-      totalAmount: amt * 1.18,
-      status: "Draft",
-      createdAt: new Date().toISOString().split("T")[0],
-      dueDate: new Date(Date.now() + 86400000 * 15).toISOString().split("T")[0],
-      projectName: projectName || "N/A"
-    };
-
-    invoices.push(newInv);
+    const result = addInvoice(leadId, clientName, Number(baseAmount), projectName || undefined);
+    if (!result.success) {
+      setNewInvoiceError(result.error || "Could not create invoice.");
+      return;
+    }
     setIsNewInvoiceOpen(false);
     setClientName("");
     setBaseAmount("");
     setProjectName("");
+    setLeadId("");
   };
 
   const handleApproveBooking = (leadId: string) => {
@@ -513,6 +507,25 @@ export default function FinancePage() {
             </div>
 
             <form onSubmit={handleCreateInvoice} className="space-y-4">
+              {newInvoiceError && (
+                <p className="text-[10px] text-red-600 font-bold bg-red-50 border border-red-150 rounded-lg px-3 py-2">{newInvoiceError}</p>
+              )}
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Lead</label>
+                <select
+                  required
+                  value={leadId}
+                  onChange={(e) => setLeadId(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none"
+                >
+                  <option value="">Select the lead this invoice is for…</option>
+                  {leads.map(l => (
+                    <option key={l.id} value={l.id}>{l.name} — {l.phone}</option>
+                  ))}
+                </select>
+              </div>
+
               <div>
                 <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Client Name</label>
                 <input

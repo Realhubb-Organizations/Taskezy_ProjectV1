@@ -69,6 +69,32 @@ propertiesRouter.delete(
   })
 );
 
+const setTeamMembersSchema = z.object({
+  members: z.array(z.object({
+    userId: z.string().uuid(),
+    percentage: z.number().min(0).max(100).optional()
+  })).max(100)
+});
+
+propertiesRouter.put(
+  "/:id/team-members",
+  requireRole("ADMIN"),
+  validate({ params: propertyIdParamSchema, body: setTeamMembersSchema }),
+  asyncHandler(async (req, res) => {
+    const existing = await repo.findById(req.params.id);
+    if (!existing) throw ApiError.notFound("Property not found");
+    try {
+      await repo.replaceTeamMembersForProperty(req.params.id, req.body.members);
+    } catch (err) {
+      if (typeof err === "object" && err !== null && "code" in err && (err as { code: string }).code === "23503") {
+        throw ApiError.badRequest("One of these users doesn't exist.");
+      }
+      throw err;
+    }
+    sendOk(res, await repo.findById(req.params.id));
+  })
+);
+
 propertiesRouter.get(
   "/:id/meta-campaigns",
   validate({ params: propertyIdParamSchema }),

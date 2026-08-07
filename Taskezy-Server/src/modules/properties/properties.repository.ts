@@ -27,23 +27,41 @@ export interface PropertyRow {
   team_assignment_mode: string;
   lead_assignment_mode: string | null;
   created_at: string;
+  team_members: PropertyTeamMemberRow[];
+}
+
+export interface PropertyTeamMemberRow {
+  userId: string;
+  name: string;
+  percentage: number | null;
 }
 
 const SELECT = `
-  SELECT id, name, developer, location, locality, zone, price_value, price_type, property_type,
-         property_status, description, possession_date, land_parcel, towers, structure, amenities,
-         contact_number, map_url, website_url, brochure_url, lead_registration_url, tags,
-         media_file_names, team_assignment_mode, lead_assignment_mode, created_at
-  FROM properties
+  SELECT p.id, p.name, p.developer, p.location, p.locality, p.zone, p.price_value, p.price_type, p.property_type,
+         p.property_status, p.description, p.possession_date, p.land_parcel, p.towers, p.structure, p.amenities,
+         p.contact_number, p.map_url, p.website_url, p.brochure_url, p.lead_registration_url, p.tags,
+         p.media_file_names, p.team_assignment_mode, p.lead_assignment_mode, p.created_at,
+         COALESCE(
+           (SELECT json_agg(json_build_object(
+              'userId', ptm.user_id,
+              'name', u.first_name || COALESCE(' ' || u.last_name, ''),
+              'percentage', ptm.percentage
+            ))
+            FROM property_team_members ptm
+            JOIN users u ON u.id = ptm.user_id
+            WHERE ptm.property_id = p.id),
+           '[]'
+         ) AS team_members
+  FROM properties p
 `;
 
 export async function findAll(): Promise<PropertyRow[]> {
-  const { rows } = await query<PropertyRow>(`${SELECT} ORDER BY name`);
+  const { rows } = await query<PropertyRow>(`${SELECT} ORDER BY p.name`);
   return rows;
 }
 
 export async function findById(id: string): Promise<PropertyRow | undefined> {
-  const { rows } = await query<PropertyRow>(`${SELECT} WHERE id = $1`, [id]);
+  const { rows } = await query<PropertyRow>(`${SELECT} WHERE p.id = $1`, [id]);
   return rows[0];
 }
 
@@ -125,6 +143,74 @@ export async function update(id: string, input: Partial<PropertyInput>): Promise
 export async function remove(id: string): Promise<boolean> {
   const { rowCount } = await pool.query(`DELETE FROM properties WHERE id = $1`, [id]);
   return (rowCount ?? 0) > 0;
+}
+
+// --- Team assignment (property_team_members) ---
+
+export interface TeamMemberInput {
+  userId: string;
+  percentage?: number;
+}
+
+/** Atomically replaces the full team-member set for a property. Throws a foreign-key violation (23503) if a userId doesn't exist. */
+export async function replaceTeamMembersForProperty(propertyId: string, members: TeamMemberInput[]): Promise<void> {
+  await withTransaction(async (client) => {
+    await client.query(`DELETE FROM property_team_members WHERE property_id = $1`, [propertyId]);
+    for (const member of members) {
+      await client.query(
+        `INSERT INTO property_team_members (property_id, user_id, percentage) VALUES ($1, $2, $3)`,
+        [propertyId, member.userId, member.percentage ?? null]
+      );
+    }
+  });
+}
+
+export interface AssignmentPoolMember {
+  userId: string;
+  percentage: number | null;
+}
+
+/** The pool of agents eligible for this property's auto-assignment — CUSTOM_MEMBERS uses the configured list, ALL_MEMBERS uses every active SALES non-admin user. */
+export async function getAssignmentPool(propertyId: string): Promise<{ teamAssignmentMode: string; leadAssignmentMode: string | null; pool: AssignmentPoolMember[] } | undefined> {
+  const { rows } = await query<{ team_assignment_mode: string; lead_assignment_mode: string | null }>(
+    `SELECT team_assignment_mode, lead_assignment_mode FROM properties WHERE id = $1`,
+    [propertyId]
+  );
+  const property = rows[0];
+  if (!property) return undefined;
+
+  if (property.team_assignment_mode === "CUSTOM_MEMBERS") {
+    const { rows: members } = await query<{ user_id: string; percentage: number | null }>(
+      `SELECT user_id, percentage FROM property_team_members WHERE property_id = $1`,
+      [propertyId]
+    );
+    return {
+      teamAssignmentMode: property.team_assignment_mode,
+      leadAssignmentMode: property.lead_assignment_mode,
+      pool: members.map(m => ({ userId: m.user_id, percentage: m.percentage }))
+    };
+  }
+
+  const { rows: allMembers } = await query<{ id: string }>(
+    `SELECT id FROM users WHERE status = 'ACTIVE' AND department = 'SALES' AND role != 'ADMIN'`
+  );
+  return {
+    teamAssignmentMode: property.team_assignment_mode,
+    leadAssignmentMode: property.lead_assignment_mode,
+    pool: allMembers.map(u => ({ userId: u.id, percentage: null }))
+  };
+}
+
+/** How many leads each candidate currently holds for this property — the tiebreaker Round Robin picks the minimum of. */
+export async function countLeadsPerAgentForProperty(propertyId: string, agentIds: string[]): Promise<Record<string, number>> {
+  if (agentIds.length === 0) return {};
+  const { rows } = await query<{ assigned_agent_id: string; count: string }>(
+    `SELECT assigned_agent_id, count(*) FROM leads WHERE property_id = $1 AND assigned_agent_id = ANY($2) GROUP BY assigned_agent_id`,
+    [propertyId, agentIds]
+  );
+  const counts: Record<string, number> = {};
+  for (const row of rows) counts[row.assigned_agent_id] = Number(row.count);
+  return counts;
 }
 
 // --- Meta campaign linking (see Taskezy_DB/migrations/005_*.sql) ---

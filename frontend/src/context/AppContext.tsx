@@ -24,6 +24,7 @@ import {
   apiListResaleUnits,
   apiCreateResaleUnit,
   apiListFollowups,
+  apiCreateFollowup,
   apiListAttendance,
   apiListReimbursements,
   apiCreateReimbursement,
@@ -31,6 +32,7 @@ import {
   apiRejectReimbursement,
   apiDeleteReimbursement,
   apiListInvoices,
+  apiCreateInvoice,
   apiGenerateInvoice,
   apiMarkInvoicePaid,
   apiDeleteInvoice,
@@ -43,6 +45,7 @@ import {
   apiDeleteCalendarEvent,
   apiListAdSpend,
   apiListMetaConnections,
+  apiSetPropertyTeamMembers,
   apiListTimesheets,
   apiPunchIn,
   apiPunchOut,
@@ -467,6 +470,7 @@ interface AppActions {
 
   // Finance actions
   verifyKYC: (leadId: string) => void;
+  addInvoice: (leadId: string, clientName: string, baseAmount: number, projectName?: string) => { success: boolean; error?: string };
   generateInvoice: (invoiceId: string) => void;
   markInvoicePaid: (invoiceId: string) => void;
 
@@ -491,6 +495,7 @@ interface AppActions {
 
   // Calendar actions
   addCalendarEvent: (event: Omit<CalendarEvent, "id">) => void;
+  addFollowupCall: (input: { scheduledAt: string; leadId?: string; leadName: string; phone?: string; callType: "CALLBACK" | "MEETING" | "SITE_VISIT"; assignedToName: string }) => void;
   deleteCalendarEvent: (id: string) => void;
 }
 
@@ -574,7 +579,10 @@ function mapApiPropertyToFrontend(row: ApiPropertyRow): Property {
     priceType: row.price_type === "STARTING_FROM" ? "Starting From" : row.price_type === "ABSOLUTE" ? "Absolute" : undefined,
     type: row.property_type,
     propertyStatus: row.property_status || undefined,
-    membersCount: 0, // team assignment not read here — see property_team_members if/when needed
+    membersCount: row.team_members.length,
+    assignedTeam: row.team_members.length > 0
+      ? row.team_members.map(m => ({ userId: m.userId, name: m.name, percentage: m.percentage ?? undefined }))
+      : undefined,
     description: row.description || undefined,
     possessionDate: row.possession_date || undefined,
     landParcel: row.land_parcel || undefined,
@@ -966,6 +974,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  // Writes to followup_calls alongside calendar_events (see addCalendarEvent
+  // call sites for SITE_VISIT/FOLLOWUP reminders) — the followup_calls table
+  // used to only ever contain whatever was seeded, since nothing wrote to it.
+  const addFollowupCall = (input: { scheduledAt: string; leadId?: string; leadName: string; phone?: string; callType: "CALLBACK" | "MEETING" | "SITE_VISIT"; assignedToName: string }) => {
+    const assignee = users.find(u => u.name === input.assignedToName);
+    if (!isApiSessionActive() || !assignee) return;
+    apiCreateFollowup({
+      scheduledAt: input.scheduledAt,
+      leadId: input.leadId && isRealId(input.leadId) ? input.leadId : undefined,
+      leadName: input.leadName,
+      phone: input.phone,
+      callType: input.callType,
+      assignedToId: assignee.id
+    })
+      .then((created) => setFollowupCalls(prev => [...prev, mapApiFollowupToFrontend(created)]))
+      .catch((err) => console.warn("Could not persist new follow-up to the database:", err));
+  };
+
   const deleteCalendarEvent = (id: string) => {
     setCalendarEvents(prev => prev.filter(e => e.id !== id));
     if (isApiSessionActive() && isRealId(id)) {
@@ -1196,18 +1222,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       lead.dealValue = dealValue;
       lead.kycDocName = kycDocName;
 
-      invoices.push({
-        id: `inv-${Date.now()}`,
-        leadId: lead.id,
-        clientName: lead.name,
-        baseAmount: dealValue || 0,
-        cgst: (dealValue || 0) * 0.09,
-        sgst: (dealValue || 0) * 0.09,
-        totalAmount: (dealValue || 0) * 1.18,
-        status: "Draft",
-        createdAt: new Date().toISOString(),
-        dueDate: new Date(Date.now() + 86400000 * 15).toISOString()
-      });
+      // One invoice per booking — skip if a status flip-flop (e.g. Booking
+      // Done -> Approved -> Done again) already created one for this lead.
+      if (!invoices.some(i => i.leadId === lead.id)) {
+        const localInvoiceId = `inv-${Date.now()}`;
+        setInvoices(prev => [...prev, {
+          id: localInvoiceId,
+          leadId: lead.id,
+          clientName: lead.name,
+          baseAmount: dealValue || 0,
+          cgst: (dealValue || 0) * 0.09,
+          sgst: (dealValue || 0) * 0.09,
+          totalAmount: (dealValue || 0) * 1.18,
+          status: "Draft",
+          createdAt: new Date().toISOString(),
+          dueDate: new Date(Date.now() + 86400000 * 15).toISOString(),
+          projectName: lead.property
+        }]);
+
+        if (isApiSessionActive() && isRealLeadId(leadId)) {
+          apiCreateInvoice({
+            leadId,
+            clientName: lead.name,
+            baseAmount: dealValue || 0,
+            projectName: lead.property
+          })
+            .then((created) => setInvoices(prev => prev.map(i => (i.id === localInvoiceId ? mapApiInvoiceToFrontend(created) : i))))
+            .catch((err) => console.warn("Could not persist auto-generated invoice to the database:", err));
+        }
+      }
 
       addCalendarEvent({
         system: "CRM",
@@ -1323,8 +1366,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         teamAssignmentMode: newProp.teamAssignmentMode,
         leadAssignmentMode: newProp.leadAssignmentMode
       })
-        .then((created) => {
-          setProperties(prev => prev.map(p => (p.id === newProp.id ? { ...mapApiPropertyToFrontend(created), membersCount: p.membersCount, assignedTeam: p.assignedTeam } : p)));
+        .then(async (created) => {
+          let finalRow = created;
+          if (newProp.teamAssignmentMode === "CUSTOM_MEMBERS" && newProp.assignedTeam && newProp.assignedTeam.length > 0) {
+            finalRow = await apiSetPropertyTeamMembers(
+              created.id,
+              newProp.assignedTeam.map(m => ({ userId: m.userId, percentage: m.percentage }))
+            );
+          }
+          setProperties(prev => prev.map(p => (p.id === newProp.id ? mapApiPropertyToFrontend(finalRow) : p)));
         })
         .catch((err) => console.warn("Could not persist new property to the database:", err));
     }
@@ -1556,6 +1606,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const addInvoice = (leadId: string, clientName: string, baseAmount: number, projectName?: string) => {
+    // invoices.lead_id is NOT NULL in the schema — an invoice with no real lead can't be persisted.
+    if (!leads.some(l => l.id === leadId)) {
+      return { success: false, error: "Select a lead for this invoice." };
+    }
+
+    const localInvoiceId = `inv-${Date.now()}`;
+    setInvoices(prev => [...prev, {
+      id: localInvoiceId,
+      leadId,
+      clientName,
+      baseAmount,
+      cgst: baseAmount * 0.09,
+      sgst: baseAmount * 0.09,
+      totalAmount: baseAmount * 1.18,
+      status: "Draft",
+      createdAt: new Date().toISOString(),
+      dueDate: new Date(Date.now() + 86400000 * 15).toISOString(),
+      projectName
+    }]);
+
+    if (isApiSessionActive() && isRealLeadId(leadId)) {
+      apiCreateInvoice({ leadId, clientName, baseAmount, projectName })
+        .then((created) => setInvoices(prev => prev.map(i => (i.id === localInvoiceId ? mapApiInvoiceToFrontend(created) : i))))
+        .catch((err) => console.warn("Could not persist new invoice to the database:", err));
+    }
+
+    return { success: true };
+  };
+
   const generateInvoice = (invoiceId: string) => {
     setInvoices(prev => prev.map(inv => {
       if (inv.id === invoiceId) {
@@ -1700,6 +1780,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         teamAssignmentMode: updatedFields.teamAssignmentMode,
         leadAssignmentMode: updatedFields.leadAssignmentMode
       }).catch((err) => console.warn("Could not persist property edit to the database:", err));
+
+      if (updatedFields.assignedTeam !== undefined) {
+        apiSetPropertyTeamMembers(
+          id,
+          updatedFields.assignedTeam.map(m => ({ userId: m.userId, percentage: m.percentage }))
+        )
+          .then((updated) => setProperties(prev => prev.map(p => (p.id === id ? mapApiPropertyToFrontend(updated) : p))))
+          .catch((err) => console.warn("Could not persist property team assignment to the database:", err));
+      }
     }
   };
 
@@ -1785,6 +1874,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         approveRegularization,
         rejectRegularization,
         verifyKYC,
+        addInvoice,
         generateInvoice,
         markInvoicePaid,
         addTeamMember,
@@ -1801,6 +1891,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         markNotificationRead,
         markAllNotificationsRead,
         addCalendarEvent,
+        addFollowupCall,
         deleteCalendarEvent
       }}
     >

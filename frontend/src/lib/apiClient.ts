@@ -314,6 +314,7 @@ export interface ApiPropertyRow {
   team_assignment_mode: "ALL_MEMBERS" | "CUSTOM_MEMBERS";
   lead_assignment_mode: "ROUND_ROBIN" | "PERCENTAGE" | null;
   created_at: string;
+  team_members: { userId: string; name: string; percentage: number | null }[];
 }
 export function apiListProperties(): Promise<ApiPropertyRow[]> {
   return request<ApiPropertyRow[]>("/api/v1/properties");
@@ -367,6 +368,16 @@ export function apiSetPropertyMetaCampaigns(propertyId: string, campaignNames: s
   });
 }
 
+export function apiSetPropertyTeamMembers(
+  propertyId: string,
+  members: { userId: string; percentage?: number }[]
+): Promise<ApiPropertyRow> {
+  return request<ApiPropertyRow>(`/api/v1/properties/${propertyId}/team-members`, {
+    method: "PUT",
+    body: JSON.stringify({ members })
+  });
+}
+
 export function apiEditProperty(propertyId: string, input: Partial<PropertyApiInput>): Promise<ApiPropertyRow> {
   return request<ApiPropertyRow>(`/api/v1/properties/${propertyId}`, { method: "PATCH", body: JSON.stringify(input) });
 }
@@ -416,6 +427,19 @@ export interface ApiFollowupRow {
 }
 export function apiListFollowups(): Promise<ApiFollowupRow[]> {
   return request<ApiFollowupRow[]>("/api/v1/followups");
+}
+
+export interface CreateFollowupApiInput {
+  scheduledAt: string;
+  leadId?: string;
+  leadName: string;
+  phone?: string;
+  callType: "CALLBACK" | "MEETING" | "SITE_VISIT";
+  assignedToId: string;
+}
+
+export function apiCreateFollowup(input: CreateFollowupApiInput): Promise<ApiFollowupRow> {
+  return request<ApiFollowupRow>("/api/v1/followups", { method: "POST", body: JSON.stringify(input) });
 }
 
 // --- Attendance (derived view) ---
@@ -496,6 +520,23 @@ export interface ApiInvoiceRow {
 }
 export function apiListInvoices(): Promise<ApiInvoiceRow[]> {
   return request<ApiInvoiceRow[]>("/api/v1/invoices");
+}
+
+export interface CreateInvoiceApiInput {
+  leadId: string;
+  clientName: string;
+  baseAmount: number;
+  dueDate?: string;
+  developerName?: string;
+  projectName?: string;
+  unitNo?: string;
+  unitDimension?: string;
+  brokerageType?: "PERCENTAGE" | "FLAT";
+  brokerageRate?: number;
+}
+
+export function apiCreateInvoice(input: CreateInvoiceApiInput): Promise<ApiInvoiceRow> {
+  return request<ApiInvoiceRow>("/api/v1/invoices", { method: "POST", body: JSON.stringify(input) });
 }
 
 export function apiGenerateInvoice(invoiceId: string): Promise<ApiInvoiceRow> {

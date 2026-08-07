@@ -15,7 +15,7 @@ export default function LeadDetailDrawer({
   onClose,
   onUpdateStatus
 }: LeadDetailDrawerProps) {
-  const { addNotification, addCalendarEvent } = useApp();
+  const { addNotification, addCalendarEvent, addFollowupCall } = useApp();
   const [localStatus, setLocalStatus] = useState<LeadStatus>("New Lead");
   const [reminderDate, setReminderDate] = useState("");
   const [reminderTime, setReminderTime] = useState("");
@@ -67,6 +67,15 @@ export default function LeadDetailDrawer({
       time: reminderTime,
       description: `${lead.property || "Property"} • ${lead.phone}`,
       leadId: lead.id
+    });
+    addFollowupCall({
+      scheduledAt: new Date(`${reminderDate}T${reminderTime}`).toISOString(),
+      leadId: lead.id,
+      leadName: lead.name,
+      phone: lead.phone,
+      // isSiteVisit already covers "Meeting Scheduled" (see above), matching the SITE_VISIT calendar event type used for it.
+      callType: isSiteVisit ? "SITE_VISIT" : "CALLBACK",
+      assignedToName: lead.assignedAgent
     });
     alert(`Calendar Task Saved!\nLead: ${lead.name}\nStatus: ${localStatus}\nDate: ${reminderDate}\nTime: ${reminderTime}\nNotification scheduled.`);
   };

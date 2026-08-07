@@ -4,6 +4,7 @@ import { insertLeadLog } from "../leads/leads.repository";
 import { isUniqueViolation } from "../users/users.repository";
 import { createNotification } from "../notifications/notifications.service";
 import { findPropertyIdByCampaignName } from "../properties/properties.repository";
+import { pickAgentForProperty } from "../properties/properties.assignment";
 import { MetaLeadData } from "./meta-client";
 
 function firstFieldValue(fieldData: MetaLeadData["field_data"], keys: string[]): string | undefined {
@@ -20,11 +21,13 @@ function normalizeIndianMobile(raw: string): string | undefined {
 }
 
 /**
- * Turns one Meta leadgen event into a `leads` row. New Meta leads land as
- * UNASSIGNED (per product decision — no auto-assignment via the existing
- * round-robin/percentage property rule) but leads.assigned_agent_id is
- * NOT NULL, so they're placed on the connecting admin's name until a
- * manager routes them via the existing reassign flow.
+ * Turns one Meta leadgen event into a `leads` row. If the lead's campaign
+ * matches a property (see findPropertyIdByCampaignName) AND that property
+ * has an assignable team, it's routed through the same Round Robin /
+ * Percentage rule a manually created lead for that property would use.
+ * Otherwise — no property match, or a property with no configured team —
+ * it lands UNASSIGNED on the connecting admin for a manager to route
+ * manually, same as before.
  */
 export async function ingestMetaLead(leadData: MetaLeadData, connectingAdminId: string): Promise<void> {
   const combinedFirstLast = [firstFieldValue(leadData.field_data, ["first_name"]), firstFieldValue(leadData.field_data, ["last_name"])]
@@ -50,14 +53,17 @@ export async function ingestMetaLead(leadData: MetaLeadData, connectingAdminId: 
   // — only meaningful when Meta actually gave us the real campaign_name, not
   // our own form_id/"Meta Lead Ads" fallback.
   const propertyId = leadData.campaign_name ? await findPropertyIdByCampaignName(leadData.campaign_name) : undefined;
+  const autoAssignedAgentId = propertyId ? await pickAgentForProperty(propertyId) : undefined;
+  const assignedAgentId = autoAssignedAgentId ?? connectingAdminId;
+  const statusCode = autoAssignedAgentId ? "NEW" : "UNASSIGNED";
 
   try {
     const { rows, rowCount } = await pool.query<{ id: string }>(
       `INSERT INTO leads (name, phone, email, source, campaign, assigned_agent_id, status_code, assigned_at, meta_leadgen_id, property_id)
-       VALUES ($1, $2, $3, 'Meta Ads', $4, $5, 'UNASSIGNED', now(), $6, $7)
+       VALUES ($1, $2, $3, 'Meta Ads', $4, $5, $6, now(), $7, $8)
        ON CONFLICT (meta_leadgen_id) DO NOTHING
        RETURNING id`,
-      [name, phone, email ?? null, campaign, connectingAdminId, leadData.id, propertyId ?? null]
+      [name, phone, email ?? null, campaign, assignedAgentId, statusCode, leadData.id, propertyId ?? null]
     );
 
     // rowCount is 0 when ON CONFLICT DO NOTHING suppressed the insert (a
@@ -69,7 +75,7 @@ export async function ingestMetaLead(leadData: MetaLeadData, connectingAdminId: 
         category: "NEW_LEAD",
         title: "New Meta Lead",
         message: `${name} — via ${campaign}`,
-        recipientUserId: connectingAdminId,
+        recipientUserId: assignedAgentId,
         leadId: rows[0].id,
         link: "/dashboard/crm"
       });
