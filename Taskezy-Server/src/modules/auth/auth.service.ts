@@ -51,9 +51,12 @@ async function issueTokenPair(user: UserRow): Promise<{ accessToken: string; ref
 }
 
 export async function login(email: string, password: string): Promise<AuthResult> {
+  // Case-insensitive — email addresses aren't case-sensitive in practice,
+  // and an admin typing "Neha@..." at user-creation time while Neha logs in
+  // with "neha@..." shouldn't produce a login failure.
   const { rows } = await query<UserRow>(
     `SELECT id, first_name, last_name, email, role, department, role_type, designation, status, password_hash
-     FROM users WHERE email = $1`,
+     FROM users WHERE LOWER(email) = LOWER($1)`,
     [email]
   );
   const user = rows[0];

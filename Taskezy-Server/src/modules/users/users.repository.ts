@@ -81,12 +81,16 @@ export interface CreateUserInput {
 }
 
 export async function create(input: CreateUserInput): Promise<string> {
+  // Normalized to lowercase — login (auth.service.ts) matches case-insensitively,
+  // but storing consistently also prevents "Neha@x.in" and "neha@x.in" ever
+  // being accepted as two different accounts by the UNIQUE constraint.
+  const email = input.email.trim().toLowerCase();
   const { rows } = await pool.query(
     `INSERT INTO users (first_name, last_name, email, company_email, phone_number, designation, role, role_type, employment_type, department, manager_id, password_hash)
      VALUES ($1,$2,$3,$3,$4,$5,$6,$7,$8,$9,$10,$11)
      RETURNING id`,
     [
-      input.firstName, input.lastName ?? null, input.email, input.phoneNumber ?? null, input.designation ?? null,
+      input.firstName, input.lastName ?? null, email, input.phoneNumber ?? null, input.designation ?? null,
       input.role, input.roleType ?? null, input.employmentType ?? null, input.department ?? null,
       input.managerId ?? null, input.passwordHash
     ]
