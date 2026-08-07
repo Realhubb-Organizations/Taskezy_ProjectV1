@@ -1,13 +1,13 @@
 "use client";
 
 import React, { useState } from "react";
-import { useApp, Property } from "@/context/AppContext";
+import { useApp, Property, PropertyTeamAssignmentMode, LeadAssignmentMode, PropertyTeamMember } from "@/context/AppContext";
 import { Search, Info, MapPin, Building, Edit, Trash2, Users, Plus } from "lucide-react";
 import AddPropertyModal from "@/components/properties/AddPropertyModal";
 import MetaCampaignLinker from "@/components/properties/MetaCampaignLinker";
 
 export default function PropertiesPage() {
-  const { properties, deleteProperty, editProperty, activeRole } = useApp();
+  const { properties, users, deleteProperty, editProperty, activeRole } = useApp();
   const [selectedProperty, setSelectedProperty] = useState<Property | null>(null);
 
   // Search & Filters state
@@ -35,7 +35,18 @@ export default function PropertiesPage() {
   const [editPrice, setEditPrice] = useState("");
   const [editType, setEditType] = useState("Apartment");
   const [editDesc, setEditDesc] = useState("");
+  const [editTeamAssignmentMode, setEditTeamAssignmentMode] = useState<PropertyTeamAssignmentMode>("ALL_MEMBERS");
+  const [editLeadAssignmentMode, setEditLeadAssignmentMode] = useState<LeadAssignmentMode>("ROUND_ROBIN");
+  const [editSelectedMemberIds, setEditSelectedMemberIds] = useState<string[]>([]);
+  const [editMemberPercentages, setEditMemberPercentages] = useState<Record<string, number>>({});
   const [successMsg, setSuccessMsg] = useState("");
+
+  const salesTeam = users.filter(u => u.department === "SALES" && u.role !== "ADMIN");
+  const editPercentageTotal = editSelectedMemberIds.reduce((sum, id) => sum + (editMemberPercentages[id] || 0), 0);
+
+  const toggleEditMember = (userId: string) => {
+    setEditSelectedMemberIds(prev => (prev.includes(userId) ? prev.filter(id => id !== userId) : [...prev, userId]));
+  };
 
   // Extract unique builders/zones/types for filters
   const builders = ["All", ...Array.from(new Set(properties.map(p => p.developer)))];
@@ -69,6 +80,12 @@ export default function PropertiesPage() {
     setEditPrice(p.price || "");
     setEditType(p.type || "Apartment");
     setEditDesc(p.description || "");
+    setEditTeamAssignmentMode(p.teamAssignmentMode || "ALL_MEMBERS");
+    setEditLeadAssignmentMode(p.leadAssignmentMode || "ROUND_ROBIN");
+    setEditSelectedMemberIds((p.assignedTeam || []).map(m => m.userId));
+    setEditMemberPercentages(
+      Object.fromEntries((p.assignedTeam || []).map(m => [m.userId, m.percentage || 0]))
+    );
   };
 
   const teamLabelForProperty = (p: Property): string => {
@@ -117,6 +134,28 @@ export default function PropertiesPage() {
     e.preventDefault();
     if (!selectedProperty) return;
 
+    if (editTeamAssignmentMode === "CUSTOM_MEMBERS" && editSelectedMemberIds.length === 0) {
+      alert("Select at least one team member, or switch to All Members.");
+      return;
+    }
+    if (editTeamAssignmentMode === "CUSTOM_MEMBERS" && editLeadAssignmentMode === "PERCENTAGE" && editPercentageTotal !== 100) {
+      if (!confirm(`Selected member percentages add up to ${editPercentageTotal}%, not 100%. Save anyway?`)) {
+        return;
+      }
+    }
+
+    const assignedTeam: PropertyTeamMember[] =
+      editTeamAssignmentMode === "CUSTOM_MEMBERS"
+        ? editSelectedMemberIds.map(id => {
+            const member = salesTeam.find(u => u.id === id);
+            return {
+              userId: id,
+              name: member?.name || "Unknown",
+              percentage: editLeadAssignmentMode === "PERCENTAGE" ? editMemberPercentages[id] || 0 : undefined
+            };
+          })
+        : [];
+
     editProperty(selectedProperty.id, {
       name: editName,
       developer: editDev,
@@ -124,7 +163,10 @@ export default function PropertiesPage() {
       location: editLoc,
       price: editPrice,
       type: editType,
-      description: editDesc
+      description: editDesc,
+      teamAssignmentMode: editTeamAssignmentMode,
+      leadAssignmentMode: editTeamAssignmentMode === "CUSTOM_MEMBERS" ? editLeadAssignmentMode : undefined,
+      assignedTeam
     });
 
     setSuccessMsg(`Successfully updated property: ${editName}`);
@@ -482,6 +524,106 @@ export default function PropertiesPage() {
                       rows={3}
                       className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none"
                     />
+                  </div>
+
+                  <div className="border-t border-slate-200 pt-4 space-y-3">
+                    <h4 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <Users className="h-3.5 w-3.5 text-slate-500" /> Team Assignment
+                    </h4>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setEditTeamAssignmentMode("ALL_MEMBERS")}
+                        className={`p-2.5 rounded-lg text-[11px] font-bold border transition-all text-left ${
+                          editTeamAssignmentMode === "ALL_MEMBERS" ? "bg-brand-50 border-brand-300 text-brand-700" : "bg-white border-slate-200 text-slate-500"
+                        }`}
+                      >
+                        All Members
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditTeamAssignmentMode("CUSTOM_MEMBERS")}
+                        className={`p-2.5 rounded-lg text-[11px] font-bold border transition-all text-left ${
+                          editTeamAssignmentMode === "CUSTOM_MEMBERS" ? "bg-brand-50 border-brand-300 text-brand-700" : "bg-white border-slate-200 text-slate-500"
+                        }`}
+                      >
+                        Custom Members
+                      </button>
+                    </div>
+
+                    {editTeamAssignmentMode === "CUSTOM_MEMBERS" && (
+                      <div className="space-y-3 animate-fade-in">
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setEditLeadAssignmentMode("ROUND_ROBIN")}
+                            className={`p-2 rounded-lg text-[10px] font-bold border transition-all ${
+                              editLeadAssignmentMode === "ROUND_ROBIN" ? "bg-brand-50 border-brand-300 text-brand-700" : "bg-white border-slate-200 text-slate-500"
+                            }`}
+                          >
+                            Round Robin
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditLeadAssignmentMode("PERCENTAGE")}
+                            className={`p-2 rounded-lg text-[10px] font-bold border transition-all ${
+                              editLeadAssignmentMode === "PERCENTAGE" ? "bg-brand-50 border-brand-300 text-brand-700" : "bg-white border-slate-200 text-slate-500"
+                            }`}
+                          >
+                            Percentage Based
+                          </button>
+                        </div>
+
+                        <div className="flex items-center justify-between">
+                          <label className="block text-[9px] font-bold text-slate-500 uppercase">Select Sales Team</label>
+                          {editLeadAssignmentMode === "PERCENTAGE" && (
+                            <span className={`text-[9px] font-bold ${editPercentageTotal === 100 ? "text-emerald-600" : "text-amber-600"}`}>
+                              Total: {editPercentageTotal}%
+                            </span>
+                          )}
+                        </div>
+                        <div className="border border-slate-200 rounded-xl divide-y divide-slate-100 max-h-48 overflow-y-auto">
+                          {salesTeam.length === 0 ? (
+                            <p className="text-[10px] text-slate-400 italic p-3">No sales team members yet.</p>
+                          ) : (
+                            salesTeam.map(member => {
+                              const isChecked = editSelectedMemberIds.includes(member.id);
+                              return (
+                                <div key={member.id} className="flex items-center justify-between p-2 hover:bg-slate-50">
+                                  <label className="flex items-center gap-2 cursor-pointer min-w-0 flex-1">
+                                    <input
+                                      type="checkbox"
+                                      checked={isChecked}
+                                      onChange={() => toggleEditMember(member.id)}
+                                      className="h-3.5 w-3.5 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                                    />
+                                    <span className="min-w-0">
+                                      <span className="block text-[11px] font-bold text-slate-800 truncate">{member.name}</span>
+                                      <span className="block text-[9px] text-slate-450">
+                                        {member.role_type === "Manager" ? "Sales Manager / TL" : "Sales Agent"}
+                                      </span>
+                                    </span>
+                                  </label>
+                                  {isChecked && editLeadAssignmentMode === "PERCENTAGE" && (
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      max={100}
+                                      value={editMemberPercentages[member.id] ?? 0}
+                                      onChange={(e) =>
+                                        setEditMemberPercentages(prev => ({ ...prev, [member.id]: Number(e.target.value) }))
+                                      }
+                                      className="w-16 bg-slate-50 border border-slate-200 rounded px-2 py-1 text-[10px] text-right font-mono focus:outline-none"
+                                    />
+                                  )}
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div className="border-t border-slate-200 pt-4">
