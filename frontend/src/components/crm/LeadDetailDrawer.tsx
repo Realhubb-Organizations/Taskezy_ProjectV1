@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { X, Phone, MessageSquare, Mail, Share2, Award, Calendar, Clock, ArrowRight, Activity, Bell } from "lucide-react";
+import React, { useState, useEffect, useMemo } from "react";
+import { X, Phone, MessageSquare, Mail, Share2, Award, Calendar, Clock, ArrowRight, Activity, Bell, Repeat } from "lucide-react";
 import { useApp, Lead, LeadStatus } from "@/context/AppContext";
 
 interface LeadDetailDrawerProps {
@@ -15,11 +15,29 @@ export default function LeadDetailDrawer({
   onClose,
   onUpdateStatus
 }: LeadDetailDrawerProps) {
-  const { addNotification, addCalendarEvent, addFollowupCall } = useApp();
+  const { addNotification, addCalendarEvent, addFollowupCall, users, currentUser, activeRole, reassignLead } = useApp();
   const [localStatus, setLocalStatus] = useState<LeadStatus>("New Lead");
   const [reminderDate, setReminderDate] = useState("");
   const [reminderTime, setReminderTime] = useState("");
   const [reminderSet, setReminderSet] = useState(false);
+  const [reassignTarget, setReassignTarget] = useState("");
+
+  // Who this lead can be handed to: ADMIN can reassign to anyone; a Manager
+  // can only reassign within their own direct reports; a Member can only
+  // reassign to a teammate under their own manager (or to that manager) —
+  // mirrors the server-side check in leads.service.ts, which is what
+  // actually enforces this (this list is just so the picker doesn't offer
+  // choices that would come back a 403).
+  const reassignTargets = useMemo(() => {
+    if (!currentUser) return [];
+    const others = users.filter(u => u.name !== lead?.assignedAgent);
+    if (activeRole === "ADMIN") return others;
+    if (currentUser.role_type === "Manager") {
+      return others.filter(u => u.managerId === currentUser.id);
+    }
+    if (!currentUser.managerId) return [];
+    return others.filter(u => u.id === currentUser.managerId || u.managerId === currentUser.managerId);
+  }, [users, currentUser, activeRole, lead?.assignedAgent]);
 
   useEffect(() => {
     if (lead) {
@@ -78,6 +96,13 @@ export default function LeadDetailDrawer({
       assignedToName: lead.assignedAgent
     });
     alert(`Calendar Task Saved!\nLead: ${lead.name}\nStatus: ${localStatus}\nDate: ${reminderDate}\nTime: ${reminderTime}\nNotification scheduled.`);
+  };
+
+  const handleReassign = () => {
+    if (!reassignTarget) return;
+    reassignLead(lead.id, reassignTarget);
+    setReassignTarget("");
+    onClose();
   };
 
   const shareLeadProfile = () => {
@@ -279,6 +304,43 @@ export default function LeadDetailDrawer({
                     <span>Save Task Reminder</span>
                   </button>
                 </form>
+              )}
+            </div>
+          </div>
+
+          {/* Section C.5: Reassign — scoped to who this caller is actually allowed to hand the lead to */}
+          <div className="space-y-3">
+            <h4 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider border-b border-slate-100 pb-1.5 flex items-center gap-1.5">
+              <Repeat className="h-3.5 w-3.5 text-slate-500" />
+              Reassign Lead
+            </h4>
+            <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 space-y-2.5">
+              <p className="text-[10px] text-slate-500">
+                Currently assigned to <span className="font-bold text-slate-700">{lead.assignedAgent}</span>
+              </p>
+              {reassignTargets.length === 0 ? (
+                <p className="text-[10px] text-slate-400 italic">No eligible teammates to reassign to.</p>
+              ) : (
+                <div className="flex gap-2">
+                  <select
+                    value={reassignTarget}
+                    onChange={(e) => setReassignTarget(e.target.value)}
+                    className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 focus:outline-none"
+                  >
+                    <option value="">Select a team member…</option>
+                    {reassignTargets.map(u => (
+                      <option key={u.id} value={u.name}>{u.name}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={handleReassign}
+                    disabled={!reassignTarget}
+                    className="shrink-0 bg-brand-700 hover:bg-brand-600 disabled:opacity-40 text-white font-bold px-4 py-2 rounded-xl text-xs transition-all"
+                  >
+                    Reassign
+                  </button>
+                </div>
               )}
             </div>
           </div>

@@ -38,11 +38,12 @@ leadsRouter.patch(
   validate({ params: leadIdParamSchema, body: editLeadSchema }),
   asyncHandler(editLeadHandler)
 );
-// Reassign and delete are destructive/sensitive enough to restrict to ADMIN —
-// matches the frontend's existing admin-only gating on these actions.
+// Reassign is open to every authenticated role — leads.service.ts enforces
+// who can reassign to whom based on reporting line (ADMIN: anyone; Manager:
+// own reports; Member: teammates under the same manager). Delete stays
+// ADMIN-only — genuinely destructive, no equivalent scoped-down case for it.
 leadsRouter.patch(
   "/:id/reassign",
-  requireRole("ADMIN"),
   validate({ params: leadIdParamSchema, body: reassignLeadSchema }),
   asyncHandler(reassignLeadHandler)
 );

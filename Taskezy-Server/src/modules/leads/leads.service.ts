@@ -3,6 +3,7 @@ import { AccessTokenPayload } from "../../utils/tokens";
 import { ApiError } from "../../utils/ApiError";
 import * as repo from "./leads.repository";
 import { CreateLeadInput } from "./leads.repository";
+import * as usersRepo from "../users/users.repository";
 
 /**
  * Mirrors the frontend's isSalesMember scoping rule (AppContext.tsx /
@@ -114,15 +115,42 @@ export async function editLead(caller: AccessTokenPayload, leadId: string, input
   return repo.findById(leadId);
 }
 
-// Reassignment and deletion are ADMIN-only — enforced by requireRole at the
-// route level (see leads.routes.ts), not re-checked here, so there's exactly
-// one place that decides who can call these.
+/**
+ * ADMIN may reassign a lead to anyone. Everyone else is restricted to their
+ * own reporting line: a Manager may only hand a lead to one of their own
+ * direct reports (or take it themselves); a Member may only hand it to a
+ * teammate who shares their manager (or to that manager). Checked here, not
+ * just in the UI, since the route is open to every authenticated role.
+ */
+async function assertReassignAllowed(caller: AccessTokenPayload, newAgentId: string): Promise<void> {
+  if (caller.role === "ADMIN") return;
+
+  if (caller.roleType === "MANAGER") {
+    if (newAgentId === caller.sub) return;
+    const target = await usersRepo.findById(newAgentId);
+    if (target?.manager_id === caller.sub) return;
+    throw ApiError.forbidden("You can only reassign leads to one of your own direct reports.");
+  }
+
+  // Member: peers under the same manager, or the manager themself.
+  const callerUser = await usersRepo.findById(caller.sub);
+  if (callerUser?.manager_id && newAgentId === callerUser.manager_id) return;
+  const target = await usersRepo.findById(newAgentId);
+  if (callerUser?.manager_id && target?.manager_id === callerUser.manager_id) return;
+  throw ApiError.forbidden("You can only reassign leads to a teammate under your own manager.");
+}
+
+// Deletion is ADMIN-only — enforced by requireRole at the route level (see
+// leads.routes.ts). Reassignment is open to every role but scoped by
+// reporting line above, since a Member routing a missed lead to a teammate
+// is a normal CRM action, not an admin-only one.
 export async function reassignLead(caller: AccessTokenPayload, leadId: string, newAgentId: string) {
   const previousAgentId = await repo.getAssignedAgentId(leadId);
   if (!previousAgentId) throw ApiError.notFound("Lead not found");
   if (previousAgentId === newAgentId) {
     throw ApiError.badRequest("Lead is already assigned to this agent.");
   }
+  await assertReassignAllowed(caller, newAgentId);
 
   try {
     await withTransaction(async (client) => {
