@@ -56,8 +56,14 @@ function checkUserAccess(user: { role: string; department?: string; role_type?: 
     return user.role === "ADMIN";
   }
 
+  // Settings: Manage Users / Connected Apps (OAuth) / roster data — admin-level
+  // actions, not something a Manager or Member should be able to open at all.
+  if (path.startsWith("/dashboard/settings")) {
+    return user.role === "ADMIN";
+  }
+
   return true;
-} // Properties, Resale, Reports, Settings, Organization are open to other departments
+} // Properties, Resale, Reports, Organization are open to other departments
 
 function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
