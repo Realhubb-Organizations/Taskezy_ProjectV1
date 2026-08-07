@@ -45,19 +45,21 @@ export async function upsertConnection(input: UpsertConnectionInput): Promise<vo
 export interface ActiveConnection {
   pageToken: string;
   connectedBy: string;
+  pageName: string;
 }
 
-/** Looks up an ACTIVE connection by Page ID for webhook processing — decrypted token + the admin new leads should land on. */
+/** Looks up an ACTIVE connection by Page ID for webhook processing — decrypted token, the admin new leads should land on, and the Page name (for the lead's Meta footprint). */
 export async function getActiveConnectionByPageId(pageId: string): Promise<ActiveConnection | undefined> {
-  const { rows } = await query<{ page_token_encrypted: string; page_token_iv: string; page_token_tag: string; connected_by: string }>(
-    `SELECT page_token_encrypted, page_token_iv, page_token_tag, connected_by FROM meta_connections WHERE page_id = $1 AND status = 'ACTIVE'`,
+  const { rows } = await query<{ page_token_encrypted: string; page_token_iv: string; page_token_tag: string; connected_by: string; page_name: string }>(
+    `SELECT page_token_encrypted, page_token_iv, page_token_tag, connected_by, page_name FROM meta_connections WHERE page_id = $1 AND status = 'ACTIVE'`,
     [pageId]
   );
   const row = rows[0];
   if (!row) return undefined;
   return {
     pageToken: decryptSecret({ ciphertext: row.page_token_encrypted, iv: row.page_token_iv, authTag: row.page_token_tag }),
-    connectedBy: row.connected_by
+    connectedBy: row.connected_by,
+    pageName: row.page_name
   };
 }
 

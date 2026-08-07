@@ -193,6 +193,8 @@ export interface Lead {
   source?: string;
   createdAtStr?: string;
   campaign?: string;
+  metaPageName?: string; // which connected Meta Page this lead came in through
+  metaFormId?: string; // which Lead Ad Form on that Page
   property?: string;
   leadScore?: number;
 
@@ -534,6 +536,10 @@ function mapApiLeadToFrontendLead(row: ApiLeadRow): Lead {
     kycVerified: false, // not included in the leads list endpoint yet
     assignedAgent: row.assigned_agent_name,
     logs: [], // lead_logs isn't joined into the list endpoint yet — see leads.repository.ts
+    source: row.source || undefined,
+    campaign: row.campaign || undefined,
+    metaPageName: row.meta_page_name || undefined,
+    metaFormId: row.meta_form_id || undefined,
     property: row.property_name || undefined,
     leadScore: row.lead_score ?? undefined,
     assignedAt: row.assigned_at || undefined,

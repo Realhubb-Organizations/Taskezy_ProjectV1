@@ -183,26 +183,30 @@ export default function LeadDetailDrawer({
             </div>
           </div>
 
-          {/* Section B: Marketing/Ads Info */}
+          {/* Section B: Lead Source / Ads Footprint — where this lead actually came from */}
           <div className="space-y-3">
-            <h4 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider border-b border-slate-100 pb-1.5">Section B: Ads Campaign Telemetry</h4>
+            <h4 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider border-b border-slate-100 pb-1.5">Section B: Lead Source</h4>
             <div className="text-xs font-semibold text-slate-700 bg-slate-50 p-4 rounded-2xl border border-slate-200/60 space-y-2">
               <div className="flex justify-between items-center">
-                <span className="text-[9px] font-bold text-slate-400 uppercase">Traffic Source</span>
-                <span className="text-slate-800 bg-white border border-slate-200 px-2 py-0.5 rounded-lg font-bold">{lead.campaign || "Manual Entry"}</span>
+                <span className="text-[9px] font-bold text-slate-400 uppercase">Source</span>
+                <span className="text-slate-800 bg-white border border-slate-200 px-2 py-0.5 rounded-lg font-bold">{lead.source || "Manual Entry"}</span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-[9px] font-bold text-slate-400 uppercase">Ad Set Name</span>
-                <span className="text-slate-655 font-mono truncate max-w-[200px]">{lead.source || "Organic Leads Group"}</span>
+                <span className="text-[9px] font-bold text-slate-400 uppercase">Campaign</span>
+                <span className="text-slate-655 font-mono truncate max-w-[220px]">{lead.campaign || "—"}</span>
               </div>
-              <div className="flex justify-between items-start pt-1.5 border-t border-slate-100">
-                <div className="min-w-0">
-                  <span className="text-[9px] font-bold text-slate-450 uppercase block">Form Response Summary</span>
-                  <p className="text-[10px] text-slate-500 font-medium leading-relaxed mt-0.5">
-                    &quot;Looking for a 3BHK flat near Coimbatore outer ring road. Budget around ₹85 Lakhs. Prefer higher floors.&quot;
-                  </p>
+              {lead.metaPageName && (
+                <div className="flex justify-between items-center">
+                  <span className="text-[9px] font-bold text-slate-400 uppercase">Meta Page</span>
+                  <span className="text-slate-655 font-mono truncate max-w-[220px]">{lead.metaPageName}</span>
                 </div>
-              </div>
+              )}
+              {lead.metaFormId && (
+                <div className="flex justify-between items-center">
+                  <span className="text-[9px] font-bold text-slate-400 uppercase">Lead Form ID</span>
+                  <span className="text-slate-655 font-mono truncate max-w-[220px]">{lead.metaFormId}</span>
+                </div>
+              )}
             </div>
           </div>
 

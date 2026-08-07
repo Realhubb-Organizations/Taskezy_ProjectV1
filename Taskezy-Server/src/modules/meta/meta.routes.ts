@@ -131,7 +131,7 @@ async function processLeadgenEvent(pageId: string, leadgenId: string): Promise<v
     return;
   }
   const leadData = await fetchLeadData(leadgenId, connection.pageToken);
-  await ingestMetaLead(leadData, connection.connectedBy);
+  await ingestMetaLead(leadData, connection.connectedBy, connection.pageName);
 }
 
 /** POST delivery — one or more new leads. ACK fast, process after responding so Meta never sees our DB/Graph-API latency. */

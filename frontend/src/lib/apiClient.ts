@@ -145,6 +145,10 @@ export interface ApiLeadRow {
   property_name: string | null;
   assigned_at: string | null;
   created_at: string;
+  source: string | null;
+  campaign: string | null;
+  meta_page_name: string | null;
+  meta_form_id: string | null;
 }
 
 // Pages through every lead and concatenates the results, as a bridge until the

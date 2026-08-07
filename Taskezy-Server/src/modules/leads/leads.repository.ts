@@ -16,6 +16,10 @@ export interface LeadListRow {
   property_name: string | null;
   assigned_at: string | null;
   created_at: string;
+  source: string | null;
+  campaign: string | null;
+  meta_page_name: string | null;
+  meta_form_id: string | null;
 }
 
 export interface LeadListFilter {
@@ -34,7 +38,8 @@ const LIST_SELECT = `
     l.deal_value, l.lead_score, l.assigned_agent_id,
     u.first_name || COALESCE(' ' || u.last_name, '') AS assigned_agent_name,
     l.property_id, p.name AS property_name,
-    l.assigned_at, l.created_at
+    l.assigned_at, l.created_at,
+    l.source, l.campaign, l.meta_page_name, l.meta_form_id
   FROM leads l
   JOIN users u ON u.id = l.assigned_agent_id
   JOIN lead_statuses ls ON ls.code = l.status_code

@@ -29,7 +29,7 @@ function normalizeIndianMobile(raw: string): string | undefined {
  * it lands UNASSIGNED on the connecting admin for a manager to route
  * manually, same as before.
  */
-export async function ingestMetaLead(leadData: MetaLeadData, connectingAdminId: string): Promise<void> {
+export async function ingestMetaLead(leadData: MetaLeadData, connectingAdminId: string, pageName: string): Promise<void> {
   const combinedFirstLast = [firstFieldValue(leadData.field_data, ["first_name"]), firstFieldValue(leadData.field_data, ["last_name"])]
     .filter(Boolean)
     .join(" ");
@@ -59,11 +59,14 @@ export async function ingestMetaLead(leadData: MetaLeadData, connectingAdminId: 
 
   try {
     const { rows, rowCount } = await pool.query<{ id: string }>(
-      `INSERT INTO leads (name, phone, email, source, campaign, assigned_agent_id, status_code, assigned_at, meta_leadgen_id, property_id)
-       VALUES ($1, $2, $3, 'Meta Ads', $4, $5, $6, now(), $7, $8)
+      `INSERT INTO leads (name, phone, email, source, campaign, assigned_agent_id, status_code, assigned_at, meta_leadgen_id, property_id, meta_page_name, meta_form_id, meta_ad_id)
+       VALUES ($1, $2, $3, 'Meta Ads', $4, $5, $6, now(), $7, $8, $9, $10, $11)
        ON CONFLICT (meta_leadgen_id) DO NOTHING
        RETURNING id`,
-      [name, phone, email ?? null, campaign, assignedAgentId, statusCode, leadData.id, propertyId ?? null]
+      [
+        name, phone, email ?? null, campaign, assignedAgentId, statusCode, leadData.id, propertyId ?? null,
+        pageName, leadData.form_id ?? null, leadData.ad_id ?? null
+      ]
     );
 
     // rowCount is 0 when ON CONFLICT DO NOTHING suppressed the insert (a
