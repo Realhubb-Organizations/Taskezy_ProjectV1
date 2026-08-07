@@ -3,6 +3,7 @@ import { logger } from "../../utils/logger";
 import { insertLeadLog } from "../leads/leads.repository";
 import { isUniqueViolation } from "../users/users.repository";
 import { createNotification } from "../notifications/notifications.service";
+import { findPropertyIdByCampaignName } from "../properties/properties.repository";
 import { MetaLeadData } from "./meta-client";
 
 function firstFieldValue(fieldData: MetaLeadData["field_data"], keys: string[]): string | undefined {
@@ -45,14 +46,18 @@ export async function ingestMetaLead(leadData: MetaLeadData, connectingAdminId: 
 
   const name = rawName || "Meta Lead";
   const campaign = leadData.campaign_name || leadData.form_id || "Meta Lead Ads";
+  // Matched by campaign NAME (see properties.repository.findPropertyIdByCampaignName)
+  // — only meaningful when Meta actually gave us the real campaign_name, not
+  // our own form_id/"Meta Lead Ads" fallback.
+  const propertyId = leadData.campaign_name ? await findPropertyIdByCampaignName(leadData.campaign_name) : undefined;
 
   try {
     const { rows, rowCount } = await pool.query<{ id: string }>(
-      `INSERT INTO leads (name, phone, email, source, campaign, assigned_agent_id, status_code, assigned_at, meta_leadgen_id)
-       VALUES ($1, $2, $3, 'Meta Ads', $4, $5, 'UNASSIGNED', now(), $6)
+      `INSERT INTO leads (name, phone, email, source, campaign, assigned_agent_id, status_code, assigned_at, meta_leadgen_id, property_id)
+       VALUES ($1, $2, $3, 'Meta Ads', $4, $5, 'UNASSIGNED', now(), $6, $7)
        ON CONFLICT (meta_leadgen_id) DO NOTHING
        RETURNING id`,
-      [name, phone, email ?? null, campaign, connectingAdminId, leadData.id]
+      [name, phone, email ?? null, campaign, connectingAdminId, leadData.id, propertyId ?? null]
     );
 
     // rowCount is 0 when ON CONFLICT DO NOTHING suppressed the insert (a

@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { useApp, Property } from "@/context/AppContext";
 import { Search, Info, MapPin, Building, Edit, Trash2, Users, Plus } from "lucide-react";
 import AddPropertyModal from "@/components/properties/AddPropertyModal";
+import MetaCampaignLinker from "@/components/properties/MetaCampaignLinker";
 
 export default function PropertiesPage() {
   const { properties, deleteProperty, editProperty, activeRole } = useApp();
@@ -553,6 +554,11 @@ export default function PropertiesPage() {
                       <p className="text-slate-600 whitespace-pre-line">{selectedProperty.description}</p>
                     </div>
                   )}
+
+                  {/* Connected Meta Campaigns */}
+                  <div className="border-t border-slate-200 pt-4">
+                    <MetaCampaignLinker propertyId={selectedProperty.id} isAdmin={activeRole === "ADMIN"} />
+                  </div>
 
                   {/* Register Interest Form */}
                   <div className="border-t border-slate-200 pt-4 space-y-4">

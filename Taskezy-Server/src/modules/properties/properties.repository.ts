@@ -1,4 +1,4 @@
-import { pool, query } from "../../db/pool";
+import { pool, query, withTransaction } from "../../db/pool";
 
 export interface PropertyRow {
   id: string;
@@ -125,4 +125,44 @@ export async function update(id: string, input: Partial<PropertyInput>): Promise
 export async function remove(id: string): Promise<boolean> {
   const { rowCount } = await pool.query(`DELETE FROM properties WHERE id = $1`, [id]);
   return (rowCount ?? 0) > 0;
+}
+
+// --- Meta campaign linking (see Taskezy_DB/migrations/005_*.sql) ---
+
+export async function listCampaignNamesForProperty(propertyId: string): Promise<string[]> {
+  const { rows } = await query<{ campaign_name: string }>(
+    `SELECT campaign_name FROM property_meta_campaigns WHERE property_id = $1 ORDER BY campaign_name`,
+    [propertyId]
+  );
+  return rows.map(r => r.campaign_name);
+}
+
+/** Every distinct campaign name a real Meta lead has arrived with — the property-campaign picker's suggestion list. */
+export async function listDistinctMetaCampaignNames(): Promise<string[]> {
+  const { rows } = await query<{ campaign: string }>(
+    `SELECT DISTINCT campaign FROM leads WHERE source = 'Meta Ads' AND campaign IS NOT NULL ORDER BY campaign`
+  );
+  return rows.map(r => r.campaign);
+}
+
+/** Atomically replaces the full campaign-name set for a property. Throws a unique-violation (23505) if a name is already linked to a different property. */
+export async function replaceCampaignsForProperty(propertyId: string, campaignNames: string[]): Promise<void> {
+  await withTransaction(async (client) => {
+    await client.query(`DELETE FROM property_meta_campaigns WHERE property_id = $1`, [propertyId]);
+    for (const name of campaignNames) {
+      await client.query(
+        `INSERT INTO property_meta_campaigns (property_id, campaign_name) VALUES ($1, $2)`,
+        [propertyId, name]
+      );
+    }
+  });
+}
+
+/** Used by the Meta webhook to auto-fill leads.property_id when a lead's campaign name matches a linked campaign. */
+export async function findPropertyIdByCampaignName(campaignName: string): Promise<string | undefined> {
+  const { rows } = await query<{ property_id: string }>(
+    `SELECT property_id FROM property_meta_campaigns WHERE campaign_name = $1`,
+    [campaignName]
+  );
+  return rows[0]?.property_id;
 }

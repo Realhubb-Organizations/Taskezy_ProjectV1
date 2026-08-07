@@ -350,6 +350,23 @@ export function apiCreateProperty(input: PropertyApiInput): Promise<ApiPropertyR
   return request<ApiPropertyRow>("/api/v1/properties", { method: "POST", body: JSON.stringify(input) });
 }
 
+// Meta ad campaigns linked to a property — matched by campaign name against
+// leads.campaign on real incoming Meta leads (see meta.lead-ingest.ts).
+export function apiGetMetaCampaignSuggestions(): Promise<string[]> {
+  return request<string[]>("/api/v1/properties/meta-campaign-suggestions");
+}
+
+export function apiGetPropertyMetaCampaigns(propertyId: string): Promise<string[]> {
+  return request<string[]>(`/api/v1/properties/${propertyId}/meta-campaigns`);
+}
+
+export function apiSetPropertyMetaCampaigns(propertyId: string, campaignNames: string[]): Promise<string[]> {
+  return request<string[]>(`/api/v1/properties/${propertyId}/meta-campaigns`, {
+    method: "PUT",
+    body: JSON.stringify({ campaignNames })
+  });
+}
+
 export function apiEditProperty(propertyId: string, input: Partial<PropertyApiInput>): Promise<ApiPropertyRow> {
   return request<ApiPropertyRow>(`/api/v1/properties/${propertyId}`, { method: "PATCH", body: JSON.stringify(input) });
 }
