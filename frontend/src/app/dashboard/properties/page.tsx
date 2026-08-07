@@ -484,6 +484,10 @@ export default function PropertiesPage() {
                     />
                   </div>
 
+                  <div className="border-t border-slate-200 pt-4">
+                    <MetaCampaignLinker propertyId={selectedProperty.id} isAdmin={activeRole === "ADMIN"} />
+                  </div>
+
                   <div className="flex gap-2 pt-2">
                     <button
                       type="submit"
