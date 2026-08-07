@@ -23,7 +23,8 @@ import {
   FileText,
   ScrollText,
   LogOut,
-  TrendingUp
+  TrendingUp,
+  Users
 } from "lucide-react";
 
 const TABS = ["Connected Apps", "Leads", "Manage Users", "About"] as const;
@@ -45,7 +46,7 @@ function initialsFor(name: string): string {
 export default function SettingsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { users, leads, activeRole, logout, updateUserFields, addTeamMember, deleteTeamMember, refreshMetaConnectionStatus } = useApp();
+  const { users, leads, activeRole, activeSystem, logout, updateUserFields, addTeamMember, deleteTeamMember, refreshMetaConnectionStatus } = useApp();
   const [activeTab, setActiveTab] = useState<Tab>("Connected Apps");
 
   // --- Connected Apps ---
@@ -189,7 +190,10 @@ export default function SettingsPage() {
     managers: users.filter(u => u.role_type === "Manager" && u.role !== "ADMIN").length,
     it: users.filter(u => u.department === "TECH").length,
     marketing: users.filter(u => u.department === "MARKETING").length,
-    finance: users.filter(u => u.department === "FINANCE" || u.role === "FINANCE").length
+    finance: users.filter(u => u.department === "FINANCE" || u.role === "FINANCE").length,
+    // CRM-scoped: sales team only — IT/Marketing/Finance belong on the HRMS side, not here.
+    salesManagers: users.filter(u => u.department === "SALES" && u.role_type === "Manager").length,
+    salesAgents: users.filter(u => u.department === "SALES" && u.role_type !== "Manager" && u.role !== "ADMIN").length
   }), [users]);
 
   const filteredUsers = useMemo(() => {
@@ -454,15 +458,22 @@ export default function SettingsPage() {
             </button>
           </div>
 
-          {/* Stat cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-            {[
-              { label: "Admin", count: userCounts.admin, icon: ShieldCheck, color: "text-violet-600 bg-violet-50 border-violet-100" },
-              { label: "Managers", count: userCounts.managers, icon: UserCog, color: "text-blue-600 bg-blue-50 border-blue-100" },
-              { label: "IT", count: userCounts.it, icon: Wrench, color: "text-indigo-600 bg-indigo-50 border-indigo-100" },
-              { label: "Marketing", count: userCounts.marketing, icon: Megaphone, color: "text-pink-600 bg-pink-50 border-pink-100" },
-              { label: "Finance", count: userCounts.finance, icon: Wallet, color: "text-emerald-600 bg-emerald-50 border-emerald-100" }
-            ].map(stat => (
+          {/* Stat cards — CRM only ever needs to see the sales team, not the whole company */}
+          <div className={`grid grid-cols-2 sm:grid-cols-3 gap-3 ${activeSystem === "CRM" ? "" : "lg:grid-cols-5"}`}>
+            {(activeSystem === "CRM"
+              ? [
+                  { label: "Admin", count: userCounts.admin, icon: ShieldCheck, color: "text-violet-600 bg-violet-50 border-violet-100" },
+                  { label: "Managers", count: userCounts.salesManagers, icon: UserCog, color: "text-blue-600 bg-blue-50 border-blue-100" },
+                  { label: "Agents", count: userCounts.salesAgents, icon: Users, color: "text-emerald-600 bg-emerald-50 border-emerald-100" }
+                ]
+              : [
+                  { label: "Admin", count: userCounts.admin, icon: ShieldCheck, color: "text-violet-600 bg-violet-50 border-violet-100" },
+                  { label: "Managers", count: userCounts.managers, icon: UserCog, color: "text-blue-600 bg-blue-50 border-blue-100" },
+                  { label: "IT", count: userCounts.it, icon: Wrench, color: "text-indigo-600 bg-indigo-50 border-indigo-100" },
+                  { label: "Marketing", count: userCounts.marketing, icon: Megaphone, color: "text-pink-600 bg-pink-50 border-pink-100" },
+                  { label: "Finance", count: userCounts.finance, icon: Wallet, color: "text-emerald-600 bg-emerald-50 border-emerald-100" }
+                ]
+            ).map(stat => (
               <div key={stat.label} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
                 <div>
                   <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">{stat.label}</span>
