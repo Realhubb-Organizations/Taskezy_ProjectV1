@@ -518,6 +518,15 @@ export function apiMarkAllNotificationsRead(system?: "CRM" | "HRMS" | "FINANCE" 
   return request<{ read: boolean }>(`/api/v1/notifications/read-all${query}`, { method: "PATCH" });
 }
 
+// EventSource can't set an Authorization header, so the access token travels
+// as a query param on this one endpoint (see notifications.routes.ts).
+// Returns null when there's no session yet — caller should not open a stream.
+export function getNotificationStreamUrl(): string | null {
+  const token = getAccessToken();
+  if (!token) return null;
+  return `${API_BASE_URL}/api/v1/notifications/stream?access_token=${encodeURIComponent(token)}`;
+}
+
 // --- Calendar events ---
 export interface ApiCalendarEventRow {
   id: string;

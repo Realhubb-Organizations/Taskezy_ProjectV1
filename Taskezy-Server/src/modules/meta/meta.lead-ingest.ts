@@ -2,6 +2,7 @@ import { pool, withTransaction } from "../../db/pool";
 import { logger } from "../../utils/logger";
 import { insertLeadLog } from "../leads/leads.repository";
 import { isUniqueViolation } from "../users/users.repository";
+import { createNotification } from "../notifications/notifications.service";
 import { MetaLeadData } from "./meta-client";
 
 function firstFieldValue(fieldData: MetaLeadData["field_data"], keys: string[]): string | undefined {
@@ -46,12 +47,28 @@ export async function ingestMetaLead(leadData: MetaLeadData, connectingAdminId: 
   const campaign = leadData.campaign_name || leadData.form_id || "Meta Lead Ads";
 
   try {
-    await pool.query(
+    const { rows, rowCount } = await pool.query<{ id: string }>(
       `INSERT INTO leads (name, phone, email, source, campaign, assigned_agent_id, status_code, assigned_at, meta_leadgen_id)
        VALUES ($1, $2, $3, 'Meta Ads', $4, $5, 'UNASSIGNED', now(), $6)
-       ON CONFLICT (meta_leadgen_id) DO NOTHING`,
+       ON CONFLICT (meta_leadgen_id) DO NOTHING
+       RETURNING id`,
       [name, phone, email ?? null, campaign, connectingAdminId, leadData.id]
     );
+
+    // rowCount is 0 when ON CONFLICT DO NOTHING suppressed the insert (a
+    // retried/re-delivered webhook for a leadgen_id we already have) — don't
+    // re-notify for something that isn't actually a new lead.
+    if (rowCount && rows[0]) {
+      await createNotification({
+        system: "CRM",
+        category: "NEW_LEAD",
+        title: "New Meta Lead",
+        message: `${name} — via ${campaign}`,
+        recipientUserId: connectingAdminId,
+        leadId: rows[0].id,
+        link: "/dashboard/crm"
+      });
+    }
   } catch (err) {
     // The only remaining unique constraint this insert can hit is leads.phone
     // (meta_leadgen_id conflicts are already absorbed by ON CONFLICT above) —

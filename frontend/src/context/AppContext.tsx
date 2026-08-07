@@ -35,6 +35,7 @@ import {
   apiMarkInvoicePaid,
   apiDeleteInvoice,
   apiListNotifications,
+  getNotificationStreamUrl,
   apiMarkNotificationRead,
   apiMarkAllNotificationsRead,
   apiListCalendarEvents,
@@ -888,6 +889,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       window.removeEventListener("offline", handleOffline);
     };
   }, []);
+
+  // Live notifications (Meta leads, etc.) over Server-Sent Events — one
+  // connection per session, reopened whenever the signed-in user changes.
+  useEffect(() => {
+    if (!currentUser) return;
+    const url = getNotificationStreamUrl();
+    if (!url) return;
+
+    const source = new EventSource(url);
+    source.addEventListener("notification", (event) => {
+      const row = JSON.parse((event as MessageEvent).data) as ApiNotificationRow;
+      const notif = mapApiNotificationToFrontend(row);
+      setNotifications(prev => (prev.some(n => n.id === notif.id) ? prev : [notif, ...prev]));
+    });
+    // EventSource auto-reconnects on transient errors — nothing to do here
+    // beyond not letting a stray error tear down the app.
+    source.onerror = () => {};
+
+    return () => source.close();
+  }, [currentUser?.id]);
 
   // Notification actions
   const addNotification = (notification: Omit<Notification, "id" | "timestamp" | "read">) => {

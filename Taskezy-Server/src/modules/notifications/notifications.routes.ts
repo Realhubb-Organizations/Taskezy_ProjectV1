@@ -6,8 +6,48 @@ import { asyncHandler } from "../../utils/asyncHandler";
 import { sendOk } from "../../utils/apiResponse";
 import { ApiError } from "../../utils/ApiError";
 import { pool, query } from "../../db/pool";
+import { verifyAccessToken } from "../../utils/tokens";
+import { subscribe } from "../../utils/sseHub";
 
 export const notificationsRouter = Router();
+
+const HEARTBEAT_MS = 25000;
+
+// Registered BEFORE requireAuth below: the browser's EventSource API cannot
+// set an Authorization header, so the access token travels as a query param
+// on this one route instead and is verified here directly.
+notificationsRouter.get("/stream", (req, res) => {
+  const token = req.query.access_token;
+  if (typeof token !== "string") {
+    res.sendStatus(401);
+    return;
+  }
+  let userId: string;
+  try {
+    userId = verifyAccessToken(token).sub;
+  } catch {
+    res.sendStatus(401);
+    return;
+  }
+
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    // Also needed at the nginx layer (proxy_buffering off) for this to
+    // actually stream in production instead of arriving in one flush.
+    "X-Accel-Buffering": "no"
+  });
+  res.write(": connected\n\n");
+
+  const heartbeat = setInterval(() => res.write(": ping\n\n"), HEARTBEAT_MS);
+  const unsubscribe = subscribe(userId, res);
+
+  req.on("close", () => {
+    clearInterval(heartbeat);
+    unsubscribe();
+  });
+});
 
 notificationsRouter.use(requireAuth);
 
