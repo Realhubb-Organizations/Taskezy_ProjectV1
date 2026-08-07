@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
-import { Megaphone, X, Loader2 } from "lucide-react";
+import React, { useEffect, useMemo, useState } from "react";
+import { Megaphone, X, Loader2, Plus } from "lucide-react";
 import {
   apiGetMetaCampaignSuggestions,
   apiGetPropertyMetaCampaigns,
@@ -22,7 +22,9 @@ interface MetaCampaignLinkerProps {
 export default function MetaCampaignLinker({ propertyId, isAdmin }: MetaCampaignLinkerProps) {
   const [campaigns, setCampaigns] = useState<string[]>([]);
   const [suggestions, setSuggestions] = useState<string[]>([]);
-  const [input, setInput] = useState("");
+  const [selected, setSelected] = useState("");
+  const [customInput, setCustomInput] = useState("");
+  const [showCustomInput, setShowCustomInput] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -66,13 +68,26 @@ export default function MetaCampaignLinker({ propertyId, isAdmin }: MetaCampaign
     }
   };
 
-  const handleAdd = () => {
-    const name = input.trim();
+  const availableSuggestions = useMemo(
+    () => suggestions.filter(s => !campaigns.includes(s)),
+    [suggestions, campaigns]
+  );
+
+  const handleAddSelected = () => {
+    const name = selected.trim();
+    setSelected("");
+    if (!name || campaigns.includes(name)) return;
+    save([...campaigns, name]);
+  };
+
+  const handleAddCustom = () => {
+    const name = customInput.trim();
     if (!name || campaigns.includes(name)) {
-      setInput("");
+      setCustomInput("");
       return;
     }
-    setInput("");
+    setCustomInput("");
+    setShowCustomInput(false);
     save([...campaigns, name]);
   };
 
@@ -118,36 +133,69 @@ export default function MetaCampaignLinker({ propertyId, isAdmin }: MetaCampaign
       )}
 
       {isAdmin && (
-        <>
+        <div className="space-y-2">
+          {/* Visible dropdown of campaign names seen on real incoming Meta leads */}
           <div className="flex gap-2">
-            <input
-              type="text"
-              list="meta-campaign-suggestions"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  handleAdd();
-                }
-              }}
+            <select
+              value={selected}
+              onChange={(e) => setSelected(e.target.value)}
               disabled={saving}
-              placeholder="Exact campaign name from Meta Ads Manager"
-              className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-brand-500 disabled:opacity-60"
-            />
+              className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none focus:border-brand-500 disabled:opacity-60"
+            >
+              <option value="">
+                {availableSuggestions.length === 0 ? "No campaigns seen on leads yet" : "Select a campaign that has sent leads…"}
+              </option>
+              {availableSuggestions.map(s => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
             <button
               type="button"
-              onClick={handleAdd}
-              disabled={saving}
-              className="shrink-0 bg-brand-700 hover:bg-brand-600 text-white font-bold px-4 py-2 rounded-lg text-xs transition-all disabled:opacity-50"
+              onClick={handleAddSelected}
+              disabled={saving || !selected}
+              className="shrink-0 bg-brand-700 hover:bg-brand-600 text-white font-bold px-4 py-2 rounded-lg text-xs transition-all disabled:opacity-40"
             >
               {saving ? "…" : "Add"}
             </button>
           </div>
-          <datalist id="meta-campaign-suggestions">
-            {suggestions.filter(s => !campaigns.includes(s)).map(s => <option key={s} value={s} />)}
-          </datalist>
-        </>
+
+          {/* Fallback for a campaign that hasn't produced a lead yet, so it can't be in the dropdown above */}
+          {showCustomInput ? (
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={customInput}
+                onChange={(e) => setCustomInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleAddCustom();
+                  }
+                }}
+                disabled={saving}
+                autoFocus
+                placeholder="Exact campaign name from Meta Ads Manager"
+                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-brand-500 disabled:opacity-60"
+              />
+              <button
+                type="button"
+                onClick={handleAddCustom}
+                disabled={saving}
+                className="shrink-0 bg-brand-700 hover:bg-brand-600 text-white font-bold px-4 py-2 rounded-lg text-xs transition-all disabled:opacity-50"
+              >
+                {saving ? "…" : "Add"}
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowCustomInput(true)}
+              className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-500 hover:text-brand-600"
+            >
+              <Plus className="h-3 w-3" /> Add a campaign that hasn&apos;t sent a lead yet
+            </button>
+          )}
+        </div>
       )}
 
       {error && <p className="text-[10px] text-red-600 font-bold">{error}</p>}
