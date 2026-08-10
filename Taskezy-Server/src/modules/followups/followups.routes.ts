@@ -18,9 +18,20 @@ const SELECT = `
   JOIN users u ON u.id = fc.assigned_to_id
 `;
 
+// Mirrors leads.service.ts's scopeForCaller rule: a SALES department
+// "Member" only ever sees their own follow-ups (lead names/phone numbers
+// included); everyone else (Managers, Finance, Admin) sees all of them.
+// Previously completely unscoped — any authenticated role, including a
+// Member, could list every follow-up call for every agent in the company.
 followupsRouter.get(
   "/",
-  asyncHandler(async (_req, res) => {
+  asyncHandler(async (req, res) => {
+    const isSalesMember = req.user!.role === "AGENT" && req.user!.roleType === "MEMBER";
+    if (isSalesMember) {
+      const { rows } = await query(`${SELECT} WHERE fc.assigned_to_id = $1 ORDER BY fc.scheduled_at`, [req.user!.sub]);
+      sendOk(res, rows);
+      return;
+    }
     const { rows } = await query(`${SELECT} ORDER BY fc.scheduled_at`);
     sendOk(res, rows);
   })

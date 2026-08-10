@@ -7,6 +7,7 @@ import { DateRange } from "./DateRangeFilter";
 import {
   filterLeadsByRange,
   filterAdSpendByRange,
+  filterFollowupsByRange,
   computeBookingValue,
   computeBookingCount,
   computeROIMultiple,
@@ -17,10 +18,11 @@ import {
 } from "@/lib/reportMetrics";
 
 export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
-  const { leads, adSpendRecords, users, activeRole, reassignLead } = useApp();
+  const { leads, adSpendRecords, followupCalls, users, currentUser, activeRole, reassignLead } = useApp();
 
   const rangeLeads = useMemo(() => filterLeadsByRange(leads, dateRange.from, dateRange.to), [leads, dateRange]);
   const rangeSpend = useMemo(() => filterAdSpendByRange(adSpendRecords, dateRange.from, dateRange.to), [adSpendRecords, dateRange]);
+  const rangeFollowups = useMemo(() => filterFollowupsByRange(followupCalls, dateRange.from, dateRange.to), [followupCalls, dateRange]);
   const totalSpend = rangeSpend.reduce((sum, r) => sum + r.spend, 0);
   const totalLeadsCount = rangeLeads.length;
 
@@ -33,17 +35,30 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
     return map;
   }, [users]);
 
+  // Role-scoped: ADMIN browses everyone; a Manager only ever sees their own
+  // direct reports; a Member (sales agent) only ever sees their own report —
+  // this used to list every agent in the company to every viewer regardless
+  // of role, letting a Member browse other agents' names/reports.
   const agentNames = useMemo(() => {
-    const names = new Set<string>([
+    const allNames = new Set<string>([
       ...users.filter(u => u.role_type !== "Manager").map(u => u.name),
       ...rangeLeads.map(l => l.assignedAgent)
     ]);
-    managerNames.forEach(m => names.delete(m));
-    return Array.from(names).sort();
-  }, [users, managerNames, rangeLeads]);
+    managerNames.forEach(m => allNames.delete(m));
+    const all = Array.from(allNames).sort();
+
+    if (activeRole === "ADMIN") return all;
+    if (!currentUser) return [];
+    if (currentUser.role_type === "Manager") {
+      return all.filter(name => users.find(u => u.name === name)?.managerId === currentUser.id);
+    }
+    return all.includes(currentUser.name) ? [currentUser.name] : [currentUser.name];
+  }, [users, managerNames, rangeLeads, activeRole, currentUser]);
+
+  const isScopedToSelf = activeRole !== "ADMIN" && currentUser?.role_type !== "Manager";
 
   const [selectedAgent, setSelectedAgent] = useState<string>(agentNames[0] || "");
-  const activeAgent = agentNames.includes(selectedAgent) ? selectedAgent : agentNames[0] || "";
+  const activeAgent = isScopedToSelf ? (currentUser?.name || "") : (agentNames.includes(selectedAgent) ? selectedAgent : agentNames[0] || "");
 
   const agentSalesTeamOptions = useMemo(() => {
     const names = new Set<string>([...agentNames, ...Array.from(managerNames)]);
@@ -58,6 +73,8 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
   const missedLeads = agentLeads
     .map(l => ({ lead: l, info: getMissedInfo(l) }))
     .filter(x => x.info.missed);
+  const agentFollowups = rangeFollowups.filter(f => f.assignedTo === activeAgent);
+  const missedFollowups = agentFollowups.filter(f => f.status === "Missed");
 
   const handleReassign = (leadId: string, leadName: string) => {
     const target = prompt(`Reassign "${leadName}" to which team member?`, agentSalesTeamOptions.find(n => n !== activeAgent) || "");
@@ -72,42 +89,47 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Agent selector */}
-        <div className="lg:col-span-3 glass-card p-4 rounded-2xl space-y-2">
-          <h3 className="text-[10px] uppercase font-extrabold text-slate-400 tracking-wider px-1">Sales Agents</h3>
-          <div className="space-y-1 max-h-[28rem] overflow-y-auto pr-1">
-            {agentNames.length === 0 ? (
-              <p className="text-[11px] text-slate-400 italic px-1">No agents with lead activity in range.</p>
-            ) : (
-              agentNames.map(name => {
-                const count = rangeLeads.filter(l => l.assignedAgent === name).length;
-                const isManagedBy = reportsToByName.get(name);
-                return (
-                  <button
-                    key={name}
-                    onClick={() => setSelectedAgent(name)}
-                    className={`w-full text-left px-3 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-between ${
-                      activeAgent === name ? "bg-brand-700 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"
-                    }`}
-                  >
-                    <span className="truncate">
-                      {name}
-                      {isManagedBy && (
-                        <span className={`block text-[9px] font-semibold ${activeAgent === name ? "text-brand-100" : "text-slate-400"}`}>
-                          reports to {isManagedBy}
-                        </span>
-                      )}
-                    </span>
-                    <span className={`shrink-0 ml-2 ${activeAgent === name ? "text-brand-100" : "text-slate-400"}`}>{count}</span>
-                  </button>
-                );
-              })
-            )}
+        {/* Agent selector — hidden entirely for a sales agent viewing their
+            own report; there's nothing to pick when they can only ever see
+            themselves. Visible (scoped to their team) for Managers, and
+            unrestricted for Admin. */}
+        {!isScopedToSelf && (
+          <div className="lg:col-span-3 glass-card p-4 rounded-2xl space-y-2">
+            <h3 className="text-[10px] uppercase font-extrabold text-slate-400 tracking-wider px-1">Sales Agents</h3>
+            <div className="space-y-1 max-h-[28rem] overflow-y-auto pr-1">
+              {agentNames.length === 0 ? (
+                <p className="text-[11px] text-slate-400 italic px-1">No agents with lead activity in range.</p>
+              ) : (
+                agentNames.map(name => {
+                  const count = rangeLeads.filter(l => l.assignedAgent === name).length;
+                  const isManagedBy = reportsToByName.get(name);
+                  return (
+                    <button
+                      key={name}
+                      onClick={() => setSelectedAgent(name)}
+                      className={`w-full text-left px-3 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-between ${
+                        activeAgent === name ? "bg-brand-700 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"
+                      }`}
+                    >
+                      <span className="truncate">
+                        {name}
+                        {isManagedBy && (
+                          <span className={`block text-[9px] font-semibold ${activeAgent === name ? "text-brand-100" : "text-slate-400"}`}>
+                            reports to {isManagedBy}
+                          </span>
+                        )}
+                      </span>
+                      <span className={`shrink-0 ml-2 ${activeAgent === name ? "text-brand-100" : "text-slate-400"}`}>{count}</span>
+                    </button>
+                  );
+                })
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Agent detail */}
-        <div className="lg:col-span-9 space-y-6">
+        <div className={isScopedToSelf ? "lg:col-span-12 space-y-6" : "lg:col-span-9 space-y-6"}>
           {!activeAgent ? (
             <div className="glass-card p-8 rounded-2xl text-center text-xs text-slate-400">
               <Users className="h-10 w-10 text-slate-350 mx-auto mb-2" />
@@ -127,7 +149,7 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
                 <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Leads Assigned</span>
                   <p className="text-xl font-black text-slate-800 mt-1">{agentLeads.length}</p>
@@ -153,6 +175,13 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                     {missedLeads.length}
                   </p>
                   <span className="text-[9px] text-slate-450">SLA: 20 min response window</span>
+                </div>
+                <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Missed Follow-ups</span>
+                  <p className={`text-xl font-black mt-1 ${missedFollowups.length > 0 ? "text-red-650" : "text-slate-800"}`}>
+                    {missedFollowups.length}
+                  </p>
+                  <span className="text-[9px] text-slate-450">SLA: 10 min after reminder due</span>
                 </div>
               </div>
 
@@ -217,6 +246,44 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                             </tr>
                           );
                         })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="glass-card p-6 rounded-2xl space-y-4">
+                <h3 className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                  <AlertTriangle className="h-4 w-4 text-amber-600" />
+                  Missed Follow-ups — Full Detail
+                </h3>
+                <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm overflow-x-auto">
+                  <table className="w-full text-left text-[11px] border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-200 text-[9px] uppercase font-bold text-slate-500 tracking-wider">
+                        <th className="p-3">Lead</th>
+                        <th className="p-3">Type</th>
+                        <th className="p-3">Scheduled</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {missedFollowups.length === 0 ? (
+                        <tr>
+                          <td colSpan={3} className="p-6 text-center text-slate-400 italic font-semibold">
+                            No missed follow-ups for {activeAgent} in this date range.
+                          </td>
+                        </tr>
+                      ) : (
+                        missedFollowups.map(f => (
+                          <tr key={f.id} className="hover:bg-slate-50/50">
+                            <td className="p-3">
+                              <p className="font-bold text-slate-800">{f.leadName}</p>
+                              <p className="text-[9px] text-slate-450 font-mono">{f.phone}</p>
+                            </td>
+                            <td className="p-3 text-slate-600">{f.type}</td>
+                            <td className="p-3 font-mono text-slate-600">{f.date} • {f.time}</td>
+                          </tr>
+                        ))
                       )}
                     </tbody>
                   </table>

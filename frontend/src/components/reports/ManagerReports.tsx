@@ -7,6 +7,7 @@ import { DateRange } from "./DateRangeFilter";
 import {
   filterLeadsByRange,
   filterAdSpendByRange,
+  filterFollowupsByRange,
   computeBookingValue,
   computeROIMultiple,
   computeAllocatedSpend,
@@ -15,18 +16,28 @@ import {
 } from "@/lib/reportMetrics";
 
 export default function ManagerReports({ dateRange }: { dateRange: DateRange }) {
-  const { leads, adSpendRecords, users } = useApp();
+  const { leads, adSpendRecords, followupCalls, users, currentUser, activeRole } = useApp();
   const [expanded, setExpanded] = useState<string | null>(null);
 
   const rangeLeads = useMemo(() => filterLeadsByRange(leads, dateRange.from, dateRange.to), [leads, dateRange]);
   const rangeSpend = useMemo(() => filterAdSpendByRange(adSpendRecords, dateRange.from, dateRange.to), [adSpendRecords, dateRange]);
+  const rangeFollowups = useMemo(() => filterFollowupsByRange(followupCalls, dateRange.from, dateRange.to), [followupCalls, dateRange]);
   const totalSpend = rangeSpend.reduce((sum, r) => sum + r.spend, 0);
   const totalLeadsCount = rangeLeads.length;
 
   // Real reporting-line grouping via users.managerId (see Settings → Manage
   // Users → "Reports To") — previously this grouped leads against a hardcoded
   // name-string lookup with no connection to the actual roster.
-  const managers = useMemo(() => users.filter(u => u.role_type === "Manager"), [users]);
+  // Role-scoped: ADMIN sees every manager's team; a Manager only ever sees
+  // their own row (peer managers' team performance isn't their business);
+  // a Member sees none of this — this used to show every manager's full
+  // team breakdown to any authenticated viewer regardless of role.
+  const managers = useMemo(() => {
+    const all = users.filter(u => u.role_type === "Manager");
+    if (activeRole === "ADMIN") return all;
+    if (currentUser?.role_type === "Manager") return all.filter(m => m.id === currentUser.id);
+    return [];
+  }, [users, activeRole, currentUser]);
 
   const managerRows = useMemo(() => {
     return managers.map(manager => {
@@ -58,12 +69,14 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
         const memberBookingValue = computeBookingValue(memberLeads);
         const memberROI = computeROIMultiple(memberBookingValue, memberSpend);
         const memberMissed = memberLeads.filter(isMissedLead);
+        const memberMissedFollowups = rangeFollowups.filter(f => f.assignedTo === member && f.status === "Missed");
         return {
           name: member,
           leadsCount: memberLeads.length,
           spend: memberSpend,
           roi: memberROI,
-          missedCount: memberMissed.length
+          missedCount: memberMissed.length,
+          missedFollowupsCount: memberMissedFollowups.length
         };
       });
 
@@ -83,7 +96,7 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
         memberBreakdown
       };
     });
-  }, [managers, users, rangeLeads, totalSpend, totalLeadsCount]);
+  }, [managers, users, rangeLeads, rangeFollowups, totalSpend, totalLeadsCount]);
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -125,7 +138,13 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {managerRows.map(row => (
+              {managerRows.length === 0 ? (
+                <tr>
+                  <td colSpan={11} className="p-6 text-center text-slate-400 italic font-semibold">
+                    Manager-level reports aren&apos;t visible at your access level.
+                  </td>
+                </tr>
+              ) : managerRows.map(row => (
                 <React.Fragment key={row.manager}>
                   <tr className="hover:bg-slate-50/50">
                     <td className="p-3 font-bold text-slate-800">{row.manager}</td>
@@ -183,12 +202,17 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                               {row.memberBreakdown.map(m => (
                                 <div key={m.name} className="bg-white border border-slate-200 rounded-lg p-3 space-y-1.5">
-                                  <div className="flex items-center justify-between">
+                                  <div className="flex items-center justify-between gap-1.5 flex-wrap">
                                     <p className="text-xs font-bold text-slate-800">{m.name}</p>
                                     <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
                                       m.missedCount > 0 ? "bg-red-50 text-red-700 border border-red-100" : "bg-emerald-50 text-emerald-700 border border-emerald-100"
                                     }`}>
-                                      {m.missedCount} missed
+                                      {m.missedCount} missed leads
+                                    </span>
+                                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
+                                      m.missedFollowupsCount > 0 ? "bg-amber-50 text-amber-700 border border-amber-100" : "bg-emerald-50 text-emerald-700 border border-emerald-100"
+                                    }`}>
+                                      {m.missedFollowupsCount} missed follow-ups
                                     </span>
                                   </div>
                                   <div className="flex items-center justify-between text-[10px] text-slate-500">

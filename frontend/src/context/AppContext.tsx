@@ -268,6 +268,7 @@ export interface ResaleUnit {
 
 export interface FollowupCall {
   id: string;
+  date: string; // YYYY-MM-DD, for report date-range filtering
   time: string;
   status: "Missed" | "Upcoming" | "Completed";
   leadName: string;
@@ -639,6 +640,7 @@ const FOLLOWUP_TYPE_MAP: Record<string, FollowupCall["type"]> = { CALLBACK: "Cal
 function mapApiFollowupToFrontend(row: ApiFollowupRow): FollowupCall {
   return {
     id: row.id,
+    date: row.scheduled_at.split("T")[0],
     time: new Date(row.scheduled_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true }).toLowerCase(),
     status: FOLLOWUP_STATUS_MAP[row.status] || "Upcoming",
     leadName: row.lead_name,

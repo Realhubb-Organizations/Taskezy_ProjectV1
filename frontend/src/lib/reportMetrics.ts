@@ -1,4 +1,4 @@
-import { Lead, AdSpendRecord, LeadStatus } from "@/context/AppContext";
+import { Lead, AdSpendRecord, LeadStatus, FollowupCall } from "@/context/AppContext";
 
 const BUYER_STATUSES = new Set<LeadStatus>([
   "Interested", "Follow up", "Follow-ups", "Call Back", "Meeting Scheduled", "Meeting Done",
@@ -28,6 +28,10 @@ export function filterLeadsByRange(leads: Lead[], from: string, to: string): Lea
 
 export function filterAdSpendByRange(records: AdSpendRecord[], from: string, to: string): AdSpendRecord[] {
   return records.filter(r => inRange(r.date, from, to));
+}
+
+export function filterFollowupsByRange(followups: FollowupCall[], from: string, to: string): FollowupCall[] {
+  return followups.filter(f => inRange(f.date, from, to));
 }
 
 export function computeCPL(totalSpend: number, totalLeads: number): number {
