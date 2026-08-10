@@ -27,10 +27,31 @@ const SELECT = `
   LEFT JOIN users cb ON cb.id = ce.created_by_id
 `;
 
+// CRM events (site visits/follow-ups/bookings/EOI) are role-scoped by who
+// created them — a sales agent's own calendar, a manager's team's calendar,
+// or everything for ADMIN. HRMS/FINANCE/ADMIN-system events (company
+// holidays, absences, payment reminders, etc.) stay visible to everyone as
+// before — only the CRM-system rows are filtered here. Previously every
+// authenticated role saw every CRM event regardless of who scheduled it.
 calendarEventsRouter.get(
   "/",
-  asyncHandler(async (_req, res) => {
-    const { rows } = await query(`${SELECT} ORDER BY ce.event_date`);
+  asyncHandler(async (req, res) => {
+    if (req.user!.role === "ADMIN") {
+      const { rows } = await query(`${SELECT} ORDER BY ce.event_date`);
+      sendOk(res, rows);
+      return;
+    }
+
+    const params: unknown[] = [req.user!.sub];
+    const crmVisibility =
+      req.user!.roleType === "MANAGER"
+        ? `ce.created_by_id = $1 OR ce.created_by_id IN (SELECT id FROM users WHERE manager_id = $1)`
+        : `ce.created_by_id = $1`;
+
+    const { rows } = await query(
+      `${SELECT} WHERE ce.system != 'CRM' OR (${crmVisibility}) ORDER BY ce.event_date`,
+      params
+    );
     sendOk(res, rows);
   })
 );
@@ -98,11 +119,19 @@ function isForeignKeyViolation(err: unknown): boolean {
 
 const idParamSchema = z.object({ id: z.string().uuid() });
 
+// Only the event's own creator or an ADMIN may delete it — previously
+// unrestricted, so any authenticated user could delete anyone else's event.
 calendarEventsRouter.delete(
   "/:id",
   validate({ params: idParamSchema }),
   asyncHandler(async (req, res) => {
-    const { rowCount } = await pool.query(`DELETE FROM calendar_events WHERE id = $1`, [req.params.id]);
+    const params: unknown[] = [req.params.id];
+    let ownershipClause = "";
+    if (req.user!.role !== "ADMIN") {
+      params.push(req.user!.sub);
+      ownershipClause = ` AND created_by_id = $2`;
+    }
+    const { rowCount } = await pool.query(`DELETE FROM calendar_events WHERE id = $1${ownershipClause}`, params);
     if (!rowCount) throw ApiError.notFound("Calendar event not found");
     sendOk(res, { deleted: true });
   })

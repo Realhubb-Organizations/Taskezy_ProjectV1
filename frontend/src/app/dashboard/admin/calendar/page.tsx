@@ -80,6 +80,7 @@ function AdminCalendarContent() {
                   </div>
                   {e.time && <p className="text-[10px] text-slate-500 font-mono mt-0.5">{e.time}</p>}
                   {e.description && <p className="text-[10px] text-slate-500 mt-0.5">{e.description}</p>}
+                  {e.createdBy && <p className="text-[10px] text-brand-600 font-bold mt-1">Added by {e.createdBy}</p>}
                 </button>
               ))}
             </div>
