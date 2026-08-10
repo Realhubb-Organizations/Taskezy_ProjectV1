@@ -2,6 +2,7 @@ import { createApp } from "./app";
 import { env } from "./config/env";
 import { pool, checkDatabaseConnection } from "./db/pool";
 import { logger } from "./utils/logger";
+import { startFollowupScheduler } from "./jobs/followupScheduler";
 
 async function main(): Promise<void> {
   const dbOk = await checkDatabaseConnection();
@@ -14,6 +15,8 @@ async function main(): Promise<void> {
   const server = app.listen(env.PORT, () => {
     logger.info(`TASKEZY API listening on port ${env.PORT} (${env.NODE_ENV})`);
   });
+
+  startFollowupScheduler();
 
   // Stateless by design (JWT auth, no in-memory session/state) — any number
   // of these processes can run behind a load balancer with zero coordination

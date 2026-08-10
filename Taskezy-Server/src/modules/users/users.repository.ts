@@ -55,6 +55,12 @@ export async function isActiveManager(id: string): Promise<boolean> {
   return rows.length > 0;
 }
 
+/** Every active admin — the follow-up SLA scheduler escalates a missed reminder to all of them. */
+export async function listActiveAdminIds(): Promise<string[]> {
+  const { rows } = await query<{ id: string }>(`SELECT id FROM users WHERE role = 'ADMIN' AND status = 'ACTIVE'`);
+  return rows.map(r => r.id);
+}
+
 export async function countAdmins(excludingId?: string): Promise<number> {
   const params: unknown[] = [];
   let where = `role = 'ADMIN' AND status = 'ACTIVE'`;

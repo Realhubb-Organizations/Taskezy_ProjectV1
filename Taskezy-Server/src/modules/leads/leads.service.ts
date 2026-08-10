@@ -91,6 +91,14 @@ export async function updateLeadStatus(
     await withTransaction(async (client) => {
       await repo.updateStatus(client, leadId, statusCode, dealValue, stampFirstResponse);
       await repo.insertLeadLog(client, leadId, caller.sub, caller.name, `Status changed to "${statusCode}"`);
+      // The agent responded in time — this is what the follow-up SLA
+      // scheduler (jobs/followupScheduler.ts) checks for before escalating
+      // a missed reminder to admins, so it needs to land in the same
+      // transaction as the status change itself.
+      await client.query(
+        `UPDATE followup_calls SET status = 'COMPLETED' WHERE lead_id = $1 AND status = 'UPCOMING'`,
+        [leadId]
+      );
     });
   } catch (err) {
     // status_code references lead_statuses(code) — an unrecognized code
