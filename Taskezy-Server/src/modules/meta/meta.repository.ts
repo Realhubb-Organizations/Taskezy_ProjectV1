@@ -67,3 +67,96 @@ export async function disconnect(id: string): Promise<boolean> {
   const { rowCount } = await pool.query(`UPDATE meta_connections SET status = 'DISCONNECTED' WHERE id = $1`, [id]);
   return (rowCount ?? 0) > 0;
 }
+
+// --- Ad accounts (real campaign spend sync — see jobs/metaAdSpendSync.ts) ---
+
+export interface UpsertAdAccountInput {
+  id: string;
+  name: string;
+  connectedBy: string;
+  userToken: string;
+}
+
+/** Encrypts the long-lived USER token before it ever reaches a query parameter — distinct from Page tokens, needed for Insights/campaign reads. */
+export async function upsertAdAccount(input: UpsertAdAccountInput): Promise<void> {
+  const { ciphertext, iv, authTag } = encryptSecret(input.userToken);
+  await pool.query(
+    `INSERT INTO meta_ad_accounts (id, name, connected_by, user_token_encrypted, user_token_iv, user_token_tag, status)
+     VALUES ($1, $2, $3, $4, $5, $6, 'ACTIVE')
+     ON CONFLICT (id) DO UPDATE SET
+       name = EXCLUDED.name,
+       connected_by = EXCLUDED.connected_by,
+       user_token_encrypted = EXCLUDED.user_token_encrypted,
+       user_token_iv = EXCLUDED.user_token_iv,
+       user_token_tag = EXCLUDED.user_token_tag,
+       status = 'ACTIVE'`,
+    [input.id, input.name, input.connectedBy, ciphertext, iv, authTag]
+  );
+}
+
+export interface ActiveAdAccount {
+  id: string;
+  name: string;
+  userToken: string;
+}
+
+/** Every ACTIVE ad account with its decrypted user token — the sync job's starting point. */
+export async function listActiveAdAccounts(): Promise<ActiveAdAccount[]> {
+  const { rows } = await query<{ id: string; name: string; user_token_encrypted: string; user_token_iv: string; user_token_tag: string }>(
+    `SELECT id, name, user_token_encrypted, user_token_iv, user_token_tag FROM meta_ad_accounts WHERE status = 'ACTIVE'`
+  );
+  return rows.map(row => ({
+    id: row.id,
+    name: row.name,
+    userToken: decryptSecret({ ciphertext: row.user_token_encrypted, iv: row.user_token_iv, authTag: row.user_token_tag })
+  }));
+}
+
+export interface UpsertCampaignInput {
+  id: string;
+  adAccountId: string;
+  name: string;
+  status: "ACTIVE" | "INACTIVE";
+}
+
+/**
+ * property_id is resolved by matching the campaign name against
+ * property_meta_campaigns — the same table Meta lead auto-assignment already
+ * uses. Returns it so the caller (the spend sync job) can stamp the same
+ * property onto every spend row for this campaign without a second lookup.
+ */
+export async function upsertCampaign(input: UpsertCampaignInput): Promise<string | null> {
+  const { rows } = await pool.query<{ property_id: string | null }>(
+    `INSERT INTO meta_campaigns (id, ad_account_id, name, status, property_id)
+     VALUES ($1, $2, $3, $4, (SELECT property_id FROM property_meta_campaigns WHERE campaign_name = $3))
+     ON CONFLICT (id) DO UPDATE SET
+       name = EXCLUDED.name,
+       status = EXCLUDED.status,
+       property_id = EXCLUDED.property_id
+     RETURNING property_id`,
+    [input.id, input.adAccountId, input.name, input.status]
+  );
+  return rows[0]?.property_id ?? null;
+}
+
+export interface UpsertSpendInput {
+  campaignId: string;
+  accountName: string;
+  propertyId: string | null;
+  spendDate: string;
+  spend: number;
+  leadsGenerated: number;
+}
+
+export async function upsertSpendRecord(input: UpsertSpendInput): Promise<void> {
+  await pool.query(
+    `INSERT INTO ad_spend_records (platform, account_name, property_id, spend_date, spend, leads_generated, meta_campaign_id)
+     VALUES ('META', $1, $2, $3, $4, $5, $6)
+     ON CONFLICT (meta_campaign_id, spend_date) WHERE meta_campaign_id IS NOT NULL DO UPDATE SET
+       account_name = EXCLUDED.account_name,
+       property_id = EXCLUDED.property_id,
+       spend = EXCLUDED.spend,
+       leads_generated = EXCLUDED.leads_generated`,
+    [input.accountName, input.propertyId, input.spendDate, input.spend, input.leadsGenerated, input.campaignId]
+  );
+}

@@ -9,6 +9,7 @@ import {
   filterAdSpendByRange,
   computeCPL,
   computeLeadQuality,
+  computeVisitConversion,
   computeBookingValue,
   computeBookingCount,
   computeROIMultiple,
@@ -18,17 +19,31 @@ import {
 const SUB_TABS = ["By Ad Account", "Overall", "Property-wise"] as const;
 type SubTab = (typeof SUB_TABS)[number];
 
+const CAMPAIGN_FILTERS = ["All", "Active", "Inactive"] as const;
+type CampaignFilter = (typeof CAMPAIGN_FILTERS)[number];
+
 export default function MarketingReports({ dateRange }: { dateRange: DateRange }) {
   const { leads, adSpendRecords, properties } = useApp();
   const [subTab, setSubTab] = useState<SubTab>("Overall");
+  // Active/Inactive/All — records with no linked Meta campaign (legacy/manual
+  // rows, or any campaign the sync job hasn't reached yet) always count as
+  // "All" but are excluded from a specific Active/Inactive filter, since we
+  // genuinely don't know their status.
+  const [campaignFilter, setCampaignFilter] = useState<CampaignFilter>("All");
 
   const rangeLeads = useMemo(() => filterLeadsByRange(leads, dateRange.from, dateRange.to), [leads, dateRange]);
-  const rangeSpend = useMemo(() => filterAdSpendByRange(adSpendRecords, dateRange.from, dateRange.to), [adSpendRecords, dateRange]);
+  const dateFilteredSpend = useMemo(() => filterAdSpendByRange(adSpendRecords, dateRange.from, dateRange.to), [adSpendRecords, dateRange]);
+  const rangeSpend = useMemo(() => {
+    if (campaignFilter === "All") return dateFilteredSpend;
+    const wanted = campaignFilter === "Active" ? "ACTIVE" : "INACTIVE";
+    return dateFilteredSpend.filter(r => r.campaignStatus === wanted);
+  }, [dateFilteredSpend, campaignFilter]);
 
   const totalSpend = rangeSpend.reduce((sum, r) => sum + r.spend, 0);
   const totalPlatformLeads = rangeSpend.reduce((sum, r) => sum + r.leadsGenerated, 0);
   const cpl = computeCPL(totalSpend, totalPlatformLeads);
   const quality = computeLeadQuality(rangeLeads);
+  const visitConversion = computeVisitConversion(rangeLeads);
   const bookingValue = computeBookingValue(rangeLeads);
   const bookingCount = computeBookingCount(rangeLeads);
   const roi = computeROIMultiple(bookingValue, totalSpend);
@@ -82,8 +97,26 @@ export default function MarketingReports({ dateRange }: { dateRange: DateRange }
 
   return (
     <div className="space-y-6 animate-fade-in">
+      {/* Campaign filter — applies to Total Ad Spend, CPL, and every table/breakdown below */}
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] font-bold text-slate-450 uppercase tracking-wider">Campaigns:</span>
+        <div className="flex gap-1.5">
+          {CAMPAIGN_FILTERS.map(f => (
+            <button
+              key={f}
+              onClick={() => setCampaignFilter(f)}
+              className={`px-3 py-1 rounded-lg text-[10px] font-bold border transition-all ${
+                campaignFilter === f ? "bg-slate-800 border-slate-800 text-white" : "bg-white border-slate-200 text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              {f}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Summary cards: CPL, Lead Quality, Booking ROI */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
           <div className="space-y-1">
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total Ad Spend</span>
@@ -124,6 +157,17 @@ export default function MarketingReports({ dateRange }: { dateRange: DateRange }
           </div>
           <div className="h-10 w-10 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-650">
             <TrendingUp className="h-5.5 w-5.5" />
+          </div>
+        </div>
+
+        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
+          <div className="space-y-1">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Visit/Meeting Conversion</span>
+            <p className="text-xl font-black text-slate-800">{visitConversion.conversionPercent.toFixed(1)}%</p>
+            <span className="text-[9px] text-slate-450">{visitConversion.convertedCount} of {rangeLeads.length} leads</span>
+          </div>
+          <div className="h-10 w-10 rounded-xl bg-pink-50 border border-pink-100 flex items-center justify-center text-pink-600">
+            <Building2 className="h-5.5 w-5.5" />
           </div>
         </div>
       </div>

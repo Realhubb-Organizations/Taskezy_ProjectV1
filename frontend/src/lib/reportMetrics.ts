@@ -12,6 +12,13 @@ const NON_BUYER_STATUSES = new Set<LeadStatus>([
 
 const BOOKING_STATUSES = new Set<LeadStatus>(["Booking Done", "Booking Approved", "Booked"]);
 
+// Site-visit/meeting conversion — kept as its own metric alongside (not
+// replacing) the buyer-vs-non-buyer Lead Quality above, per product decision.
+const VISIT_OR_MEETING_STATUSES = new Set<LeadStatus>([
+  "Site Visit Scheduled", "Site Visit Done", "Site Visit", "Visit Schedule",
+  "Meeting Scheduled", "Meeting Done"
+]);
+
 export const SLA_MINUTES = 20;
 
 export function toDateKey(iso: string): string {
@@ -44,6 +51,13 @@ export function computeLeadQuality(leads: Lead[]): { qualityPercent: number; buy
   const classified = buyerCount + nonBuyerCount;
   const qualityPercent = classified === 0 ? 0 : (buyerCount / classified) * 100;
   return { qualityPercent, buyerCount, nonBuyerCount };
+}
+
+/** What fraction of all leads (not just classified ones) actually converted to a site visit or meeting — a separate, funnel-stage view from the buyer/non-buyer status split above. */
+export function computeVisitConversion(leads: Lead[]): { conversionPercent: number; convertedCount: number } {
+  const convertedCount = leads.filter(l => VISIT_OR_MEETING_STATUSES.has(l.status)).length;
+  const conversionPercent = leads.length === 0 ? 0 : (convertedCount / leads.length) * 100;
+  return { conversionPercent, convertedCount };
 }
 
 export function computeBookingValue(leads: Lead[]): number {

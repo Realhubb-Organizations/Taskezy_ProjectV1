@@ -214,6 +214,7 @@ export interface AdSpendRecord {
   date: string; // YYYY-MM-DD
   spend: number;
   leadsGenerated: number;
+  campaignStatus?: "ACTIVE" | "INACTIVE"; // undefined for records with no linked Meta campaign (legacy/manual rows)
 }
 
 export type PropertyTeamAssignmentMode = "ALL_MEMBERS" | "CUSTOM_MEMBERS";
@@ -778,7 +779,8 @@ function mapApiAdSpendToFrontend(row: ApiAdSpendRow): AdSpendRecord {
     property: row.property_name || undefined,
     date: row.spend_date.slice(0, 10),
     spend: Number(row.spend),
-    leadsGenerated: row.leads_generated
+    leadsGenerated: row.leads_generated,
+    campaignStatus: row.campaign_status || undefined
   };
 }
 

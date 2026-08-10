@@ -646,6 +646,7 @@ export interface ApiAdSpendRow {
   spend_date: string;
   spend: string;
   leads_generated: number;
+  campaign_status: "ACTIVE" | "INACTIVE" | null;
 }
 export function apiListAdSpend(): Promise<ApiAdSpendRow[]> {
   return request<ApiAdSpendRow[]>("/api/v1/ad-spend");

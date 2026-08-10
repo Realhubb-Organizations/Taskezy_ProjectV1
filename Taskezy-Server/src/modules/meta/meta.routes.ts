@@ -10,6 +10,7 @@ import { logger } from "../../utils/logger";
 import {
   exchangeCodeForUserToken,
   fetchLeadData,
+  getAdAccounts,
   getLongLivedUserToken,
   getManagedPages,
   getOAuthDialogUrl,
@@ -76,6 +77,20 @@ metaRouter.get(
           connectedBy: adminId
         });
       }
+
+      // Ad accounts (for real campaign spend sync — see jobs/metaAdSpendSync.ts).
+      // Not every connection necessarily grants ads_read/ads_management, or the
+      // admin may not manage any ad account — non-fatal either way, Page/lead
+      // functionality above already succeeded regardless.
+      try {
+        const adAccounts = await getAdAccounts(longLivedToken);
+        for (const account of adAccounts) {
+          await repo.upsertAdAccount({ id: account.id, name: account.name, connectedBy: adminId, userToken: longLivedToken });
+        }
+      } catch (err) {
+        logger.warn({ err }, "Could not fetch/store ad accounts during Meta OAuth callback — Page/lead sync is unaffected");
+      }
+
       res.redirect(`${settingsUrl}?meta_connected=${pages.length}`);
     } catch (err) {
       logger.error({ err }, "Meta OAuth callback failed");

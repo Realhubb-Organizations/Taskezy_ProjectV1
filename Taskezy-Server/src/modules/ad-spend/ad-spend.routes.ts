@@ -13,9 +13,10 @@ adSpendRouter.get(
   asyncHandler(async (_req, res) => {
     const { rows } = await query(
       `SELECT a.id, a.platform, a.account_name, a.property_id, p.name AS property_name,
-              a.spend_date, a.spend, a.leads_generated
+              a.spend_date, a.spend, a.leads_generated, mc.status AS campaign_status
        FROM ad_spend_records a
        LEFT JOIN properties p ON p.id = a.property_id
+       LEFT JOIN meta_campaigns mc ON mc.id = a.meta_campaign_id
        ORDER BY a.spend_date`
     );
     sendOk(res, rows);
