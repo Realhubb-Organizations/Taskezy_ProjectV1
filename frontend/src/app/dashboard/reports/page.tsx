@@ -26,10 +26,18 @@ function daysAgo(n: number): string {
 }
 
 function ReportsPageContent() {
-  const { leads } = useApp();
+  const { leads, currentUser } = useApp();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const activeTab = (searchParams.get("tab") as (typeof MAIN_TABS)[number]["key"]) || "marketing";
+
+  // Marketing spend/CPL/campaign data isn't a sales agent's concern — hide
+  // the tab entirely for a Member, and don't let a direct ?tab=marketing
+  // URL bypass that (defense in depth, not just a hidden button).
+  const isSalesMember = currentUser?.role === "AGENT" && currentUser?.role_type === "Member";
+  const visibleTabs = isSalesMember ? MAIN_TABS.filter(t => t.key !== "marketing") : MAIN_TABS;
+
+  const requestedTab = (searchParams.get("tab") as (typeof MAIN_TABS)[number]["key"]) || "marketing";
+  const activeTab = visibleTabs.some(t => t.key === requestedTab) ? requestedTab : visibleTabs[0].key;
 
   const [dateRange, setDateRange] = useState<DateRange>({ from: daysAgo(30), to: todayStr() });
 
@@ -76,7 +84,7 @@ function ReportsPageContent() {
 
       {/* Main section tabs */}
       <div className="flex flex-wrap gap-2">
-        {MAIN_TABS.map(t => (
+        {visibleTabs.map(t => (
           <button
             key={t.key}
             onClick={() => handleTabChange(t.key)}
