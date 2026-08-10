@@ -545,6 +545,7 @@ function mapApiLeadToFrontendLead(row: ApiLeadRow): Lead {
     property: row.property_name || undefined,
     leadScore: row.lead_score ?? undefined,
     assignedAt: row.assigned_at || undefined,
+    firstResponseAt: row.first_response_at || undefined,
     createdAtStr: row.created_at
   };
 }

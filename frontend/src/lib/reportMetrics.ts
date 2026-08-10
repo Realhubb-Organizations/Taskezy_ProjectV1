@@ -12,7 +12,7 @@ const NON_BUYER_STATUSES = new Set<LeadStatus>([
 
 const BOOKING_STATUSES = new Set<LeadStatus>(["Booking Done", "Booking Approved", "Booked"]);
 
-const SLA_MINUTES = 20;
+export const SLA_MINUTES = 20;
 
 export function toDateKey(iso: string): string {
   return iso.split("T")[0];

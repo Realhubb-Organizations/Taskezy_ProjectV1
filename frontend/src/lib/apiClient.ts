@@ -144,6 +144,7 @@ export interface ApiLeadRow {
   property_id: string | null;
   property_name: string | null;
   assigned_at: string | null;
+  first_response_at: string | null;
   created_at: string;
   source: string | null;
   campaign: string | null;

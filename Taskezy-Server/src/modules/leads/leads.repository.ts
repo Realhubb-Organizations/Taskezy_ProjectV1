@@ -15,6 +15,7 @@ export interface LeadListRow {
   property_id: string | null;
   property_name: string | null;
   assigned_at: string | null;
+  first_response_at: string | null;
   created_at: string;
   source: string | null;
   campaign: string | null;
@@ -39,7 +40,7 @@ const LIST_SELECT = `
     l.deal_value, l.lead_score, l.assigned_agent_id,
     u.first_name || COALESCE(' ' || u.last_name, '') AS assigned_agent_name,
     l.property_id, p.name AS property_name,
-    l.assigned_at, l.created_at,
+    l.assigned_at, l.first_response_at, l.created_at,
     l.source, l.campaign, l.meta_page_name, l.meta_form_id,
     COALESCE(
       (SELECT json_agg(json_build_object('message', ll.message, 'timestamp', ll.created_at, 'user', ll.user_name_snapshot) ORDER BY ll.created_at)

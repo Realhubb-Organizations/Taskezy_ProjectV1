@@ -14,7 +14,8 @@ import {
   computeAllocatedSpend,
   getMissedInfo,
   formatCurrency,
-  formatMinutes
+  formatMinutes,
+  SLA_MINUTES
 } from "@/lib/reportMetrics";
 
 export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
@@ -197,6 +198,7 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                         <th className="p-3">Lead</th>
                         <th className="p-3">Assigned At</th>
                         <th className="p-3">Wait Time</th>
+                        <th className="p-3">Overdue By</th>
                         <th className="p-3">Notes</th>
                         <th className="p-3">Reassigned At</th>
                         {activeRole === "ADMIN" && <th className="p-3 text-right">Action</th>}
@@ -205,13 +207,20 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                     <tbody className="divide-y divide-slate-100">
                       {missedLeads.length === 0 ? (
                         <tr>
-                          <td colSpan={activeRole === "ADMIN" ? 6 : 5} className="p-6 text-center text-slate-400 italic font-semibold">
+                          <td colSpan={activeRole === "ADMIN" ? 7 : 6} className="p-6 text-center text-slate-400 italic font-semibold">
                             No missed leads for {activeAgent} in this date range.
                           </td>
                         </tr>
                       ) : (
                         missedLeads.map(({ lead, info }) => {
                           const latestLog = lead.logs.length > 0 ? lead.logs[lead.logs.length - 1] : undefined;
+                          // "Missed" fires SLA_MINUTES after assignment — this is how
+                          // far past that deadline the logged activity (or "now", if
+                          // still untouched) landed, i.e. the gap between the SLA
+                          // breach and when the agent actually did something.
+                          const missedAtTime = lead.assignedAt ? new Date(lead.assignedAt).getTime() + SLA_MINUTES * 60000 : undefined;
+                          const activityTime = latestLog ? new Date(latestLog.timestamp).getTime() : Date.now();
+                          const overdueMinutes = missedAtTime !== undefined ? Math.round((activityTime - missedAtTime) / 60000) : undefined;
                           return (
                             <tr key={lead.id} className="hover:bg-slate-50/50">
                               <td className="p-3">
@@ -225,8 +234,21 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                                 <span className="font-bold text-red-650">{formatMinutes(info.responseMinutes)}</span>
                                 {info.responseMinutes === undefined && <span className="text-[9px] text-slate-400 block">still waiting</span>}
                               </td>
-                              <td className="p-3 text-slate-500 max-w-[200px] truncate" title={latestLog?.message}>
-                                {latestLog?.message || "No activity logged."}
+                              <td className="p-3">
+                                {overdueMinutes !== undefined && overdueMinutes > 0 ? (
+                                  <span className="font-bold text-amber-700">{formatMinutes(overdueMinutes)}</span>
+                                ) : (
+                                  <span className="text-slate-400">—</span>
+                                )}
+                                {!latestLog && <span className="text-[9px] text-slate-400 block">and counting</span>}
+                              </td>
+                              <td className="p-3 text-slate-500 max-w-[220px]">
+                                <p className="truncate" title={latestLog?.message}>{latestLog?.message || "No activity logged."}</p>
+                                {latestLog && (
+                                  <p className="text-[9px] text-slate-400 font-mono mt-0.5">
+                                    {new Date(latestLog.timestamp).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                                  </p>
+                                )}
                               </td>
                               <td className="p-3 font-mono text-slate-600">
                                 {lead.reassignedAt
