@@ -30,11 +30,13 @@ function ReportsPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  // Marketing spend/CPL/campaign data isn't a sales agent's concern — hide
-  // the tab entirely for a Member, and don't let a direct ?tab=marketing
-  // URL bypass that (defense in depth, not just a hidden button).
+  // Marketing spend/CPL/campaign data and other managers' team performance
+  // aren't a sales agent's concern — hide both tabs entirely for a Member,
+  // and don't let a direct ?tab=marketing/?tab=manager URL bypass that
+  // (defense in depth, not just hidden buttons — ManagerReports.tsx also
+  // independently scopes its own data server-role-side).
   const isSalesMember = currentUser?.role === "AGENT" && currentUser?.role_type === "Member";
-  const visibleTabs = isSalesMember ? MAIN_TABS.filter(t => t.key !== "marketing") : MAIN_TABS;
+  const visibleTabs = isSalesMember ? MAIN_TABS.filter(t => t.key === "agent") : MAIN_TABS;
 
   const requestedTab = (searchParams.get("tab") as (typeof MAIN_TABS)[number]["key"]) || "marketing";
   const activeTab = visibleTabs.some(t => t.key === requestedTab) ? requestedTab : visibleTabs[0].key;
