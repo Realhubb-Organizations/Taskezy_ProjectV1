@@ -1,5 +1,5 @@
 import { logger } from "../utils/logger";
-import { getCampaignDailyInsights, getCampaigns, extractLeadCount } from "../modules/meta/meta-client";
+import { getCampaignDailyInsights, getCampaigns, extractLeadCount, isCampaignActive } from "../modules/meta/meta-client";
 import * as metaRepo from "../modules/meta/meta.repository";
 
 const POLL_INTERVAL_MS = 6 * 60 * 60 * 1000; // spend doesn't need per-minute freshness like leads
@@ -21,7 +21,10 @@ function isoDateNDaysAgo(n: number): string {
  */
 async function syncOnce(): Promise<void> {
   const adAccounts = await metaRepo.listActiveAdAccounts();
-  if (adAccounts.length === 0) return;
+  if (adAccounts.length === 0) {
+    logger.info("Meta ad spend sync: no active ad accounts to sync — skipping this cycle");
+    return;
+  }
 
   const since = isoDateNDaysAgo(LOOKBACK_DAYS);
   const until = isoDateNDaysAgo(0);
@@ -36,7 +39,7 @@ async function syncOnce(): Promise<void> {
     }
 
     for (const campaign of campaigns) {
-      const status = campaign.effective_status === "ACTIVE" ? "ACTIVE" : "INACTIVE";
+      const status = isCampaignActive(campaign) ? "ACTIVE" : "INACTIVE";
       try {
         const propertyId = await metaRepo.upsertCampaign({ id: campaign.id, adAccountId: account.id, name: campaign.name, status });
 

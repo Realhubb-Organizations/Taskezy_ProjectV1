@@ -150,17 +150,23 @@ export async function getAdAccounts(longLivedUserToken: string): Promise<MetaAdA
 export interface MetaCampaign {
   id: string;
   name: string;
-  effective_status: string;
+  status?: string;
+  effective_status?: string;
 }
 
-/** Every campaign (any status) under one ad account. */
+/** Every campaign (any status) under one ad account. Requests both status and effective_status — some ad account/permission combinations leave one or the other unset. */
 export async function getCampaigns(adAccountId: string, longLivedUserToken: string): Promise<MetaCampaign[]> {
   const data = await graphFetch<{ data: MetaCampaign[] }>(`/${adAccountId}/campaigns`, {
     access_token: longLivedUserToken,
-    fields: "id,name,effective_status",
+    fields: "id,name,status,effective_status",
     limit: "200"
   });
   return data.data;
+}
+
+/** True if either status field Meta returned says this campaign is actually running — effective_status can be missing/stale depending on the permission level the token was granted. */
+export function isCampaignActive(campaign: MetaCampaign): boolean {
+  return campaign.effective_status?.toUpperCase() === "ACTIVE" || campaign.status?.toUpperCase() === "ACTIVE";
 }
 
 export interface MetaDailyInsight {
