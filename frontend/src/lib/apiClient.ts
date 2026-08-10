@@ -174,6 +174,10 @@ export async function apiListAllLeads(): Promise<ApiLeadRow[]> {
   return all;
 }
 
+export function apiGetLead(leadId: string): Promise<ApiLeadRow> {
+  return request<ApiLeadRow>(`/api/v1/leads/${leadId}`);
+}
+
 export interface CreateLeadApiInput {
   name: string;
   phone: string;

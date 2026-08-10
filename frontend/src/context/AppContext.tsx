@@ -6,6 +6,7 @@ import {
   apiLogout,
   apiGetMe,
   apiListAllLeads,
+  apiGetLead,
   apiCreateLead,
   apiUpdateLeadStatus,
   apiEditLead,
@@ -916,6 +917,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const row = JSON.parse((event as MessageEvent).data) as ApiNotificationRow;
       const notif = mapApiNotificationToFrontend(row);
       setNotifications(prev => (prev.some(n => n.id === notif.id) ? prev : [notif, ...prev]));
+
+      // The notification itself was real-time, but until now nothing made the
+      // CRM's actual leads list (table, KPI counts) catch up — a new Meta
+      // lead wouldn't appear there until a manual page refresh. Fetch just
+      // that one lead and merge it in instead of a full reload.
+      if (notif.category === "NEW_LEAD" && notif.leadId) {
+        apiGetLead(notif.leadId)
+          .then((leadRow) => {
+            const mapped = mapApiLeadToFrontendLead(leadRow);
+            setLeads(prev => (prev.some(l => l.id === mapped.id) ? prev : [mapped, ...prev]));
+          })
+          .catch((err) => console.warn("Could not fetch the new lead for live update:", err));
+      }
     });
     // EventSource auto-reconnects on transient errors — nothing to do here
     // beyond not letting a stray error tear down the app.
