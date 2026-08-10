@@ -73,9 +73,32 @@ export function computeROIMultiple(bookingValue: number, spend: number): number 
   return spend === 0 ? 0 : bookingValue / spend;
 }
 
-// Proportional spend attribution: an entity's share of spend equals its share of lead volume in range
-export function computeAllocatedSpend(entityLeadsCount: number, totalLeadsCount: number, totalSpend: number): number {
-  return totalLeadsCount === 0 ? 0 : (entityLeadsCount / totalLeadsCount) * totalSpend;
+/**
+ * Real per-lead cost attribution: each lead is charged the CPL of the
+ * specific campaign it actually came from (grouped from real ad spend
+ * within the same date range), not an even blended split of total company
+ * spend across total company lead volume — a manager's team pulling leads
+ * from a ₹40/lead campaign and a ₹400/lead campaign should not show the
+ * same per-lead cost just because they're on the same team.
+ * Leads with no campaign, or whose campaign has no matching spend record
+ * (manual entry, or a campaign the sync hasn't reached), contribute ₹0 —
+ * we don't fabricate a cost we have no data for.
+ */
+export function computeCampaignAttributedSpend(leads: Lead[], spendRecords: AdSpendRecord[]): number {
+  const campaignTotals = new Map<string, { spend: number; leads: number }>();
+  spendRecords.forEach(r => {
+    const entry = campaignTotals.get(r.accountName) || { spend: 0, leads: 0 };
+    entry.spend += r.spend;
+    entry.leads += r.leadsGenerated;
+    campaignTotals.set(r.accountName, entry);
+  });
+
+  return leads.reduce((sum, lead) => {
+    if (!lead.campaign) return sum;
+    const totals = campaignTotals.get(lead.campaign);
+    if (!totals || totals.leads === 0) return sum;
+    return sum + totals.spend / totals.leads;
+  }, 0);
 }
 
 export interface MissedInfo {

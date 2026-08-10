@@ -11,7 +11,7 @@ import {
   computeBookingValue,
   computeBookingCount,
   computeROIMultiple,
-  computeAllocatedSpend,
+  computeCampaignAttributedSpend,
   getMissedInfo,
   formatCurrency,
   formatMinutes,
@@ -24,8 +24,6 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
   const rangeLeads = useMemo(() => filterLeadsByRange(leads, dateRange.from, dateRange.to), [leads, dateRange]);
   const rangeSpend = useMemo(() => filterAdSpendByRange(adSpendRecords, dateRange.from, dateRange.to), [adSpendRecords, dateRange]);
   const rangeFollowups = useMemo(() => filterFollowupsByRange(followupCalls, dateRange.from, dateRange.to), [followupCalls, dateRange]);
-  const totalSpend = rangeSpend.reduce((sum, r) => sum + r.spend, 0);
-  const totalLeadsCount = rangeLeads.length;
 
   // Real reporting-line lookup (see Settings → Manage Users → "Reports To"),
   // not the old hardcoded name-string SALES_HIERARCHY table.
@@ -67,7 +65,7 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
   }, [agentNames, managerNames]);
 
   const agentLeads = rangeLeads.filter(l => l.assignedAgent === activeAgent);
-  const allocatedSpend = computeAllocatedSpend(agentLeads.length, totalLeadsCount, totalSpend);
+  const allocatedSpend = computeCampaignAttributedSpend(agentLeads, rangeSpend);
   const bookingValue = computeBookingValue(agentLeads);
   const bookingCount = computeBookingCount(agentLeads);
   const roi = computeROIMultiple(bookingValue, allocatedSpend);

@@ -10,7 +10,7 @@ import {
   filterFollowupsByRange,
   computeBookingValue,
   computeROIMultiple,
-  computeAllocatedSpend,
+  computeCampaignAttributedSpend,
   isMissedLead,
   formatCurrency
 } from "@/lib/reportMetrics";
@@ -22,8 +22,6 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
   const rangeLeads = useMemo(() => filterLeadsByRange(leads, dateRange.from, dateRange.to), [leads, dateRange]);
   const rangeSpend = useMemo(() => filterAdSpendByRange(adSpendRecords, dateRange.from, dateRange.to), [adSpendRecords, dateRange]);
   const rangeFollowups = useMemo(() => filterFollowupsByRange(followupCalls, dateRange.from, dateRange.to), [followupCalls, dateRange]);
-  const totalSpend = rangeSpend.reduce((sum, r) => sum + r.spend, 0);
-  const totalLeadsCount = rangeLeads.length;
 
   // Real reporting-line grouping via users.managerId (see Settings → Manage
   // Users → "Reports To") — previously this grouped leads against a hardcoded
@@ -47,13 +45,13 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
       const allLeads = [...individualLeads, ...teamLeads];
 
       // Individual (manager's own leads) — spend/ROI computed on their own leads only
-      const individualSpend = computeAllocatedSpend(individualLeads.length, totalLeadsCount, totalSpend);
+      const individualSpend = computeCampaignAttributedSpend(individualLeads, rangeSpend);
       const individualBookingValue = computeBookingValue(individualLeads);
       const individualROI = computeROIMultiple(individualBookingValue, individualSpend);
       const individualMissed = individualLeads.filter(isMissedLead);
 
       // Team (every direct report's leads) — spend/ROI computed on the team's leads only
-      const teamSpend = computeAllocatedSpend(teamLeads.length, totalLeadsCount, totalSpend);
+      const teamSpend = computeCampaignAttributedSpend(teamLeads, rangeSpend);
       const teamBookingValue = computeBookingValue(teamLeads);
       const teamROI = computeROIMultiple(teamBookingValue, teamSpend);
       const teamMissed = teamLeads.filter(isMissedLead);
@@ -65,7 +63,7 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
 
       const memberBreakdown = teamMembers.map(member => {
         const memberLeads = rangeLeads.filter(l => l.assignedAgent === member);
-        const memberSpend = computeAllocatedSpend(memberLeads.length, totalLeadsCount, totalSpend);
+        const memberSpend = computeCampaignAttributedSpend(memberLeads, rangeSpend);
         const memberBookingValue = computeBookingValue(memberLeads);
         const memberROI = computeROIMultiple(memberBookingValue, memberSpend);
         const memberMissed = memberLeads.filter(isMissedLead);
@@ -96,7 +94,7 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
         memberBreakdown
       };
     });
-  }, [managers, users, rangeLeads, rangeFollowups, totalSpend, totalLeadsCount]);
+  }, [managers, users, rangeLeads, rangeFollowups, rangeSpend]);
 
   return (
     <div className="space-y-6 animate-fade-in">
