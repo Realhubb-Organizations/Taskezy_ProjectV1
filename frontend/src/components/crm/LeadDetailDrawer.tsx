@@ -203,7 +203,19 @@ export default function LeadDetailDrawer({
               </div>
               <div className="mt-2">
                 <span className="text-[8px] font-bold text-slate-400 uppercase block">Acquisition Date</span>
-                <span className="text-slate-600 font-mono text-[10px]">{lead.createdAtStr || "07 Jul 2026"}</span>
+                <span className="text-slate-600 font-mono text-[10px]">
+                  {lead.createdAtStr
+                    ? new Date(lead.createdAtStr).toLocaleString("en-IN", {
+                        day: "2-digit",
+                        month: "short",
+                        year: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        second: "2-digit",
+                        hour12: true
+                      })
+                    : "—"}
+                </span>
               </div>
             </div>
           </div>
