@@ -537,7 +537,7 @@ function mapApiLeadToFrontendLead(row: ApiLeadRow): Lead {
     dealValue: row.deal_value ? Number(row.deal_value) : undefined,
     kycVerified: false, // not included in the leads list endpoint yet
     assignedAgent: row.assigned_agent_name,
-    logs: [], // lead_logs isn't joined into the list endpoint yet — see leads.repository.ts
+    logs: row.logs.map(l => ({ message: l.message, timestamp: l.timestamp, user: l.user })),
     source: row.source || undefined,
     campaign: row.campaign || undefined,
     metaPageName: row.meta_page_name || undefined,

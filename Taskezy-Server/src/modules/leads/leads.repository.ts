@@ -20,6 +20,7 @@ export interface LeadListRow {
   campaign: string | null;
   meta_page_name: string | null;
   meta_form_id: string | null;
+  logs: { message: string; timestamp: string; user: string }[];
 }
 
 export interface LeadListFilter {
@@ -39,7 +40,13 @@ const LIST_SELECT = `
     u.first_name || COALESCE(' ' || u.last_name, '') AS assigned_agent_name,
     l.property_id, p.name AS property_name,
     l.assigned_at, l.created_at,
-    l.source, l.campaign, l.meta_page_name, l.meta_form_id
+    l.source, l.campaign, l.meta_page_name, l.meta_form_id,
+    COALESCE(
+      (SELECT json_agg(json_build_object('message', ll.message, 'timestamp', ll.created_at, 'user', ll.user_name_snapshot) ORDER BY ll.created_at)
+       FROM lead_logs ll
+       WHERE ll.lead_id = l.id),
+      '[]'
+    ) AS logs
   FROM leads l
   JOIN users u ON u.id = l.assigned_agent_id
   JOIN lead_statuses ls ON ls.code = l.status_code
