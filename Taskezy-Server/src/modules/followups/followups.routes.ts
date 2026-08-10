@@ -13,7 +13,8 @@ followupsRouter.use(requireAuth);
 
 const SELECT = `
   SELECT fc.id, fc.scheduled_at, fc.status, fc.lead_id, fc.lead_name, fc.phone, fc.call_type,
-         fc.assigned_to_id, u.first_name || COALESCE(' ' || u.last_name, '') AS assigned_to_name
+         fc.assigned_to_id, u.first_name || COALESCE(' ' || u.last_name, '') AS assigned_to_name,
+         fc.due_notified_at, fc.violation_notified_at
   FROM followup_calls fc
   JOIN users u ON u.id = fc.assigned_to_id
 `;

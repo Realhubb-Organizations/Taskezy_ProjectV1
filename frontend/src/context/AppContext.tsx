@@ -268,6 +268,7 @@ export interface ResaleUnit {
 
 export interface FollowupCall {
   id: string;
+  leadId?: string;
   date: string; // YYYY-MM-DD, for report date-range filtering
   time: string;
   status: "Missed" | "Upcoming" | "Completed";
@@ -275,6 +276,8 @@ export interface FollowupCall {
   phone: string;
   type: "Callback" | "Meeting" | "Site Visit";
   assignedTo: string;
+  dueNotifiedAt?: string; // when the "reminder due" alert fired — the SLA clock's start
+  violationNotifiedAt?: string; // when it was escalated to admins as overdue
 }
 
 export interface AttendanceRecord {
@@ -641,13 +644,16 @@ const FOLLOWUP_TYPE_MAP: Record<string, FollowupCall["type"]> = { CALLBACK: "Cal
 function mapApiFollowupToFrontend(row: ApiFollowupRow): FollowupCall {
   return {
     id: row.id,
+    leadId: row.lead_id || undefined,
     date: row.scheduled_at.split("T")[0],
     time: new Date(row.scheduled_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true }).toLowerCase(),
     status: FOLLOWUP_STATUS_MAP[row.status] || "Upcoming",
     leadName: row.lead_name,
     phone: row.phone || "",
     type: FOLLOWUP_TYPE_MAP[row.call_type] || "Callback",
-    assignedTo: row.assigned_to_name
+    assignedTo: row.assigned_to_name,
+    dueNotifiedAt: row.due_notified_at || undefined,
+    violationNotifiedAt: row.violation_notified_at || undefined
   };
 }
 

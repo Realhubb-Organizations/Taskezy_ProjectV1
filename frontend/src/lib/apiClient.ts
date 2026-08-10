@@ -434,6 +434,8 @@ export interface ApiFollowupRow {
   call_type: "CALLBACK" | "MEETING" | "SITE_VISIT";
   assigned_to_id: string;
   assigned_to_name: string;
+  due_notified_at: string | null;
+  violation_notified_at: string | null;
 }
 export function apiListFollowups(): Promise<ApiFollowupRow[]> {
   return request<ApiFollowupRow[]>("/api/v1/followups");

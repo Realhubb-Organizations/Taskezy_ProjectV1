@@ -286,26 +286,55 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                         <th className="p-3">Lead</th>
                         <th className="p-3">Type</th>
                         <th className="p-3">Scheduled</th>
+                        <th className="p-3">Overdue By</th>
+                        <th className="p-3">Activity Log</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {missedFollowups.length === 0 ? (
                         <tr>
-                          <td colSpan={3} className="p-6 text-center text-slate-400 italic font-semibold">
+                          <td colSpan={5} className="p-6 text-center text-slate-400 italic font-semibold">
                             No missed follow-ups for {activeAgent} in this date range.
                           </td>
                         </tr>
                       ) : (
-                        missedFollowups.map(f => (
-                          <tr key={f.id} className="hover:bg-slate-50/50">
-                            <td className="p-3">
-                              <p className="font-bold text-slate-800">{f.leadName}</p>
-                              <p className="text-[9px] text-slate-450 font-mono">{f.phone}</p>
-                            </td>
-                            <td className="p-3 text-slate-600">{f.type}</td>
-                            <td className="p-3 font-mono text-slate-600">{f.date} • {f.time}</td>
-                          </tr>
-                        ))
+                        missedFollowups.map(f => {
+                          // "Missed" fires 10 minutes after the due-reminder alert
+                          // (see Taskezy-Server/src/jobs/followupScheduler.ts) — this
+                          // is how far past that deadline the lead's latest logged
+                          // activity (or "now", if still untouched) landed.
+                          const relatedLead = f.leadId ? leads.find(l => l.id === f.leadId) : undefined;
+                          const latestLog = relatedLead && relatedLead.logs.length > 0 ? relatedLead.logs[relatedLead.logs.length - 1] : undefined;
+                          const overdueSinceTime = f.dueNotifiedAt ? new Date(f.dueNotifiedAt).getTime() + 10 * 60000 : undefined;
+                          const activityTime = latestLog ? new Date(latestLog.timestamp).getTime() : Date.now();
+                          const overdueMinutes = overdueSinceTime !== undefined ? Math.round((activityTime - overdueSinceTime) / 60000) : undefined;
+                          return (
+                            <tr key={f.id} className="hover:bg-slate-50/50">
+                              <td className="p-3">
+                                <p className="font-bold text-slate-800">{f.leadName}</p>
+                                <p className="text-[9px] text-slate-450 font-mono">{f.phone}</p>
+                              </td>
+                              <td className="p-3 text-slate-600">{f.type}</td>
+                              <td className="p-3 font-mono text-slate-600">{f.date} • {f.time}</td>
+                              <td className="p-3">
+                                {overdueMinutes !== undefined && overdueMinutes > 0 ? (
+                                  <span className="font-bold text-amber-700">{formatMinutes(overdueMinutes)}</span>
+                                ) : (
+                                  <span className="text-slate-400">—</span>
+                                )}
+                                {!latestLog && <span className="text-[9px] text-slate-400 block">and counting</span>}
+                              </td>
+                              <td className="p-3 text-slate-500 max-w-[220px]">
+                                <p className="truncate" title={latestLog?.message}>{latestLog?.message || "No activity logged."}</p>
+                                {latestLog && (
+                                  <p className="text-[9px] text-slate-400 font-mono mt-0.5">
+                                    {new Date(latestLog.timestamp).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                                  </p>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })
                       )}
                     </tbody>
                   </table>
