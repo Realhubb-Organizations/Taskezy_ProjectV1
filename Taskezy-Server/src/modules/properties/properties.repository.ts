@@ -223,10 +223,21 @@ export async function listCampaignNamesForProperty(propertyId: string): Promise<
   return rows.map(r => r.campaign_name);
 }
 
-/** Every distinct campaign name a real Meta lead has arrived with — the property-campaign picker's suggestion list. */
+/**
+ * Distinct campaign names a real Meta lead has arrived with, restricted to
+ * campaigns the spend sync currently sees as ACTIVE — a paused/ended
+ * campaign a lead once came from is still a valid historical value but not
+ * worth surfacing in the picker going forward. Falls back to including a
+ * name if it hasn't been synced yet (not in meta_campaigns at all), so a
+ * brand-new campaign isn't hidden before its first sync cycle.
+ */
 export async function listDistinctMetaCampaignNames(): Promise<string[]> {
   const { rows } = await query<{ campaign: string }>(
-    `SELECT DISTINCT campaign FROM leads WHERE source = 'Meta Ads' AND campaign IS NOT NULL ORDER BY campaign`
+    `SELECT DISTINCT l.campaign
+     FROM leads l
+     LEFT JOIN meta_campaigns mc ON mc.name = l.campaign
+     WHERE l.source = 'Meta Ads' AND l.campaign IS NOT NULL AND (mc.status = 'ACTIVE' OR mc.id IS NULL)
+     ORDER BY l.campaign`
   );
   return rows.map(r => r.campaign);
 }
@@ -267,7 +278,9 @@ export async function listGoogleCampaignNamesForProperty(propertyId: string): Pr
 }
 
 export async function listDistinctGoogleCampaignNames(): Promise<string[]> {
-  const { rows } = await query<{ name: string }>(`SELECT DISTINCT name FROM google_ads_campaigns ORDER BY name`);
+  const { rows } = await query<{ name: string }>(
+    `SELECT DISTINCT name FROM google_ads_campaigns WHERE status = 'ACTIVE' ORDER BY name`
+  );
   return rows.map(r => r.name);
 }
 
