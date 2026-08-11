@@ -44,7 +44,7 @@ const envSchema = z.object({
   GOOGLE_ADS_REFRESH_TOKEN: z.string().min(1, "GOOGLE_ADS_REFRESH_TOKEN is required"),
   // The Manager (MCC) account's Customer ID, digits only, e.g. 3349503286
   GOOGLE_ADS_LOGIN_CUSTOMER_ID: z.string().regex(/^\d+$/, "GOOGLE_ADS_LOGIN_CUSTOMER_ID must be digits only, no dashes"),
-  GOOGLE_ADS_API_VERSION: z.string().default("v18")
+  GOOGLE_ADS_API_VERSION: z.string().default("v25") // v18 is sunset — see google-ads-client.ts
 });
 
 const parsed = envSchema.safeParse(process.env);

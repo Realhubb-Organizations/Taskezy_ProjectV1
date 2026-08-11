@@ -58,7 +58,9 @@ async function gaqlSearch<T>(customerId: string, gaql: string): Promise<T[]> {
         "developer-token": env.GOOGLE_ADS_DEVELOPER_TOKEN,
         "login-customer-id": env.GOOGLE_ADS_LOGIN_CUSTOMER_ID
       },
-      body: JSON.stringify({ query: gaql, pageToken, pageSize: 1000 })
+      // pageSize is rejected (PAGE_SIZE_NOT_SUPPORTED) on newer API versions —
+      // Google fixes it at 10,000 rows server-side, no client override allowed.
+      body: JSON.stringify({ query: gaql, pageToken })
     });
     const body = (await res.json()) as GaqlResponse<T>;
     if (!res.ok || body.error) {
