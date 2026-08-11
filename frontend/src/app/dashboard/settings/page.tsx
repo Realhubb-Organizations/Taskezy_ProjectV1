@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useApp, User, Role } from "@/context/AppContext";
-import { apiDisconnectMeta, apiGetMetaConnectUrl, apiListMetaConnections, ApiMetaConnection } from "@/lib/apiClient";
+import { apiDisconnectMeta, apiGetMetaConnectUrl, apiListMetaConnections, ApiMetaConnection, apiListGoogleAdsAccounts, ApiGoogleAdsAccount } from "@/lib/apiClient";
 import {
   Settings,
   Plus,
@@ -50,11 +50,9 @@ export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<Tab>("Connected Apps");
 
   // --- Connected Apps ---
-  // Every entry other than Meta Ads is still a placeholder — no backend
-  // integration exists for them yet, unlike Meta which is wired to the real
-  // meta_connections table / OAuth flow below.
+  // Every entry other than Meta Ads and Google Ads is still a placeholder —
+  // no backend integration exists for them yet.
   const [integrations, setIntegrations] = useState([
-    { name: "Google Ads", status: "Inactive", description: "Capture leads from Google Search & Display campaigns" },
     { name: "99acres", status: "Inactive", description: "Capture leads from 99acres property listings" },
     { name: "LinkedIn", status: "Inactive", description: "Capture B2B leads from LinkedIn Lead Gen Forms" },
     { name: "Housing.com", status: "Inactive", description: "Capture leads from Housing.com property listings" },
@@ -136,6 +134,18 @@ export default function SettingsPage() {
   };
 
   const activeMetaConnections = metaConnections.filter(c => c.status === "ACTIVE");
+
+  // --- Google Ads: read-only status, auto-discovered by the sync job under one MCC credential ---
+  const [googleAccounts, setGoogleAccounts] = useState<ApiGoogleAdsAccount[]>([]);
+
+  useEffect(() => {
+    if (activeRole !== "ADMIN") return;
+    apiListGoogleAdsAccounts()
+      .then(setGoogleAccounts)
+      .catch(err => console.warn("Could not load Google Ads accounts:", err));
+  }, [activeRole]);
+
+  const activeGoogleAccounts = googleAccounts.filter(a => a.status === "ACTIVE");
 
   // --- Leads source breakdown ---
   const leadSourceRows = useMemo(() => {
@@ -372,6 +382,40 @@ export default function SettingsPage() {
               ) : (
                 <span className="text-[10px] text-slate-400 italic">Only an Admin can manage this connection.</span>
               )}
+            </div>
+          </div>
+
+          {/* Google Ads — read-only status, one server-level MCC credential auto-discovers every linked client account */}
+          <div className="glass-card p-5 rounded-2xl flex flex-col justify-between border border-slate-200 md:col-span-2 lg:col-span-1">
+            <div className="space-y-2">
+              <div className="flex justify-between items-center">
+                <h4 className="text-sm font-bold text-slate-800">Google Ads</h4>
+                <span className={`text-[9px] font-bold border px-1.5 py-0.5 rounded-full ${
+                  activeGoogleAccounts.length > 0
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-150"
+                    : "bg-slate-100 text-slate-450 border-slate-200"
+                }`}>
+                  {activeGoogleAccounts.length > 0 ? `Active (${activeGoogleAccounts.length} account${activeGoogleAccounts.length === 1 ? "" : "s"})` : "Inactive"}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 leading-normal">
+                Real campaign spend synced from every account linked under the connected Manager (MCC) account — no per-account login needed.
+              </p>
+              {activeGoogleAccounts.length > 0 && (
+                <div className="pt-1 space-y-1">
+                  {activeGoogleAccounts.map(a => (
+                    <div key={a.id} className="flex items-center justify-between text-[10px] bg-slate-50 border border-slate-150 rounded-lg px-2 py-1.5">
+                      <span className="font-bold text-slate-700 truncate">{a.name}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="pt-4 flex justify-end">
+              <span className="text-[10px] text-slate-400 italic">
+                {activeRole === "ADMIN" ? "New accounts linked under the MCC appear here automatically." : "Only an Admin can view this connection."}
+              </span>
             </div>
           </div>
 

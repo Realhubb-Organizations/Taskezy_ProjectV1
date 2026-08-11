@@ -4,6 +4,7 @@ import { pool, checkDatabaseConnection } from "./db/pool";
 import { logger } from "./utils/logger";
 import { startFollowupScheduler } from "./jobs/followupScheduler";
 import { startMetaAdSpendSync } from "./jobs/metaAdSpendSync";
+import { startGoogleAdsSpendSync } from "./jobs/googleAdsSpendSync";
 
 async function main(): Promise<void> {
   const dbOk = await checkDatabaseConnection();
@@ -19,6 +20,7 @@ async function main(): Promise<void> {
 
   startFollowupScheduler();
   startMetaAdSpendSync();
+  startGoogleAdsSpendSync();
 
   // Stateless by design (JWT auth, no in-memory session/state) — any number
   // of these processes can run behind a load balancer with zero coordination

@@ -5,6 +5,7 @@ import { useApp, Property, PropertyTeamAssignmentMode, LeadAssignmentMode, Prope
 import { Search, Info, MapPin, Building, Edit, Trash2, Users, Plus } from "lucide-react";
 import AddPropertyModal from "@/components/properties/AddPropertyModal";
 import MetaCampaignLinker from "@/components/properties/MetaCampaignLinker";
+import GoogleCampaignLinker from "@/components/properties/GoogleCampaignLinker";
 
 export default function PropertiesPage() {
   const { properties, users, deleteProperty, editProperty, activeRole } = useApp();
@@ -630,6 +631,10 @@ export default function PropertiesPage() {
                     <MetaCampaignLinker propertyId={selectedProperty.id} isAdmin={activeRole === "ADMIN"} />
                   </div>
 
+                  <div className="border-t border-slate-200 pt-4">
+                    <GoogleCampaignLinker propertyId={selectedProperty.id} isAdmin={activeRole === "ADMIN"} />
+                  </div>
+
                   <div className="flex gap-2 pt-2">
                     <button
                       type="submit"
@@ -704,6 +709,10 @@ export default function PropertiesPage() {
                   {/* Connected Meta Campaigns */}
                   <div className="border-t border-slate-200 pt-4">
                     <MetaCampaignLinker propertyId={selectedProperty.id} isAdmin={activeRole === "ADMIN"} />
+                  </div>
+
+                  <div className="border-t border-slate-200 pt-4">
+                    <GoogleCampaignLinker propertyId={selectedProperty.id} isAdmin={activeRole === "ADMIN"} />
                   </div>
 
                   {/* Register Interest Form */}

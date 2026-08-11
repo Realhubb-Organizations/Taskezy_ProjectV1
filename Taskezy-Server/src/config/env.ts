@@ -32,7 +32,19 @@ const envSchema = z.object({
   //   node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
   TOKEN_ENCRYPTION_KEY: z.string().min(1, "TOKEN_ENCRYPTION_KEY is required"),
   // Where to send the admin's browser back to after the OAuth callback finishes, e.g. https://taskezy.in/dashboard/settings
-  FRONTEND_URL: z.string().url("FRONTEND_URL is required")
+  FRONTEND_URL: z.string().url("FRONTEND_URL is required"),
+
+  // Google Ads real campaign spend sync — see src/modules/google-ads. Unlike
+  // Meta, this is one server-level credential (Manager/MCC account model),
+  // not per-connection OAuth — a single refresh token covers every linked
+  // client ad account.
+  GOOGLE_ADS_CLIENT_ID: z.string().min(1, "GOOGLE_ADS_CLIENT_ID is required"),
+  GOOGLE_ADS_CLIENT_SECRET: z.string().min(1, "GOOGLE_ADS_CLIENT_SECRET is required"),
+  GOOGLE_ADS_DEVELOPER_TOKEN: z.string().min(1, "GOOGLE_ADS_DEVELOPER_TOKEN is required"),
+  GOOGLE_ADS_REFRESH_TOKEN: z.string().min(1, "GOOGLE_ADS_REFRESH_TOKEN is required"),
+  // The Manager (MCC) account's Customer ID, digits only, e.g. 3349503286
+  GOOGLE_ADS_LOGIN_CUSTOMER_ID: z.string().regex(/^\d+$/, "GOOGLE_ADS_LOGIN_CUSTOMER_ID must be digits only, no dashes"),
+  GOOGLE_ADS_API_VERSION: z.string().default("v18")
 });
 
 const parsed = envSchema.safeParse(process.env);

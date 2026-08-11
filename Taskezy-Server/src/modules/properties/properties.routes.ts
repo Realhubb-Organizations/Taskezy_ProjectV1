@@ -21,6 +21,12 @@ propertiesRouter.get(
 );
 
 propertiesRouter.get(
+  "/google-campaign-suggestions",
+  requireRole("ADMIN"),
+  asyncHandler(async (_req, res) => sendOk(res, await repo.listDistinctGoogleCampaignNames()))
+);
+
+propertiesRouter.get(
   "/",
   asyncHandler(async (_req, res) => sendOk(res, await repo.findAll()))
 );
@@ -105,6 +111,16 @@ propertiesRouter.get(
   })
 );
 
+propertiesRouter.get(
+  "/:id/google-campaigns",
+  validate({ params: propertyIdParamSchema }),
+  asyncHandler(async (req, res) => {
+    const existing = await repo.findById(req.params.id);
+    if (!existing) throw ApiError.notFound("Property not found");
+    sendOk(res, await repo.listGoogleCampaignNamesForProperty(req.params.id));
+  })
+);
+
 const setMetaCampaignsSchema = z.object({
   campaignNames: z.array(z.string().trim().min(1)).max(50)
 });
@@ -125,5 +141,28 @@ propertiesRouter.put(
       throw err;
     }
     sendOk(res, await repo.listCampaignNamesForProperty(req.params.id));
+  })
+);
+
+const setGoogleCampaignsSchema = z.object({
+  campaignNames: z.array(z.string().trim().min(1)).max(50)
+});
+
+propertiesRouter.put(
+  "/:id/google-campaigns",
+  requireRole("ADMIN"),
+  validate({ params: propertyIdParamSchema, body: setGoogleCampaignsSchema }),
+  asyncHandler(async (req, res) => {
+    const existing = await repo.findById(req.params.id);
+    if (!existing) throw ApiError.notFound("Property not found");
+    try {
+      await repo.replaceGoogleCampaignsForProperty(req.params.id, req.body.campaignNames);
+    } catch (err) {
+      if (typeof err === "object" && err !== null && "code" in err && (err as { code: string }).code === "23505") {
+        throw ApiError.conflict("One of these campaigns is already linked to a different property.");
+      }
+      throw err;
+    }
+    sendOk(res, await repo.listGoogleCampaignNamesForProperty(req.params.id));
   })
 );

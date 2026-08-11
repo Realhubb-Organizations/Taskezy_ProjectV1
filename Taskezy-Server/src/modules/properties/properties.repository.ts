@@ -252,3 +252,34 @@ export async function findPropertyIdByCampaignName(campaignName: string): Promis
   );
   return rows[0]?.property_id;
 }
+
+// --- Google Ads campaign linking (see Taskezy_DB/migrations/009_*.sql) ---
+// No lead-ingest webhook for Google (spend-sync only, per scoping decision),
+// so suggestions come from the synced google_ads_campaigns cache rather than
+// from leads.campaign the way Meta's suggestions do.
+
+export async function listGoogleCampaignNamesForProperty(propertyId: string): Promise<string[]> {
+  const { rows } = await query<{ campaign_name: string }>(
+    `SELECT campaign_name FROM property_google_campaigns WHERE property_id = $1 ORDER BY campaign_name`,
+    [propertyId]
+  );
+  return rows.map(r => r.campaign_name);
+}
+
+export async function listDistinctGoogleCampaignNames(): Promise<string[]> {
+  const { rows } = await query<{ name: string }>(`SELECT DISTINCT name FROM google_ads_campaigns ORDER BY name`);
+  return rows.map(r => r.name);
+}
+
+/** Atomically replaces the full campaign-name set for a property. Throws a unique-violation (23505) if a name is already linked to a different property. */
+export async function replaceGoogleCampaignsForProperty(propertyId: string, campaignNames: string[]): Promise<void> {
+  await withTransaction(async (client) => {
+    await client.query(`DELETE FROM property_google_campaigns WHERE property_id = $1`, [propertyId]);
+    for (const name of campaignNames) {
+      await client.query(
+        `INSERT INTO property_google_campaigns (property_id, campaign_name) VALUES ($1, $2)`,
+        [propertyId, name]
+      );
+    }
+  });
+}

@@ -378,6 +378,24 @@ export function apiSetPropertyMetaCampaigns(propertyId: string, campaignNames: s
   });
 }
 
+// Google ad campaigns linked to a property — same name-matching idea as Meta,
+// except suggestions come from the synced google_ads_campaigns cache (no
+// lead-ingest webhook for Google, spend-sync only).
+export function apiGetGoogleCampaignSuggestions(): Promise<string[]> {
+  return request<string[]>("/api/v1/properties/google-campaign-suggestions");
+}
+
+export function apiGetPropertyGoogleCampaigns(propertyId: string): Promise<string[]> {
+  return request<string[]>(`/api/v1/properties/${propertyId}/google-campaigns`);
+}
+
+export function apiSetPropertyGoogleCampaigns(propertyId: string, campaignNames: string[]): Promise<string[]> {
+  return request<string[]>(`/api/v1/properties/${propertyId}/google-campaigns`, {
+    method: "PUT",
+    body: JSON.stringify({ campaignNames })
+  });
+}
+
 export function apiSetPropertyTeamMembers(
   propertyId: string,
   members: { userId: string; percentage?: number }[]
@@ -676,6 +694,20 @@ export function apiGetMetaConnectUrl(): Promise<{ url: string }> {
 
 export function apiDisconnectMeta(connectionId: string): Promise<{ disconnected: boolean }> {
   return request<{ disconnected: boolean }>(`/api/v1/meta/connections/${connectionId}`, { method: "DELETE" });
+}
+
+// --- Google Ads — one server-level credential (Manager/MCC account), no
+// per-user OAuth to trigger from the UI; this just surfaces what the sync
+// job has auto-discovered under the MCC (see jobs/googleAdsSpendSync.ts).
+export interface ApiGoogleAdsAccount {
+  id: string;
+  name: string;
+  status: "ACTIVE" | "DISCONNECTED";
+  created_at: string;
+}
+
+export function apiListGoogleAdsAccounts(): Promise<ApiGoogleAdsAccount[]> {
+  return request<ApiGoogleAdsAccount[]>("/api/v1/google-ads/accounts");
 }
 
 // --- Timesheets (HRMS punch in/out + regularization) ---
