@@ -10,6 +10,7 @@ interface AddLeadModalProps {
     email: string;
     agent: string;
     source: string;
+    property: string;
     note: string;
   }) => void;
   onSubmitBulk: (data: {
@@ -37,6 +38,7 @@ export default function AddLeadModal({
   const [email, setEmail] = useState("");
   const [agent, setAgent] = useState(agentsList[0] || "");
   const [source, setSource] = useState("Meta Ads");
+  const [property, setProperty] = useState(propertiesList[0] || "");
   const [note, setNote] = useState("");
 
   // Tab 2 Bulk Form State
@@ -55,7 +57,7 @@ export default function AddLeadModal({
       alert("Name and Phone are required.");
       return;
     }
-    onSubmitManual({ name, phone, email, agent, source, note });
+    onSubmitManual({ name, phone, email, agent, source, property, note });
     // Reset manual form fields
     setName("");
     setPhone("");
@@ -213,6 +215,20 @@ export default function AddLeadModal({
                     <option value="Direct Walkin">Direct Walkin</option>
                   </select>
                 </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-[9px] font-bold text-slate-400 uppercase">Property</label>
+                <select
+                  value={property}
+                  onChange={(e) => setProperty(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:outline-none focus:bg-white focus:border-brand-500 transition-all"
+                >
+                  <option value="">Unassigned Project</option>
+                  {propertiesList.map(p => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
               </div>
 
               <div className="space-y-1">

@@ -1212,12 +1212,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (isApiSessionActive()) {
       const realAgent = users.find(u => u.name === newLead.assignedAgent);
       if (realAgent) {
+        const realProperty = newLead.property ? properties.find(p => p.name === newLead.property) : undefined;
         apiCreateLead({
           name: newLead.name,
           phone: newLead.phone,
           email: newLead.email || undefined,
           source: newLead.source,
           campaign: newLead.campaign,
+          propertyId: realProperty?.id,
           assignedAgentId: realAgent.id
         })
           .then((created) => {

@@ -185,6 +185,7 @@ export default function LeadDashboard() {
     email: string;
     agent: string;
     source: string;
+    property: string;
     note: string;
   }) => {
     // API Integration Point: call addLead in AppContext
@@ -194,7 +195,7 @@ export default function LeadDashboard() {
       email: data.email,
       assignedAgent: data.agent,
       campaign: data.source,
-      property: propertiesList[0] || "Altura Project",
+      property: data.property || undefined,
       leadScore: 85,
       createdAtStr: new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
     });
