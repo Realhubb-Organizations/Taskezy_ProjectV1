@@ -41,3 +41,10 @@ yarn-error.log*
 
 # typescript
 *.tsbuildinfo
+
+# internal docs — kept locally only, not on GitHub (README.md is the only doc that stays public)
+/credentials.md
+/IMPLEMENTATIONS.md
+/ARCHITECTURAL_BLUEPRINT.md
+/SDLC_MANUAL.md
+/Taskezy-Server/API_TESTING.md
