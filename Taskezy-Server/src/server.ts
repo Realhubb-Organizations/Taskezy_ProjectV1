@@ -3,6 +3,7 @@ import { env } from "./config/env";
 import { pool, checkDatabaseConnection } from "./db/pool";
 import { logger } from "./utils/logger";
 import { startFollowupScheduler } from "./jobs/followupScheduler";
+import { startMissedLeadScheduler } from "./jobs/missedLeadScheduler";
 import { startMetaAdSpendSync } from "./jobs/metaAdSpendSync";
 import { startGoogleAdsSpendSync } from "./jobs/googleAdsSpendSync";
 
@@ -19,6 +20,7 @@ async function main(): Promise<void> {
   });
 
   startFollowupScheduler();
+  startMissedLeadScheduler();
   startMetaAdSpendSync();
   startGoogleAdsSpendSync();
 

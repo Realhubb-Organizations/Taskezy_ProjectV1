@@ -3,7 +3,7 @@ import { publishToUser } from "../../utils/sseHub";
 
 export interface CreateNotificationInput {
   system: "CRM" | "HRMS" | "FINANCE" | "ADMIN";
-  category: "NEW_LEAD" | "REMINDER" | "REGULARIZATION" | "ATTENDANCE" | "LEAVE" | "INVOICE" | "CLAIM" | "KYC" | "GENERAL";
+  category: "NEW_LEAD" | "REMINDER" | "REGULARIZATION" | "ATTENDANCE" | "LEAVE" | "INVOICE" | "CLAIM" | "KYC" | "GENERAL" | "REASSIGNMENT" | "MISSED_SLA";
   title: string;
   message: string;
   recipientUserId: string;

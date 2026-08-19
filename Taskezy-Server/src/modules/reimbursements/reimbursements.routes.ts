@@ -6,6 +6,8 @@ import { asyncHandler } from "../../utils/asyncHandler";
 import { sendOk } from "../../utils/apiResponse";
 import { ApiError } from "../../utils/ApiError";
 import { pool, query } from "../../db/pool";
+import { createNotification } from "../notifications/notifications.service";
+import { listActiveAdminAndFinanceIds } from "../users/users.repository";
 
 export const reimbursementsRouter = Router();
 
@@ -46,6 +48,21 @@ reimbursementsRouter.post(
       [title, claimType, amount, req.user!.sub, notes ?? null]
     );
     const { rows: created } = await query(`${SELECT} WHERE rc.id = $1`, [rows[0].id]);
+
+    const recipientIds = await listActiveAdminAndFinanceIds();
+    await Promise.all(
+      recipientIds
+        .filter(id => id !== req.user!.sub)
+        .map(id => createNotification({
+          system: "FINANCE",
+          category: "CLAIM",
+          title: "New Reimbursement Claim",
+          message: `${req.user!.name} submitted a claim: "${title}" (₹${amount.toLocaleString("en-IN")}).`,
+          recipientUserId: id,
+          link: "/dashboard/finance?tab=reimbursements"
+        }))
+    );
+
     sendOk(res, created[0], 201);
   })
 );
@@ -65,7 +82,16 @@ reimbursementsRouter.patch(
     );
     if (rows.length === 0) throw ApiError.notFound("Pending claim not found");
     const { rows: updated } = await query(`${SELECT} WHERE rc.id = $1`, [req.params.id]);
-    sendOk(res, updated[0]);
+    const claim = updated[0];
+    await createNotification({
+      system: "FINANCE",
+      category: "CLAIM",
+      title: "Claim Approved",
+      message: `Your claim "${claim.title}" (₹${Number(claim.amount).toLocaleString("en-IN")}) was approved.`,
+      recipientUserId: String(claim.agent_id),
+      link: "/dashboard/finance?tab=reimbursements"
+    });
+    sendOk(res, claim);
   })
 );
 
@@ -80,7 +106,16 @@ reimbursementsRouter.patch(
     );
     if (rows.length === 0) throw ApiError.notFound("Pending claim not found");
     const { rows: updated } = await query(`${SELECT} WHERE rc.id = $1`, [req.params.id]);
-    sendOk(res, updated[0]);
+    const claim = updated[0];
+    await createNotification({
+      system: "FINANCE",
+      category: "CLAIM",
+      title: "Claim Rejected",
+      message: `Your claim "${claim.title}" (₹${Number(claim.amount).toLocaleString("en-IN")}) was rejected.`,
+      recipientUserId: String(claim.agent_id),
+      link: "/dashboard/finance?tab=reimbursements"
+    });
+    sendOk(res, claim);
   })
 );
 

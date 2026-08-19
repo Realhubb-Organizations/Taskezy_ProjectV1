@@ -71,6 +71,7 @@ import {
   ApiRequestError
 } from "@/lib/apiClient";
 import { dbCodeToFrontendStatus, frontendStatusToDbCode, isRealLeadId, isRealId } from "@/lib/leadStatusMapping";
+import { initNotificationSoundUnlock, playNotificationSound } from "@/lib/notificationSound";
 
 // --- Types ---
 export type Role = "ADMIN" | "FINANCE" | "AGENT";
@@ -352,7 +353,9 @@ export type NotificationCategory =
   | "INVOICE"
   | "CLAIM"
   | "KYC"
-  | "GENERAL";
+  | "GENERAL"
+  | "REASSIGNMENT"
+  | "MISSED_SLA";
 
 export interface Notification {
   id: string;
@@ -916,6 +919,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, []);
 
+  // One-time browser-autoplay unlock (see notificationSound.ts) — attaches
+  // once on mount, independent of the SSE connection lifecycle below.
+  useEffect(() => {
+    return initNotificationSoundUnlock();
+  }, []);
+
   // Live notifications (Meta leads, etc.) over Server-Sent Events — one
   // connection per session, reopened whenever the signed-in user changes.
   useEffect(() => {
@@ -928,6 +937,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const row = JSON.parse((event as MessageEvent).data) as ApiNotificationRow;
       const notif = mapApiNotificationToFrontend(row);
       setNotifications(prev => (prev.some(n => n.id === notif.id) ? prev : [notif, ...prev]));
+      playNotificationSound();
 
       // The notification itself was real-time, but until now nothing made the
       // CRM's actual leads list (table, KPI counts) catch up — a new Meta

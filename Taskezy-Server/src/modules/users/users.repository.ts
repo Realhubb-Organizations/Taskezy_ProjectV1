@@ -61,6 +61,14 @@ export async function listActiveAdminIds(): Promise<string[]> {
   return rows.map(r => r.id);
 }
 
+/** Admin + Finance — the audience for billing/claim events (invoice generated, claim submitted). */
+export async function listActiveAdminAndFinanceIds(): Promise<string[]> {
+  const { rows } = await query<{ id: string }>(
+    `SELECT id FROM users WHERE (role = 'ADMIN' OR role = 'FINANCE') AND status = 'ACTIVE'`
+  );
+  return rows.map(r => r.id);
+}
+
 export async function countAdmins(excludingId?: string): Promise<number> {
   const params: unknown[] = [];
   let where = `role = 'ADMIN' AND status = 'ACTIVE'`;

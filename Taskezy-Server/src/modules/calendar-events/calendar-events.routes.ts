@@ -6,6 +6,7 @@ import { asyncHandler } from "../../utils/asyncHandler";
 import { sendOk } from "../../utils/apiResponse";
 import { ApiError } from "../../utils/ApiError";
 import { pool, query, withTransaction } from "../../db/pool";
+import { createNotification } from "../notifications/notifications.service";
 
 export const calendarEventsRouter = Router();
 
@@ -109,7 +110,25 @@ calendarEventsRouter.post(
     }
 
     const { rows: created } = await query(`${SELECT} WHERE ce.id = $1`, [eventId]);
-    sendOk(res, created[0], 201);
+    const event = created[0];
+
+    if (attendeeUserIds?.length) {
+      await Promise.all(
+        (attendeeUserIds as string[])
+          .filter((id: string) => id !== req.user!.sub)
+          .map((id: string) => createNotification({
+            system,
+            category: "GENERAL",
+            title: "Added to a Calendar Event",
+            message: `${req.user!.name} added you to "${title}" on ${date}${time ? ` at ${time}` : ""}.`,
+            recipientUserId: id,
+            leadId: leadId ?? undefined,
+            link: system === "CRM" ? "/dashboard/crm/calendar" : system === "HRMS" ? "/dashboard/hrms?tab=calendar" : system === "FINANCE" ? "/dashboard/finance?tab=calendar" : "/dashboard/admin/calendar"
+          }))
+      );
+    }
+
+    sendOk(res, event, 201);
   })
 );
 

@@ -4,6 +4,7 @@ import { ApiError } from "../../utils/ApiError";
 import * as repo from "./leads.repository";
 import { CreateLeadInput } from "./leads.repository";
 import * as usersRepo from "../users/users.repository";
+import { createNotification } from "../notifications/notifications.service";
 
 /**
  * Mirrors the frontend's isSalesMember scoping rule (AppContext.tsx /
@@ -63,8 +64,9 @@ export async function createLead(_caller: AccessTokenPayload, input: CreateLeadI
   if (existing) {
     throw ApiError.conflict(`A lead with phone number ${input.phone} already exists.`);
   }
+  let created;
   try {
-    return await repo.create(input);
+    created = await repo.create(input);
   } catch (err) {
     // assigned_agent_id references users(id) — a well-formed but nonexistent
     // UUID passes Zod's uuid() check and only fails at the DB as an FK violation.
@@ -73,6 +75,22 @@ export async function createLead(_caller: AccessTokenPayload, input: CreateLeadI
     }
     throw err;
   }
+
+  // Meta leads get this via meta.lead-ingest.ts's own notification; every
+  // other creation path (manual Add Lead, future Google Sheets ingestion,
+  // any direct API caller) goes through here, so this is the one place that
+  // needs to fire it for everything that isn't already covered.
+  await createNotification({
+    system: "CRM",
+    category: "NEW_LEAD",
+    title: "New Lead Assigned",
+    message: `${created.name} — ${created.property_name || "Unassigned Project"} • via ${created.source || created.campaign || "Manual Entry"}`,
+    recipientUserId: created.assigned_agent_id,
+    leadId: created.id,
+    link: "/dashboard/crm"
+  });
+
+  return created;
 }
 
 export async function updateLeadStatus(
@@ -174,7 +192,19 @@ export async function reassignLead(caller: AccessTokenPayload, leadId: string, n
     throw err;
   }
 
-  return repo.findById(leadId);
+  const updated = await repo.findById(leadId);
+  if (updated) {
+    await createNotification({
+      system: "CRM",
+      category: "REASSIGNMENT",
+      title: "Lead Reassigned To You",
+      message: `${updated.name} — ${updated.property_name || "Unassigned Project"} was reassigned to you by ${caller.name}.`,
+      recipientUserId: newAgentId,
+      leadId: updated.id,
+      link: "/dashboard/crm"
+    });
+  }
+  return updated;
 }
 
 export async function deleteLead(leadId: string): Promise<void> {
@@ -199,7 +229,19 @@ export async function deleteLead(leadId: string): Promise<void> {
 export async function verifyLeadKyc(leadId: string) {
   const updated = await repo.setKycVerified(leadId);
   if (!updated) throw ApiError.notFound("Lead not found");
-  return repo.findById(leadId);
+  const lead = await repo.findById(leadId);
+  if (lead) {
+    await createNotification({
+      system: "CRM",
+      category: "KYC",
+      title: "KYC Verified",
+      message: `${lead.name}'s KYC document has been verified — the invoice can now be generated.`,
+      recipientUserId: lead.assigned_agent_id,
+      leadId: lead.id,
+      link: "/dashboard/crm"
+    });
+  }
+  return lead;
 }
 
 function isForeignKeyViolation(err: unknown): boolean {

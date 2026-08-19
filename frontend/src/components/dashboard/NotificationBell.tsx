@@ -2,8 +2,9 @@
 
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { Bell, UserPlus, AlarmClock, Briefcase, DollarSign, Check, ChevronDown } from "lucide-react";
+import { Bell, UserPlus, AlarmClock, Briefcase, DollarSign, Check, ChevronDown, Repeat, AlertTriangle, Volume2, VolumeX } from "lucide-react";
 import { useApp, Notification, NotificationCategory } from "@/context/AppContext";
+import { isNotificationSoundMuted, setNotificationSoundMuted } from "@/lib/notificationSound";
 
 function timeAgo(iso: string): string {
   const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
@@ -20,6 +21,10 @@ function categoryIcon(category: NotificationCategory) {
       return UserPlus;
     case "REMINDER":
       return AlarmClock;
+    case "REASSIGNMENT":
+      return Repeat;
+    case "MISSED_SLA":
+      return AlertTriangle;
     case "REGULARIZATION":
     case "ATTENDANCE":
     case "LEAVE":
@@ -48,7 +53,19 @@ export default function NotificationBell() {
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [activeGroupKey, setActiveGroupKey] = useState<string>("");
+  const [soundMuted, setSoundMuted] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
+
+  // Read from localStorage only after mount — avoids an SSR/client mismatch on first render.
+  useEffect(() => {
+    setSoundMuted(isNotificationSoundMuted());
+  }, []);
+
+  const toggleSound = () => {
+    const next = !soundMuted;
+    setSoundMuted(next);
+    setNotificationSoundMuted(next);
+  };
 
   useEffect(() => {
     function handleOutside(e: MouseEvent) {
@@ -73,6 +90,13 @@ export default function NotificationBell() {
     () => notifications.filter(n => n.system === "CRM" && n.category === "REMINDER").sort(sortDesc),
     [notifications]
   );
+  // Catch-all for every other CRM category (reassignment, KYC, invoice,
+  // missed-SLA, general) — without this, anything outside New Leads/Reminders
+  // was silently unreachable in the CRM view even though it was delivered.
+  const crmActivity = useMemo(
+    () => notifications.filter(n => n.system === "CRM" && n.category !== "NEW_LEAD" && n.category !== "REMINDER").sort(sortDesc),
+    [notifications]
+  );
   const hrmsNotifs = useMemo(
     () => notifications.filter(n => n.system === "HRMS").sort(sortDesc),
     [notifications]
@@ -86,13 +110,15 @@ export default function NotificationBell() {
     if (activeSystem === "CRM") {
       return [
         { key: "new-leads", label: "New Leads", emptyText: "No new leads right now.", items: newLeads },
-        { key: "reminders", label: "Reminder Alerts", emptyText: "No reminders scheduled.", items: reminders }
+        { key: "reminders", label: "Reminder Alerts", emptyText: "No reminders scheduled.", items: reminders },
+        { key: "activity", label: "Activity Alerts", emptyText: "No other alerts.", items: crmActivity }
       ];
     }
     if (activeSystem === "ADMIN") {
       return [
         { key: "new-leads", label: "CRM · New Leads", emptyText: "No new leads.", items: newLeads },
         { key: "reminders", label: "CRM · Reminder Alerts", emptyText: "No reminders.", items: reminders },
+        { key: "activity", label: "CRM · Activity Alerts", emptyText: "No other CRM alerts.", items: crmActivity },
         { key: "hrms", label: "HRMS", emptyText: "No HRMS notifications.", items: hrmsNotifs },
         { key: "finance", label: "Finance", emptyText: "No finance notifications.", items: financeNotifs }
       ];
@@ -104,7 +130,7 @@ export default function NotificationBell() {
       return [{ key: "finance", label: "Finance Alerts", emptyText: "No finance notifications.", items: financeNotifs }];
     }
     return [];
-  }, [activeSystem, newLeads, reminders, hrmsNotifs, financeNotifs]);
+  }, [activeSystem, newLeads, reminders, crmActivity, hrmsNotifs, financeNotifs]);
 
   // Keep the selected dropdown group valid whenever the system context (or panel) changes
   useEffect(() => {
@@ -184,12 +210,21 @@ export default function NotificationBell() {
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 bg-slate-50/50">
             <h3 className="text-xs font-extrabold text-slate-800">{panelTitle}</h3>
-            <button
-              onClick={() => markAllNotificationsRead(activeSystem === "ADMIN" ? undefined : activeSystem)}
-              className="text-[10px] font-bold text-brand-600 hover:text-brand-700 flex items-center gap-1"
-            >
-              <Check className="h-3 w-3" /> Mark all read
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={toggleSound}
+                className="text-slate-400 hover:text-slate-600"
+                title={soundMuted ? "Unmute notification sound" : "Mute notification sound"}
+              >
+                {soundMuted ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
+              </button>
+              <button
+                onClick={() => markAllNotificationsRead(activeSystem === "ADMIN" ? undefined : activeSystem)}
+                className="text-[10px] font-bold text-brand-600 hover:text-brand-700 flex items-center gap-1"
+              >
+                <Check className="h-3 w-3" /> Mark all read
+              </button>
+            </div>
           </div>
 
           {/* Group selector dropdown */}

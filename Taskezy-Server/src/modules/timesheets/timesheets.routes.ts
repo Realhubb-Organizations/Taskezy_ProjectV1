@@ -6,6 +6,8 @@ import { asyncHandler } from "../../utils/asyncHandler";
 import { sendOk } from "../../utils/apiResponse";
 import { ApiError } from "../../utils/ApiError";
 import { pool, query } from "../../db/pool";
+import { createNotification } from "../notifications/notifications.service";
+import { listActiveAdminIds } from "../users/users.repository";
 
 export const timesheetsRouter = Router();
 
@@ -117,6 +119,19 @@ timesheetsRouter.post(
     await pool.query(`UPDATE timesheet_logs SET status = 'REGULARIZATION_PENDING' WHERE id = $1`, [req.params.id]);
 
     const { rows: result } = await query(`${SELECT} WHERE t.id = $1`, [req.params.id]);
+
+    const adminIds = await listActiveAdminIds();
+    await Promise.all(
+      adminIds.map(id => createNotification({
+        system: "HRMS",
+        category: "REGULARIZATION",
+        title: "Regularization Request",
+        message: `${req.user!.name} submitted an attendance regularization request: "${reason}".`,
+        recipientUserId: id,
+        link: "/dashboard/hrms"
+      }))
+    );
+
     sendOk(res, result[0], 201);
   })
 );
@@ -147,6 +162,14 @@ timesheetsRouter.patch(
     );
 
     const { rows: result } = await query(`${SELECT} WHERE t.id = $1`, [req.params.id]);
+    await createNotification({
+      system: "HRMS",
+      category: "REGULARIZATION",
+      title: "Regularization Approved",
+      message: "Your attendance regularization request was approved.",
+      recipientUserId: String(result[0].user_id),
+      link: "/dashboard/hrms"
+    });
     sendOk(res, result[0]);
   })
 );
@@ -174,6 +197,14 @@ timesheetsRouter.patch(
     );
 
     const { rows: result } = await query(`${SELECT} WHERE t.id = $1`, [req.params.id]);
+    await createNotification({
+      system: "HRMS",
+      category: "REGULARIZATION",
+      title: "Regularization Rejected",
+      message: "Your attendance regularization request was rejected.",
+      recipientUserId: String(result[0].user_id),
+      link: "/dashboard/hrms"
+    });
     sendOk(res, result[0]);
   })
 );

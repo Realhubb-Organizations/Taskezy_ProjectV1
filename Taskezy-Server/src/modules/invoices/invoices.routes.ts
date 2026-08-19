@@ -6,6 +6,8 @@ import { asyncHandler } from "../../utils/asyncHandler";
 import { sendOk } from "../../utils/apiResponse";
 import { ApiError } from "../../utils/ApiError";
 import { pool, query } from "../../db/pool";
+import { createNotification } from "../notifications/notifications.service";
+import { listActiveAdminAndFinanceIds } from "../users/users.repository";
 
 export const invoicesRouter = Router();
 
@@ -17,6 +19,12 @@ const SELECT = `
          brokerage_rate, collection_status, collected_amount, created_at
   FROM invoices
 `;
+
+/** The lead's assigned agent — invoice generation/payment is meaningful to them, not just Finance. */
+async function findLeadAgentId(leadId: string): Promise<string | undefined> {
+  const { rows } = await query<{ assigned_agent_id: string }>(`SELECT assigned_agent_id FROM leads WHERE id = $1`, [leadId]);
+  return rows[0]?.assigned_agent_id;
+}
 
 invoicesRouter.get(
   "/",
@@ -77,6 +85,21 @@ invoicesRouter.post(
       throw err;
     }
     const { rows: created } = await query(`${SELECT} WHERE id = $1`, [insertedId]);
+
+    const recipientIds = await listActiveAdminAndFinanceIds();
+    await Promise.all(
+      recipientIds
+        .filter(id => id !== req.user!.sub) // no need to notify yourself of your own action
+        .map(id => createNotification({
+          system: "FINANCE",
+          category: "INVOICE",
+          title: "New Invoice Created",
+          message: `Invoice for ${req.body.clientName} (₹${req.body.baseAmount.toLocaleString("en-IN")}) was created by ${req.user!.name}.`,
+          recipientUserId: id,
+          link: "/dashboard/finance"
+        }))
+    );
+
     sendOk(res, created[0], 201);
   })
 );
@@ -111,7 +134,19 @@ invoicesRouter.patch(
       }
     }
     const { rows: updated } = await query(`${SELECT} WHERE id = $1`, [req.params.id]);
-    sendOk(res, updated[0]);
+    const invoice = updated[0];
+    const agentId = invoice.lead_id ? await findLeadAgentId(String(invoice.lead_id)) : undefined;
+    if (agentId) {
+      await createNotification({
+        system: "CRM",
+        category: "INVOICE",
+        title: "Invoice Generated",
+        message: `Invoice ${invoice.invoice_number} for ${invoice.client_name} is ready.`,
+        recipientUserId: agentId,
+        link: "/dashboard/finance"
+      });
+    }
+    sendOk(res, invoice);
   })
 );
 
@@ -123,7 +158,19 @@ invoicesRouter.patch(
     const { rows } = await pool.query(`UPDATE invoices SET status = 'PAID' WHERE id = $1 RETURNING id`, [req.params.id]);
     if (rows.length === 0) throw ApiError.notFound("Invoice not found");
     const { rows: updated } = await query(`${SELECT} WHERE id = $1`, [req.params.id]);
-    sendOk(res, updated[0]);
+    const invoice = updated[0];
+    const agentId = invoice.lead_id ? await findLeadAgentId(String(invoice.lead_id)) : undefined;
+    if (agentId) {
+      await createNotification({
+        system: "CRM",
+        category: "INVOICE",
+        title: "Invoice Marked Paid",
+        message: `Invoice ${invoice.invoice_number} for ${invoice.client_name} was marked as paid.`,
+        recipientUserId: agentId,
+        link: "/dashboard/finance"
+      });
+    }
+    sendOk(res, invoice);
   })
 );
 
