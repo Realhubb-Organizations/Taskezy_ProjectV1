@@ -1,13 +1,17 @@
 "use client";
 
-// A short two-tone chime synthesized via the Web Audio API — no external
-// asset to manage/miss. Browsers block audio until the user has interacted
-// with the page at least once (autoplay policy, not a bug); initUnlock()
-// creates/resumes the shared AudioContext on the first click anywhere so
-// every subsequent live notification can actually play.
+// Real ringtone file, served from public/ (see frontend/public/sounds/notification.mp3).
+// Falls back to a synthesized chime (Web Audio API) if that file is ever
+// missing/fails to load, so sound never just silently stops working. Browsers
+// block audio until the user has interacted with the page at least once
+// (autoplay policy, not a bug); initUnlock() primes both playback paths on
+// the first click anywhere so every subsequent live notification can play.
 
+const SOUND_URL = "/sounds/notification.mp3";
 const MUTE_KEY = "taskezy_notif_sound_muted";
+
 let sharedContext: AudioContext | null = null;
+let unlocked = false;
 
 export function isNotificationSoundMuted(): boolean {
   if (typeof window === "undefined") return false;
@@ -27,17 +31,23 @@ function getContext(): AudioContext | null {
   return sharedContext;
 }
 
-/** Call once on app mount — resumes the AudioContext on the user's first click so later sounds aren't silently blocked. */
+/** Call once on app mount — primes the audio file + AudioContext on the user's first click so later sounds aren't silently blocked. */
 export function initNotificationSoundUnlock(): () => void {
   const unlock = () => {
+    unlocked = true;
     const ctx = getContext();
     if (ctx && ctx.state === "suspended") ctx.resume().catch(() => {});
+    // Muted priming play — satisfies the browser's "played after a user
+    // gesture" requirement without actually being audible on this click.
+    const audio = new Audio(SOUND_URL);
+    audio.volume = 0;
+    audio.play().then(() => audio.pause()).catch(() => {});
   };
   window.addEventListener("click", unlock, { once: true });
   return () => window.removeEventListener("click", unlock);
 }
 
-/** One "ding" — a two-tone chime with a fast attack, at `startOffset` seconds from now. */
+/** One "ding" — a two-tone chime with a fast attack, at `startOffset` seconds from now. Fallback only. */
 function playChime(ctx: AudioContext, startOffset: number, peakGain: number): void {
   const now = ctx.currentTime + startOffset;
   const gain = ctx.createGain();
@@ -57,14 +67,20 @@ function playChime(ctx: AudioContext, startOffset: number, peakGain: number): vo
   });
 }
 
-export function playNotificationSound(): void {
-  if (isNotificationSoundMuted()) return;
+function playSynthesizedFallback(): void {
   const ctx = getContext();
-  if (!ctx || ctx.state === "suspended") return; // not unlocked yet — skip silently, not an error
-
-  // Two chimes back-to-back ("ding-ding") — repetition reads as more urgent
-  // than a single longer tone at the same peak volume, without needing to
-  // push the gain uncomfortably high.
+  if (!ctx || ctx.state === "suspended") return;
   playChime(ctx, 0, 0.5);
   playChime(ctx, 0.22, 0.5);
+}
+
+export function playNotificationSound(): void {
+  if (isNotificationSoundMuted() || !unlocked) return;
+
+  const audio = new Audio(SOUND_URL);
+  audio.volume = 0.85;
+  audio.play().catch(() => {
+    // File missing, wrong format, or blocked — fall back rather than go silent.
+    playSynthesizedFallback();
+  });
 }
