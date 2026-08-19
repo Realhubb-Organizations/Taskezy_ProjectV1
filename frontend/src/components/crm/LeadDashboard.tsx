@@ -18,7 +18,8 @@ export default function LeadDashboard() {
     editLead,
     currentUser,
     properties,
-    calendarEvents
+    calendarEvents,
+    users
   } = useApp();
 
   const router = useRouter();
@@ -152,14 +153,12 @@ export default function LeadDashboard() {
 
   // Extract properties lists for Bulk Upload assignments
   const propertiesList = properties.map(p => p.name);
-  // Dedicated Agent list
-  const agentsList = [
-    "Santosh Ray",
-    "Gautham Karanam",
-    "Sanjeev Kumar",
-    "Partha Mazumdar",
-    "Akhil Raj Singh"
-  ];
+  // Real sales roster (agents + managers/TLs), not a hardcoded seed-data
+  // snapshot — matches the same department === "SALES" scoping already used
+  // for the Properties team-member picker.
+  const agentsList = users
+    .filter(u => u.department === "SALES" && u.status !== "INACTIVE")
+    .map(u => u.name);
 
   // Callback Handlers
   const handleViewLeadDetails = (lead: Lead) => {
