@@ -74,6 +74,51 @@ async function notifyMissedLeads(): Promise<void> {
 
     await pool.query(`UPDATE leads SET missed_notified_at = now() WHERE id = $1`, [row.id]);
   }
+
+  // Admin also gets a running same-day total whenever it changes — a
+  // per-lead ping tells them *that* something was missed, this tells them
+  // *how much* has piled up today across the whole team, which per-lead
+  // pings alone don't answer. Fires once per poll cycle that actually found
+  // new misses (not every cycle), so it updates live through the day without
+  // spamming a fresh notification every 60s when nothing's changed.
+  await notifyAdminDailyDigest(adminIds);
+}
+
+interface DailyMissedRow {
+  agent_name: string;
+  manager_name: string | null;
+  missed_count: string;
+}
+
+async function notifyAdminDailyDigest(adminIds: string[]): Promise<void> {
+  const { rows } = await pool.query<DailyMissedRow>(
+    `SELECT u.first_name || COALESCE(' ' || u.last_name, '') AS agent_name,
+            m.first_name || COALESCE(' ' || m.last_name, '') AS manager_name,
+            count(*) AS missed_count
+     FROM leads l
+     JOIN users u ON u.id = l.assigned_agent_id
+     LEFT JOIN users m ON m.id = u.manager_id
+     WHERE l.missed_notified_at::date = CURRENT_DATE
+     GROUP BY u.id, u.first_name, u.last_name, m.first_name, m.last_name
+     ORDER BY count(*) DESC`
+  );
+  if (rows.length === 0) return;
+
+  const total = rows.reduce((sum, r) => sum + Number(r.missed_count), 0);
+  const breakdown = rows
+    .map(r => `${r.agent_name}: ${r.missed_count}${r.manager_name ? ` (${r.manager_name}'s team)` : ""}`)
+    .join(" · ");
+
+  for (const adminId of adminIds) {
+    await createNotification({
+      system: "CRM",
+      category: "REMINDER",
+      title: `Missed Leads Today: ${total}`,
+      message: `${total} missed lead${total === 1 ? "" : "s"} today across ${rows.length} agent${rows.length === 1 ? "" : "s"} — ${breakdown}`,
+      recipientUserId: adminId,
+      link: "/dashboard/reports"
+    });
+  }
 }
 
 /** Single-process in-memory poller — same scaling caveat as followupScheduler.ts and utils/sseHub.ts. */
