@@ -67,22 +67,31 @@ function getContext(): AudioContext | null {
   return sharedContext;
 }
 
-/** Call once on app mount — primes every sound file + the AudioContext on the user's first click so later sounds aren't silently blocked. */
+/**
+ * Call once on app mount — primes every sound file + the AudioContext on the
+ * user's first interaction so later sounds aren't blocked. Listens for
+ * pointerdown/keydown/touchstart, not just "click" — a login form submitted
+ * by pressing Enter, for example, never fires a click event, so a
+ * click-only listener misses that interaction entirely and leaves audio
+ * locked even though the user has genuinely engaged with the page.
+ */
 export function initNotificationSoundUnlock(): () => void {
   const unlock = () => {
     unlocked = true;
     const ctx = getContext();
     if (ctx && ctx.state === "suspended") ctx.resume().catch(() => {});
     // Muted priming play per file — satisfies the browser's "played after a
-    // user gesture" requirement without being audible on this click.
+    // user gesture" requirement without being audible on this interaction.
     Object.values(SOUND_FILES).forEach(url => {
       const audio = new Audio(url);
       audio.volume = 0;
       audio.play().then(() => audio.pause()).catch(() => {});
     });
+    events.forEach(evt => window.removeEventListener(evt, unlock));
   };
-  window.addEventListener("click", unlock, { once: true });
-  return () => window.removeEventListener("click", unlock);
+  const events: (keyof WindowEventMap)[] = ["pointerdown", "keydown", "touchstart"];
+  events.forEach(evt => window.addEventListener(evt, unlock));
+  return () => events.forEach(evt => window.removeEventListener(evt, unlock));
 }
 
 /** One "ding" — a two-tone chime with a fast attack, at `startOffset` seconds from now. Fallback only. */
@@ -114,13 +123,20 @@ function playSynthesizedFallback(kind: NotificationSoundKind): void {
 }
 
 export function playNotificationSound(category: string, system: string): void {
-  if (isNotificationSoundMuted() || !unlocked) return;
+  if (isNotificationSoundMuted()) return;
 
+  // Always attempt playback, even if our own `unlocked` tracking somehow
+  // missed the user's first interaction (see initNotificationSoundUnlock) —
+  // the browser is the actual source of truth on whether audio is allowed,
+  // not this flag. Worst case here is a silently-caught rejection, same as
+  // before; best case, it plays even when our own tracking was wrong.
   const kind = resolveNotificationSoundKind(category, system);
   const audio = new Audio(SOUND_FILES[kind]);
   audio.volume = 0.85;
   audio.play().catch(() => {
-    // File missing, wrong format, or blocked — fall back rather than go silent.
-    playSynthesizedFallback(kind);
+    // File missing, wrong format, or genuinely still autoplay-blocked —
+    // fall back to the synthesized chime, which only needs the
+    // AudioContext (not <audio> element autoplay) to have been unlocked.
+    if (unlocked) playSynthesizedFallback(kind);
   });
 }
