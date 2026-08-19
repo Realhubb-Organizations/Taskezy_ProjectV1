@@ -937,7 +937,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const row = JSON.parse((event as MessageEvent).data) as ApiNotificationRow;
       const notif = mapApiNotificationToFrontend(row);
       setNotifications(prev => (prev.some(n => n.id === notif.id) ? prev : [notif, ...prev]));
-      playNotificationSound();
+      playNotificationSound(notif.category, notif.system);
 
       // The notification itself was real-time, but until now nothing made the
       // CRM's actual leads list (table, KPI counts) catch up — a new Meta

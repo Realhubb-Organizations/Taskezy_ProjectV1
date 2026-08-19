@@ -1,13 +1,49 @@
 "use client";
 
-// Real ringtone file, served from public/ (see frontend/public/sounds/notification.mp3).
-// Falls back to a synthesized chime (Web Audio API) if that file is ever
-// missing/fails to load, so sound never just silently stops working. Browsers
-// block audio until the user has interacted with the page at least once
-// (autoplay policy, not a bug); initUnlock() primes both playback paths on
-// the first click anywhere so every subsequent live notification can play.
+// Real ringtone files, served from public/sounds/ (see frontend/public/sounds/).
+// Each "kind" falls back to its own synthesized chime (Web Audio API, a
+// different pitch per kind) if its file is missing/fails to load, so sound
+// never just silently stops working. Browsers block audio until the user has
+// interacted with the page at least once (autoplay policy, not a bug);
+// initUnlock() primes every sound file + the AudioContext on the first click
+// anywhere so subsequent live notifications can actually play.
 
-const SOUND_URL = "/sounds/notification.mp3";
+export type NotificationSoundKind = "leads" | "reminder" | "activity" | "hrms" | "finance";
+
+const SOUND_FILES: Record<NotificationSoundKind, string> = {
+  leads: "/sounds/leads.mp3",
+  reminder: "/sounds/reminder.mp3",
+  activity: "/sounds/activity.mp3",
+  hrms: "/sounds/hrms.mp3",
+  finance: "/sounds/finance.mp3"
+};
+
+// Distinct fallback pitch per kind — keeps sounds differentiable even before
+// (or if) a real file for that kind is dropped in.
+const FALLBACK_TONES: Record<NotificationSoundKind, [number, number]> = {
+  leads: [880, 1320],
+  reminder: [660, 990],
+  activity: [740, 1100],
+  hrms: [520, 780],
+  finance: [990, 1480]
+};
+
+/**
+ * Maps a notification's category/system to which "purpose" sound it should
+ * play. New Lead and Reminder get their own tone since they're the two
+ * highest-frequency, most time-sensitive CRM events; everything else CRM
+ * (reassignment, KYC, missed-SLA, general) shares one "activity" tone,
+ * matching NotificationBell's own "Activity Alerts" catch-all group.
+ * HRMS/FINANCE-system notifications get their own tone regardless of category.
+ */
+export function resolveNotificationSoundKind(category: string, system: string): NotificationSoundKind {
+  if (category === "NEW_LEAD") return "leads";
+  if (category === "REMINDER") return "reminder";
+  if (system === "HRMS") return "hrms";
+  if (system === "FINANCE") return "finance";
+  return "activity";
+}
+
 const MUTE_KEY = "taskezy_notif_sound_muted";
 
 let sharedContext: AudioContext | null = null;
@@ -31,24 +67,26 @@ function getContext(): AudioContext | null {
   return sharedContext;
 }
 
-/** Call once on app mount — primes the audio file + AudioContext on the user's first click so later sounds aren't silently blocked. */
+/** Call once on app mount — primes every sound file + the AudioContext on the user's first click so later sounds aren't silently blocked. */
 export function initNotificationSoundUnlock(): () => void {
   const unlock = () => {
     unlocked = true;
     const ctx = getContext();
     if (ctx && ctx.state === "suspended") ctx.resume().catch(() => {});
-    // Muted priming play — satisfies the browser's "played after a user
-    // gesture" requirement without actually being audible on this click.
-    const audio = new Audio(SOUND_URL);
-    audio.volume = 0;
-    audio.play().then(() => audio.pause()).catch(() => {});
+    // Muted priming play per file — satisfies the browser's "played after a
+    // user gesture" requirement without being audible on this click.
+    Object.values(SOUND_FILES).forEach(url => {
+      const audio = new Audio(url);
+      audio.volume = 0;
+      audio.play().then(() => audio.pause()).catch(() => {});
+    });
   };
   window.addEventListener("click", unlock, { once: true });
   return () => window.removeEventListener("click", unlock);
 }
 
 /** One "ding" — a two-tone chime with a fast attack, at `startOffset` seconds from now. Fallback only. */
-function playChime(ctx: AudioContext, startOffset: number, peakGain: number): void {
+function playChime(ctx: AudioContext, startOffset: number, peakGain: number, tones: [number, number]): void {
   const now = ctx.currentTime + startOffset;
   const gain = ctx.createGain();
   gain.gain.setValueAtTime(0.0001, now);
@@ -56,7 +94,7 @@ function playChime(ctx: AudioContext, startOffset: number, peakGain: number): vo
   gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.4);
   gain.connect(ctx.destination);
 
-  [880, 1320].forEach((freq, i) => {
+  tones.forEach((freq, i) => {
     const osc = ctx.createOscillator();
     osc.type = "triangle"; // brighter/more piercing than sine — cuts through background noise better
     osc.frequency.value = freq;
@@ -67,20 +105,22 @@ function playChime(ctx: AudioContext, startOffset: number, peakGain: number): vo
   });
 }
 
-function playSynthesizedFallback(): void {
+function playSynthesizedFallback(kind: NotificationSoundKind): void {
   const ctx = getContext();
   if (!ctx || ctx.state === "suspended") return;
-  playChime(ctx, 0, 0.5);
-  playChime(ctx, 0.22, 0.5);
+  const tones = FALLBACK_TONES[kind];
+  playChime(ctx, 0, 0.5, tones);
+  playChime(ctx, 0.22, 0.5, tones);
 }
 
-export function playNotificationSound(): void {
+export function playNotificationSound(category: string, system: string): void {
   if (isNotificationSoundMuted() || !unlocked) return;
 
-  const audio = new Audio(SOUND_URL);
+  const kind = resolveNotificationSoundKind(category, system);
+  const audio = new Audio(SOUND_FILES[kind]);
   audio.volume = 0.85;
   audio.play().catch(() => {
     // File missing, wrong format, or blocked — fall back rather than go silent.
-    playSynthesizedFallback();
+    playSynthesizedFallback(kind);
   });
 }
