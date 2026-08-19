@@ -1,6 +1,7 @@
 import { pool } from "../db/pool";
 import { logger } from "../utils/logger";
 import { createNotification } from "../modules/notifications/notifications.service";
+import { listActiveAdminIds } from "../modules/users/users.repository";
 
 const POLL_INTERVAL_MS = 60_000;
 const SLA_MINUTES = 20; // matches Reports' isMissedLead / getMissedInfo rule (reportMetrics.ts)
@@ -33,6 +34,14 @@ async function notifyMissedLeads(): Promise<void> {
        AND l.assigned_at <= now() - interval '${SLA_MINUTES} minutes'
        AND l.missed_notified_at IS NULL`
   );
+  if (rows.length === 0) return;
+
+  // Escalation always reaches Admin, not just the agent's direct manager —
+  // an agent with no manager_id set (manager_id IS NULL) would otherwise
+  // have their missed SLA go completely unescalated, seen by no one but
+  // themselves. Mirrors followupScheduler.ts's SLA-violation escalation,
+  // which always notifies every active admin for the same reason.
+  const adminIds = await listActiveAdminIds();
 
   for (const row of rows) {
     await createNotification({
@@ -44,17 +53,25 @@ async function notifyMissedLeads(): Promise<void> {
       leadId: row.id,
       link: "/dashboard/crm"
     });
-    if (row.manager_id) {
+
+    // Manager (if any) + every active admin, deduplicated so someone who is
+    // both doesn't get notified twice.
+    const escalationRecipients = new Set<string>(adminIds);
+    if (row.manager_id) escalationRecipients.add(row.manager_id);
+    escalationRecipients.delete(row.assigned_agent_id);
+
+    for (const recipientId of escalationRecipients) {
       await createNotification({
         system: "CRM",
         category: "MISSED_SLA",
         title: "Team Lead Missed SLA",
         message: `${row.agent_name} hasn't responded to "${row.name}" within ${SLA_MINUTES} minutes.`,
-        recipientUserId: row.manager_id,
+        recipientUserId: recipientId,
         leadId: row.id,
         link: "/dashboard/reports"
       });
     }
+
     await pool.query(`UPDATE leads SET missed_notified_at = now() WHERE id = $1`, [row.id]);
   }
 }
