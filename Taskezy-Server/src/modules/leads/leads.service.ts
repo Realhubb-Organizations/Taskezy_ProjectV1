@@ -53,10 +53,7 @@ export async function getLead(caller: AccessTokenPayload, id: string) {
   return lead;
 }
 
-// caller is unused today (any authenticated user may create a lead for any
-// agent, matching the frontend's Add Lead form) but kept in the signature
-// for when creation gets restricted by role — see requireRole in routes.
-export async function createLead(_caller: AccessTokenPayload, input: CreateLeadInput) {
+export async function createLead(caller: AccessTokenPayload, input: CreateLeadInput) {
   // Mirrors addLead()'s duplicate-phone rule in AppContext.tsx — the leads.phone
   // UNIQUE constraint would also catch this, but checking first gives a clean
   // 409 with a useful message instead of a raw constraint-violation error.
@@ -89,6 +86,25 @@ export async function createLead(_caller: AccessTokenPayload, input: CreateLeadI
     leadId: created.id,
     link: "/dashboard/crm"
   });
+
+  // Admin gets visibility into every lead creation too, not just the person
+  // it lands on — matters most when one agent creates a lead and assigns it
+  // to a teammate (Admin previously had no way to know that happened at
+  // all). Excludes the assignee (already notified above) and the creator
+  // themself (an admin creating a lead doesn't need to be told they just did).
+  const adminIds = await usersRepo.listActiveAdminIds();
+  const adminRecipients = adminIds.filter(id => id !== created.assigned_agent_id && id !== caller.sub);
+  await Promise.all(
+    adminRecipients.map(id => createNotification({
+      system: "CRM",
+      category: "NEW_LEAD",
+      title: "New Lead Created",
+      message: `${caller.name} added a new lead "${created.name}" and assigned it to ${created.assigned_agent_name}.`,
+      recipientUserId: id,
+      leadId: created.id,
+      link: "/dashboard/crm"
+    }))
+  );
 
   return created;
 }
