@@ -37,25 +37,34 @@ export function initNotificationSoundUnlock(): () => void {
   return () => window.removeEventListener("click", unlock);
 }
 
+/** One "ding" — a two-tone chime with a fast attack, at `startOffset` seconds from now. */
+function playChime(ctx: AudioContext, startOffset: number, peakGain: number): void {
+  const now = ctx.currentTime + startOffset;
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(peakGain, now + 0.012); // fast attack reads as "louder" even at the same peak
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.4);
+  gain.connect(ctx.destination);
+
+  [880, 1320].forEach((freq, i) => {
+    const osc = ctx.createOscillator();
+    osc.type = "triangle"; // brighter/more piercing than sine — cuts through background noise better
+    osc.frequency.value = freq;
+    osc.connect(gain);
+    const start = now + i * 0.09;
+    osc.start(start);
+    osc.stop(start + 0.35);
+  });
+}
+
 export function playNotificationSound(): void {
   if (isNotificationSoundMuted()) return;
   const ctx = getContext();
   if (!ctx || ctx.state === "suspended") return; // not unlocked yet — skip silently, not an error
 
-  const now = ctx.currentTime;
-  const gain = ctx.createGain();
-  gain.gain.setValueAtTime(0.0001, now);
-  gain.gain.exponentialRampToValueAtTime(0.18, now + 0.02);
-  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.35);
-  gain.connect(ctx.destination);
-
-  [880, 1320].forEach((freq, i) => {
-    const osc = ctx.createOscillator();
-    osc.type = "sine";
-    osc.frequency.value = freq;
-    osc.connect(gain);
-    const start = now + i * 0.09;
-    osc.start(start);
-    osc.stop(start + 0.3);
-  });
+  // Two chimes back-to-back ("ding-ding") — repetition reads as more urgent
+  // than a single longer tone at the same peak volume, without needing to
+  // push the gain uncomfortably high.
+  playChime(ctx, 0, 0.5);
+  playChime(ctx, 0.22, 0.5);
 }
