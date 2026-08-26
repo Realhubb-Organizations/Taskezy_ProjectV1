@@ -63,4 +63,95 @@ body {
   .text-glow {
     text-shadow: 0 0 20px rgba(0, 119, 182, 0.15);
   }
+
+  /* animate-fade-in is referenced across the app (modals, dropdowns, panel
+     transitions) but its keyframes were never defined anywhere — every use
+     of it has been a no-op. Defined here, once, fixes it everywhere. */
+  @keyframes fade-in {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .animate-fade-in {
+    animation: fade-in 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  /* Landing-page hero entrance — more pronounced than the small-UI fade-in above. */
+  @keyframes fade-in-up {
+    from { opacity: 0; transform: translateY(22px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .animate-fade-in-up {
+    animation: fade-in-up 0.8s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  /* Slow ambient drift for hero background blobs. */
+  @keyframes blob-float {
+    0%, 100% { transform: translate(0, 0) scale(1); }
+    33% { transform: translate(24px, -18px) scale(1.06); }
+    66% { transform: translate(-18px, 14px) scale(0.96); }
+  }
+  .animate-blob-float {
+    animation: blob-float 16s ease-in-out infinite;
+  }
+
+  /* Slow gradient-position shift for shimmering hero heading text. */
+  @keyframes gradient-shift {
+    0%, 100% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+  }
+  .animate-gradient-shift {
+    background-size: 200% auto;
+    animation: gradient-shift 6s ease-in-out infinite;
+  }
+
+  /* Diagonal light sweep across the primary CTA on hover. */
+  @keyframes shimmer-sweep {
+    from { transform: translateX(-150%) skewX(-20deg); }
+    to { transform: translateX(250%) skewX(-20deg); }
+  }
+  .btn-shimmer {
+    position: relative;
+    overflow: hidden;
+  }
+  .btn-shimmer::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 40%;
+    height: 100%;
+    background: linear-gradient(115deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+    opacity: 0;
+  }
+  .btn-shimmer:hover::after {
+    opacity: 1;
+    animation: shimmer-sweep 1s ease-in-out;
+  }
+
+  /* Scroll-reveal: paired with a small IntersectionObserver hook (see
+     page.tsx) — starts hidden, gets .is-visible added once in viewport. */
+  .reveal-on-scroll {
+    opacity: 0;
+    transform: translateY(28px);
+    transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1), transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .reveal-on-scroll.is-visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .animate-fade-in,
+    .animate-fade-in-up,
+    .animate-blob-float,
+    .animate-gradient-shift,
+    .btn-shimmer::after {
+      animation: none !important;
+    }
+    .reveal-on-scroll {
+      opacity: 1;
+      transform: none;
+      transition: none;
+    }
+  }
 }
