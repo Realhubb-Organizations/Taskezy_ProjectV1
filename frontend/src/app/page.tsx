@@ -6,15 +6,6 @@ import HeroBackgroundLottie from "@/components/HeroBackgroundLottie";
 export default function Home() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col justify-between overflow-x-hidden relative">
-      {/* Background gradients — slow ambient drift for depth without being distracting */}
-      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-7xl h-[600px] pointer-events-none overflow-hidden opacity-40 z-0">
-        <div className="absolute -top-40 left-10 w-[500px] h-[500px] rounded-full bg-brand-200/20 blur-[120px] animate-blob-float" />
-        <div
-          className="absolute -top-30 right-10 w-[400px] h-[400px] rounded-full bg-brand-100/30 blur-[100px] animate-blob-float"
-          style={{ animationDelay: "-6s", animationDuration: "20s" }}
-        />
-      </div>
-
       {/* Header */}
       <header className="relative z-10 w-full max-w-7xl mx-auto px-6 sm:px-8 py-4 flex items-center justify-between border-b border-slate-200/80 bg-white/40 backdrop-blur-md animate-fade-in-up">
         <Link href="/" className="flex items-center">
