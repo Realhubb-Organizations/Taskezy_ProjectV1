@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowRight, Zap, Users, Compass, Calculator } from "lucide-react";
 import RevealOnScroll from "@/components/RevealOnScroll";
 import HeroBackgroundLottie from "@/components/HeroBackgroundLottie";
+import ProductShowcaseLottie from "@/components/ProductShowcaseLottie";
 
 export default function Home() {
   return (
@@ -80,6 +81,10 @@ export default function Home() {
             </div>
           </div>
         </div>
+
+        <RevealOnScroll className="w-full mb-20">
+          <ProductShowcaseLottie />
+        </RevealOnScroll>
 
         {/* Feature Contexts — reveal on scroll into view, staggered */}
         <section className="w-full grid grid-cols-1 md:grid-cols-3 gap-6 text-left">
