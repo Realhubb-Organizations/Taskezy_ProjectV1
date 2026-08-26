@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ArrowRight, Zap, Users, Compass, Calculator } from "lucide-react";
 import RevealOnScroll from "@/components/RevealOnScroll";
+import HeroLottie from "@/components/HeroLottie";
 
 export default function Home() {
   return (
@@ -81,6 +82,10 @@ export default function Home() {
           >
             Access Roster Portal
           </Link>
+        </div>
+
+        <div className="animate-fade-in-up w-full" style={{ animationDelay: "380ms" }}>
+          <HeroLottie />
         </div>
 
         {/* Feature Contexts — reveal on scroll into view, staggered */}
