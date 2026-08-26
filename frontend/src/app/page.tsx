@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ArrowRight, Zap, Users, Compass, Calculator } from "lucide-react";
 import RevealOnScroll from "@/components/RevealOnScroll";
-import HeroLottie from "@/components/HeroLottie";
+import HeroBackgroundLottie from "@/components/HeroBackgroundLottie";
 
 export default function Home() {
   return (
@@ -43,49 +43,51 @@ export default function Home() {
 
       {/* Hero Section */}
       <main className="relative z-10 flex-grow max-w-7xl mx-auto px-6 sm:px-8 py-20 flex flex-col items-center justify-center text-center">
-        <div
-          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-brand-200 bg-brand-50 text-xs text-brand-700 font-bold mb-8 backdrop-blur-md animate-fade-in-up"
-          style={{ animationDelay: "80ms" }}
-        >
-          <Zap className="h-3.5 w-3.5 text-brand-500" />
-          <span>Next-Generation Real Estate Operations</span>
-        </div>
+        <div className="relative w-full flex flex-col items-center mb-20">
+          <HeroBackgroundLottie />
 
-        <h1
-          className="text-4xl sm:text-6xl font-extrabold tracking-tight text-brand-700 max-w-4xl leading-tight mb-6 animate-fade-in-up"
-          style={{ animationDelay: "160ms" }}
-        >
-          The Business Operating System for{" "}
-          <span className="bg-clip-text text-transparent bg-gradient-to-r from-brand-700 via-brand-500 to-brand-700 animate-gradient-shift">
-            Real Estate Enterprise
-          </span>
-        </h1>
+          <div className="relative z-10 flex flex-col items-center">
+            <div
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-brand-200 bg-brand-50 text-xs text-brand-700 font-bold mb-8 backdrop-blur-md animate-fade-in-up"
+              style={{ animationDelay: "80ms" }}
+            >
+              <Zap className="h-3.5 w-3.5 text-brand-500" />
+              <span>Next-Generation Real Estate Operations</span>
+            </div>
 
-        <p
-          className="text-base sm:text-lg text-slate-600 max-w-2xl mb-10 leading-relaxed animate-fade-in-up"
-          style={{ animationDelay: "240ms" }}
-        >
-          Unify your Sales Pipeline (CRM), Geofenced HR Telemetry (HRMS), and Compliance Finance Ledgers under a secure, logical PostgreSQL multi-tenant architecture.
-        </p>
+            <h1
+              className="text-4xl sm:text-6xl font-extrabold tracking-tight text-brand-700 max-w-4xl leading-tight mb-6 animate-fade-in-up"
+              style={{ animationDelay: "160ms" }}
+            >
+              The Business Operating System for{" "}
+              <span className="bg-clip-text text-transparent bg-gradient-to-r from-brand-700 via-brand-500 to-brand-700 animate-gradient-shift">
+                Real Estate Enterprise
+              </span>
+            </h1>
 
-        <div className="flex flex-col sm:flex-row gap-4 mb-20 animate-fade-in-up" style={{ animationDelay: "320ms" }}>
-          <Link
-            href="/checkout"
-            className="btn-shimmer inline-flex items-center gap-2 bg-gradient-to-r from-brand-700 to-brand-600 hover:from-brand-650 hover:to-brand-500 text-white font-semibold px-8 py-4 rounded-xl transition-all duration-300 hover:-translate-y-0.5 shadow-lg shadow-brand-700/15 hover:shadow-xl hover:shadow-brand-700/25 group"
-          >
-            Configure Subscription
-            <ArrowRight className="h-4 w-4 group-hover:translate-x-1 transition-transform" />
-          </Link>
-          <Link
-            href="/auth/login"
-            className="inline-flex items-center gap-2 border border-slate-250 bg-white hover:bg-slate-50 text-slate-700 font-semibold px-8 py-4 rounded-xl transition-all duration-300 hover:-translate-y-0.5 shadow-sm hover:shadow-md"
-          >
-            Access Roster Portal
-          </Link>
-        </div>
+            <p
+              className="text-base sm:text-lg text-slate-600 max-w-2xl mb-10 leading-relaxed animate-fade-in-up"
+              style={{ animationDelay: "240ms" }}
+            >
+              Unify your Sales Pipeline (CRM), Geofenced HR Telemetry (HRMS), and Compliance Finance Ledgers under a secure, logical PostgreSQL multi-tenant architecture.
+            </p>
 
-        <div className="animate-fade-in-up w-full" style={{ animationDelay: "380ms" }}>
-          <HeroLottie />
+            <div className="flex flex-col sm:flex-row gap-4 animate-fade-in-up" style={{ animationDelay: "320ms" }}>
+              <Link
+                href="/checkout"
+                className="btn-shimmer inline-flex items-center gap-2 bg-gradient-to-r from-brand-700 to-brand-600 hover:from-brand-650 hover:to-brand-500 text-white font-semibold px-8 py-4 rounded-xl transition-all duration-300 hover:-translate-y-0.5 shadow-lg shadow-brand-700/15 hover:shadow-xl hover:shadow-brand-700/25 group"
+              >
+                Configure Subscription
+                <ArrowRight className="h-4 w-4 group-hover:translate-x-1 transition-transform" />
+              </Link>
+              <Link
+                href="/auth/login"
+                className="inline-flex items-center gap-2 border border-slate-250 bg-white hover:bg-slate-50 text-slate-700 font-semibold px-8 py-4 rounded-xl transition-all duration-300 hover:-translate-y-0.5 shadow-sm hover:shadow-md"
+              >
+                Access Roster Portal
+              </Link>
+            </div>
+          </div>
         </div>
 
         {/* Feature Contexts — reveal on scroll into view, staggered */}
