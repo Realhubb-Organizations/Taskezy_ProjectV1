@@ -27,7 +27,6 @@ import {
   Video,
   LifeBuoy,
   Briefcase,
-  ArrowLeft,
   Calendar,
   MoreHorizontal
 } from "lucide-react";
@@ -89,6 +88,8 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   const [isRoleDropdownOpen, setIsRoleDropdownOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSystemDropdownOpen, setIsSystemDropdownOpen] = useState(false);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   // Modals simulation state
   const [activeModal, setActiveModal] = useState<string | null>(null);
@@ -140,11 +141,12 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   const activeSystemDetail = getSystemDetails(activeSystem);
 
   const mainNavigation = [
-    { name: "Dashboard", href: "/dashboard", activeCheck: (p: string, t?: string | null) => p === "/dashboard" && !t, icon: LayoutDashboard },
-    { name: "Leads", href: "/dashboard/crm", activeCheck: (p: string, t?: string | null) => p === "/dashboard/crm", icon: Users },
-    { name: "Properties", href: "/dashboard/properties", activeCheck: (p: string, t?: string | null) => p === "/dashboard/properties", icon: Building },
-    { name: "Resale Market", href: "/dashboard/resale", activeCheck: (p: string, t?: string | null) => p === "/dashboard/resale", icon: Landmark },
-    { name: "Calendar", href: "/dashboard/crm/calendar", activeCheck: (p: string, t?: string | null) => p === "/dashboard/crm/calendar", icon: Calendar }
+    { name: "Dashboard", href: "/dashboard/crm", activeCheck: (p: string, t?: string | null) => p === "/dashboard/crm" && !t, icon: LayoutDashboard },
+    { name: "Properties", href: "/dashboard/properties", activeCheck: (p: string) => p === "/dashboard/properties", icon: Building },
+    { name: "Leads", href: "/dashboard/crm?tab=leads", activeCheck: (p: string, t?: string | null) => (p === "/dashboard/crm" && t === "leads") || p === "/dashboard/leads", icon: Calendar },
+    { name: "Campaigns", href: "/dashboard/reports", activeCheck: (p: string) => p === "/dashboard/reports", icon: BarChart },
+    { name: "Data Calling", href: "/dashboard/crm/calendar", activeCheck: (p: string) => p === "/dashboard/crm/calendar", icon: Briefcase },
+    { name: "Team Analysis", href: "/dashboard/organization", activeCheck: (p: string) => p === "/dashboard/organization", icon: Users }
   ];
 
   const hrisNavigation = [
@@ -177,7 +179,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     ? mainNavigation.filter(item => checkUserAccess(currentUser, item.href))
     : showAdmin
       ? [
-          { name: "Dashboard", href: "/dashboard", activeCheck: (p: string, t?: string | null) => p === "/dashboard" && !t, icon: LayoutDashboard },
+          { name: "Home", href: "/dashboard", activeCheck: (p: string, t?: string | null) => p === "/dashboard" && !t, icon: LayoutDashboard },
           { name: "Calendar", href: "/dashboard/admin/calendar", activeCheck: (p: string, t?: string | null) => p === "/dashboard/admin/calendar", icon: Calendar }
         ]
       : [];
@@ -202,321 +204,219 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   };
 
   const getActiveTabName = () => {
+    if (pathname === "/dashboard") return "Dashboard";
     if (pathname === "/dashboard/admin/calendar") return "Calendar";
     for (const item of mainNavigation) {
       if (item.activeCheck(pathname, activeTabParam)) return item.name;
     }
     for (const item of hrisNavigation) {
-      if (item.activeCheck(pathname, activeTabParam)) return `HRIS: ${item.name}`;
+      if (item.activeCheck(pathname, activeTabParam)) return item.name;
     }
     for (const item of financeNavigation) {
-      if (item.activeCheck(pathname, activeTabParam)) return `Finance: ${item.name}`;
+      if (item.activeCheck(pathname, activeTabParam)) return item.name;
     }
     for (const item of bottomNavigation) {
       if (item.activeCheck(pathname, activeTabParam)) return item.name;
     }
-    return "Control Cockpit";
+    return "Dashboard";
   };
 
   const hasPageAccess = checkUserAccess(currentUser, pathname);
 
+  const userInitials = (currentUser?.name || "BS")
+    .split(" ")
+    .filter(Boolean)
+    .map(part => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase() || "BS";
+
   return (
-    <div className="min-h-screen flex bg-slate-50 text-slate-800">
+    <div className="min-h-screen flex bg-[#F4F5F7] text-slate-800">
       {/* Desktop Sidebar */}
-      <aside className="hidden md:flex md:w-64 md:flex-col md:fixed md:inset-y-0 border-r border-slate-200 bg-white z-20">
-        <div className="flex flex-col flex-grow pt-4 pb-4 overflow-y-auto">
-          {/* Logo */}
-          <div className="flex items-center flex-shrink-0 px-6 mb-6">
-            <Link href="/dashboard" className="flex items-center">
-              <img
-                src="/Blue White Professional Minimal Company Business Card (1).png"
-                alt="TASKEZY Logo"
-                className="h-10 w-auto object-contain"
-              />
+      <aside
+        className={`hidden md:flex md:flex-col md:fixed md:inset-y-0 border-r border-slate-200 bg-white z-20 transition-all duration-300 ${
+          isSidebarCollapsed ? "md:w-20" : "md:w-60"
+        }`}
+      >
+        <div className="flex flex-col flex-grow pt-4 pb-4 overflow-y-auto overflow-x-hidden">
+          {/* Logo + collapse toggle */}
+          <div className={`flex items-center flex-shrink-0 mb-6 ${isSidebarCollapsed ? "justify-between px-3" : "justify-between px-5"}`}>
+            <Link href="/dashboard" className="flex items-center overflow-hidden">
+              {isSidebarCollapsed ? (
+                <img src="/logo_icon.png" alt="TASKEZY" className="h-7 w-auto object-contain" />
+              ) : (
+                <div className="shrink-0 flex items-center gap-2">
+                  <img
+                    src="/taskezy_logo_clean.png"
+                    alt="TASKEZY Logo"
+                    className="h-8 w-auto object-contain"
+                  />
+                  <div className="flex flex-col justify-center gap-[3px] text-slate-700 hover:text-black cursor-pointer">
+                    <div className="w-3.5 h-[2px] bg-slate-700 rounded-full" />
+                    <div className="w-3.5 h-[2px] bg-slate-700 rounded-full" />
+                  </div>
+                </div>
+              )}
             </Link>
           </div>
 
-          {/* System Switcher */}
-          {availableSystems.length > 1 ? (
-            <div className="relative px-4 mb-4">
+          {/* Navigation Links */}
+          <nav className="mt-2 flex-1 px-3 space-y-4">
+            {/* HRMS Accordion */}
+            <div>
               <button
-                onClick={() => setIsSystemDropdownOpen(!isSystemDropdownOpen)}
-                className="w-full flex items-center justify-between p-2.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl transition-all duration-200"
+                onClick={() => {
+                  if (isSidebarCollapsed) setIsSidebarCollapsed(false);
+                  else {
+                    const el = document.getElementById("hrms-menu");
+                    if (el) el.classList.toggle("hidden");
+                  }
+                }}
+                className={`w-full flex items-center ${isSidebarCollapsed ? "justify-center gap-1.5" : "justify-between px-2"} py-2 text-[13px] font-bold text-black hover:bg-slate-50 rounded-lg`}
+                title="HRMS"
               >
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div className={`p-1.5 rounded-lg border ${activeSystemDetail.color}`}>
-                    <activeSystemDetail.icon className="h-4 w-4 shrink-0" />
+                <div className="flex items-center gap-2.5">
+                  <div className="w-4.5 h-4.5 rounded-full border-2 border-black flex items-center justify-center shrink-0">
+                    <div className="w-1.5 h-1.5 rounded-full bg-black" />
                   </div>
-                  <div className="text-left min-w-0">
-                    <p className="text-[11px] font-extrabold text-slate-805 leading-none">{activeSystemDetail.name}</p>
-                    <p className="text-[9px] text-slate-400 font-semibold leading-none mt-1 truncate">{activeSystemDetail.desc}</p>
-                  </div>
+                  {!isSidebarCollapsed && <span>HRMS</span>}
                 </div>
-                <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform duration-200 shrink-0 ${isSystemDropdownOpen ? "rotate-180" : ""}`} />
+                <ChevronDown className="h-3.5 w-3.5 text-black shrink-0" />
               </button>
-
-              {isSystemDropdownOpen && (
-                <>
-                  <div className="fixed inset-0 z-30" onClick={() => setIsSystemDropdownOpen(false)} />
-                  <div className="absolute left-4 right-4 mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-40 p-1.5 space-y-1 animate-fade-in">
-                    {availableSystems.map((sys) => {
-                      const details = getSystemDetails(sys);
-                      const isSelected = sys === activeSystem;
-                      return (
-                        <button
-                          key={sys}
-                          onClick={() => {
-                            handleSystemChange(sys);
-                            setIsSystemDropdownOpen(false);
-                          }}
-                          className={`w-full flex items-center justify-between p-2 rounded-lg transition-all duration-200 text-left ${
-                            isSelected ? "bg-brand-50/50" : "hover:bg-slate-50"
-                          }`}
-                        >
-                          <div className="flex items-center gap-2 min-w-0">
-                            <div className={`p-1 rounded-md border ${details.color}`}>
-                              <details.icon className="h-3.5 w-3.5 shrink-0" />
-                            </div>
-                            <div className="min-w-0">
-                              <p className={`text-[10px] font-bold ${isSelected ? "text-brand-700" : "text-slate-700"}`}>{details.name}</p>
-                              <p className="text-[8px] text-slate-400 font-medium leading-tight truncate">{details.desc}</p>
-                            </div>
-                          </div>
-                          {isSelected && <span className="h-1.5 w-1.5 rounded-full bg-brand-600 mr-1" />}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </>
+              {!isSidebarCollapsed && (
+                <div id="hrms-menu" className="hidden pl-6 pt-1 space-y-1">
+                  {allowedHrisNavigation.map((item) => (
+                    <Link key={item.name} href={item.href} className="block py-1 text-xs text-slate-600 hover:text-black font-medium">
+                      {item.name}
+                    </Link>
+                  ))}
+                </div>
               )}
             </div>
-          ) : (
-            <div className="px-4 mb-4">
-              <div className="flex items-center gap-2.5 p-2.5 bg-slate-50 border border-slate-100 rounded-xl">
-                <div className={`p-1.5 rounded-lg border ${activeSystemDetail.color}`}>
-                  <activeSystemDetail.icon className="h-4 w-4 animate-pulse" />
+
+            {/* CRM Accordion */}
+            <div>
+              <button
+                onClick={() => {
+                  if (isSidebarCollapsed) setIsSidebarCollapsed(false);
+                  else {
+                    const el = document.getElementById("crm-menu");
+                    if (el) el.classList.toggle("hidden");
+                  }
+                }}
+                className={`w-full flex items-center ${isSidebarCollapsed ? "justify-center gap-1.5" : "justify-between px-2"} py-2 text-[13px] font-bold text-black hover:bg-slate-50 rounded-lg`}
+                title="CRM"
+              >
+                <div className="flex items-center gap-2.5">
+                  <div className="grid grid-cols-2 gap-0.5 w-4 h-4 border-[1.5px] border-black p-[1px] rounded-[2px] shrink-0">
+                    <div className="bg-black"></div>
+                    <div className="bg-black"></div>
+                    <div className="bg-black"></div>
+                    <div className="bg-black"></div>
+                  </div>
+                  {!isSidebarCollapsed && <span>CRM</span>}
                 </div>
-                <div>
-                  <p className="text-[11px] font-extrabold text-slate-800 leading-none">{activeSystemDetail.name}</p>
-                  <p className="text-[9px] text-slate-400 font-semibold leading-none mt-1">{activeSystemDetail.desc}</p>
+                <ChevronDown className="h-3.5 w-3.5 text-black shrink-0" />
+              </button>
+              {!isSidebarCollapsed && (
+                <div id="crm-menu" className="pl-4 pt-1 space-y-1">
+                  {allowedMainNavigation.map((item) => {
+                    const isActive = item.activeCheck(pathname, activeTabParam);
+                    return (
+                      <Link
+                        key={item.name}
+                        href={item.href}
+                        className={`flex items-center gap-2.5 py-2 px-3 text-xs rounded-lg transition-colors ${
+                          isActive
+                            ? "bg-[#0C0E28] text-white font-semibold"
+                            : "text-slate-700 hover:text-black hover:bg-slate-100 font-normal"
+                        }`}
+                      >
+                        <item.icon className="h-4 w-4 shrink-0" />
+                        <span>{item.name}</span>
+                      </Link>
+                    );
+                  })}
                 </div>
-              </div>
+              )}
             </div>
-          )}
 
-          {/* Navigation Links */}
-          <nav className="mt-2 flex-1 px-4 space-y-4">
-            {/* Main Section */}
-            {allowedMainNavigation.length > 0 && (
-              <div className="space-y-1">
-                {allowedMainNavigation.map((item) => {
-                  const isActive = item.activeCheck(pathname, activeTabParam);
-                  return (
-                    <Link
-                      key={item.name}
-                      href={item.href}
-                      className={`group flex items-center px-4 py-2.5 text-xs font-bold rounded-lg transition-all duration-250 ${
-                        isActive
-                          ? "bg-brand-50 border-l-2 border-brand-500 text-brand-700"
-                          : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
-                      }`}
-                    >
-                      <item.icon className={`mr-2.5 h-4.5 w-4.5 ${isActive ? "text-brand-650" : "text-slate-400"}`} />
-                      {item.name}
-                    </Link>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* HRIS Group */}
-            {allowedHrisNavigation.length > 0 && (
-              <div className="space-y-1">
-                <p className="px-4 text-[9px] uppercase tracking-wider font-extrabold text-slate-400">HRIS</p>
-                {allowedHrisNavigation.map((item) => {
-                  const isActive = item.activeCheck(pathname, activeTabParam);
-                  return (
-                    <Link
-                      key={item.name}
-                      href={item.href}
-                      className={`group flex items-center px-4 py-2 text-xs font-bold rounded-lg transition-all duration-250 ${
-                        isActive
-                          ? "bg-brand-50 border-l-2 border-brand-500 text-brand-700"
-                          : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
-                      }`}
-                    >
-                      <item.icon className={`mr-2.5 h-4 w-4 ${isActive ? "text-brand-650" : "text-slate-400"}`} />
-                      {item.name}
-                    </Link>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* Finance Group */}
-            {allowedFinanceNavigation.length > 0 && (
-              <div className="space-y-1">
-                <p className="px-4 text-[9px] uppercase tracking-wider font-extrabold text-slate-400">Finance</p>
-                {allowedFinanceNavigation.map((item) => {
-                  const isActive = item.activeCheck(pathname, activeTabParam);
-                  return (
-                    <Link
-                      key={item.name}
-                      href={item.href}
-                      className={`group flex items-center px-4 py-2 text-xs font-bold rounded-lg transition-all duration-250 ${
-                        isActive
-                          ? "bg-brand-50 border-l-2 border-brand-500 text-brand-700"
-                          : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
-                      }`}
-                    >
-                      <item.icon className={`mr-2.5 h-4 w-4 ${isActive ? "text-brand-650" : "text-slate-400"}`} />
-                      {item.name}
-                    </Link>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* System settings and reports */}
-            {allowedBottomNavigation.length > 0 && (
-              <div className="space-y-1 pt-2 border-t border-slate-100">
-                {allowedBottomNavigation.map((item) => {
-                  const isActive = item.activeCheck(pathname, activeTabParam);
-                  return (
-                    <Link
-                      key={item.name}
-                      href={item.href}
-                      className={`group flex items-center px-4 py-2 text-xs font-bold rounded-lg transition-all duration-250 ${
-                        isActive
-                          ? "bg-brand-50 border-l-2 border-brand-500 text-brand-700"
-                          : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
-                      }`}
-                    >
-                      <item.icon className={`mr-2.5 h-4 w-4 ${isActive ? "text-brand-650" : "text-slate-400"}`} />
-                      {item.name}
-                    </Link>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* Help / Modals trigger links */}
-            <div className="space-y-1 pt-2 border-t border-slate-100 text-[11px] font-bold text-slate-450">
+            {/* FINANCE Accordion */}
+            <div>
               <button
-                onClick={() => setActiveModal("help")}
-                className="w-full flex items-center px-4 py-1.5 hover:text-slate-800 transition-colors"
+                onClick={() => {
+                  if (isSidebarCollapsed) setIsSidebarCollapsed(false);
+                  else {
+                    const el = document.getElementById("finance-menu");
+                    if (el) el.classList.toggle("hidden");
+                  }
+                }}
+                className={`w-full flex items-center ${isSidebarCollapsed ? "justify-center gap-1.5" : "justify-between px-2"} py-2 text-[13px] font-bold text-black hover:bg-slate-50 rounded-lg`}
+                title="FINANCE"
               >
-                <HelpCircle className="mr-2 h-3.5 w-3.5" /> Help &amp; Support
+                <div className="flex items-center gap-2.5">
+                  <FileText className="h-4.5 w-4.5 text-black shrink-0" />
+                  {!isSidebarCollapsed && <span>FINANCE</span>}
+                </div>
+                <ChevronDown className="h-3.5 w-3.5 text-black shrink-0" />
               </button>
-              <button
-                onClick={() => setActiveModal("tutorials")}
-                className="w-full flex items-center px-4 py-1.5 hover:text-slate-800 transition-colors"
-              >
-                <Video className="mr-2 h-3.5 w-3.5" /> CRM Tutorials
-              </button>
-              <button
-                onClick={() => setActiveModal("contact")}
-                className="w-full flex items-center px-4 py-1.5 hover:text-slate-800 transition-colors"
-              >
-                <LifeBuoy className="mr-2 h-3.5 w-3.5" /> Contact Support
-              </button>
+              {!isSidebarCollapsed && (
+                <div id="finance-menu" className="hidden pl-6 pt-1 space-y-1">
+                  {allowedFinanceNavigation.map((item) => (
+                    <Link key={item.name} href={item.href} className="block py-1 text-xs text-slate-600 hover:text-black font-medium">
+                      {item.name}
+                    </Link>
+                  ))}
+                </div>
+              )}
             </div>
           </nav>
-        </div>
-
-        {/* User profile footer */}
-        <div className="flex-shrink-0 flex border-t border-slate-200 p-4 bg-slate-50/50">
-          <div className="flex items-center w-full">
-            <div className="h-9 w-9 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-500">
-              <UserIcon className="h-4 w-4" />
-            </div>
-            <div className="ml-3 flex-1 min-w-0">
-              <p className="text-xs font-bold text-slate-800 truncate">
-                {currentUser?.name || "Sanjeev Singh"}
-              </p>
-              <p className="text-[10px] text-slate-500 truncate">
-                {currentUser?.email || "admin@realhubb.in"}
-              </p>
-            </div>
-            <button
-              onClick={handleLogout}
-              className="ml-auto text-slate-400 hover:text-red-500 transition-colors p-1"
-              title="Logout"
-            >
-              <LogOut className="h-4 w-4" />
-            </button>
-          </div>
         </div>
       </aside>
 
       {/* Main content wrapper */}
-      <div className="md:pl-64 flex flex-col flex-1 w-full min-h-screen">
+      <div className={`flex flex-col flex-1 w-full min-h-screen transition-all duration-300 ${isSidebarCollapsed ? "md:pl-20" : "md:pl-64"}`}>
         {/* Top Header Bar */}
-        <header className="sticky top-0 z-10 flex-shrink-0 h-14 md:h-16 border-b border-slate-200 bg-white/70 backdrop-blur-md flex items-center justify-between px-3 sm:px-6 lg:px-8 gap-2">
-          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
-            {/* Back Navigation Button */}
-            <button
-              onClick={() => router.back()}
-              className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-500 hover:text-slate-800 transition-all flex items-center justify-center shrink-0 border border-slate-200 shadow-sm bg-white"
-              title="Navigate back to previous tab/page"
-            >
-              <ArrowLeft className="h-3.5 w-3.5" />
-            </button>
-
-            <h1 className="text-xs sm:text-sm font-bold text-brand-700 tracking-wide uppercase ml-0.5 truncate">{getActiveTabName()}</h1>
-          </div>
-
-          <div className="flex items-center gap-2 sm:gap-4 shrink-0">
-            {/* Edge sync status — desktop only; mobile equivalent lives in the "More" drawer */}
-            <div className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-slate-200 bg-slate-50 text-xs">
-              <button
-                onClick={() => setOnlineStatus(!isOnline)}
-                className={`flex items-center gap-1.5 transition-colors font-bold ${
-                  isOnline ? "text-emerald-600 hover:text-emerald-700" : "text-amber-600 hover:text-amber-700"
-                }`}
-                title="Toggle network online/offline to test synchronization capabilities"
-              >
-                {isOnline ? (
-                  <>
-                    <Wifi className="h-3.5 w-3.5" />
-                    <span className="hidden sm:inline">Online</span>
-                  </>
-                ) : (
-                  <>
-                    <WifiOff className="h-3.5 w-3.5 animate-pulse" />
-                    <span>Offline</span>
-                  </>
-                )}
-              </button>
-
-              {pendingSyncCount > 0 && (
-                <div className="flex items-center gap-1.5 border-l border-slate-200 pl-2 ml-1">
-                  <button
-                    onClick={triggerSync}
-                    disabled={isSyncing || !isOnline}
-                    className={`flex items-center gap-1 text-brand-600 hover:text-brand-500 disabled:opacity-40 disabled:cursor-not-allowed font-semibold ${
-                      isSyncing ? "animate-spin" : ""
-                    }`}
-                  >
-                    <RefreshCw className="h-3 w-3" />
-                    <span>Sync ({pendingSyncCount})</span>
-                  </button>
-                </div>
-              )}
-            </div>
-
+        <header className="sticky top-0 z-10 flex-shrink-0 h-14 md:h-16 border-b border-slate-200 bg-white flex items-center justify-between px-6 sm:px-8">
+          <h1 className="text-xl font-bold text-black tracking-tight">{getActiveTabName()}</h1>
+          <div className="flex items-center gap-3 sm:gap-4 shrink-0">
             {/* Notification Bell */}
             <NotificationBell />
 
-            {/* Connected User Badge — desktop only; mobile shows this in the "More" drawer instead */}
-            <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 text-xs font-bold text-slate-750 max-w-[240px] truncate">
-              <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
-              <span className="truncate">Connected: {currentUser?.name} ({currentUser?.designation})</span>
+            {/* User menu */}
+            <div className="relative">
+              <button
+                onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+                className="flex items-center gap-1 shrink-0"
+                title={currentUser?.name}
+              >
+                <span className="h-8 w-8 rounded-full bg-[#001D4A] text-white text-xs font-bold flex items-center justify-center shrink-0">
+                  {userInitials}
+                </span>
+                <ChevronDown className={`h-4 w-4 text-slate-500 transition-transform duration-200 ${isUserMenuOpen ? "rotate-180" : ""}`} />
+              </button>
+
+              {isUserMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-30" onClick={() => setIsUserMenuOpen(false)} />
+                  <div className="absolute right-0 mt-2 w-56 bg-white border border-slate-200 rounded-xl shadow-xl z-40 p-1.5 animate-fade-in">
+                    <div className="px-3 py-2 border-b border-slate-100">
+                      <p className="text-xs font-bold text-slate-800 truncate">{currentUser?.name}</p>
+                      <p className="text-[10px] text-slate-500 truncate">{currentUser?.email}</p>
+                    </div>
+                    <button
+                      onClick={handleLogout}
+                      className="w-full flex items-center gap-2 px-3 py-2 mt-1 text-xs font-bold text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                    >
+                      <LogOut className="h-3.5 w-3.5" /> Logout
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </header>
-
-        {/* Mobile Sidebar drawer */}
         {isMobileMenuOpen && (
           <>
             <div
@@ -809,7 +709,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
         </nav>
 
         {/* Core Container — bottom padding on mobile clears the fixed tab bar */}
-        <main className="flex-1 p-3 sm:p-6 lg:p-8 pb-24 md:pb-8 bg-slate-50/50 overflow-y-auto">
+        <main className="flex-1 px-3 sm:px-6 lg:px-8 pt-2 sm:pt-4 pb-24 md:pb-8 bg-slate-50/50 overflow-y-auto">
           {hasPageAccess ? children : (
             <div className="min-h-[60vh] flex flex-col items-center justify-center p-6 text-center space-y-6 bg-white border border-slate-200 rounded-3xl shadow-sm max-w-2xl mx-auto my-8 animate-fade-in">
               <div className="h-16 w-16 rounded-2xl bg-red-50 border border-red-200 flex items-center justify-center text-red-650 shadow-md">

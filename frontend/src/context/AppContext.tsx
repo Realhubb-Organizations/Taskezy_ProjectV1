@@ -103,7 +103,7 @@ export function getAvailableSystems(user: { role: string; department?: string } 
 
 export function getDefaultSystem(user: { role: string; department?: string } | null): SystemType {
   if (!user) return "CRM";
-  if (user.role === "ADMIN") return "ADMIN";
+  if (user.role === "ADMIN") return "CRM";
   if (user.department === "SALES") return "CRM";
   if (user.department === "FINANCE" || user.role === "FINANCE") return "FINANCE";
   return "HRMS";
