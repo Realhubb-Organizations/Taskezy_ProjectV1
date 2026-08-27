@@ -62,7 +62,13 @@
       "Bash(curl -s -o /dev/null -w \"login: HTTP %{http_code}\\\\n\" http://localhost:3000/auth/login)",
       "WebFetch(domain:claude.ai)",
       "Bash(npm view *)",
-      "Bash(curl -s https://api.github.com/repos/Realhubb-Organizations/Taskezy_ProjectV1/commits/main)"
+      "Bash(curl -s https://api.github.com/repos/Realhubb-Organizations/Taskezy_ProjectV1/commits/main)",
+      "Bash(find 'c:\\\\Users\\\\REALHUBB VENTURES\\\\OneDrive\\\\Desktop\\\\Taskezy-ProjectV1\\\\Taskezy-Server/src/modules/notifications' -type f)",
+      "Bash(echo ---routes---)",
+      "Bash(cat 'c:\\\\Users\\\\REALHUBB VENTURES\\\\OneDrive\\\\Desktop\\\\Taskezy-ProjectV1\\\\Taskezy-Server/src/modules/notifications/notifications.routes.ts')",
+      "Bash(grep -n '^\\\\s*generateInvoice,$' 'c:\\\\Users\\\\REALHUBB VENTURES\\\\OneDrive\\\\Desktop\\\\Taskezy-ProjectV1\\\\frontend/src/context/AppContext.tsx')",
+      "Bash(grep -n '^\\\\s*addCalendarEvent,$' 'c:\\\\Users\\\\REALHUBB VENTURES\\\\OneDrive\\\\Desktop\\\\Taskezy-ProjectV1\\\\frontend/src/context/AppContext.tsx')",
+      "Bash(git rm *)"
     ]
   }
 }
