@@ -29,7 +29,9 @@ import {
   Video,
   LifeBuoy,
   Calendar,
-  MoreHorizontal
+  MoreHorizontal,
+  PanelLeftClose,
+  PanelLeftOpen
 } from "lucide-react";
 
 function initialsFor(name?: string): string {
@@ -94,6 +96,9 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
 
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  // Desktop-only sidebar collapse (icon rail) — the mobile drawer/bottom tab
+  // bar are separate, `md:hidden`-gated UI and are unaffected by this.
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Set<SystemType>>(new Set());
   const toggleGroup = (key: SystemType) => {
     setExpandedGroups(prev => {
@@ -208,35 +213,60 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen flex bg-slate-50 text-slate-800">
-      {/* Desktop Sidebar */}
-      <aside className="hidden md:flex md:w-64 md:flex-col md:fixed md:inset-y-0 border-r border-slate-200 bg-white z-20">
-        <div className="flex flex-col flex-grow pt-4 pb-4 overflow-y-auto">
-          {/* Logo */}
-          <div className="flex items-center flex-shrink-0 px-6 mb-6">
-            <Link href="/dashboard" className="flex items-center">
-              <img
-                src="/Blue White Professional Minimal Company Business Card.png"
-                alt="TASKEZY Logo"
-                className="h-10 w-auto object-contain"
-              />
-            </Link>
+      {/* Desktop Sidebar — collapses to an icon rail; mobile uses a separate drawer/bottom-tab pattern below, entirely unaffected by this. */}
+      <aside
+        className={`hidden md:flex md:flex-col md:fixed md:inset-y-0 border-r border-slate-200 bg-white z-20 transition-all duration-200 ${
+          isSidebarCollapsed ? "md:w-20" : "md:w-64"
+        }`}
+      >
+        <div className="flex flex-col flex-grow pt-4 pb-4 overflow-y-auto overflow-x-hidden">
+          {/* Logo + collapse toggle */}
+          <div className={`flex items-center flex-shrink-0 mb-6 ${isSidebarCollapsed ? "justify-center px-2" : "justify-between px-6"}`}>
+            {!isSidebarCollapsed && (
+              <Link href="/dashboard" className="flex items-center min-w-0">
+                <img
+                  src="/Blue White Professional Minimal Company Business Card.png"
+                  alt="TASKEZY Logo"
+                  className="h-10 w-auto object-contain"
+                />
+              </Link>
+            )}
+            <button
+              onClick={() => setIsSidebarCollapsed(v => !v)}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-brand-700 hover:bg-slate-50 transition-colors shrink-0"
+              title={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            >
+              {isSidebarCollapsed ? <PanelLeftOpen className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}
+            </button>
           </div>
 
           {/* Navigation Groups — HRMS/CRM/FINANCE always visible, each independently expandable */}
-          <nav className="flex-1 px-4 space-y-1">
+          <nav className={`flex-1 space-y-1 ${isSidebarCollapsed ? "px-2" : "px-4"}`}>
             {sidebarGroups.map((group) => {
-              const isExpanded = expandedGroups.has(group.key) || group.items.some(i => i.activeCheck(pathname, activeTabParam));
+              const isExpanded = !isSidebarCollapsed && (expandedGroups.has(group.key) || group.items.some(i => i.activeCheck(pathname, activeTabParam)));
               return (
                 <div key={group.key}>
                   <button
-                    onClick={() => toggleGroup(group.key)}
-                    className="w-full flex items-center justify-between px-4 py-2.5 text-xs font-extrabold text-slate-800 rounded-lg hover:bg-slate-50 transition-colors"
+                    onClick={() => {
+                      if (isSidebarCollapsed) {
+                        setIsSidebarCollapsed(false);
+                        setExpandedGroups(prev => new Set(prev).add(group.key));
+                      } else {
+                        toggleGroup(group.key);
+                      }
+                    }}
+                    title={group.label}
+                    className={`w-full flex items-center text-xs font-extrabold text-slate-800 rounded-lg hover:bg-slate-50 transition-colors ${
+                      isSidebarCollapsed ? "justify-center py-2.5" : "justify-between px-4 py-2.5"
+                    }`}
                   >
-                    <span className="flex items-center gap-2.5">
+                    <span className={`flex items-center ${isSidebarCollapsed ? "" : "gap-2.5"}`}>
                       <group.icon className="h-4.5 w-4.5 text-brand-700" />
-                      {group.label}
+                      {!isSidebarCollapsed && group.label}
                     </span>
-                    <ChevronDown className={`h-3.5 w-3.5 text-slate-400 transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`} />
+                    {!isSidebarCollapsed && (
+                      <ChevronDown className={`h-3.5 w-3.5 text-slate-400 transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`} />
+                    )}
                   </button>
 
                   {isExpanded && (
@@ -273,12 +303,13 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                   <Link
                     key={item.name}
                     href={item.href}
-                    className={`flex items-center px-4 py-2 text-xs font-bold rounded-lg transition-all duration-200 ${
-                      isActive ? "bg-brand-50 text-brand-700" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
-                    }`}
+                    title={item.name}
+                    className={`flex items-center text-xs font-bold rounded-lg transition-all duration-200 ${
+                      isSidebarCollapsed ? "justify-center py-2" : "px-4 py-2"
+                    } ${isActive ? "bg-brand-50 text-brand-700" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"}`}
                   >
-                    <item.icon className={`mr-2.5 h-4 w-4 ${isActive ? "text-brand-650" : "text-slate-400"}`} />
-                    {item.name}
+                    <item.icon className={`h-4 w-4 ${isSidebarCollapsed ? "" : "mr-2.5"} ${isActive ? "text-brand-650" : "text-slate-400"}`} />
+                    {!isSidebarCollapsed && item.name}
                   </Link>
                 );
               })}
@@ -287,21 +318,24 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
             <div className="pt-3 mt-3 border-t border-slate-100 space-y-1 text-[11px] font-bold text-slate-450">
               <button
                 onClick={() => setActiveModal("help")}
-                className="w-full flex items-center px-4 py-1.5 hover:text-slate-800 transition-colors"
+                title="Help & Support"
+                className={`w-full flex items-center hover:text-slate-800 transition-colors ${isSidebarCollapsed ? "justify-center py-2" : "px-4 py-1.5"}`}
               >
-                <HelpCircle className="mr-2 h-3.5 w-3.5" /> Help &amp; Support
+                <HelpCircle className={`h-3.5 w-3.5 ${isSidebarCollapsed ? "" : "mr-2"}`} /> {!isSidebarCollapsed && "Help & Support"}
               </button>
               <button
                 onClick={() => setActiveModal("tutorials")}
-                className="w-full flex items-center px-4 py-1.5 hover:text-slate-800 transition-colors"
+                title="CRM Tutorials"
+                className={`w-full flex items-center hover:text-slate-800 transition-colors ${isSidebarCollapsed ? "justify-center py-2" : "px-4 py-1.5"}`}
               >
-                <Video className="mr-2 h-3.5 w-3.5" /> CRM Tutorials
+                <Video className={`h-3.5 w-3.5 ${isSidebarCollapsed ? "" : "mr-2"}`} /> {!isSidebarCollapsed && "CRM Tutorials"}
               </button>
               <button
                 onClick={() => setActiveModal("contact")}
-                className="w-full flex items-center px-4 py-1.5 hover:text-slate-800 transition-colors"
+                title="Contact Support"
+                className={`w-full flex items-center hover:text-slate-800 transition-colors ${isSidebarCollapsed ? "justify-center py-2" : "px-4 py-1.5"}`}
               >
-                <LifeBuoy className="mr-2 h-3.5 w-3.5" /> Contact Support
+                <LifeBuoy className={`h-3.5 w-3.5 ${isSidebarCollapsed ? "" : "mr-2"}`} /> {!isSidebarCollapsed && "Contact Support"}
               </button>
             </div>
           </nav>
@@ -309,7 +343,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
       </aside>
 
       {/* Main content wrapper */}
-      <div className="md:pl-64 flex flex-col flex-1 w-full min-h-screen">
+      <div className={`flex flex-col flex-1 w-full min-h-screen transition-all duration-200 ${isSidebarCollapsed ? "md:pl-20" : "md:pl-64"}`}>
         {/* Top Header Bar */}
         <header className="sticky top-0 z-10 flex-shrink-0 h-14 md:h-16 border-b border-slate-200 bg-white/70 backdrop-blur-md flex items-center justify-between px-3 sm:px-6 lg:px-8 gap-2">
           <h1 className="text-sm font-bold text-slate-900 truncate">{getActiveTabName()}</h1>
