@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useApp, User, Role } from "@/context/AppContext";
 import { apiDisconnectMeta, apiGetMetaConnectUrl, apiListMetaConnections, ApiMetaConnection, apiListGoogleAdsAccounts, ApiGoogleAdsAccount } from "@/lib/apiClient";
@@ -627,8 +628,9 @@ export default function SettingsPage() {
           </div>
 
           <div className="glass-card rounded-2xl divide-y divide-slate-100 overflow-hidden">
-            <button
-              onClick={() => alert("Privacy Policy: Realhubb Ventures processes lead and employee data solely for internal CRM/HRMS/Finance operations. Full policy document pending legal publication.")}
+            <Link
+              href="/privacy-policy"
+              target="_blank"
               className="w-full flex items-center justify-between px-5 py-3.5 text-left hover:bg-slate-50 transition-colors"
             >
               <span className="flex items-center gap-2.5 text-xs font-bold text-slate-700">
@@ -636,9 +638,10 @@ export default function SettingsPage() {
                 Privacy Policy
               </span>
               <span className="text-[10px] text-slate-400">View</span>
-            </button>
-            <button
-              onClick={() => alert("Terms of Service: Usage of the TASKEZY platform is governed by the Realhubb Ventures master services agreement. Full terms document pending legal publication.")}
+            </Link>
+            <Link
+              href="/terms"
+              target="_blank"
               className="w-full flex items-center justify-between px-5 py-3.5 text-left hover:bg-slate-50 transition-colors"
             >
               <span className="flex items-center gap-2.5 text-xs font-bold text-slate-700">
@@ -646,7 +649,7 @@ export default function SettingsPage() {
                 Terms of Service
               </span>
               <span className="text-[10px] text-slate-400">View</span>
-            </button>
+            </Link>
           </div>
 
           <button
