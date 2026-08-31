@@ -111,7 +111,7 @@ export default function DashboardHome() {
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {/* CRM */}
-          <div className="bg-white rounded-[2rem] shadow-sm border border-slate-100 p-7 flex flex-col justify-between">
+          <Link href="/dashboard/crm" className="bg-white rounded-[2rem] shadow-sm border border-slate-100 p-7 flex flex-col justify-between hover:shadow-md hover:border-brand-200 transition-all cursor-pointer">
             <div className="space-y-5">
               <h3 className="text-2xl font-extrabold text-brand-700 flex items-center gap-2">
                 <Activity className="h-6 w-6 text-brand-600" />
@@ -137,13 +137,13 @@ export default function DashboardHome() {
                 </div>
               </div>
             </div>
-            <Link href="/dashboard/crm" className="text-sm font-bold text-[#006AFF] hover:underline mt-6 inline-flex items-center gap-1">
+            <span className="text-sm font-bold text-[#006AFF] mt-6 inline-flex items-center gap-1">
               Know More <ArrowRight className="h-3.5 w-3.5" />
-            </Link>
-          </div>
+            </span>
+          </Link>
 
           {/* HRMS */}
-          <div className="bg-white rounded-[2rem] shadow-sm border border-slate-100 p-7 flex flex-col justify-between">
+          <Link href="/dashboard/hrms" className="bg-white rounded-[2rem] shadow-sm border border-slate-100 p-7 flex flex-col justify-between hover:shadow-md hover:border-brand-200 transition-all cursor-pointer">
             <div className="space-y-5">
               <h3 className="text-2xl font-extrabold text-brand-700 flex items-center gap-2">
                 <Users className="h-6 w-6 text-brand-600" />
@@ -169,13 +169,13 @@ export default function DashboardHome() {
                 </div>
               </div>
             </div>
-            <Link href="/dashboard/hrms" className="text-sm font-bold text-[#006AFF] hover:underline mt-6 inline-flex items-center gap-1">
+            <span className="text-sm font-bold text-[#006AFF] mt-6 inline-flex items-center gap-1">
               Know More <ArrowRight className="h-3.5 w-3.5" />
-            </Link>
-          </div>
+            </span>
+          </Link>
 
           {/* Finance */}
-          <div className="bg-white rounded-[2rem] shadow-sm border border-slate-100 p-7 flex flex-col justify-between">
+          <Link href="/dashboard/finance" className="bg-white rounded-[2rem] shadow-sm border border-slate-100 p-7 flex flex-col justify-between hover:shadow-md hover:border-brand-200 transition-all cursor-pointer">
             <div className="space-y-5">
               <h3 className="text-2xl font-extrabold text-brand-700 flex items-center gap-2">
                 <TrendingUp className="h-6 w-6 text-brand-600" />
@@ -201,10 +201,10 @@ export default function DashboardHome() {
                 </div>
               </div>
             </div>
-            <Link href="/dashboard/finance" className="text-sm font-bold text-[#006AFF] hover:underline mt-6 inline-flex items-center gap-1">
+            <span className="text-sm font-bold text-[#006AFF] mt-6 inline-flex items-center gap-1">
               Know More <ArrowRight className="h-3.5 w-3.5" />
-            </Link>
-          </div>
+            </span>
+          </Link>
         </div>
       </div>
     );
