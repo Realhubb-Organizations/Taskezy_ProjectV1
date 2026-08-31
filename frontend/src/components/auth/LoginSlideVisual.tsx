@@ -1,19 +1,34 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { TrendingUp, Scale } from "lucide-react";
 
 interface LoginSlideVisualProps {
   variant: "dashboard" | "leads";
+  /** Real exported slide image (see frontend/public/) — used when it loads; falls back to the drawn mockup below on 404. */
+  imageSrc?: string;
 }
 
 /**
- * Code-drawn mockup panels (no external screenshot asset) standing in for
- * the product's real dashboard/leads screens on the login carousel — easy
- * to swap for a real screenshot later by replacing this component's markup
- * with an <img>, without touching the carousel logic that drives it.
+ * Prefers a real exported screenshot when one exists at imageSrc; falls back
+ * to a code-drawn approximation (no external asset needed) if that file is
+ * missing, so the carousel never shows a broken image while real slide
+ * assets are still being sourced.
  */
-export default function LoginSlideVisual({ variant }: LoginSlideVisualProps) {
+export default function LoginSlideVisual({ variant, imageSrc }: LoginSlideVisualProps) {
+  const [imageFailed, setImageFailed] = useState(false);
+
+  if (imageSrc && !imageFailed) {
+    return (
+      <img
+        src={imageSrc}
+        alt=""
+        className="w-full h-auto rounded-2xl shadow-2xl"
+        onError={() => setImageFailed(true)}
+      />
+    );
+  }
+
   if (variant === "leads") {
     return (
       <div className="relative w-full">

@@ -7,14 +7,20 @@ import { Lock, Mail, ShieldCheck, AlertCircle, Eye, EyeOff, Sparkles } from "luc
 import Link from "next/link";
 import LoginSlideVisual from "@/components/auth/LoginSlideVisual";
 
-const slides: { variant: "dashboard" | "leads"; title: string; description: string }[] = [
+// Drop the real exported images at these two paths (frontend/public/...) and
+// they're used automatically — no code change needed. Until then, each slide
+// falls back to a code-drawn approximation (see LoginSlideVisual.tsx) so the
+// carousel never shows a broken image.
+const slides: { variant: "dashboard" | "leads"; image: string; title: string; description: string }[] = [
   {
     variant: "dashboard",
+    image: "/slide-team-performance.png",
     title: "Managing Team just got easier",
     description: "Simplify team management and drive better results with unprecedented real-time visibility across your entire portfolio."
   },
   {
     variant: "leads",
+    image: "/slide-leads-analysis.png",
     title: "Deeper insights into your business",
     description: "Transform scattered data into actionable intelligence and deeper business visibility."
   }
@@ -105,7 +111,7 @@ export default function LoginPage() {
 
         <div className="flex-1 flex flex-col items-center justify-center w-full z-10 my-4">
           <div className="w-full max-w-[420px] xl:max-w-[440px] mb-8">
-            <LoginSlideVisual variant={slides[currentSlide].variant} />
+            <LoginSlideVisual variant={slides[currentSlide].variant} imageSrc={slides[currentSlide].image} />
           </div>
 
           <div className="text-center space-y-2 max-w-md px-4">
