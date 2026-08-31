@@ -11,7 +11,7 @@ export default function Home() {
       <header className="relative z-10 w-full max-w-7xl mx-auto px-6 sm:px-8 py-4 flex items-center justify-between border-b border-slate-200/80 bg-white/40 backdrop-blur-md animate-fade-in-up">
         <Link href="/" className="flex items-center">
           <img
-            src="/Blue White Professional Minimal Company Business Card (1).png"
+            src="/Blue White Professional Minimal Company Business Card.png"
             alt="TASKEZY Logo"
             className="h-10 w-auto object-contain"
           />

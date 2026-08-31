@@ -6,7 +6,7 @@ export default function PrivacyPolicyPage() {
     <div className="min-h-screen bg-slate-50 text-slate-800">
       <header className="w-full max-w-4xl mx-auto px-6 sm:px-8 py-6 flex items-center justify-between">
         <Link href="/" className="flex items-center">
-          <img src="/taskezy_logo_clean.png" alt="TASKEZY" className="h-8 w-auto object-contain" />
+          <img src="/Blue White Professional Minimal Company Business Card.png" alt="TASKEZY" className="h-8 w-auto object-contain" />
         </Link>
         <Link href="/auth/login" className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-600 hover:text-brand-700 transition-colors">
           <ArrowLeft className="h-3.5 w-3.5" /> Back to Sign In

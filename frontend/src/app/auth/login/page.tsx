@@ -105,7 +105,7 @@ export default function LoginPage() {
             visible logo. This crops the padding out so the wordmark itself sits at top-6/left-12. */}
         <div className="absolute top-6 left-12 z-20 overflow-hidden" style={{ width: 156, height: 40 }}>
           <img
-            src="/Blue White Professional Minimal Company Business Card (1).png"
+            src="/Blue White Professional Minimal Company Business Card.png"
             alt="TASKEZY Logo"
             className="max-w-none"
             style={{ width: 186, height: 106, marginTop: -30, marginLeft: -15 }}
@@ -172,7 +172,7 @@ export default function LoginPage() {
           <div className="lg:hidden text-center mb-6">
             <div className="overflow-hidden mx-auto" style={{ width: 156, height: 40 }}>
               <img
-                src="/Blue White Professional Minimal Company Business Card (1).png"
+                src="/Blue White Professional Minimal Company Business Card.png"
                 alt="TASKEZY Logo"
                 className="max-w-none"
                 style={{ width: 186, height: 106, marginTop: -30, marginLeft: -15 }}

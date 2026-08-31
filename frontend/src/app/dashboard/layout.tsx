@@ -229,7 +229,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
           <div className="flex items-center flex-shrink-0 px-6 mb-6">
             <Link href="/dashboard" className="flex items-center">
               <img
-                src="/Blue White Professional Minimal Company Business Card (1).png"
+                src="/Blue White Professional Minimal Company Business Card.png"
                 alt="TASKEZY Logo"
                 className="h-10 w-auto object-contain"
               />
@@ -527,7 +527,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
               <div className="flex items-center justify-between mb-4 border-b border-slate-100 pb-4">
                 <Link href="/dashboard" className="flex items-center">
                   <img
-                    src="/Blue White Professional Minimal Company Business Card (1).png"
+                    src="/Blue White Professional Minimal Company Business Card.png"
                     alt="TASKEZY Logo"
                     className="h-9 w-auto object-contain"
                   />
