@@ -256,6 +256,7 @@ export interface Property {
   teamAssignmentMode?: PropertyTeamAssignmentMode;
   leadAssignmentMode?: LeadAssignmentMode;
   assignedTeam?: PropertyTeamMember[];
+  createdAt?: string;
 }
 
 export interface ResaleUnit {
@@ -591,6 +592,7 @@ function mapApiPropertyToFrontend(row: ApiPropertyRow): Property {
     location: row.location,
     locality: row.locality || undefined,
     zone: row.zone || undefined,
+    createdAt: row.created_at,
     price: formatPriceValue(row.price_value, row.price_type),
     priceType: row.price_type === "STARTING_FROM" ? "Starting From" : row.price_type === "ABSOLUTE" ? "Absolute" : undefined,
     type: row.property_type,
@@ -1378,7 +1380,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const newProp: Property = {
       ...propertyData,
       id: `prop-${Date.now()}`,
-      membersCount: 0
+      membersCount: 0,
+      createdAt: new Date().toISOString()
     };
     setProperties(prev => [...prev, newProp]);
 

@@ -1,154 +1,130 @@
 "use client";
 
-import React, { useRef, useState } from "react";
-import {
-  X,
-  Info,
-  Users,
-  UploadCloud,
-  FileText,
-  Trash2,
-  MapPin,
-  Check
-} from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { X } from "lucide-react";
 import { useApp, Property, LeadAssignmentMode, PropertyTeamAssignmentMode, PropertyTeamMember } from "@/context/AppContext";
 
 interface AddPropertyModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: (name: string) => void;
+  /** Prefills the form from an existing property (used by the properties table's Duplicate action) — always creates a new property, never edits the source. */
+  duplicateFrom?: Property | null;
 }
 
-const PROPERTY_TYPES = ["Residential", "Commercial", "Apartment", "Villa", "Plot", "Mixed-Use"];
+const PROPERTY_TYPES = ["Apartment", "Villa", "Plot", "Commercial", "Residential", "Mixed-Use"];
 const PROPERTY_STATUSES = ["Pre-Launch", "Under Construction", "Ready to Move", "Sold Out"];
 
-export default function AddPropertyModal({ isOpen, onClose, onSuccess }: AddPropertyModalProps) {
-  const { properties, users, addProperty } = useApp();
-  const fileInputRef = useRef<HTMLInputElement>(null);
+// Only what the database actually requires (see Taskezy-Server/src/modules/properties/properties.schema.ts) —
+// name, developer, propertyType, and location. Everything else here is optional server-side.
+const REQUIRED_FIELDS = ["name", "developer", "propertyType", "location"] as const;
 
-  const [activeTab, setActiveTab] = useState<"basic" | "team">("basic");
+export default function AddPropertyModal({ isOpen, onClose, onSuccess, duplicateFrom }: AddPropertyModalProps) {
+  const { users, addProperty } = useApp();
 
-  // Basic Information fields
-  const [name, setName] = useState("");
+  const [activeTab, setActiveTab] = useState<"details" | "team">("details");
+
+  // Property Details — field set and order match the provided design exactly.
   const [developer, setDeveloper] = useState("");
+  const [name, setName] = useState("");
   const [propertyType, setPropertyType] = useState("");
   const [propertyStatus, setPropertyStatus] = useState("");
   const [possessionDate, setPossessionDate] = useState("");
   const [price, setPrice] = useState("");
-  const [priceType, setPriceType] = useState<"Absolute" | "Starting From">("Absolute");
-  const [websiteUrl, setWebsiteUrl] = useState("");
   const [leadRegistrationUrl, setLeadRegistrationUrl] = useState("");
   const [description, setDescription] = useState("");
-  const [tagInput, setTagInput] = useState("");
-  const [tags, setTags] = useState<string[]>([]);
-
-  // Contact & Location
   const [contactNumber, setContactNumber] = useState("");
-  const [zone, setZone] = useState("");
-  const [locality, setLocality] = useState("");
+  const [location, setLocation] = useState("");
   const [mapUrl, setMapUrl] = useState("");
 
-  // Media & Documents (filenames only — no real upload backend)
-  const [mediaFileNames, setMediaFileNames] = useState<string[]>([]);
-  const [isDragOver, setIsDragOver] = useState(false);
-
-  // Team Members Assignment
+  // Team Access Settings
   const [teamAssignmentMode, setTeamAssignmentMode] = useState<PropertyTeamAssignmentMode>("ALL_MEMBERS");
   const [leadAssignmentMode, setLeadAssignmentMode] = useState<LeadAssignmentMode>("ROUND_ROBIN");
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
   const [memberPercentages, setMemberPercentages] = useState<Record<string, number>>({});
+  const [memberSearch, setMemberSearch] = useState("");
 
-  const zoneOptions = Array.from(new Set(properties.map(p => p.zone).filter(Boolean))) as string[];
-  const localityOptions = Array.from(new Set(properties.map(p => p.locality).filter(Boolean))) as string[];
   const salesTeam = users.filter(u => u.department === "SALES" && u.role !== "ADMIN");
-
-  if (!isOpen) return null;
+  const visibleTeam = salesTeam.filter(m => m.name.toLowerCase().includes(memberSearch.toLowerCase()));
 
   const resetForm = () => {
-    setActiveTab("basic");
-    setName("");
+    setActiveTab("details");
     setDeveloper("");
+    setName("");
     setPropertyType("");
     setPropertyStatus("");
     setPossessionDate("");
     setPrice("");
-    setPriceType("Absolute");
-    setWebsiteUrl("");
     setLeadRegistrationUrl("");
     setDescription("");
-    setTagInput("");
-    setTags([]);
     setContactNumber("");
-    setZone("");
-    setLocality("");
+    setLocation("");
     setMapUrl("");
-    setMediaFileNames([]);
     setTeamAssignmentMode("ALL_MEMBERS");
     setLeadAssignmentMode("ROUND_ROBIN");
     setSelectedMemberIds([]);
     setMemberPercentages({});
+    setMemberSearch("");
   };
+
+  // Prefill from the source property whenever a duplicate is requested — a
+  // fresh copy, not a live edit link back to the original.
+  useEffect(() => {
+    if (isOpen && duplicateFrom) {
+      setDeveloper(duplicateFrom.developer);
+      setName(`${duplicateFrom.name} (Copy)`);
+      setPropertyType(duplicateFrom.type);
+      setPropertyStatus(duplicateFrom.propertyStatus || "");
+      setPossessionDate(duplicateFrom.possessionDate || "");
+      setPrice(duplicateFrom.price || "");
+      setLeadRegistrationUrl(duplicateFrom.leadRegistrationUrl || "");
+      setDescription(duplicateFrom.description || "");
+      setContactNumber(duplicateFrom.contactNumber || "");
+      setLocation(duplicateFrom.location);
+      setMapUrl(duplicateFrom.mapUrl || "");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, duplicateFrom]);
+
+  if (!isOpen) return null;
 
   const handleClose = () => {
     resetForm();
     onClose();
   };
 
-  const handleAddTag = () => {
-    const t = tagInput.trim();
-    if (!t) return;
-    if (!tags.includes(t)) setTags(prev => [...prev, t]);
-    setTagInput("");
-  };
-
-  const handleTagKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      handleAddTag();
-    }
-  };
-
-  const handleFilesAdded = (fileList: FileList | null) => {
-    if (!fileList) return;
-    const names = Array.from(fileList).map(f => f.name);
-    setMediaFileNames(prev => [...prev, ...names]);
-  };
-
   const toggleMember = (userId: string) => {
-    setSelectedMemberIds(prev =>
-      prev.includes(userId) ? prev.filter(id => id !== userId) : [...prev, userId]
-    );
+    setSelectedMemberIds(prev => (prev.includes(userId) ? prev.filter(id => id !== userId) : [...prev, userId]));
   };
 
   const selectedPercentageTotal = selectedMemberIds.reduce((sum, id) => sum + (memberPercentages[id] || 0), 0);
 
-  const validateBasicTab = (): boolean => {
-    if (!name || !developer || !propertyType || !propertyStatus || !websiteUrl || !leadRegistrationUrl || !description || !contactNumber || !zone || !locality || !mapUrl) {
-      alert("Please fill in all required fields (marked *) before continuing.");
+  const fieldValues: Record<(typeof REQUIRED_FIELDS)[number], string> = { name, developer, propertyType, location };
+
+  const validateDetailsTab = (): boolean => {
+    const missing = REQUIRED_FIELDS.filter(f => !fieldValues[f].trim());
+    if (missing.length > 0) {
+      alert("Please fill in Builder Name, Property Name, Property Type, and Location before continuing.");
       return false;
     }
     return true;
   };
 
-  const handleNext = () => {
-    if (validateBasicTab()) setActiveTab("team");
+  const handleSaveAndNext = () => {
+    if (validateDetailsTab()) setActiveTab("team");
   };
 
-  const handleSaveProperty = () => {
-    if (!validateBasicTab()) {
-      setActiveTab("basic");
+  const handleCreateProperty = () => {
+    if (!validateDetailsTab()) {
+      setActiveTab("details");
       return;
     }
-
     if (teamAssignmentMode === "CUSTOM_MEMBERS" && selectedMemberIds.length === 0) {
       alert("Select at least one team member, or switch to All Members.");
       return;
     }
-
     if (teamAssignmentMode === "CUSTOM_MEMBERS" && leadAssignmentMode === "PERCENTAGE" && selectedPercentageTotal !== 100) {
-      if (!confirm(`Selected member percentages add up to ${selectedPercentageTotal}%, not 100%. Save anyway?`)) {
-        return;
-      }
+      if (!confirm(`Selected member percentages add up to ${selectedPercentageTotal}%, not 100%. Save anyway?`)) return;
     }
 
     const assignedTeam: PropertyTeamMember[] | undefined =
@@ -166,21 +142,16 @@ export default function AddPropertyModal({ isOpen, onClose, onSuccess }: AddProp
     const propertyData: Omit<Property, "id" | "membersCount"> = {
       name,
       developer,
-      location: `${locality}, ${zone}`,
-      locality,
-      zone,
+      location,
       price: price || undefined,
-      priceType,
+      priceType: "Absolute",
       type: propertyType,
-      propertyStatus,
-      description,
+      propertyStatus: propertyStatus || undefined,
+      description: description || undefined,
       possessionDate: possessionDate || undefined,
-      contactNumber,
-      mapUrl,
-      websiteUrl,
-      leadRegistrationUrl,
-      tags,
-      mediaFileNames,
+      contactNumber: contactNumber || undefined,
+      mapUrl: mapUrl || undefined,
+      leadRegistrationUrl: leadRegistrationUrl || undefined,
       teamAssignmentMode,
       leadAssignmentMode: teamAssignmentMode === "CUSTOM_MEMBERS" ? leadAssignmentMode : undefined,
       assignedTeam
@@ -195,80 +166,66 @@ export default function AddPropertyModal({ isOpen, onClose, onSuccess }: AddProp
     <>
       <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-30" onClick={handleClose} />
       <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center sm:p-4">
-      <div className="w-full sm:max-w-2xl h-[95vh] sm:h-auto sm:max-h-[90vh] bg-white border-0 sm:border border-slate-200 rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden">
-        {/* Header */}
-        <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 bg-slate-50/50 shrink-0">
-          <div>
-            <h3 className="text-sm font-bold text-brand-700">New Property</h3>
-            <p className="text-[10px] text-slate-500 mt-0.5">Create a new property by filling in the details below.</p>
+        <div className="w-full sm:max-w-xl h-[95vh] sm:h-auto sm:max-h-[90vh] bg-white border-0 sm:border border-slate-200 rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+          {/* Header */}
+          <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 shrink-0">
+            <h3 className="text-sm font-bold text-slate-800">Add Property details</h3>
+            <button onClick={handleClose} className="text-slate-400 hover:text-slate-600">
+              <X className="h-5 w-5" />
+            </button>
           </div>
-          <button onClick={handleClose} className="text-slate-400 hover:text-slate-655">
-            <X className="h-5 w-5" />
-          </button>
-        </div>
 
-        {/* Tabs */}
-        <div className="flex gap-2 px-6 py-3 border-b border-slate-100 shrink-0">
-          <button
-            onClick={() => setActiveTab("basic")}
-            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-              activeTab === "basic" ? "bg-brand-700 text-white shadow-sm" : "bg-white border border-slate-200 text-slate-500 hover:text-slate-700"
-            }`}
-          >
-            <Info className="h-3.5 w-3.5" />
-            Basic Information
-          </button>
-          <button
-            onClick={() => setActiveTab("team")}
-            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-              activeTab === "team" ? "bg-brand-700 text-white shadow-sm" : "bg-white border border-slate-200 text-slate-500 hover:text-slate-700"
-            }`}
-          >
-            <Users className="h-3.5 w-3.5" />
-            Team Members
-          </button>
-        </div>
+          {/* Tabs */}
+          <div className="flex gap-6 px-6 border-b border-slate-100 shrink-0">
+            <button
+              onClick={() => setActiveTab("details")}
+              className={`py-3 text-xs font-bold border-b-2 transition-all ${
+                activeTab === "details" ? "border-brand-600 text-brand-700" : "border-transparent text-slate-450 hover:text-slate-600"
+              }`}
+            >
+              Property Details
+            </button>
+            <button
+              onClick={() => setActiveTab("team")}
+              className={`py-3 text-xs font-bold border-b-2 transition-all ${
+                activeTab === "team" ? "border-brand-600 text-brand-700" : "border-transparent text-slate-450 hover:text-slate-600"
+              }`}
+            >
+              Team Access Settings
+            </button>
+          </div>
 
-        {/* Scrollable body */}
-        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
-          {activeTab === "basic" && (
-            <div className="space-y-6 animate-fade-in">
-              {/* Basic Information */}
-              <div className="space-y-4">
-                <h4 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider border-b border-slate-100 pb-1.5 flex items-center gap-1.5">
-                  <Info className="h-3.5 w-3.5 text-slate-500" /> Basic Information
-                </h4>
-
+          {/* Scrollable body */}
+          <div className="flex-1 overflow-y-auto px-6 py-5">
+            {activeTab === "details" && (
+              <div className="space-y-4 animate-fade-in">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Property Name *</label>
+                    <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Builder Name</label>
                     <input
                       type="text"
-                      required
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      placeholder="Enter property name"
+                      value={developer}
+                      onChange={(e) => setDeveloper(e.target.value)}
+                      placeholder="e.g. developer name"
                       className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-brand-500"
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Builder or Company Name *</label>
+                    <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Property Name</label>
                     <input
                       type="text"
-                      required
-                      value={developer}
-                      onChange={(e) => setDeveloper(e.target.value)}
-                      placeholder="Enter builder or company name"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder="e.g. property name"
                       className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-brand-500"
                     />
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div>
-                    <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Property Type *</label>
+                    <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Property Type</label>
                     <select
-                      required
                       value={propertyType}
                       onChange={(e) => setPropertyType(e.target.value)}
                       className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none focus:border-brand-500"
@@ -278,9 +235,8 @@ export default function AddPropertyModal({ isOpen, onClose, onSuccess }: AddProp
                     </select>
                   </div>
                   <div>
-                    <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Property Status *</label>
+                    <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Property Status</label>
                     <select
-                      required
                       value={propertyStatus}
                       onChange={(e) => setPropertyStatus(e.target.value)}
                       className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none focus:border-brand-500"
@@ -289,9 +245,6 @@ export default function AddPropertyModal({ isOpen, onClose, onSuccess }: AddProp
                       {PROPERTY_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
                     </select>
                   </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Possession Date</label>
                     <input
@@ -301,368 +254,212 @@ export default function AddPropertyModal({ isOpen, onClose, onSuccess }: AddProp
                       className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-brand-500"
                     />
                   </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Price (Optional)</label>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={price}
-                        onChange={(e) => setPrice(e.target.value)}
-                        placeholder="Value"
-                        className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-brand-500"
-                      />
-                      <select
-                        value={priceType}
-                        onChange={(e) => setPriceType(e.target.value as "Absolute" | "Starting From")}
-                        className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-2 text-xs text-slate-700 focus:outline-none focus:border-brand-500 shrink-0"
-                      >
-                        <option value="Absolute">Absolute</option>
-                        <option value="Starting From">Starting From</option>
-                      </select>
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Website URL *</label>
-                  <input
-                    type="url"
-                    required
-                    value={websiteUrl}
-                    onChange={(e) => setWebsiteUrl(e.target.value)}
-                    placeholder="Enter website URL"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-brand-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Lead Registration URL *</label>
-                  <input
-                    type="url"
-                    required
-                    value={leadRegistrationUrl}
-                    onChange={(e) => setLeadRegistrationUrl(e.target.value)}
-                    placeholder="Enter lead registration form URL"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-brand-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Description *</label>
-                  <textarea
-                    required
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    placeholder="Enter property description..."
-                    rows={4}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-brand-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Tags</label>
-                  <div className="flex gap-2">
+                    <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Quoted Price</label>
                     <input
                       type="text"
-                      value={tagInput}
-                      onChange={(e) => setTagInput(e.target.value)}
-                      onKeyDown={handleTagKeyDown}
-                      placeholder="Add a tag and press Enter"
+                      value={price}
+                      onChange={(e) => setPrice(e.target.value)}
+                      placeholder="e.g. 1.91 Cr"
                       className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-brand-500"
                     />
-                    <button
-                      type="button"
-                      onClick={handleAddTag}
-                      className="shrink-0 bg-brand-700 hover:bg-brand-600 text-white font-bold px-4 py-2 rounded-lg text-xs transition-all"
-                    >
-                      Add
-                    </button>
                   </div>
-                  {tags.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 mt-2">
-                      {tags.map(tag => (
-                        <span key={tag} className="inline-flex items-center gap-1 bg-brand-50 border border-brand-100 text-brand-700 px-2 py-0.5 rounded-lg text-[10px] font-bold">
-                          {tag}
-                          <button type="button" onClick={() => setTags(prev => prev.filter(t => t !== tag))} className="hover:text-brand-900">
-                            <X className="h-2.5 w-2.5" />
-                          </button>
-                        </span>
-                      ))}
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Lead Registration URL</label>
+                    <input
+                      type="text"
+                      value={leadRegistrationUrl}
+                      onChange={(e) => setLeadRegistrationUrl(e.target.value)}
+                      placeholder="e.g. landing page lead form link"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-brand-500"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Description</label>
+                  <textarea
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    placeholder="e.g. project description"
+                    rows={3}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-brand-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Contact Number</label>
+                  <input
+                    type="tel"
+                    value={contactNumber}
+                    onChange={(e) => setContactNumber(e.target.value)}
+                    placeholder="e.g. contact number"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-brand-500"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Location</label>
+                    <input
+                      type="text"
+                      value={location}
+                      onChange={(e) => setLocation(e.target.value)}
+                      placeholder="e.g. enter location"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-brand-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Map URL</label>
+                    <input
+                      type="text"
+                      value={mapUrl}
+                      onChange={(e) => setMapUrl(e.target.value)}
+                      placeholder="e.g. paste map url"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-brand-500"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeTab === "team" && (
+              <div className="space-y-4 animate-fade-in">
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                  <span className="block text-[10px] font-bold text-slate-500 uppercase">Select Team Members</span>
+                  <div className="flex items-center gap-6">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        checked={teamAssignmentMode === "ALL_MEMBERS"}
+                        onChange={() => setTeamAssignmentMode("ALL_MEMBERS")}
+                        className="h-3.5 w-3.5 text-brand-600 focus:ring-brand-500"
+                      />
+                      <span className="text-xs font-semibold text-slate-700">All Members</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        checked={teamAssignmentMode === "CUSTOM_MEMBERS"}
+                        onChange={() => setTeamAssignmentMode("CUSTOM_MEMBERS")}
+                        className="h-3.5 w-3.5 text-brand-600 focus:ring-brand-500"
+                      />
+                      <span className="text-xs font-semibold text-slate-700">Custom Members</span>
+                    </label>
+                  </div>
+
+                  {teamAssignmentMode === "CUSTOM_MEMBERS" && (
+                    <div className="space-y-3 pt-3 border-t border-slate-200 animate-fade-in">
+                      <div>
+                        <span className="block text-[10px] font-bold text-slate-500 uppercase mb-2">Select Distribution</span>
+                        <div className="flex items-center gap-6">
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="radio"
+                              checked={leadAssignmentMode === "ROUND_ROBIN"}
+                              onChange={() => setLeadAssignmentMode("ROUND_ROBIN")}
+                              className="h-3.5 w-3.5 text-brand-600 focus:ring-brand-500"
+                            />
+                            <span className="text-xs font-semibold text-slate-700">Round Robin</span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="radio"
+                              checked={leadAssignmentMode === "PERCENTAGE"}
+                              onChange={() => setLeadAssignmentMode("PERCENTAGE")}
+                              className="h-3.5 w-3.5 text-brand-600 focus:ring-brand-500"
+                            />
+                            <span className="text-xs font-semibold text-slate-700">Percentage Split</span>
+                          </label>
+                        </div>
+                      </div>
+
+                      <input
+                        type="text"
+                        value={memberSearch}
+                        onChange={(e) => setMemberSearch(e.target.value)}
+                        placeholder="Looking for your team members?"
+                        className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-brand-500"
+                      />
+
+                      <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-48 overflow-y-auto bg-white">
+                        {visibleTeam.length === 0 ? (
+                          <p className="text-[10px] text-slate-400 italic p-3">No matching team members.</p>
+                        ) : (
+                          visibleTeam.map(member => {
+                            const isChecked = selectedMemberIds.includes(member.id);
+                            return (
+                              <div key={member.id} className="flex items-center justify-between p-2.5 hover:bg-slate-50">
+                                <label className="flex items-center gap-2.5 cursor-pointer min-w-0 flex-1">
+                                  <input
+                                    type="checkbox"
+                                    checked={isChecked}
+                                    onChange={() => toggleMember(member.id)}
+                                    className="h-3.5 w-3.5 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                                  />
+                                  <span className="text-xs font-semibold text-slate-800 truncate">{member.name}</span>
+                                </label>
+                                {isChecked && leadAssignmentMode === "PERCENTAGE" && (
+                                  <div className="flex items-center gap-1 shrink-0">
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      max={100}
+                                      value={memberPercentages[member.id] ?? 0}
+                                      onChange={(e) =>
+                                        setMemberPercentages(prev => ({ ...prev, [member.id]: Number(e.target.value) }))
+                                      }
+                                      className="w-14 bg-slate-50 border border-slate-200 rounded px-2 py-1 text-[10px] text-right font-mono focus:outline-none"
+                                    />
+                                    <span className="text-[10px] text-slate-400 font-bold">%</span>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+
+                      {leadAssignmentMode === "PERCENTAGE" && selectedMemberIds.length > 0 && (
+                        <p className={`text-[10px] font-bold ${selectedPercentageTotal === 100 ? "text-emerald-600" : "text-amber-600"}`}>
+                          Total: {selectedPercentageTotal}%
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>
               </div>
+            )}
+          </div>
 
-              {/* Contact & Location */}
-              <div className="space-y-4">
-                <h4 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider border-b border-slate-100 pb-1.5 flex items-center gap-1.5">
-                  <MapPin className="h-3.5 w-3.5 text-slate-500" /> Contact &amp; Location
-                </h4>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Contact Number *</label>
-                    <input
-                      type="tel"
-                      required
-                      value={contactNumber}
-                      onChange={(e) => setContactNumber(e.target.value)}
-                      placeholder="Enter contact number"
-                      className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-brand-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Zone *</label>
-                    <input
-                      list="zone-options"
-                      required
-                      value={zone}
-                      onChange={(e) => setZone(e.target.value)}
-                      placeholder="Enter or select zone"
-                      className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-brand-500"
-                    />
-                    <datalist id="zone-options">
-                      {zoneOptions.map(z => <option key={z} value={z} />)}
-                    </datalist>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Locality *</label>
-                  <input
-                    list="locality-options"
-                    required
-                    value={locality}
-                    onChange={(e) => setLocality(e.target.value)}
-                    placeholder="Enter or select locality"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-brand-500"
-                  />
-                  <datalist id="locality-options">
-                    {localityOptions.map(l => <option key={l} value={l} />)}
-                  </datalist>
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Map URL *</label>
-                  <input
-                    type="url"
-                    required
-                    value={mapUrl}
-                    onChange={(e) => setMapUrl(e.target.value)}
-                    placeholder="Enter Google Maps URL or location link"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-brand-500"
-                  />
-                </div>
-              </div>
-
-              {/* Media & Documents */}
-              <div className="space-y-3">
-                <h4 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider border-b border-slate-100 pb-1.5 flex items-center justify-between">
-                  <span className="flex items-center gap-1.5">
-                    <FileText className="h-3.5 w-3.5 text-slate-500" /> Media &amp; Documents
-                  </span>
-                  <span className="text-slate-400 normal-case font-bold">{mediaFileNames.length} files added</span>
-                </h4>
-
-                <div
-                  onClick={() => fileInputRef.current?.click()}
-                  onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
-                  onDragLeave={() => setIsDragOver(false)}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    setIsDragOver(false);
-                    handleFilesAdded(e.dataTransfer.files);
-                  }}
-                  className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-colors ${
-                    isDragOver ? "border-brand-400 bg-brand-50/40" : "border-slate-200 bg-slate-50/50 hover:bg-slate-50"
-                  }`}
-                >
-                  <UploadCloud className="h-6 w-6 text-slate-400 mx-auto mb-2" />
-                  <p className="text-xs font-bold text-slate-600">Drop files here or click to browse</p>
-                  <p className="text-[10px] text-slate-400 mt-1">Images, Videos, PDF, and Documents • Max 25MB per file</p>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    multiple
-                    className="hidden"
-                    onChange={(e) => handleFilesAdded(e.target.files)}
-                  />
-                </div>
-
-                {mediaFileNames.length === 0 ? (
-                  <p className="text-[10px] text-slate-400 italic text-center py-2">
-                    No media or documents uploaded. Add images, videos, or documents to showcase this property.
-                  </p>
-                ) : (
-                  <div className="space-y-1.5">
-                    {mediaFileNames.map((f, idx) => (
-                      <div key={idx} className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-[11px]">
-                        <span className="text-slate-700 font-semibold truncate">{f}</span>
-                        <button
-                          type="button"
-                          onClick={() => setMediaFileNames(prev => prev.filter((_, i) => i !== idx))}
-                          className="text-slate-400 hover:text-red-600 shrink-0 ml-2"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {activeTab === "team" && (
-            <div className="space-y-5 animate-fade-in">
-              <h4 className="text-xs font-bold text-slate-700">Team Members Assignment</h4>
-
-              <div className="space-y-3">
-                <button
-                  type="button"
-                  onClick={() => setTeamAssignmentMode("ALL_MEMBERS")}
-                  className={`w-full text-left p-4 rounded-xl border transition-all flex items-start gap-3 ${
-                    teamAssignmentMode === "ALL_MEMBERS" ? "border-brand-400 bg-brand-50/40" : "border-slate-200 bg-white hover:bg-slate-50"
-                  }`}
-                >
-                  <span className={`h-4 w-4 rounded-full border-2 mt-0.5 shrink-0 flex items-center justify-center ${
-                    teamAssignmentMode === "ALL_MEMBERS" ? "border-brand-600" : "border-slate-300"
-                  }`}>
-                    {teamAssignmentMode === "ALL_MEMBERS" && <span className="h-2 w-2 rounded-full bg-brand-600" />}
-                  </span>
-                  <span>
-                    <span className="block text-xs font-bold text-slate-800">All Members</span>
-                    <span className="block text-[10px] text-slate-500 mt-0.5">All current and future team members will be part of this property.</span>
-                  </span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setTeamAssignmentMode("CUSTOM_MEMBERS")}
-                  className={`w-full text-left p-4 rounded-xl border transition-all flex items-start gap-3 ${
-                    teamAssignmentMode === "CUSTOM_MEMBERS" ? "border-brand-400 bg-brand-50/40" : "border-slate-200 bg-white hover:bg-slate-50"
-                  }`}
-                >
-                  <span className={`h-4 w-4 rounded-full border-2 mt-0.5 shrink-0 flex items-center justify-center ${
-                    teamAssignmentMode === "CUSTOM_MEMBERS" ? "border-brand-600" : "border-slate-300"
-                  }`}>
-                    {teamAssignmentMode === "CUSTOM_MEMBERS" && <span className="h-2 w-2 rounded-full bg-brand-600" />}
-                  </span>
-                  <span>
-                    <span className="block text-xs font-bold text-slate-800">Custom Members</span>
-                    <span className="block text-[10px] text-slate-500 mt-0.5">Pick specific sales agents, managers, or team leads for this property.</span>
-                  </span>
-                </button>
-              </div>
-
-              {teamAssignmentMode === "CUSTOM_MEMBERS" && (
-                <div className="space-y-4 pt-2 border-t border-slate-100 animate-fade-in">
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-500 mb-2 uppercase">Lead Assignment Mode</label>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setLeadAssignmentMode("ROUND_ROBIN")}
-                        className={`p-2.5 rounded-lg text-[11px] font-bold border transition-all ${
-                          leadAssignmentMode === "ROUND_ROBIN" ? "bg-brand-50 border-brand-300 text-brand-700" : "bg-white border-slate-200 text-slate-500"
-                        }`}
-                      >
-                        Round Robin
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setLeadAssignmentMode("PERCENTAGE")}
-                        className={`p-2.5 rounded-lg text-[11px] font-bold border transition-all ${
-                          leadAssignmentMode === "PERCENTAGE" ? "bg-brand-50 border-brand-300 text-brand-700" : "bg-white border-slate-200 text-slate-500"
-                        }`}
-                      >
-                        Percentage Based
-                      </button>
-                    </div>
-                    <p className="text-[10px] text-slate-400 mt-1.5">
-                      {leadAssignmentMode === "ROUND_ROBIN"
-                        ? "Incoming leads for this property are distributed evenly, one after another, across the selected members."
-                        : "Incoming leads are distributed according to the percentage weight assigned to each selected member."}
-                    </p>
-                  </div>
-
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <label className="block text-[10px] font-bold text-slate-500 uppercase">Select Sales Team</label>
-                      {leadAssignmentMode === "PERCENTAGE" && (
-                        <span className={`text-[10px] font-bold ${selectedPercentageTotal === 100 ? "text-emerald-600" : "text-amber-600"}`}>
-                          Total: {selectedPercentageTotal}%
-                        </span>
-                      )}
-                    </div>
-                    <div className="border border-slate-200 rounded-xl divide-y divide-slate-100 max-h-56 overflow-y-auto">
-                      {salesTeam.map(member => {
-                        const isChecked = selectedMemberIds.includes(member.id);
-                        return (
-                          <div key={member.id} className="flex items-center justify-between p-2.5 hover:bg-slate-50">
-                            <label className="flex items-center gap-2.5 cursor-pointer min-w-0 flex-1">
-                              <input
-                                type="checkbox"
-                                checked={isChecked}
-                                onChange={() => toggleMember(member.id)}
-                                className="h-3.5 w-3.5 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-                              />
-                              <span className="min-w-0">
-                                <span className="block text-xs font-bold text-slate-800 truncate">{member.name}</span>
-                                <span className="block text-[9px] text-slate-450">
-                                  {member.role_type === "Manager" ? "Sales Manager / TL" : "Sales Agent"}
-                                </span>
-                              </span>
-                            </label>
-                            {isChecked && leadAssignmentMode === "PERCENTAGE" && (
-                              <input
-                                type="number"
-                                min={0}
-                                max={100}
-                                value={memberPercentages[member.id] ?? 0}
-                                onChange={(e) =>
-                                  setMemberPercentages(prev => ({ ...prev, [member.id]: Number(e.target.value) }))
-                                }
-                                className="w-16 bg-slate-50 border border-slate-200 rounded px-2 py-1 text-[11px] text-right font-mono focus:outline-none"
-                              />
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div className="flex justify-between items-center px-6 py-4 border-t border-slate-100 bg-slate-50/50 shrink-0">
-          <button
-            onClick={handleClose}
-            className="px-4 py-2 rounded-lg text-xs font-bold text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-all"
-          >
-            Cancel
-          </button>
-          {activeTab === "basic" ? (
+          {/* Footer */}
+          <div className="flex justify-end items-center gap-2 px-6 py-4 border-t border-slate-100 shrink-0">
             <button
-              onClick={handleNext}
-              className="inline-flex items-center gap-1.5 bg-brand-700 hover:bg-brand-600 text-white font-bold px-4 py-2 rounded-lg text-xs transition-all shadow-sm"
+              onClick={handleClose}
+              className="px-5 py-2 rounded-lg text-xs font-bold border border-slate-200 text-slate-600 hover:bg-slate-50 transition-all"
             >
-              Next: Team Members
+              Cancel
             </button>
-          ) : (
-            <button
-              onClick={handleSaveProperty}
-              className="inline-flex items-center gap-1.5 bg-brand-700 hover:bg-brand-600 text-white font-bold px-4 py-2 rounded-lg text-xs transition-all shadow-sm"
-            >
-              <Check className="h-3.5 w-3.5" />
-              Save Property
-            </button>
-          )}
+            {activeTab === "details" ? (
+              <button
+                onClick={handleSaveAndNext}
+                className="px-5 py-2 rounded-lg text-xs font-bold bg-brand-700 hover:bg-brand-600 text-white transition-all shadow-sm"
+              >
+                Save &amp; Next
+              </button>
+            ) : (
+              <button
+                onClick={handleCreateProperty}
+                className="px-5 py-2 rounded-lg text-xs font-bold bg-brand-700 hover:bg-brand-600 text-white transition-all shadow-sm"
+              >
+                Create Property
+              </button>
+            )}
+          </div>
         </div>
-      </div>
       </div>
     </>
   );
