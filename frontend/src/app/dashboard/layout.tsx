@@ -140,7 +140,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   const activeSystemDetail = getSystemDetails(activeSystem);
 
   const mainNavigation = [
-    { name: "Dashboard", href: "/dashboard", activeCheck: (p: string, t?: string | null) => p === "/dashboard" && !t, icon: LayoutDashboard },
+    { name: "Home", href: "/dashboard", activeCheck: (p: string, t?: string | null) => p === "/dashboard" && !t, icon: LayoutDashboard },
     { name: "Leads", href: "/dashboard/crm", activeCheck: (p: string, t?: string | null) => p === "/dashboard/crm", icon: Users },
     { name: "Properties", href: "/dashboard/properties", activeCheck: (p: string, t?: string | null) => p === "/dashboard/properties", icon: Building },
     { name: "Resale Market", href: "/dashboard/resale", activeCheck: (p: string, t?: string | null) => p === "/dashboard/resale", icon: Landmark },
@@ -177,7 +177,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     ? mainNavigation.filter(item => checkUserAccess(currentUser, item.href))
     : showAdmin
       ? [
-          { name: "Dashboard", href: "/dashboard", activeCheck: (p: string, t?: string | null) => p === "/dashboard" && !t, icon: LayoutDashboard },
+          { name: "Home", href: "/dashboard", activeCheck: (p: string, t?: string | null) => p === "/dashboard" && !t, icon: LayoutDashboard },
           { name: "Calendar", href: "/dashboard/admin/calendar", activeCheck: (p: string, t?: string | null) => p === "/dashboard/admin/calendar", icon: Calendar }
         ]
       : [];

@@ -3,11 +3,6 @@
 import React, { useState } from "react";
 import Link from "next/link";
 import { useApp, FollowupCall, User, Invoice } from "@/context/AppContext";
-import KpiGrid from "@/components/dashboard/KpiGrid";
-import SalesTelemetry from "@/components/dashboard/SalesTelemetry";
-import MarketingOperations from "@/components/dashboard/MarketingOperations";
-import AttendanceWidget from "@/components/dashboard/AttendanceWidget";
-import FinanceAudit from "@/components/dashboard/FinanceAudit";
 import {
   Phone,
   Clock,
@@ -60,109 +55,157 @@ export default function DashboardHome() {
   const userDept = currentUser?.department || "TECH";
   const userRole = currentUser?.role || "ADMIN";
 
-  // Render Admin Dashboard (God Admin see all monitoring details of all departments)
+  // Render Admin Home (replaces the old dense "Global Admin Operations
+  // Cockpit" — a lighter, module-summary landing screen instead, per the
+  // provided design). The detailed telemetry that used to live here
+  // (KpiGrid/SalesTelemetry/AttendanceWidget/FinanceAudit/MarketingOperations)
+  // is still reachable from each module's own page — this screen is just the
+  // front door.
   if (activeSystem === "ADMIN") {
     const now = new Date();
-    const isSameLocalDay = (isoStr: string | undefined, ref: Date) =>
-      !!isoStr && new Date(isoStr).toDateString() === ref.toDateString();
+    const sevenDaysAgo = new Date(now);
+    sevenDaysAgo.setDate(now.getDate() - 7);
+    const isWithinLast7Days = (iso?: string) => !!iso && new Date(iso) >= sevenDaysAgo;
 
-    // Top KPIs calculations — all derived from real data, no seed-baseline padding
-    const leadsToday = leads.filter(l => isSameLocalDay(l.createdAtStr, now)).length;
-    const visitsToday = followupCalls.filter(c => c.type === "Site Visit" && c.status === "Upcoming").length;
-    const monthBookings = leads.filter(l => {
-      if (!["Booking Done", "Booking Approved"].includes(l.status) || !l.createdAtStr) return false;
-      const d = new Date(l.createdAtStr);
-      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-    }).length;
-    // Site-visit calendar events on this week's Saturday/Sunday.
-    const startOfWeek = new Date(now);
-    startOfWeek.setDate(now.getDate() - now.getDay());
-    const endOfWeek = new Date(startOfWeek);
-    endOfWeek.setDate(startOfWeek.getDate() + 6);
-    const weekendVisits = calendarEvents.filter(e => {
-      if (e.type !== "SITE_VISIT") return false;
-      const d = new Date(e.date);
-      return (d.getDay() === 0 || d.getDay() === 6) && d >= startOfWeek && d <= endOfWeek;
-    }).length;
+    // CRM — all real: leads created in the window, campaigns the ad-spend
+    // sync currently reports ACTIVE, spend/lead-count in the same window
+    // (CPL derived from those, not a separate estimate), and follow-ups
+    // still pending action.
+    const leadsLast7Days = leads.filter(l => isWithinLast7Days(l.createdAtStr)).length;
+    const activeCampaignsCount = new Set(
+      adSpendRecords.filter(r => r.campaignStatus === "ACTIVE").map(r => r.accountName)
+    ).size;
+    const spendLast7Days = adSpendRecords.filter(r => isWithinLast7Days(r.date)).reduce((s, r) => s + r.spend, 0);
+    const leadsGenLast7Days = adSpendRecords.filter(r => isWithinLast7Days(r.date)).reduce((s, r) => s + r.leadsGenerated, 0);
+    const avgCplLast7Days = leadsGenLast7Days > 0 ? spendLast7Days / leadsGenLast7Days : 0;
+    const pendingFollowUps = followupCalls.filter(c => c.status === "Upcoming").length;
 
-    // Sales telemetry calculations
-    const missedFollowups = followupCalls.filter(c => c.status === "Missed").length;
-    const scheduledFollowups = followupCalls.filter(c => c.status === "Upcoming").length;
-    const activeAgentsCount = users.filter(u => u.role === "AGENT").length;
-
-    // Marketing spend, from real ad_spend_records — 0/empty until the Meta/Google
-    // integrations are live and actually writing rows here.
+    // HRMS — Present/Pending Info use real timesheet/regularization data.
+    // "Leave applications" and "WFH" have no backing feature anywhere in this
+    // schema (no leave-request table, no remote-work flag) — shown honestly
+    // as 0 rather than invented, matching how every other unavailable metric
+    // in this app is handled (e.g. Talk Time: "No data").
     const todayStr = now.toISOString().split("T")[0];
-    const metaSpendRows = adSpendRecords.filter(r => r.platform === "Meta");
-    const googleSpendRows = adSpendRecords.filter(r => r.platform === "Google");
-    const metaTotalSpend = metaSpendRows.reduce((sum, r) => sum + r.spend, 0);
-    const metaTodaySpend = metaSpendRows.filter(r => r.date === todayStr).reduce((sum, r) => sum + r.spend, 0);
-    const metaActiveCampaigns = new Set(metaSpendRows.map(r => r.accountName)).size;
-    const googleTotalSpend = googleSpendRows.reduce((sum, r) => sum + r.spend, 0);
-    const googleTodaySpend = googleSpendRows.filter(r => r.date === todayStr).reduce((sum, r) => sum + r.spend, 0);
-    const googleActiveCampaigns = new Set(googleSpendRows.map(r => r.accountName)).size;
+    const presentTodayCount = timesheets.filter(ts => ts.date === todayStr).length;
+    const pendingRegularizations = timesheets.filter(ts => ts.status === "Regularization Pending").length;
+    const leavesAppliedLast7Days = 0;
+    const employeesOnLeave = 0;
+    const wfhCount = 0;
+
+    // Finance — invoices in the window (+ distinct projects they cover),
+    // current booked-lead count, total invoices as the closest real
+    // "transactions" proxy (no separate ledger table exists), and total
+    // reimbursement claims.
+    const invoicesLast7Days = invoices.filter(i => isWithinLast7Days(i.createdAt));
+    const propertiesInvoicedLast7Days = new Set(invoicesLast7Days.map(i => i.projectName).filter(Boolean)).size;
+    const bookingsCount = leads.filter(l => ["Booked", "Booking Done", "Booking Approved"].includes(l.status)).length;
 
     return (
       <div className="space-y-8 pb-12 animate-fade-in">
-        <div className="flex justify-between items-center">
-          <div>
-            <h2 className="text-xl font-bold text-brand-700 flex items-center gap-2">
-              <Activity className="h-6.5 w-6.5 text-brand-600" />
-              Global Admin Operations Cockpit
-            </h2>
-            <p className="text-xs text-slate-500">Real-time telemetry and monitoring across Sales, HRMS, and Finance partitions.</p>
+        <div>
+          <h2 className="text-2xl font-bold text-slate-900">Hey, {currentUser?.name}!</h2>
+          <Link href="#" className="text-sm text-slate-450 underline underline-offset-2 hover:text-slate-600 transition-colors">
+            Are you ready to experience how the growth process work?
+          </Link>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {/* CRM */}
+          <div className="bg-white rounded-[2rem] shadow-sm border border-slate-100 p-7 flex flex-col justify-between">
+            <div className="space-y-5">
+              <h3 className="text-2xl font-extrabold text-brand-700 flex items-center gap-2">
+                <Activity className="h-6 w-6 text-brand-600" />
+                CRM
+              </h3>
+              <div>
+                <p className="text-sm text-slate-450">Leads in last 7 days</p>
+                <p className="text-3xl font-black text-slate-900 mt-1">{leadsLast7Days}</p>
+                <p className="text-sm font-bold text-[#006AFF] mt-1">{activeCampaignsCount} Active Campaigns</p>
+              </div>
+              <div className="grid grid-cols-3 gap-3 pt-2 border-t border-slate-100">
+                <div>
+                  <p className="text-xs text-slate-450">Spends</p>
+                  <p className="text-lg font-bold text-slate-900">{spendLast7Days >= 1000 ? `${(spendLast7Days / 1000).toFixed(1)}K` : spendLast7Days.toFixed(0)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-450">Avg CPL</p>
+                  <p className="text-lg font-bold text-slate-900">{avgCplLast7Days.toFixed(2)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-450">Follow Ups</p>
+                  <p className="text-lg font-bold text-slate-900">{pendingFollowUps}</p>
+                </div>
+              </div>
+            </div>
+            <Link href="/dashboard/crm" className="text-sm font-bold text-[#006AFF] hover:underline mt-6 inline-flex items-center gap-1">
+              Know More <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
           </div>
-          <span className="text-xs font-bold text-brand-700 bg-brand-50 border border-brand-100 px-3 py-1.5 rounded-xl shadow-sm">
-            Live Telemetry Online
-          </span>
+
+          {/* HRMS */}
+          <div className="bg-white rounded-[2rem] shadow-sm border border-slate-100 p-7 flex flex-col justify-between">
+            <div className="space-y-5">
+              <h3 className="text-2xl font-extrabold text-brand-700 flex items-center gap-2">
+                <Users className="h-6 w-6 text-brand-600" />
+                HRMS
+              </h3>
+              <div>
+                <p className="text-sm text-slate-450">Applied Leaves in last 7 days</p>
+                <p className="text-3xl font-black text-slate-900 mt-1">{leavesAppliedLast7Days}</p>
+                <p className="text-sm font-bold text-[#006AFF] mt-1">{employeesOnLeave} Employees Applied</p>
+              </div>
+              <div className="grid grid-cols-3 gap-3 pt-2 border-t border-slate-100">
+                <div>
+                  <p className="text-xs text-slate-450">Present</p>
+                  <p className="text-lg font-bold text-slate-900">{presentTodayCount}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-450">Pending Info</p>
+                  <p className="text-lg font-bold text-red-600">{pendingRegularizations}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-450">WFH</p>
+                  <p className="text-lg font-bold text-slate-900">{wfhCount}</p>
+                </div>
+              </div>
+            </div>
+            <Link href="/dashboard/hrms" className="text-sm font-bold text-[#006AFF] hover:underline mt-6 inline-flex items-center gap-1">
+              Know More <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+          </div>
+
+          {/* Finance */}
+          <div className="bg-white rounded-[2rem] shadow-sm border border-slate-100 p-7 flex flex-col justify-between">
+            <div className="space-y-5">
+              <h3 className="text-2xl font-extrabold text-brand-700 flex items-center gap-2">
+                <TrendingUp className="h-6 w-6 text-brand-600" />
+                Finance
+              </h3>
+              <div>
+                <p className="text-sm text-slate-450">Raised Invoices in last 7 days</p>
+                <p className="text-3xl font-black text-slate-900 mt-1">{invoicesLast7Days.length}</p>
+                <p className="text-sm font-bold text-[#006AFF] mt-1">{propertiesInvoicedLast7Days} Properties Included</p>
+              </div>
+              <div className="grid grid-cols-3 gap-3 pt-2 border-t border-slate-100">
+                <div>
+                  <p className="text-xs text-slate-450">Bookings</p>
+                  <p className="text-lg font-bold text-slate-900">{bookingsCount}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-450">Transactions</p>
+                  <p className="text-lg font-bold text-slate-900">{invoices.length}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-450">Reimbursements</p>
+                  <p className="text-lg font-bold text-slate-900">{reimbursements.length}</p>
+                </div>
+              </div>
+            </div>
+            <Link href="/dashboard/finance" className="text-sm font-bold text-[#006AFF] hover:underline mt-6 inline-flex items-center gap-1">
+              Know More <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+          </div>
         </div>
-
-        {/* Step 1: Top Level KPIs Grid */}
-        <KpiGrid
-          totalLeads={leads.length}
-          leadsToday={leadsToday}
-          visitsToday={visitsToday}
-          weekendVisits={weekendVisits}
-          monthBookings={monthBookings}
-        />
-
-        {/* Step 2: Sales Telemetry Monitoring */}
-        {/* phoneCallsToday/talkTime have no real data source yet — no telephony
-            integration logs call count or duration anywhere in this schema.
-            Shown honestly as zero/"No data" rather than a fabricated number. */}
-        <SalesTelemetry
-          phoneCallsToday={0}
-          talkTime="No data"
-          activeAgents={activeAgentsCount}
-          scheduledFollowups={scheduledFollowups}
-          missedFollowups={missedFollowups}
-        />
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Step 4: HRMS Teams Attendance */}
-          <AttendanceWidget
-            users={users}
-            timesheets={timesheets}
-          />
-
-          {/* Step 5: Finance Audit & Billing Logs */}
-          <FinanceAudit
-            invoices={invoices}
-            pendingClaimsCount={pendingClaimsCount}
-            pendingFinanceReview={pendingFinanceReview}
-            properties={properties}
-          />
-        </div>
-
-        {/* Step 3: Marketing Operations */}
-        <MarketingOperations
-          metaTotalSpend={metaTotalSpend}
-          metaTodaySpend={metaTodaySpend}
-          metaActiveCampaigns={metaActiveCampaigns}
-          googleTotalSpend={googleTotalSpend}
-          googleTodaySpend={googleTodaySpend}
-          googleActiveCampaigns={googleActiveCampaigns}
-        />
       </div>
     );
   }
