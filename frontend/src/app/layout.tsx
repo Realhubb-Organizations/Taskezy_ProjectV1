@@ -9,6 +9,9 @@ export const metadata: Metadata = {
   title: "TASKEZY Enterprise Platform - Unified SaaS for Real Estate",
   description:
     "TASKEZY is the central business operations platform for Indian Real Estate brokerages & developers, unifying CRM pipelines, geofenced HRMS, and automated GST finance ledgers under a secure multi-tenant architecture.",
+  icons: {
+    icon: "/favicon.png"
+  }
 };
 
 export default function RootLayout({
