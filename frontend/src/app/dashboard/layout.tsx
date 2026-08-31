@@ -3,10 +3,12 @@
 import React, { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useApp, Role, SystemType, getAvailableSystems } from "@/context/AppContext";
+import { useApp, SystemType } from "@/context/AppContext";
 import NotificationBell from "@/components/dashboard/NotificationBell";
 import {
   LayoutDashboard,
+  LayoutGrid,
+  Target,
   Users,
   Clock,
   DollarSign,
@@ -26,11 +28,15 @@ import {
   HelpCircle,
   Video,
   LifeBuoy,
-  Briefcase,
-  ArrowLeft,
   Calendar,
   MoreHorizontal
 } from "lucide-react";
+
+function initialsFor(name?: string): string {
+  if (!name) return "U";
+  const parts = name.trim().split(" ").filter(Boolean);
+  return ((parts[0]?.[0] || "") + (parts[1]?.[0] || "")).toUpperCase() || "U";
+}
 
 function checkUserAccess(user: { role: string; department?: string; role_type?: string } | null, path: string): boolean {
   if (!user) return false;
@@ -86,9 +92,17 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     setActiveSystem
   } = useApp();
 
-  const [isRoleDropdownOpen, setIsRoleDropdownOpen] = useState(false);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [isSystemDropdownOpen, setIsSystemDropdownOpen] = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState<Set<SystemType>>(new Set());
+  const toggleGroup = (key: SystemType) => {
+    setExpandedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
 
   // Modals simulation state
   const [activeModal, setActiveModal] = useState<string | null>(null);
@@ -117,84 +131,60 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     return null; // redirect above is in flight
   }
 
-  const availableSystems = getAvailableSystems(currentUser);
-
-  const handleSystemChange = (system: SystemType) => {
-    setActiveSystem(system);
-    router.push("/dashboard");
-  };
-
-  const getSystemDetails = (sys: SystemType) => {
-    switch (sys) {
-      case "CRM":
-        return { name: "CRM Portal", icon: Building, color: "text-blue-600 bg-blue-50 border-blue-100", desc: "Leads & Properties" };
-      case "HRMS":
-        return { name: "HRMS Portal", icon: Briefcase, color: "text-indigo-600 bg-indigo-50 border-indigo-100", desc: "Attendance & Roster" };
-      case "FINANCE":
-        return { name: "Finance Portal", icon: DollarSign, color: "text-emerald-600 bg-emerald-50 border-emerald-100", desc: "Billing & Claims" };
-      case "ADMIN":
-        return { name: "Admin Cockpit", icon: Shield, color: "text-violet-600 bg-violet-50 border-violet-100", desc: "Global Control" };
-    }
-  };
-
-  const activeSystemDetail = getSystemDetails(activeSystem);
-
-  const mainNavigation = [
-    { name: "Home", href: "/dashboard", activeCheck: (p: string, t?: string | null) => p === "/dashboard" && !t, icon: LayoutDashboard },
+  // Sidebar groups — CRM/HRMS/FINANCE are always shown together, each
+  // independently expandable, rather than switched between one at a time.
+  // Clicking any item inside a group sets activeSystem to that group so
+  // everything downstream that already keys off activeSystem (Settings,
+  // NotificationBell, the Home dashboard's per-role content) keeps working
+  // exactly as before — only how the sidebar presents them changed.
+  const crmItems = [
     { name: "Leads", href: "/dashboard/crm", activeCheck: (p: string, t?: string | null) => p === "/dashboard/crm", icon: Users },
     { name: "Properties", href: "/dashboard/properties", activeCheck: (p: string, t?: string | null) => p === "/dashboard/properties", icon: Building },
     { name: "Resale Market", href: "/dashboard/resale", activeCheck: (p: string, t?: string | null) => p === "/dashboard/resale", icon: Landmark },
-    { name: "Calendar", href: "/dashboard/crm/calendar", activeCheck: (p: string, t?: string | null) => p === "/dashboard/crm/calendar", icon: Calendar }
+    { name: "Calendar", href: "/dashboard/crm/calendar", activeCheck: (p: string, t?: string | null) => p === "/dashboard/crm/calendar", icon: Calendar },
+    { name: "Settings", href: "/dashboard/settings", activeCheck: (p: string, t?: string | null) => p === "/dashboard/settings", icon: Settings },
+    { name: "Reports", href: "/dashboard/reports", activeCheck: (p: string, t?: string | null) => p === "/dashboard/reports", icon: BarChart }
   ];
 
-  const hrisNavigation = [
+  const hrmsItems = [
     { name: "Teams", href: "/dashboard/hrms?tab=teams", activeCheck: (p: string, t?: string | null) => p === "/dashboard/hrms" && t === "teams", icon: Users },
     { name: "Attendance", href: "/dashboard/hrms?tab=attendance", activeCheck: (p: string, t?: string | null) => p === "/dashboard/hrms" && t === "attendance", icon: Clock },
+    { name: "HR Dashboard", href: "/dashboard/hrms?tab=dashboard", activeCheck: (p: string, t?: string | null) => p === "/dashboard/hrms" && t === "dashboard", icon: LayoutDashboard },
     { name: "Calendar", href: "/dashboard/hrms?tab=calendar", activeCheck: (p: string, t?: string | null) => p === "/dashboard/hrms" && t === "calendar", icon: Calendar },
-    { name: "HR Dashboard", href: "/dashboard/hrms?tab=dashboard", activeCheck: (p: string, t?: string | null) => p === "/dashboard/hrms" && t === "dashboard", icon: LayoutDashboard }
+    { name: "Settings", href: "/dashboard/settings", activeCheck: (p: string, t?: string | null) => p === "/dashboard/settings", icon: Settings },
+    { name: "Reports", href: "/dashboard/reports", activeCheck: (p: string, t?: string | null) => p === "/dashboard/reports", icon: BarChart }
   ];
 
-  const financeNavigation = [
+  const financeItems = [
     { name: "Billing", href: "/dashboard/finance?tab=billing", activeCheck: (p: string, t?: string | null) => p === "/dashboard/finance" && t === "billing", icon: DollarSign },
     { name: "Reimbursements", href: "/dashboard/finance?tab=reimbursements", activeCheck: (p: string, t?: string | null) => p === "/dashboard/finance" && t === "reimbursements", icon: FileText },
+    { name: "Finance Dashboard", href: "/dashboard/finance?tab=dashboard", activeCheck: (p: string, t?: string | null) => p === "/dashboard/finance" && t === "dashboard", icon: LayoutDashboard },
     { name: "Calendar", href: "/dashboard/finance?tab=calendar", activeCheck: (p: string, t?: string | null) => p === "/dashboard/finance" && t === "calendar", icon: Calendar },
-    { name: "Finance Dashboard", href: "/dashboard/finance?tab=dashboard", activeCheck: (p: string, t?: string | null) => p === "/dashboard/finance" && t === "dashboard", icon: LayoutDashboard }
-  ];
-
-  const bottomNavigation = [
     { name: "Settings", href: "/dashboard/settings", activeCheck: (p: string, t?: string | null) => p === "/dashboard/settings", icon: Settings },
-    { name: "Reports", href: "/dashboard/reports", activeCheck: (p: string, t?: string | null) => p === "/dashboard/reports", icon: BarChart },
-    { name: "Organization", href: "/dashboard/organization", activeCheck: (p: string, t?: string | null) => p === "/dashboard/organization", icon: Building }
+    { name: "Reports", href: "/dashboard/reports", activeCheck: (p: string, t?: string | null) => p === "/dashboard/reports", icon: BarChart }
   ];
 
-  // Filter navigation arrays based on current user context and active system
-  const showCRM = activeSystem === "CRM";
-  const showHRMS = activeSystem === "HRMS";
-  const showFinance = activeSystem === "FINANCE";
-  const showAdmin = activeSystem === "ADMIN";
+  const sidebarGroups = (
+    [
+      { key: "HRMS" as SystemType, label: "HRMS", icon: Target, baseHref: "/dashboard/hrms", items: hrmsItems },
+      { key: "CRM" as SystemType, label: "CRM", icon: LayoutGrid, baseHref: "/dashboard/crm", items: crmItems },
+      { key: "FINANCE" as SystemType, label: "FINANCE", icon: FileText, baseHref: "/dashboard/finance", items: financeItems }
+    ]
+  )
+    .filter(g => checkUserAccess(currentUser, g.baseHref))
+    .map(g => ({ ...g, items: g.items.filter(item => checkUserAccess(currentUser, item.href)) }));
 
-  const allowedMainNavigation = showCRM
-    ? mainNavigation.filter(item => checkUserAccess(currentUser, item.href))
-    : showAdmin
-      ? [
-          { name: "Home", href: "/dashboard", activeCheck: (p: string, t?: string | null) => p === "/dashboard" && !t, icon: LayoutDashboard },
-          { name: "Calendar", href: "/dashboard/admin/calendar", activeCheck: (p: string, t?: string | null) => p === "/dashboard/admin/calendar", icon: Calendar }
-        ]
-      : [];
-  const allowedHrisNavigation = showHRMS ? hrisNavigation.filter(item => checkUserAccess(currentUser, item.href)) : [];
-  const allowedFinanceNavigation = showFinance ? financeNavigation.filter(item => checkUserAccess(currentUser, item.href)) : [];
-  const allowedBottomNavigation = bottomNavigation.filter(item => checkUserAccess(currentUser, item.href));
+  // Static links, always visible below the groups regardless of which is expanded.
+  const staticBottomLinks = [
+    { name: "Organization", href: "/dashboard/organization", activeCheck: (p: string) => p === "/dashboard/organization", icon: Building }
+  ].filter(item => checkUserAccess(currentUser, item.href));
 
-  // Mobile bottom tab bar: whichever system's nav group is active, its first
-  // 4 items become fixed tabs (mirrors a native app's tab bar); anything
-  // beyond that — plus Settings/Reports/Organization/Help/Logout, none of
-  // which fit in a 5-tab bar — lives behind the "More" tab (the same drawer
-  // used on desktop-hidden screens).
-  const primaryMobileNav = (
-    allowedMainNavigation.length > 0 ? allowedMainNavigation :
-    allowedHrisNavigation.length > 0 ? allowedHrisNavigation :
-    allowedFinanceNavigation.length > 0 ? allowedFinanceNavigation : []
-  ).slice(0, 4);
+  const activeGroupForMobile = sidebarGroups.find(g => g.key === activeSystem) || sidebarGroups[0];
+  // Mobile bottom tab bar: whichever system's group is currently active, its
+  // first 4 items become fixed tabs (mirrors a native app's tab bar);
+  // anything beyond that — plus the other groups/Organization/Help/Logout —
+  // lives behind the "More" tab (the same drawer used on desktop-hidden screens).
+  const primaryMobileNav = activeGroupForMobile ? activeGroupForMobile.items.slice(0, 4) : [];
 
   const handleLogout = () => {
     logout();
@@ -202,20 +192,16 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   };
 
   const getActiveTabName = () => {
-    if (pathname === "/dashboard/admin/calendar") return "Calendar";
-    for (const item of mainNavigation) {
-      if (item.activeCheck(pathname, activeTabParam)) return item.name;
+    if (pathname === "/dashboard" && !activeTabParam) return "Home";
+    for (const group of sidebarGroups) {
+      for (const item of group.items) {
+        if (item.activeCheck(pathname, activeTabParam)) return item.name;
+      }
     }
-    for (const item of hrisNavigation) {
-      if (item.activeCheck(pathname, activeTabParam)) return `HRIS: ${item.name}`;
+    for (const item of staticBottomLinks) {
+      if (item.activeCheck(pathname)) return item.name;
     }
-    for (const item of financeNavigation) {
-      if (item.activeCheck(pathname, activeTabParam)) return `Finance: ${item.name}`;
-    }
-    for (const item of bottomNavigation) {
-      if (item.activeCheck(pathname, activeTabParam)) return item.name;
-    }
-    return "Control Cockpit";
+    return "Home";
   };
 
   const hasPageAccess = checkUserAccess(currentUser, pathname);
@@ -236,172 +222,69 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
             </Link>
           </div>
 
-          {/* System Switcher */}
-          {availableSystems.length > 1 ? (
-            <div className="relative px-4 mb-4">
-              <button
-                onClick={() => setIsSystemDropdownOpen(!isSystemDropdownOpen)}
-                className="w-full flex items-center justify-between p-2.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl transition-all duration-200"
-              >
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div className={`p-1.5 rounded-lg border ${activeSystemDetail.color}`}>
-                    <activeSystemDetail.icon className="h-4 w-4 shrink-0" />
-                  </div>
-                  <div className="text-left min-w-0">
-                    <p className="text-[11px] font-extrabold text-slate-805 leading-none">{activeSystemDetail.name}</p>
-                    <p className="text-[9px] text-slate-400 font-semibold leading-none mt-1 truncate">{activeSystemDetail.desc}</p>
-                  </div>
-                </div>
-                <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform duration-200 shrink-0 ${isSystemDropdownOpen ? "rotate-180" : ""}`} />
-              </button>
+          {/* Navigation Groups — HRMS/CRM/FINANCE always visible, each independently expandable */}
+          <nav className="flex-1 px-4 space-y-1">
+            {sidebarGroups.map((group) => {
+              const isExpanded = expandedGroups.has(group.key) || group.items.some(i => i.activeCheck(pathname, activeTabParam));
+              return (
+                <div key={group.key}>
+                  <button
+                    onClick={() => toggleGroup(group.key)}
+                    className="w-full flex items-center justify-between px-4 py-2.5 text-xs font-extrabold text-slate-800 rounded-lg hover:bg-slate-50 transition-colors"
+                  >
+                    <span className="flex items-center gap-2.5">
+                      <group.icon className="h-4.5 w-4.5 text-brand-700" />
+                      {group.label}
+                    </span>
+                    <ChevronDown className={`h-3.5 w-3.5 text-slate-400 transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`} />
+                  </button>
 
-              {isSystemDropdownOpen && (
-                <>
-                  <div className="fixed inset-0 z-30" onClick={() => setIsSystemDropdownOpen(false)} />
-                  <div className="absolute left-4 right-4 mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-40 p-1.5 space-y-1 animate-fade-in">
-                    {availableSystems.map((sys) => {
-                      const details = getSystemDetails(sys);
-                      const isSelected = sys === activeSystem;
-                      return (
-                        <button
-                          key={sys}
-                          onClick={() => {
-                            handleSystemChange(sys);
-                            setIsSystemDropdownOpen(false);
-                          }}
-                          className={`w-full flex items-center justify-between p-2 rounded-lg transition-all duration-200 text-left ${
-                            isSelected ? "bg-brand-50/50" : "hover:bg-slate-50"
-                          }`}
-                        >
-                          <div className="flex items-center gap-2 min-w-0">
-                            <div className={`p-1 rounded-md border ${details.color}`}>
-                              <details.icon className="h-3.5 w-3.5 shrink-0" />
-                            </div>
-                            <div className="min-w-0">
-                              <p className={`text-[10px] font-bold ${isSelected ? "text-brand-700" : "text-slate-700"}`}>{details.name}</p>
-                              <p className="text-[8px] text-slate-400 font-medium leading-tight truncate">{details.desc}</p>
-                            </div>
-                          </div>
-                          {isSelected && <span className="h-1.5 w-1.5 rounded-full bg-brand-600 mr-1" />}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </>
-              )}
+                  {isExpanded && (
+                    <div className="mt-1 ml-4 pl-3.5 border-l border-slate-150 space-y-0.5 animate-fade-in">
+                      {group.items.map((item) => {
+                        const isActive = item.activeCheck(pathname, activeTabParam);
+                        return (
+                          <Link
+                            key={item.name}
+                            href={item.href}
+                            onClick={() => setActiveSystem(group.key)}
+                            className={`flex items-center px-3 py-2 text-xs font-bold rounded-lg transition-all duration-200 ${
+                              isActive
+                                ? "bg-brand-50 text-brand-700"
+                                : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
+                            }`}
+                          >
+                            <item.icon className={`mr-2 h-3.5 w-3.5 ${isActive ? "text-brand-650" : "text-slate-400"}`} />
+                            {item.name}
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* Static links — Organization, then Help/Tutorials/Contact — always visible regardless of which group is expanded */}
+            <div className="pt-3 mt-3 border-t border-slate-100 space-y-1">
+              {staticBottomLinks.map((item) => {
+                const isActive = item.activeCheck(pathname);
+                return (
+                  <Link
+                    key={item.name}
+                    href={item.href}
+                    className={`flex items-center px-4 py-2 text-xs font-bold rounded-lg transition-all duration-200 ${
+                      isActive ? "bg-brand-50 text-brand-700" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
+                    }`}
+                  >
+                    <item.icon className={`mr-2.5 h-4 w-4 ${isActive ? "text-brand-650" : "text-slate-400"}`} />
+                    {item.name}
+                  </Link>
+                );
+              })}
             </div>
-          ) : (
-            <div className="px-4 mb-4">
-              <div className="flex items-center gap-2.5 p-2.5 bg-slate-50 border border-slate-100 rounded-xl">
-                <div className={`p-1.5 rounded-lg border ${activeSystemDetail.color}`}>
-                  <activeSystemDetail.icon className="h-4 w-4 animate-pulse" />
-                </div>
-                <div>
-                  <p className="text-[11px] font-extrabold text-slate-800 leading-none">{activeSystemDetail.name}</p>
-                  <p className="text-[9px] text-slate-400 font-semibold leading-none mt-1">{activeSystemDetail.desc}</p>
-                </div>
-              </div>
-            </div>
-          )}
 
-          {/* Navigation Links */}
-          <nav className="mt-2 flex-1 px-4 space-y-4">
-            {/* Main Section */}
-            {allowedMainNavigation.length > 0 && (
-              <div className="space-y-1">
-                {allowedMainNavigation.map((item) => {
-                  const isActive = item.activeCheck(pathname, activeTabParam);
-                  return (
-                    <Link
-                      key={item.name}
-                      href={item.href}
-                      className={`group flex items-center px-4 py-2.5 text-xs font-bold rounded-lg transition-all duration-250 ${
-                        isActive
-                          ? "bg-brand-50 border-l-2 border-brand-500 text-brand-700"
-                          : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
-                      }`}
-                    >
-                      <item.icon className={`mr-2.5 h-4.5 w-4.5 ${isActive ? "text-brand-650" : "text-slate-400"}`} />
-                      {item.name}
-                    </Link>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* HRIS Group */}
-            {allowedHrisNavigation.length > 0 && (
-              <div className="space-y-1">
-                <p className="px-4 text-[9px] uppercase tracking-wider font-extrabold text-slate-400">HRIS</p>
-                {allowedHrisNavigation.map((item) => {
-                  const isActive = item.activeCheck(pathname, activeTabParam);
-                  return (
-                    <Link
-                      key={item.name}
-                      href={item.href}
-                      className={`group flex items-center px-4 py-2 text-xs font-bold rounded-lg transition-all duration-250 ${
-                        isActive
-                          ? "bg-brand-50 border-l-2 border-brand-500 text-brand-700"
-                          : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
-                      }`}
-                    >
-                      <item.icon className={`mr-2.5 h-4 w-4 ${isActive ? "text-brand-650" : "text-slate-400"}`} />
-                      {item.name}
-                    </Link>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* Finance Group */}
-            {allowedFinanceNavigation.length > 0 && (
-              <div className="space-y-1">
-                <p className="px-4 text-[9px] uppercase tracking-wider font-extrabold text-slate-400">Finance</p>
-                {allowedFinanceNavigation.map((item) => {
-                  const isActive = item.activeCheck(pathname, activeTabParam);
-                  return (
-                    <Link
-                      key={item.name}
-                      href={item.href}
-                      className={`group flex items-center px-4 py-2 text-xs font-bold rounded-lg transition-all duration-250 ${
-                        isActive
-                          ? "bg-brand-50 border-l-2 border-brand-500 text-brand-700"
-                          : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
-                      }`}
-                    >
-                      <item.icon className={`mr-2.5 h-4 w-4 ${isActive ? "text-brand-650" : "text-slate-400"}`} />
-                      {item.name}
-                    </Link>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* System settings and reports */}
-            {allowedBottomNavigation.length > 0 && (
-              <div className="space-y-1 pt-2 border-t border-slate-100">
-                {allowedBottomNavigation.map((item) => {
-                  const isActive = item.activeCheck(pathname, activeTabParam);
-                  return (
-                    <Link
-                      key={item.name}
-                      href={item.href}
-                      className={`group flex items-center px-4 py-2 text-xs font-bold rounded-lg transition-all duration-250 ${
-                        isActive
-                          ? "bg-brand-50 border-l-2 border-brand-500 text-brand-700"
-                          : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
-                      }`}
-                    >
-                      <item.icon className={`mr-2.5 h-4 w-4 ${isActive ? "text-brand-650" : "text-slate-400"}`} />
-                      {item.name}
-                    </Link>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* Help / Modals trigger links */}
-            <div className="space-y-1 pt-2 border-t border-slate-100 text-[11px] font-bold text-slate-450">
+            <div className="pt-3 mt-3 border-t border-slate-100 space-y-1 text-[11px] font-bold text-slate-450">
               <button
                 onClick={() => setActiveModal("help")}
                 className="w-full flex items-center px-4 py-1.5 hover:text-slate-800 transition-colors"
@@ -423,95 +306,50 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
             </div>
           </nav>
         </div>
-
-        {/* User profile footer */}
-        <div className="flex-shrink-0 flex border-t border-slate-200 p-4 bg-slate-50/50">
-          <div className="flex items-center w-full">
-            <div className="h-9 w-9 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-500">
-              <UserIcon className="h-4 w-4" />
-            </div>
-            <div className="ml-3 flex-1 min-w-0">
-              <p className="text-xs font-bold text-slate-800 truncate">
-                {currentUser?.name || "Sanjeev Singh"}
-              </p>
-              <p className="text-[10px] text-slate-500 truncate">
-                {currentUser?.email || "admin@realhubb.in"}
-              </p>
-            </div>
-            <button
-              onClick={handleLogout}
-              className="ml-auto text-slate-400 hover:text-red-500 transition-colors p-1"
-              title="Logout"
-            >
-              <LogOut className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
       </aside>
 
       {/* Main content wrapper */}
       <div className="md:pl-64 flex flex-col flex-1 w-full min-h-screen">
         {/* Top Header Bar */}
         <header className="sticky top-0 z-10 flex-shrink-0 h-14 md:h-16 border-b border-slate-200 bg-white/70 backdrop-blur-md flex items-center justify-between px-3 sm:px-6 lg:px-8 gap-2">
-          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
-            {/* Back Navigation Button */}
-            <button
-              onClick={() => router.back()}
-              className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-500 hover:text-slate-800 transition-all flex items-center justify-center shrink-0 border border-slate-200 shadow-sm bg-white"
-              title="Navigate back to previous tab/page"
-            >
-              <ArrowLeft className="h-3.5 w-3.5" />
-            </button>
+          <h1 className="text-sm font-bold text-slate-900 truncate">{getActiveTabName()}</h1>
 
-            <h1 className="text-xs sm:text-sm font-bold text-brand-700 tracking-wide uppercase ml-0.5 truncate">{getActiveTabName()}</h1>
-          </div>
-
-          <div className="flex items-center gap-2 sm:gap-4 shrink-0">
-            {/* Edge sync status — desktop only; mobile equivalent lives in the "More" drawer */}
-            <div className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-slate-200 bg-slate-50 text-xs">
-              <button
-                onClick={() => setOnlineStatus(!isOnline)}
-                className={`flex items-center gap-1.5 transition-colors font-bold ${
-                  isOnline ? "text-emerald-600 hover:text-emerald-700" : "text-amber-600 hover:text-amber-700"
-                }`}
-                title="Toggle network online/offline to test synchronization capabilities"
-              >
-                {isOnline ? (
-                  <>
-                    <Wifi className="h-3.5 w-3.5" />
-                    <span className="hidden sm:inline">Online</span>
-                  </>
-                ) : (
-                  <>
-                    <WifiOff className="h-3.5 w-3.5 animate-pulse" />
-                    <span>Offline</span>
-                  </>
-                )}
-              </button>
-
-              {pendingSyncCount > 0 && (
-                <div className="flex items-center gap-1.5 border-l border-slate-200 pl-2 ml-1">
-                  <button
-                    onClick={triggerSync}
-                    disabled={isSyncing || !isOnline}
-                    className={`flex items-center gap-1 text-brand-600 hover:text-brand-500 disabled:opacity-40 disabled:cursor-not-allowed font-semibold ${
-                      isSyncing ? "animate-spin" : ""
-                    }`}
-                  >
-                    <RefreshCw className="h-3 w-3" />
-                    <span>Sync ({pendingSyncCount})</span>
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* Notification Bell */}
+          <div className="flex items-center gap-3 sm:gap-4 shrink-0">
             <NotificationBell />
 
-            {/* Connected User Badge — desktop only; mobile shows this in the "More" drawer instead */}
-            <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 text-xs font-bold text-slate-750 max-w-[240px] truncate">
-              <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
-              <span className="truncate">Connected: {currentUser?.name} ({currentUser?.designation})</span>
+            {/* User menu — avatar + name dropdown, replaces the old separate profile footer/badge; Logout lives here now. */}
+            <div className="relative">
+              <button
+                onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+                className="flex items-center gap-1.5"
+              >
+                <span className="h-8 w-8 rounded-full bg-brand-800 text-white text-xs font-bold flex items-center justify-center shrink-0">
+                  {initialsFor(currentUser?.name)}
+                </span>
+                <ChevronDown className={`h-3.5 w-3.5 text-slate-400 transition-transform duration-200 hidden sm:block ${isUserMenuOpen ? "rotate-180" : ""}`} />
+              </button>
+
+              {isUserMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-30" onClick={() => setIsUserMenuOpen(false)} />
+                  <div className="absolute right-0 mt-2 w-56 bg-white border border-slate-200 rounded-xl shadow-xl z-40 overflow-hidden animate-fade-in">
+                    <div className="px-4 py-3 border-b border-slate-100">
+                      <p className="text-xs font-bold text-slate-800 truncate">{currentUser?.name}</p>
+                      <p className="text-[10px] text-slate-500 truncate">{currentUser?.email}</p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setIsUserMenuOpen(false);
+                        handleLogout();
+                      }}
+                      className="w-full flex items-center gap-2 px-4 py-2.5 text-xs font-bold text-red-600 hover:bg-red-50 transition-colors"
+                    >
+                      <LogOut className="h-3.5 w-3.5" />
+                      Logout
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </header>
@@ -573,148 +411,54 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                 </div>
               </div>
 
-              {/* Mobile System Switcher */}
-              {availableSystems.length > 1 ? (
-                <div className="relative mb-4">
-                  <button
-                    onClick={() => setIsSystemDropdownOpen(!isSystemDropdownOpen)}
-                    className="w-full flex items-center justify-between p-2.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl transition-all duration-200"
-                  >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div className={`p-1.5 rounded-lg border ${activeSystemDetail.color}`}>
-                        <activeSystemDetail.icon className="h-4 w-4 shrink-0" />
-                      </div>
-                      <div className="text-left min-w-0">
-                        <p className="text-[11px] font-extrabold text-slate-805 leading-none">{activeSystemDetail.name}</p>
-                        <p className="text-[9px] text-slate-400 font-semibold leading-none mt-1 truncate">{activeSystemDetail.desc}</p>
-                      </div>
+              <nav className="space-y-1 flex-1 overflow-y-auto">
+                {sidebarGroups.map((group) => {
+                  const isExpanded = expandedGroups.has(group.key) || group.items.some(i => i.activeCheck(pathname, activeTabParam));
+                  return (
+                    <div key={group.key}>
+                      <button
+                        onClick={() => toggleGroup(group.key)}
+                        className="w-full flex items-center justify-between px-4 py-2.5 text-xs font-extrabold text-slate-800 rounded-lg hover:bg-slate-50 transition-colors"
+                      >
+                        <span className="flex items-center gap-2.5">
+                          <group.icon className="h-4.5 w-4.5 text-brand-700" />
+                          {group.label}
+                        </span>
+                        <ChevronDown className={`h-3.5 w-3.5 text-slate-400 transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`} />
+                      </button>
+                      {isExpanded && (
+                        <div className="mt-1 ml-4 pl-3.5 border-l border-slate-150 space-y-0.5">
+                          {group.items.map((item) => {
+                            const isActive = item.activeCheck(pathname, activeTabParam);
+                            return (
+                              <Link
+                                key={item.name}
+                                href={item.href}
+                                className={`flex items-center px-3 py-2 text-xs font-semibold rounded-lg ${
+                                  isActive ? "bg-brand-50 text-brand-700" : "text-slate-500 hover:bg-slate-50"
+                                }`}
+                                onClick={() => {
+                                  setActiveSystem(group.key);
+                                  setIsMobileMenuOpen(false);
+                                }}
+                              >
+                                <item.icon className="mr-2 h-3.5 w-3.5 text-slate-400" />
+                                {item.name}
+                              </Link>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
-                    <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform duration-200 shrink-0 ${isSystemDropdownOpen ? "rotate-180" : ""}`} />
-                  </button>
+                  );
+                })}
 
-                  {isSystemDropdownOpen && (
-                    <>
-                      <div className="fixed inset-0 z-30" onClick={() => setIsSystemDropdownOpen(false)} />
-                      <div className="absolute left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-40 p-1.5 space-y-1 animate-fade-in">
-                        {availableSystems.map((sys) => {
-                          const details = getSystemDetails(sys);
-                          const isSelected = sys === activeSystem;
-                          return (
-                            <button
-                              key={sys}
-                              onClick={() => {
-                                handleSystemChange(sys);
-                                setIsSystemDropdownOpen(false);
-                                setIsMobileMenuOpen(false);
-                              }}
-                              className={`w-full flex items-center justify-between p-2 rounded-lg transition-all duration-200 text-left ${
-                                isSelected ? "bg-brand-50/50" : "hover:bg-slate-50"
-                              }`}
-                            >
-                              <div className="flex items-center gap-2 min-w-0">
-                                <div className={`p-1 rounded-md border ${details.color}`}>
-                                  <details.icon className="h-3.5 w-3.5 shrink-0" />
-                                </div>
-                                <div className="min-w-0">
-                                  <p className={`text-[10px] font-bold ${isSelected ? "text-brand-700" : "text-slate-700"}`}>{details.name}</p>
-                                  <p className="text-[8px] text-slate-400 font-medium leading-tight truncate">{details.desc}</p>
-                                </div>
-                              </div>
-                              {isSelected && <span className="h-1.5 w-1.5 rounded-full bg-brand-600 mr-1" />}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </>
-                  )}
-                </div>
-              ) : (
-                <div className="mb-4">
-                  <div className="flex items-center gap-2.5 p-2.5 bg-slate-50 border border-slate-100 rounded-xl">
-                    <div className={`p-1.5 rounded-lg border ${activeSystemDetail.color}`}>
-                      <activeSystemDetail.icon className="h-4 w-4" />
-                    </div>
-                    <div>
-                      <p className="text-[11px] font-extrabold text-slate-800 leading-none">{activeSystemDetail.name}</p>
-                      <p className="text-[9px] text-slate-400 font-semibold leading-none mt-1">{activeSystemDetail.desc}</p>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <nav className="space-y-4 flex-1 overflow-y-auto">
-                {allowedMainNavigation.length > 0 && (
-                  <div className="space-y-1">
-                    {allowedMainNavigation.map((item) => {
-                      const isActive = item.activeCheck(pathname, activeTabParam);
-                      return (
-                        <Link
-                          key={item.name}
-                          href={item.href}
-                          className={`flex items-center px-4 py-2 text-xs font-semibold rounded-lg ${
-                            isActive ? "bg-brand-50 text-brand-700 border-l-2 border-brand-500" : "text-slate-500 hover:bg-slate-50"
-                          }`}
-                          onClick={() => setIsMobileMenuOpen(false)}
-                        >
-                          <item.icon className="mr-2 h-4.5 w-4.5 text-slate-400" />
-                          {item.name}
-                        </Link>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {allowedHrisNavigation.length > 0 && (
-                  <div className="space-y-1">
-                    <p className="px-4 text-[9px] uppercase tracking-wider font-extrabold text-slate-400">HRIS</p>
-                    {allowedHrisNavigation.map((item) => {
-                      const isActive = item.activeCheck(pathname, activeTabParam);
-                      return (
-                        <Link
-                          key={item.name}
-                          href={item.href}
-                          className={`flex items-center px-4 py-1.5 text-xs font-semibold rounded-lg ${
-                            isActive ? "bg-brand-50 text-brand-700 border-l-2 border-brand-500" : "text-slate-500 hover:bg-slate-50"
-                          }`}
-                          onClick={() => setIsMobileMenuOpen(false)}
-                        >
-                          <item.icon className="mr-2 h-4 w-4 text-slate-400" />
-                          {item.name}
-                        </Link>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {allowedFinanceNavigation.length > 0 && (
-                  <div className="space-y-1">
-                    <p className="px-4 text-[9px] uppercase tracking-wider font-extrabold text-slate-400">Finance</p>
-                    {allowedFinanceNavigation.map((item) => {
-                      const isActive = item.activeCheck(pathname, activeTabParam);
-                      return (
-                        <Link
-                          key={item.name}
-                          href={item.href}
-                          className={`flex items-center px-4 py-1.5 text-xs font-semibold rounded-lg ${
-                            isActive ? "bg-brand-50 text-brand-700 border-l-2 border-brand-500" : "text-slate-500 hover:bg-slate-50"
-                          }`}
-                          onClick={() => setIsMobileMenuOpen(false)}
-                        >
-                          <item.icon className="mr-2 h-4 w-4 text-slate-400" />
-                          {item.name}
-                        </Link>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {/* Settings/Reports/Organization — present on the desktop sidebar
-                    but previously missing here, leaving mobile with no way to
-                    reach them at all. */}
-                {allowedBottomNavigation.length > 0 && (
-                  <div className="space-y-1 pt-2 border-t border-slate-100">
-                    {allowedBottomNavigation.map((item) => {
-                      const isActive = item.activeCheck(pathname, activeTabParam);
+                {/* Organization — present on the desktop sidebar but previously
+                    missing here, leaving mobile with no way to reach it at all. */}
+                {staticBottomLinks.length > 0 && (
+                  <div className="space-y-1 pt-2 mt-2 border-t border-slate-100">
+                    {staticBottomLinks.map((item) => {
+                      const isActive = item.activeCheck(pathname);
                       return (
                         <Link
                           key={item.name}
