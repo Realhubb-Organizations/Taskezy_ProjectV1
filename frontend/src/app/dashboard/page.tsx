@@ -1,208 +1,727 @@
 "use client";
 
-import React from "react";
-import { useRouter } from "next/navigation";
-import { useApp } from "@/context/AppContext";
+import React, { useState } from "react";
+import Link from "next/link";
+import { useApp, FollowupCall, User, Invoice } from "@/context/AppContext";
+import KpiGrid from "@/components/dashboard/KpiGrid";
+import SalesTelemetry from "@/components/dashboard/SalesTelemetry";
+import MarketingOperations from "@/components/dashboard/MarketingOperations";
+import AttendanceWidget from "@/components/dashboard/AttendanceWidget";
+import FinanceAudit from "@/components/dashboard/FinanceAudit";
+import {
+  Phone,
+  Clock,
+  Calendar,
+  Users,
+  MapPin,
+  TrendingUp,
+  Percent,
+  Layers,
+  Globe,
+  Award,
+  AlertCircle,
+  Building,
+  Target,
+  ArrowRight,
+  TrendingDown,
+  Activity,
+  CheckCircle,
+  ChevronDown,
+  DollarSign,
+  FileText,
+  ShieldAlert,
+  Server,
+  Lock,
+  Cpu
+} from "lucide-react";
 
 export default function DashboardHome() {
-  const router = useRouter();
   const {
-    leads,
-    followupCalls,
-    currentUser,
-    invoices,
-    reimbursements,
-    timesheets,
-    adSpendRecords,
-    setActiveSystem
+    leads, properties, followupCalls, users, currentUser, invoices, reimbursements, activeSystem, timesheets,
+    attendanceRecords, calendarEvents, adSpendRecords, metaConnected, adminSeats, financeSeats, agentSeats
   } = useApp();
 
-  const sevenDaysAgo = new Date();
-  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  const [agentFilter, setAgentFilter] = useState("All Agents");
+
+  // Filters followup calls list
+  const filteredCalls = followupCalls.filter(call => {
+    if (agentFilter === "All Agents") return true;
+    return call.assignedTo.toLowerCase().includes(agentFilter.toLowerCase().split(" ")[0]);
+  });
+
+  const followupAgents = ["All Agents", "Gautham Karanam", "Akhil Raj Singh", "Bicky Roy", "Neha Chourey", "Himesh Sengupta"];
+
+  // Finance metrics
+  const totalInvoiced = invoices.reduce((sum, inv) => sum + inv.totalAmount, 0);
+  const pendingClaimsCount = reimbursements.filter(r => r.status === "Pending").length;
+  const pendingFinanceReview = leads.filter(l => l.status === "Finance Review" || l.status === "Booking Done").length;
+
+  // Department dashboard selector
+  const userDept = currentUser?.department || "TECH";
+  const userRole = currentUser?.role || "ADMIN";
+
+  // Render Admin Dashboard (God Admin see all monitoring details of all departments)
+  if (activeSystem === "ADMIN") {
+    const now = new Date();
+    const isSameLocalDay = (isoStr: string | undefined, ref: Date) =>
+      !!isoStr && new Date(isoStr).toDateString() === ref.toDateString();
+
+    // Top KPIs calculations — all derived from real data, no seed-baseline padding
+    const leadsToday = leads.filter(l => isSameLocalDay(l.createdAtStr, now)).length;
+    const visitsToday = followupCalls.filter(c => c.type === "Site Visit" && c.status === "Upcoming").length;
+    const monthBookings = leads.filter(l => {
+      if (!["Booking Done", "Booking Approved"].includes(l.status) || !l.createdAtStr) return false;
+      const d = new Date(l.createdAtStr);
+      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+    }).length;
+    // Site-visit calendar events on this week's Saturday/Sunday.
+    const startOfWeek = new Date(now);
+    startOfWeek.setDate(now.getDate() - now.getDay());
+    const endOfWeek = new Date(startOfWeek);
+    endOfWeek.setDate(startOfWeek.getDate() + 6);
+    const weekendVisits = calendarEvents.filter(e => {
+      if (e.type !== "SITE_VISIT") return false;
+      const d = new Date(e.date);
+      return (d.getDay() === 0 || d.getDay() === 6) && d >= startOfWeek && d <= endOfWeek;
+    }).length;
+
+    // Sales telemetry calculations
+    const missedFollowups = followupCalls.filter(c => c.status === "Missed").length;
+    const scheduledFollowups = followupCalls.filter(c => c.status === "Upcoming").length;
+    const activeAgentsCount = users.filter(u => u.role === "AGENT").length;
+
+    // Marketing spend, from real ad_spend_records — 0/empty until the Meta/Google
+    // integrations are live and actually writing rows here.
+    const todayStr = now.toISOString().split("T")[0];
+    const metaSpendRows = adSpendRecords.filter(r => r.platform === "Meta");
+    const googleSpendRows = adSpendRecords.filter(r => r.platform === "Google");
+    const metaTotalSpend = metaSpendRows.reduce((sum, r) => sum + r.spend, 0);
+    const metaTodaySpend = metaSpendRows.filter(r => r.date === todayStr).reduce((sum, r) => sum + r.spend, 0);
+    const metaActiveCampaigns = new Set(metaSpendRows.map(r => r.accountName)).size;
+    const googleTotalSpend = googleSpendRows.reduce((sum, r) => sum + r.spend, 0);
+    const googleTodaySpend = googleSpendRows.filter(r => r.date === todayStr).reduce((sum, r) => sum + r.spend, 0);
+    const googleActiveCampaigns = new Set(googleSpendRows.map(r => r.accountName)).size;
+
+    return (
+      <div className="space-y-8 pb-12 animate-fade-in">
+        <div className="flex justify-between items-center">
+          <div>
+            <h2 className="text-xl font-bold text-brand-700 flex items-center gap-2">
+              <Activity className="h-6.5 w-6.5 text-brand-600" />
+              Global Admin Operations Cockpit
+            </h2>
+            <p className="text-xs text-slate-500">Real-time telemetry and monitoring across Sales, HRMS, and Finance partitions.</p>
+          </div>
+          <span className="text-xs font-bold text-brand-700 bg-brand-50 border border-brand-100 px-3 py-1.5 rounded-xl shadow-sm">
+            Live Telemetry Online
+          </span>
+        </div>
+
+        {/* Step 1: Top Level KPIs Grid */}
+        <KpiGrid
+          totalLeads={leads.length}
+          leadsToday={leadsToday}
+          visitsToday={visitsToday}
+          weekendVisits={weekendVisits}
+          monthBookings={monthBookings}
+        />
+
+        {/* Step 2: Sales Telemetry Monitoring */}
+        {/* phoneCallsToday/talkTime have no real data source yet — no telephony
+            integration logs call count or duration anywhere in this schema.
+            Shown honestly as zero/"No data" rather than a fabricated number. */}
+        <SalesTelemetry
+          phoneCallsToday={0}
+          talkTime="No data"
+          activeAgents={activeAgentsCount}
+          scheduledFollowups={scheduledFollowups}
+          missedFollowups={missedFollowups}
+        />
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Step 4: HRMS Teams Attendance */}
+          <AttendanceWidget
+            users={users}
+            timesheets={timesheets}
+          />
+
+          {/* Step 5: Finance Audit & Billing Logs */}
+          <FinanceAudit
+            invoices={invoices}
+            pendingClaimsCount={pendingClaimsCount}
+            pendingFinanceReview={pendingFinanceReview}
+            properties={properties}
+          />
+        </div>
+
+        {/* Step 3: Marketing Operations */}
+        <MarketingOperations
+          metaTotalSpend={metaTotalSpend}
+          metaTodaySpend={metaTodaySpend}
+          metaActiveCampaigns={metaActiveCampaigns}
+          googleTotalSpend={googleTotalSpend}
+          googleTodaySpend={googleTodaySpend}
+          googleActiveCampaigns={googleActiveCampaigns}
+        />
+      </div>
+    );
+  }
+
+  // Render Finance Department View (Finance department can only access the finance part)
+  if (activeSystem === "FINANCE") {
+    return (
+      <div className="space-y-8 pb-12 animate-fade-in">
+        <div>
+          <h2 className="text-xl font-bold text-brand-700 flex items-center gap-2">
+            <DollarSign className="h-6.5 w-6.5 text-brand-600" />
+            Finance Operations Cockpit
+          </h2>
+          <p className="text-xs text-slate-500">Corporate invoices, GST ledgers, and expense claim reimbursement systems.</p>
+        </div>
+
+        {/* Finance Stats Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
+            <div className="space-y-1">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Invoiced Amount</span>
+              <p className="text-xl font-black text-slate-800">₹{totalInvoiced.toLocaleString()}</p>
+              <span className="text-[9px] text-slate-400 block mt-1">Includes 18% CGST + SGST</span>
+            </div>
+            <div className="h-10 w-10 rounded-xl bg-brand-50 border border-brand-100 flex items-center justify-center text-brand-600">
+              <DollarSign className="h-5.5 w-5.5" />
+            </div>
+          </div>
+
+          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
+            <div className="space-y-1">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Pending Reimbursement Claims</span>
+              <p className="text-xl font-black text-amber-600">{pendingClaimsCount} claims</p>
+              <span className="text-[9px] text-slate-450 block mt-1">Requires review</span>
+            </div>
+            <div className="h-10 w-10 rounded-xl bg-amber-50 border border-amber-100 flex items-center justify-center text-amber-600">
+              <FileText className="h-5.5 w-5.5" />
+            </div>
+          </div>
+
+          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
+            <div className="space-y-1">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Pending Booking Reviews</span>
+              <p className="text-xl font-black text-brand-700">{pendingFinanceReview} bookings</p>
+              <span className="text-[9px] text-slate-450 block mt-1">Awaiting GST invoice generation</span>
+            </div>
+            <div className="h-10 w-10 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-brand-700">
+              <CheckCircle className="h-5.5 w-5.5" />
+            </div>
+          </div>
+        </div>
+
+        {/* Finance Actions Info */}
+        <div className="glass-card p-6 rounded-2xl bg-brand-50/10 border border-brand-200 space-y-3">
+          <h3 className="text-xs font-bold text-brand-850 flex items-center gap-1.5">
+            <Lock className="h-4.5 w-4.5 text-brand-600" />
+            Isolated Finance Boundary
+          </h3>
+          <p className="text-xs text-slate-650 leading-relaxed">
+            As a member of the Finance department, your account boundary is restricted exclusively to financial telemetry, invoice dispatching, and reimbursement claim governance. Other business lines (CRM pipelines, HRMS geofencing) are blocked.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Render HRMS View
+  if (activeSystem === "HRMS") {
+    if (userDept === "TECH") {
+    return (
+      <div className="space-y-8 pb-12 animate-fade-in">
+        <div>
+          <h2 className="text-xl font-bold text-brand-700 flex items-center gap-2">
+            <Cpu className="h-6.5 w-6.5 text-brand-600" />
+            IT &amp; Systems Management Dashboard
+          </h2>
+          <p className="text-xs text-slate-500">Corporate user directories, server telemetry, and partition isolation gates.</p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Database Isolation Status</span>
+            <p className="text-lg font-black text-emerald-600 mt-1 flex items-center gap-1.5">
+              <Server className="h-4.5 w-4.5 text-emerald-500" /> Isolated PG partition
+            </p>
+            <span className="text-[9px] text-slate-400 mt-2">Active on AWS RDS Instance</span>
+          </div>
+
+          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Active Corporate Seats</span>
+            <p className="text-lg font-black text-slate-800 mt-1">
+              {users.length} users / {adminSeats + financeSeats + agentSeats} licensed
+            </p>
+            <span className="text-[9px] text-brand-600 font-bold mt-2">
+              Utilization: {Math.round((users.length / Math.max(1, adminSeats + financeSeats + agentSeats)) * 100)}%
+            </span>
+          </div>
+
+          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Meta Ads Integration</span>
+            <p className={`text-lg font-black mt-1 ${metaConnected ? "text-slate-800" : "text-slate-400"}`}>
+              {metaConnected ? "Connected" : "Not connected"}
+            </p>
+            <span className={`text-[9px] font-bold mt-2 ${metaConnected ? "text-emerald-600" : "text-amber-600"}`}>
+              {metaConnected ? "Live" : "Set up in Settings → Connected Apps"}
+            </span>
+          </div>
+        </div>
+
+        {/* Corporate Roster Listing */}
+        <div className="glass-card p-6 rounded-2xl space-y-4">
+          <h3 className="text-xs font-bold text-slate-700">Corporate User Directory</h3>
+          <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-[9px] uppercase font-bold text-slate-500 tracking-wider">
+                    <th className="p-3">User</th>
+                    <th className="p-3">Email ID</th>
+                    <th className="p-3">Department</th>
+                    <th className="p-3">Designation</th>
+                    <th className="p-3 text-right">Role</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
+                  {users.map((u, idx) => (
+                    <tr key={idx} className="hover:bg-slate-50/50">
+                      <td className="p-3 font-bold text-slate-800">{u.name}</td>
+                      <td className="p-3 text-slate-500 font-mono">{u.email}</td>
+                      <td className="p-3 text-slate-550">{u.department}</td>
+                      <td className="p-3 text-slate-500">{u.designation}</td>
+                      <td className="p-3 text-right text-brand-700 font-bold">{u.role}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (userDept === "MARKETING") {
+    // All derived from real ad_spend_records — empty/zero until the Meta/Google
+    // Ads integration is live and actually writing rows. Impressions/CTR are
+    // deliberately left out: the current schema has no field for either, so
+    // showing a number for them would just be a different flavor of mock data.
+    const totalSpend = adSpendRecords.reduce((sum, r) => sum + r.spend, 0);
+    const totalLeadsGenerated = adSpendRecords.reduce((sum, r) => sum + r.leadsGenerated, 0);
+    const avgCPL = totalLeadsGenerated > 0 ? totalSpend / totalLeadsGenerated : 0;
+
+    const accountBreakdown = Array.from(
+      adSpendRecords.reduce((map, r) => {
+        const existing = map.get(r.accountName) || { spend: 0, leads: 0 };
+        existing.spend += r.spend;
+        existing.leads += r.leadsGenerated;
+        map.set(r.accountName, existing);
+        return map;
+      }, new Map<string, { spend: number; leads: number }>())
+    )
+      .map(([name, v]) => ({ name, spend: v.spend, leads: v.leads, cpl: v.leads > 0 ? v.spend / v.leads : 0 }))
+      .sort((a, b) => b.spend - a.spend);
+
+    return (
+      <div className="space-y-8 pb-12 animate-fade-in">
+        <div>
+          <h2 className="text-xl font-bold text-brand-700 flex items-center gap-2">
+            <Globe className="h-6.5 w-6.5 text-brand-600" />
+            Marketing &amp; Campaigns Dashboard
+          </h2>
+          <p className="text-xs text-slate-500">
+            {adSpendRecords.length > 0
+              ? "Live Meta/Google campaign spending and lead generation telemetry."
+              : "No ad spend data yet — connect Meta/Google Ads in Settings to populate this."}
+          </p>
+        </div>
+
+        {/* Campaign Metrics */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 text-center text-xs bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+          <div>
+            <span className="text-slate-400 block font-semibold mb-0.5">Total Spend</span>
+            <span className="text-lg font-black text-brand-700 font-mono">₹{totalSpend.toLocaleString("en-IN")}</span>
+          </div>
+          <div className="sm:border-l border-slate-200">
+            <span className="text-slate-400 block font-semibold mb-0.5">Ingested Leads</span>
+            <span className="text-lg font-black text-slate-850">{totalLeadsGenerated}</span>
+          </div>
+          <div className="sm:border-l border-slate-200">
+            <span className="text-slate-400 block font-semibold mb-0.5">Avg CPL</span>
+            <span className="text-lg font-black text-brand-700 font-mono">₹{avgCPL.toFixed(0)}</span>
+          </div>
+        </div>
+
+        {/* Detailed Marketing Campaigns */}
+        <div className="glass-card p-6 rounded-2xl space-y-4">
+          <h3 className="text-xs font-bold text-slate-700">Ad Account Performance Breakdown</h3>
+          <div className="border border-slate-205 rounded-xl overflow-hidden bg-white shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-[9px] uppercase font-bold text-slate-500 tracking-wider">
+                    <th className="p-3">Rank</th>
+                    <th className="p-3">Ad Account</th>
+                    <th className="p-3">Leads</th>
+                    <th className="p-3">Spend</th>
+                    <th className="p-3 text-right">CPL</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
+                  {accountBreakdown.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="p-6 text-center text-slate-400 font-semibold italic">
+                        No ad accounts reporting spend yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    accountBreakdown.map((ad, idx) => (
+                      <tr key={ad.name} className="hover:bg-slate-50/50">
+                        <td className="p-3 text-slate-400">#{idx + 1}</td>
+                        <td className="p-3 text-slate-805 truncate max-w-[200px]">{ad.name}</td>
+                        <td className="p-3 font-black text-slate-800">{ad.leads}</td>
+                        <td className="p-3 text-slate-600 font-mono">₹{ad.spend.toLocaleString("en-IN")}</td>
+                        <td className="p-3 text-right text-emerald-600 font-mono font-bold">₹{ad.cpl.toFixed(0)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Otherwise, render general HRMS Overview Dashboard
   const todayStr = new Date().toISOString().split("T")[0];
-
-  // CRM Card Stats
-  const leadsLast7Days = leads.filter(l => l.createdAtStr && new Date(l.createdAtStr) >= sevenDaysAgo).length;
-  const activeCampaigns = new Set(adSpendRecords.map(r => r.accountName)).size;
-  const totalSpends = adSpendRecords.reduce((sum, r) => sum + r.spend, 0);
-  const spendsDisplay = totalSpends >= 1000 ? `${(totalSpends / 1000).toFixed(1)}K` : totalSpends.toLocaleString("en-IN");
-  const totalLeadsGenerated = adSpendRecords.reduce((sum, r) => sum + r.leadsGenerated, 0);
-  const avgCPL = totalLeadsGenerated > 0 ? (totalSpends / totalLeadsGenerated).toFixed(2) : "345.76";
-  const followUpsCount = followupCalls.filter(c => c.status === "Upcoming").length;
-
-  // HRMS Card Stats
-  const presentCount = timesheets.filter(ts => ts.date === todayStr).length;
-  const pendingInfoCount = timesheets.filter(ts => ts.status === "Regularization Pending").length;
-
-  // Finance Card Stats
-  const raisedInvoicesLast7Days = invoices.filter(inv => inv.createdAt && new Date(inv.createdAt) >= sevenDaysAgo).length;
-  const propertiesIncludedCount = new Set(invoices.filter(inv => inv.projectName).map(inv => inv.projectName)).size;
-  const bookingsCount = leads.filter(l => l.status === "Booking Done" || l.status === "Booking Approved").length;
-  const transactionsCount = invoices.filter(inv => inv.status === "Paid").length;
-  const reimbursementsCount = reimbursements.length;
-
-  const navigateToModule = (system: "CRM" | "HRMS" | "FINANCE", path: string) => {
-    setActiveSystem(system);
-    router.push(path);
-  };
-
+  const presentTodayCount = timesheets.filter(ts => ts.date === todayStr).length;
+  const totalPresentDays = attendanceRecords.reduce((sum, r) => sum + r.presentDays, 0);
+  const totalOnTimeDays = attendanceRecords.reduce((sum, r) => sum + r.onTime, 0);
+  const avgOnTimeRate = totalPresentDays > 0 ? Math.round((totalOnTimeDays / totalPresentDays) * 100) : 0;
   return (
-    <div className="w-full max-w-[1240px] pt-0 pb-12">
-      <div className="pt-0 pb-3">
-        <h1 className="text-[22px] font-bold text-[#000000] tracking-tight leading-tight">
-          Hey, {currentUser?.name || "Bhavuk Sharma"}!
-        </h1>
-        <p className="text-[#9CA3AF] text-[13px] font-normal mt-1">
-          Are you ready to experience how the growth process work?
-        </p>
+    <div className="space-y-8 pb-12 animate-fade-in">
+      <div>
+        <h2 className="text-xl font-bold text-brand-700 flex items-center gap-2">
+          <Users className="h-6.5 w-6.5 text-brand-600" />
+          HRMS Overview Dashboard
+        </h2>
+        <p className="text-xs text-slate-500">Corporate roster demographics, attendance statistics, and geofencing telemetry.</p>
       </div>
 
-      {/* Horizontal Divider Line */}
-      <div className="border-t border-[#E5E7EB] w-full mb-8"></div>
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm text-center flex flex-col justify-between">
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Employees</span>
+          <p className="text-2xl font-black text-slate-800 mt-1">{users.length}</p>
+          <span className="text-[9px] text-slate-450 mt-2 block">Active roster accounts</span>
+        </div>
+        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm text-center flex flex-col justify-between">
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Present Today</span>
+          <p className="text-2xl font-black text-brand-700 mt-1">{presentTodayCount}</p>
+          <span className="text-[9px] text-slate-455 mt-2 block">
+            Attendance rate: {users.length > 0 ? Math.round((presentTodayCount / users.length) * 100) : 0}%
+          </span>
+        </div>
+        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm text-center flex flex-col justify-between">
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Late Clock-Ins</span>
+          <p className="text-2xl font-black text-amber-600 mt-1">
+            {attendanceRecords.reduce((sum, r) => sum + r.late, 0)}
+          </p>
+          <span className="text-[9px] text-slate-450 mt-2 block">Requires correction checks</span>
+        </div>
+        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm text-center flex flex-col justify-between">
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Pending Corrections</span>
+          <p className="text-2xl font-black text-slate-800 mt-1">
+            {timesheets.filter(ts => ts.status === "Regularization Pending").length}
+          </p>
+          <span className="text-[9px] text-slate-450 mt-2 block">Awaiting audit approval</span>
+        </div>
+        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm text-center flex flex-col justify-between">
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Avg On-Time Rate</span>
+          <p className="text-2xl font-black text-emerald-650 mt-1">{avgOnTimeRate}%</p>
+          <span className="text-[9px] text-slate-450 mt-2 block">All geofenced logs</span>
+        </div>
+      </div>
 
-      {/* 3 Columns Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-
-        {/* CRM Card */}
-        <div className="bg-white border border-[#E5E7EB] rounded-[24px] p-6 shadow-sm flex flex-col justify-between min-h-[300px]">
-          <div>
-            {/* Logo Section */}
-            <div className="flex items-center">
-              <img src="/crm_logo.png" alt="iCRM Logo" className="h-[74px] w-auto object-contain" />
-            </div>
-
-            {/* Main Stats */}
-            <div className="mt-5">
-              <span className="text-[#9CA3AF] text-[12px] font-normal block">Leads in last 7 days</span>
-              <span className="text-[#000000] font-bold text-[28px] block mt-1 leading-none">{leadsLast7Days || 127}</span>
-              <span className="text-[12px] font-bold mt-2 block">
-                <span className="text-[#0055FF]">{activeCampaigns || 13} Active</span>{" "}
-                <span className="text-[#6B7280]">Campaigns</span>
-              </span>
-            </div>
-
-            {/* Grid Metrics */}
-            <div className="mt-6">
-              <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {/* Quick Stats */}
+        <div className="glass-card p-6 rounded-2xl space-y-4">
+          <h3 className="text-xs font-bold text-slate-705 border-b border-slate-100 pb-3">Corporate Roster Snapshot</h3>
+          <div className="divide-y divide-slate-100 max-h-60 overflow-y-auto pr-1 text-xs">
+            {users.slice(0, 5).map((member, idx) => (
+              <div key={idx} className="py-2.5 flex justify-between items-center font-medium">
                 <div>
-                  <span className="text-[#9CA3AF] text-[11px] font-normal leading-tight block">Spends</span>
-                  <span className="text-[#000000] font-bold text-[14px] block mt-1">{spendsDisplay !== "0" ? spendsDisplay : "11.6K"}</span>
+                  <p className="font-bold text-slate-850">{member.name}</p>
+                  <p className="text-[9px] text-slate-400 font-mono mt-0.5">{member.email}</p>
                 </div>
-                <div>
-                  <span className="text-[#9CA3AF] text-[11px] font-normal leading-tight block">Avg CPL</span>
-                  <span className="text-[#000000] font-bold text-[14px] block mt-1">{avgCPL}</span>
-                </div>
-                <div>
-                  <span className="text-[#9CA3AF] text-[11px] font-normal leading-tight block">Follow Ups</span>
-                  <span className="text-[#000000] font-bold text-[14px] block mt-1">{followUpsCount || 29}</span>
+                <div className="text-right">
+                  <span className="bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded text-[9px] text-slate-600 font-bold block">
+                    {member.department}
+                  </span>
+                  <span className="text-[9px] text-slate-400 mt-1 block">{member.designation}</span>
                 </div>
               </div>
-            </div>
+            ))}
           </div>
-
-          {/* Action */}
-          <button
-            onClick={() => navigateToModule("CRM", "/dashboard/crm")}
-            className="text-[#0055FF] font-medium text-[12px] hover:underline flex items-center gap-1 mt-6 self-start"
-          >
-            Know More <span className="text-[11px] font-normal">&gt;</span>
-          </button>
         </div>
 
-        {/* HRMS Card */}
-        <div className="bg-white border border-[#E5E7EB] rounded-[24px] p-6 shadow-sm flex flex-col justify-between min-h-[300px]">
+        <div className="glass-card p-6 rounded-2xl space-y-4 flex flex-col justify-between">
           <div>
-            {/* Logo Section */}
-            <div className="flex items-center">
-              <img src="/hrms_logo.png" alt="HRMS Logo" className="h-[74px] w-auto object-contain" />
-            </div>
-
-            {/* Main Stats */}
-            <div className="mt-5">
-              <span className="text-[#9CA3AF] text-[12px] font-normal block">Applied Leaves in last 7 days</span>
-              <span className="text-[#000000] font-bold text-[28px] block mt-1 leading-none">6</span>
-              <span className="text-[12px] font-bold mt-2 block">
-                <span className="text-[#0055FF]">5 Employees</span>{" "}
-                <span className="text-[#6B7280]">Applied</span>
-              </span>
-            </div>
-
-            {/* Grid Metrics */}
-            <div className="mt-6">
-              <div className="grid grid-cols-3 gap-2">
-                <div>
-                  <span className="text-[#9CA3AF] text-[11px] font-normal leading-tight block">Present</span>
-                  <span className="text-[#000000] font-bold text-[14px] block mt-1">{presentCount || 21}</span>
-                </div>
-                <div>
-                  <span className="text-[#9CA3AF] text-[11px] font-normal leading-tight block">Pending Info</span>
-                  <span className="text-[#EF4444] font-bold text-[14px] block mt-1">{pendingInfoCount || 2}</span>
-                </div>
-                <div>
-                  <span className="text-[#9CA3AF] text-[11px] font-normal leading-tight block">WFH</span>
-                  <span className="text-[#000000] font-bold text-[14px] block mt-1">1</span>
-                </div>
-              </div>
-            </div>
+            <h3 className="text-xs font-bold text-slate-705 border-b border-slate-100 pb-3">HRIS Guidelines & Policies</h3>
+            <p className="text-[11px] text-slate-550 leading-relaxed mt-2">
+              Taskezy geofencing attendance records are audited daily. Clock-ins registered outside of Mumbai Corporate HQ (perimeter 150m) must be regularized with appropriate business reason. Regularization requests are approved by Global Administrators.
+            </p>
           </div>
-
-          {/* Action */}
-          <button
-            onClick={() => navigateToModule("HRMS", "/dashboard/hrms?tab=dashboard")}
-            className="text-[#0055FF] font-medium text-[12px] hover:underline flex items-center gap-1 mt-6 self-start"
-          >
-            Know More <span className="text-[11px] font-normal">&gt;</span>
-          </button>
-        </div>
-
-        {/* Finance Card */}
-        <div className="bg-white border border-[#E5E7EB] rounded-[24px] p-6 shadow-sm flex flex-col justify-between min-h-[300px]">
-          <div>
-            {/* Logo Section */}
-            <div className="flex items-center">
-              <img src="/finance_logo.png" alt="Finance Logo" className="h-[74px] w-auto object-contain" />
-            </div>
-
-            {/* Main Stats */}
-            <div className="mt-5">
-              <span className="text-[#9CA3AF] text-[12px] font-normal block">Raised Invoices in last 7 days</span>
-              <span className="text-[#000000] font-bold text-[28px] block mt-1 leading-none">{raisedInvoicesLast7Days || 3}</span>
-              <span className="text-[12px] font-bold mt-2 block">
-                <span className="text-[#0055FF]">{propertiesIncludedCount || 2} Properties</span>{" "}
-                <span className="text-[#6B7280]">Included</span>
-              </span>
-            </div>
-
-            {/* Grid Metrics */}
-            <div className="mt-6">
-              <div className="grid grid-cols-3 gap-2">
-                <div>
-                  <span className="text-[#9CA3AF] text-[11px] font-normal leading-tight block">Bookings</span>
-                  <span className="text-[#000000] font-bold text-[14px] block mt-1">{bookingsCount || 3}</span>
-                </div>
-                <div>
-                  <span className="text-[#9CA3AF] text-[11px] font-normal leading-tight block">Transactions</span>
-                  <span className="text-[#000000] font-bold text-[14px] block mt-1">{transactionsCount || 11}</span>
-                </div>
-                <div>
-                  <span className="text-[#9CA3AF] text-[11px] font-normal leading-tight block">Reimbursements</span>
-                  <span className="text-[#000000] font-bold text-[14px] block mt-1">{reimbursementsCount || 9}</span>
-                </div>
-              </div>
-            </div>
+          <div className="pt-4 border-t border-slate-105">
+            <Link href="/dashboard/hrms?tab=attendance" className="text-xs text-brand-700 hover:underline font-bold">
+              View My Attendance logs →
+            </Link>
           </div>
-
-          {/* Action */}
-          <button
-            onClick={() => navigateToModule("FINANCE", "/dashboard/finance?tab=dashboard")}
-            className="text-[#0055FF] font-medium text-[12px] hover:underline flex items-center gap-1 mt-6 self-start"
-          >
-            Know More <span className="text-[11px] font-normal">&gt;</span>
-          </button>
         </div>
-
       </div>
     </div>
   );
 }
 
+  // DEFAULT VIEW: SALES VIEW (Default view for sales department managers and members)
+  const isSalesMember = currentUser?.role_type === "Member" && currentUser?.role !== "ADMIN";
+
+  const scopedCalls = followupCalls.filter(call => {
+    if (isSalesMember) {
+      return call.assignedTo.toLowerCase() === currentUser?.name.toLowerCase();
+    }
+    return true;
+  });
+
+  const scopedLeads = leads.filter(l => {
+    if (isSalesMember) {
+      return l.assignedAgent.toLowerCase() === currentUser?.name.toLowerCase();
+    }
+    return true;
+  });
+
+  const activeCalls = scopedCalls.filter(call => {
+    if (agentFilter === "All Agents") return true;
+    return call.assignedTo.toLowerCase().includes(agentFilter.toLowerCase().split(" ")[0]);
+  });
+
+  const salesFollowupAgents = isSalesMember
+    ? [currentUser?.name || ""]
+    : ["All Agents", ...Array.from(new Set(followupCalls.map(c => c.assignedTo)))];
+
+  // All real, no simulated-call padding — followup_calls are the only real
+  // call/visit-task data this schema tracks; actual phone-call duration isn't
+  // logged anywhere (no telephony integration), so Talk Time is shown honestly
+  // as "No data" rather than a fabricated duration.
+  const totalCallsCount = scopedCalls.length;
+  const uniqueProspectsCount = new Set(scopedCalls.map(c => c.phone)).size;
+  const completedCallsCount = scopedCalls.filter(c => c.status === "Completed").length;
+  const missedCallsCount = scopedCalls.filter(c => c.status === "Missed").length;
+  const upcomingCallsCount = scopedCalls.filter(c => c.status === "Upcoming").length;
+  const meetingsScheduledCount = scopedCalls.filter(c => c.type === "Meeting").length;
+  const visitsScheduledCount = scopedCalls.filter(c => c.type === "Site Visit").length;
+
+  return (
+    <div className="space-y-8 pb-12 animate-fade-in">
+      <div className="flex justify-between items-center">
+        <div>
+          <h2 className="text-xl font-bold text-brand-700">
+            {isSalesMember ? "Sales Agent Dashboard" : "Sales Director Dashboard"}
+          </h2>
+          <p className="text-xs text-slate-500">
+            {isSalesMember 
+              ? `Personal workspace for ${currentUser?.name}. Viewing active leads and scheduled callbacks.` 
+              : "Global sales operations tracking, pipelines distribution, and performance logs."
+            }
+          </p>
+        </div>
+        {isSalesMember && (
+          <span className="text-[10px] bg-indigo-50 border border-indigo-100 text-indigo-700 px-2 py-0.5 rounded font-bold">
+            Scoped View: My Pipeline
+          </span>
+        )}
+      </div>
+
+      {/* Call Statistics Banner */}
+      <div className="glass-card p-6 rounded-2xl space-y-6">
+        <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+          <h3 className="text-sm font-extrabold text-slate-700 flex items-center gap-1.5">
+            <Phone className="h-4.5 w-4.5 text-brand-600" />
+            {"Today's Call Statistics"}
+          </h3>
+          <span className="text-[10px] bg-brand-50 border border-brand-100 text-brand-700 px-2 py-0.5 rounded font-bold animate-pulse">
+            Live Telemetry
+          </span>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-6 text-center">
+          <div className="space-y-1">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Calls</span>
+            <p className="text-xl font-black text-slate-800">{totalCallsCount}</p>
+            <span className="text-[9px] text-slate-450 block">{uniqueProspectsCount} Unique prospects</span>
+          </div>
+
+          <div className="space-y-1 border-l border-slate-200">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Talk Time</span>
+            <p className="text-xl font-black text-slate-800">No data</p>
+            <span className="text-[9px] text-slate-450 block">Not tracked yet</span>
+          </div>
+
+          <div className="space-y-1 border-l border-slate-200">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Completed Calls</span>
+            <p className="text-xl font-black text-slate-800">{completedCallsCount}</p>
+            <span className="text-[9px] text-emerald-600 font-bold block">
+              {totalCallsCount > 0 ? Math.round((completedCallsCount / totalCallsCount) * 100) : 0}% Success
+            </span>
+          </div>
+
+          <div className="space-y-1 border-l border-slate-200">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Meetings Scheduled</span>
+            <p className="text-xl font-black text-slate-800">{meetingsScheduledCount}</p>
+            <span className="text-[9px] text-slate-450 block">Activity today</span>
+          </div>
+
+          <div className="space-y-1 border-l border-slate-200">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Follow-ups Today</span>
+            <p className="text-xl font-black text-slate-800">{scopedCalls.length}</p>
+            <span className="text-[9px] text-red-650 font-semibold block">{missedCallsCount} Missed callbacks</span>
+          </div>
+
+          <div className="space-y-1 border-l border-slate-200">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Visit Scheduled</span>
+            <p className="text-xl font-black text-slate-800">{visitsScheduledCount}</p>
+            <span className="text-[9px] text-slate-400 block">Activity today</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Main split: Follow-ups Today & Propertywise breakdown */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        {/* Left: Follow-ups Table */}
+        <div className="lg:col-span-8 glass-card p-6 rounded-2xl space-y-4">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-100 pb-3">
+            <div>
+              <h3 className="text-xs font-bold text-slate-700">Follow-ups Scheduled Today</h3>
+              <p className="text-[10px] text-red-650 font-semibold mt-0.5">
+                {missedCallsCount} Missed • {upcomingCallsCount} Upcoming
+              </p>
+            </div>
+            
+            {!isSalesMember && (
+              <div>
+                <select
+                  value={agentFilter}
+                  onChange={(e) => setAgentFilter(e.target.value)}
+                  className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-[10px] font-bold text-slate-705 focus:outline-none"
+                >
+                  {salesFollowupAgents.map(a => (
+                    <option key={a} value={a}>{a}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+
+          <div className="border border-slate-205 rounded-xl overflow-hidden bg-white shadow-sm">
+            <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-200 text-[9px] uppercase font-bold text-slate-505 tracking-wider">
+                      <th className="p-3">Time</th>
+                      <th className="p-3">Status</th>
+                      <th className="p-3">Lead Name</th>
+                      <th className="p-3">Phone</th>
+                      <th className="p-3">Type</th>
+                      <th className="p-3">Assigned To</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-medium">
+                    {activeCalls.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="p-6 text-center text-slate-400 font-semibold italic bg-slate-50/20">
+                          No scheduled followups today.
+                        </td>
+                      </tr>
+                    ) : (
+                      activeCalls.map((call) => (
+                        <tr key={call.id} className="hover:bg-slate-50/50 transition-colors">
+                          <td className="p-3 font-medium text-slate-700 font-mono">{call.time}</td>
+                          <td className="p-3">
+                            <span className={`inline-block px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                              call.status === "Missed" ? "bg-red-50 text-red-750 border border-red-100" : "bg-blue-50 text-blue-700 border border-blue-100"
+                            }`}>
+                              {call.status}
+                            </span>
+                          </td>
+                          <td className="p-3 font-bold text-slate-800">{call.leadName}</td>
+                          <td className="p-3 font-mono text-[10px] text-slate-550">{call.phone}</td>
+                          <td className="p-3 text-slate-650 font-semibold">{call.type}</td>
+                          <td className="p-3 text-slate-500 font-semibold">{call.assignedTo}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Right: Lead stages & properties */}
+        <div className="lg:col-span-4 space-y-6">
+          <div className="glass-card p-6 rounded-2xl space-y-4">
+            <h3 className="text-xs font-bold text-slate-700">Lead Pipeline Distribution</h3>
+            <div className="flex items-baseline justify-between border-b border-slate-100 pb-2">
+              <span className="text-2xl font-black text-slate-805">{scopedLeads.length}</span>
+              <span className="text-[10px] text-slate-500 font-bold">
+                {isSalesMember ? "My Ingested Leads" : "Total Ingested Leads"}
+              </span>
+            </div>
+            
+            <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1 text-[11px]">
+              {Array.from(new Set(scopedLeads.map(l => l.status))).length === 0 ? (
+                <div className="text-slate-400 italic">No lead status data.</div>
+              ) : (
+                Array.from(new Set(scopedLeads.map(l => l.status))).map((status, idx) => {
+                  const count = scopedLeads.filter(l => l.status === status).length;
+                  return (
+                    <div key={idx} className="flex justify-between items-center text-slate-650 font-medium">
+                      <span>{status}</span>
+                      <span className="font-bold text-slate-800">{count}</span>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+
+          <div className="glass-card p-6 rounded-2xl space-y-4">
+            <h3 className="text-xs font-bold text-slate-700 border-b border-slate-100 pb-3">Top Project Pipelines</h3>
+            <div className="space-y-2 max-h-44 overflow-y-auto pr-1 text-xs">
+              {scopedLeads.length === 0 ? (
+                <div className="text-slate-400 italic">No project data.</div>
+              ) : (
+                Array.from(new Set(scopedLeads.map(l => l.property || "Unassigned"))).map((propName, idx) => {
+                  const count = scopedLeads.filter(l => (l.property || "Unassigned") === propName).length;
+                  return (
+                    <div key={idx} className="flex justify-between items-center border-b border-slate-100 pb-1.5 font-medium">
+                      <span className="text-slate-750">{propName}</span>
+                      <span className="font-bold text-brand-700">{count} leads</span>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

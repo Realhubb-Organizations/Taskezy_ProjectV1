@@ -6,11 +6,10 @@ interface RevealOnScrollProps {
   children: React.ReactNode;
   delayMs?: number;
   className?: string;
-  id?: string;
 }
 
 /** Fades + slides a section in the moment it enters the viewport — pairs with .reveal-on-scroll in globals.css. */
-export default function RevealOnScroll({ children, delayMs = 0, className = "", id }: RevealOnScrollProps) {
+export default function RevealOnScroll({ children, delayMs = 0, className = "" }: RevealOnScrollProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
 
@@ -32,7 +31,6 @@ export default function RevealOnScroll({ children, delayMs = 0, className = "", 
 
   return (
     <div
-      id={id}
       ref={ref}
       className={`reveal-on-scroll ${visible ? "is-visible" : ""} ${className}`}
       style={{ transitionDelay: visible ? `${delayMs}ms` : "0ms" }}
