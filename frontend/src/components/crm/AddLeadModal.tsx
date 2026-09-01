@@ -125,7 +125,7 @@ export default function AddLeadModal({
           footer buttons stay pinned while only the form fields scroll — the
           previous version had no height cap at all, so a tall form (the bulk
           upload tab especially) just ran off the bottom of the screen. */}
-      <div className="fixed inset-0 z-55 flex items-end sm:items-center justify-center sm:p-4">
+      <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center sm:p-4">
         <div className="w-full sm:max-w-lg h-[95vh] sm:h-auto sm:max-h-[90vh] bg-white border-0 sm:border border-slate-200 rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-fade-in">
           {/* Header */}
           <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 bg-slate-50/50 shrink-0">

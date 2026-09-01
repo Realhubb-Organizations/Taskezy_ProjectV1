@@ -212,7 +212,11 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   };
 
   const getActiveTabName = () => {
-    if (pathname === "/dashboard" && !activeTabParam) return "Home";
+    // The CRM group's own "Dashboard" item already has an activeCheck that
+    // matches bare /dashboard, so the loop below finds it naturally for
+    // anyone with CRM access (including Admins) — no special case needed.
+    // A hardcoded "Home" here previously fought with that and with the page's
+    // own on-screen heading, which also says "Dashboard".
     for (const group of sidebarGroups) {
       for (const item of group.items) {
         if (item.activeCheck(pathname, activeTabParam)) return item.name;
@@ -221,7 +225,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     for (const item of staticBottomLinks) {
       if (item.activeCheck(pathname)) return item.name;
     }
-    return "Home";
+    return "Dashboard";
   };
 
   const hasPageAccess = checkUserAccess(currentUser, pathname);

@@ -720,7 +720,7 @@ export default function HRMSPage() {
       {/* Regularization Request Modal */}
       {selectedLog && (
         <>
-          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-35" onClick={() => setSelectedLog(null)} />
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-30" onClick={() => setSelectedLog(null)} />
           <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[calc(100%-2rem)] max-w-sm bg-white border border-slate-200 p-6 rounded-2xl shadow-2xl z-40 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b border-slate-200 pb-2">
               <h3 className="text-xs font-bold text-brand-700 flex items-center gap-1">

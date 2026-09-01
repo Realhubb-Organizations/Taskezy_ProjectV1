@@ -127,7 +127,7 @@ export default function LeadDetailDrawer({
       <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity" onClick={onClose} />
 
       {/* Drawer Panel (Right slide-out) */}
-      <div className="fixed inset-y-0 right-0 w-full max-w-md bg-white border-l border-slate-200 shadow-2xl z-55 flex flex-col animate-slide-in">
+      <div className="fixed inset-y-0 right-0 w-full max-w-md bg-white border-l border-slate-200 shadow-2xl z-[60] flex flex-col animate-slide-in">
         {/* Header Title Controls */}
         <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 bg-slate-50/50">
           <div>
