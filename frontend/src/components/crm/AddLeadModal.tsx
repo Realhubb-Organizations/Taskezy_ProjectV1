@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { X, Upload, FileSpreadsheet, Info, Download, Sparkles } from "lucide-react";
 
 interface AddLeadModalProps {
@@ -115,18 +116,28 @@ export default function AddLeadModal({
     alert("Downloading Excel spreadsheet template sheet: taskezy_bulk_leads_v2.xlsx...");
   };
 
-  return (
+  // Rendered via a portal straight into <body>: this component's caller
+  // (the Dashboard page) wraps its whole page in a div with the
+  // `animate-fade-in` utility, whose keyframes end on `transform: translateY(0)`
+  // with `animation-fill-mode: both` — that lingering non-"none" transform
+  // makes the page wrapper the containing block for any `position: fixed`
+  // descendant, so this modal's "fixed to the viewport" positioning was
+  // actually scoped to that page div's box (below the header, clipped to its
+  // content height) instead of the real screen. A portal sidesteps the whole
+  // class of bug by escaping that ancestor entirely.
+  return createPortal(
     <>
-      {/* Backdrop */}
-      <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 transition-opacity" onClick={onClose} />
+      {/* Backdrop — plain dim, no blur, so the dialog reads as clearly on top
+          rather than the page behind looking like it half-rendered. */}
+      <div className="fixed inset-0 bg-slate-900/60 z-50 transition-opacity" onClick={onClose} />
 
       {/* Modal Box — bottom sheet on mobile, centered dialog from sm: up.
-          Fixed viewport-relative height + flex column so the header/tabs and
-          footer buttons stay pinned while only the form fields scroll — the
-          previous version had no height cap at all, so a tall form (the bulk
-          upload tab especially) just ran off the bottom of the screen. */}
-      <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center sm:p-4">
-        <div className="w-full sm:max-w-lg h-[95vh] sm:h-auto sm:max-h-[90vh] bg-white border-0 sm:border border-slate-200 rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-fade-in">
+          The wrapper itself scrolls (overflow-y-auto) as a safety net on very
+          short viewports; the card's own max-h + internal flex-1 scroll (see
+          below) is what normally keeps the header/tabs/footer pinned while
+          only the form fields scroll. */}
+      <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center overflow-y-auto p-0 sm:p-4">
+        <div className="w-full sm:max-w-lg h-[95vh] sm:h-auto sm:max-h-[90vh] my-0 sm:my-8 bg-white border-0 sm:border border-slate-200 rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-fade-in">
           {/* Header */}
           <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 bg-slate-50/50 shrink-0">
             <div>
@@ -429,6 +440,7 @@ export default function AddLeadModal({
           )}
         </div>
       </div>
-    </>
+    </>,
+    document.body
   );
 }

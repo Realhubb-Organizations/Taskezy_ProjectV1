@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { X, Phone, MessageSquare, Mail, Share2, Award, Calendar, Clock, ArrowRight, Activity, Bell, Repeat } from "lucide-react";
 import { useApp, Lead, LeadStatus } from "@/context/AppContext";
 
@@ -121,10 +122,17 @@ export default function LeadDetailDrawer({
     localStatus === "Site Visit Scheduled" ||
     localStatus === "Call Back";
 
-  return (
+  // Rendered via a portal straight into <body> — the caller (the Leads page)
+  // wraps its whole page in a div with the `animate-fade-in` utility, whose
+  // keyframes end on `transform: translateY(0)` with `animation-fill-mode:
+  // both`. That lingering non-"none" transform makes the page wrapper the
+  // containing block for any `position: fixed` descendant, so this drawer's
+  // "fixed to the viewport" positioning was actually scoped to that page
+  // div's box instead of the real screen. A portal escapes that ancestor.
+  return createPortal(
     <div className="fixed inset-0 z-50">
       {/* Backdrop */}
-      <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity" onClick={onClose} />
+      <div className="fixed inset-0 bg-slate-900/60 transition-opacity" onClick={onClose} />
 
       {/* Drawer Panel (Right slide-out) */}
       <div className="fixed inset-y-0 right-0 w-full max-w-md bg-white border-l border-slate-200 shadow-2xl z-[60] flex flex-col animate-slide-in">
@@ -387,6 +395,7 @@ export default function LeadDetailDrawer({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
