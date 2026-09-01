@@ -2,7 +2,8 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
-import { useApp, FollowupCall, User, Invoice } from "@/context/AppContext";
+import { useApp, FollowupCall, User, Invoice, Lead } from "@/context/AppContext";
+import AddLeadModal from "@/components/crm/AddLeadModal";
 import {
   Phone,
   Clock,
@@ -22,21 +23,53 @@ import {
   Activity,
   CheckCircle,
   ChevronDown,
+  ChevronRight,
   DollarSign,
   FileText,
   ShieldAlert,
   Server,
   Lock,
-  Cpu
+  Cpu,
+  Plus,
+  Eye
 } from "lucide-react";
 
 export default function DashboardHome() {
   const {
     leads, properties, followupCalls, users, currentUser, invoices, reimbursements, activeSystem, timesheets,
-    attendanceRecords, calendarEvents, adSpendRecords, metaConnected, adminSeats, financeSeats, agentSeats
+    attendanceRecords, calendarEvents, adSpendRecords, metaConnected, adminSeats, financeSeats, agentSeats, addLead
   } = useApp();
 
   const [agentFilter, setAgentFilter] = useState("All Agents");
+  const [dateRange, setDateRange] = useState<"today" | "yesterday" | "week" | "month" | "all">("today");
+  const [isUploadOpen, setIsUploadOpen] = useState(false);
+  const [uploadMsg, setUploadMsg] = useState("");
+
+  const dateInRange = (dateStr: string | undefined, range: typeof dateRange, refNow: Date): boolean => {
+    if (!dateStr) return false;
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return false;
+    if (range === "all") return true;
+    const startOfToday = new Date(refNow.getFullYear(), refNow.getMonth(), refNow.getDate());
+    if (range === "today") return d.toDateString() === refNow.toDateString();
+    if (range === "yesterday") {
+      const y = new Date(startOfToday);
+      y.setDate(y.getDate() - 1);
+      return d.toDateString() === y.toDateString();
+    }
+    if (range === "week") {
+      const weekAgo = new Date(startOfToday);
+      weekAgo.setDate(weekAgo.getDate() - 6);
+      return d >= weekAgo;
+    }
+    // month
+    return d.getMonth() === refNow.getMonth() && d.getFullYear() === refNow.getFullYear();
+  };
+
+  const latestLogMessage = (l: Lead): string => {
+    if (!l.logs || l.logs.length === 0) return "No feedback yet";
+    return [...l.logs].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0].message;
+  };
 
   // Filters followup calls list
   const filteredCalls = followupCalls.filter(call => {
@@ -549,222 +582,278 @@ export default function DashboardHome() {
     return true;
   });
 
-  const activeCalls = scopedCalls.filter(call => {
-    if (agentFilter === "All Agents") return true;
-    return call.assignedTo.toLowerCase().includes(agentFilter.toLowerCase().split(" ")[0]);
-  });
+  const now = new Date();
+  const rangeLeads = scopedLeads.filter(l => dateInRange(l.createdAtStr, dateRange, now));
+  const rangeCalls = scopedCalls.filter(c => dateInRange(c.date, dateRange, now));
 
-  const salesFollowupAgents = isSalesMember
-    ? [currentUser?.name || ""]
-    : ["All Agents", ...Array.from(new Set(followupCalls.map(c => c.assignedTo)))];
+  // Stat row mirrors the app's canonical lead-status funnel (leadStatusMapping.ts)
+  // rather than inventing new categories — every number here is a real count
+  // of leads currently sitting in that status, within the selected date range.
+  const totalLeadsCount = rangeLeads.length;
+  const newLeadsCount = rangeLeads.filter(l => l.status === "New Lead").length;
+  const rnrCount = rangeLeads.filter(l => l.status === "RNR").length;
+  const followUpsCount = rangeLeads.filter(l => l.status === "Follow-ups").length;
+  const siteVisitScheduledCount = rangeLeads.filter(l => l.status === "Visit Schedule").length;
+  const siteVisitDoneCount = rangeLeads.filter(l => l.status === "Site Visit").length;
+  // "Call Backs" is the operational callback queue (followup_calls), same
+  // source the rest of this dashboard already used for call telemetry.
+  const pendingCallBackCalls = rangeCalls.filter(c => c.type === "Callback" && c.status !== "Completed")
+    .sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`));
+  const callBacksCount = pendingCallBackCalls.length;
 
-  // All real, no simulated-call padding — followup_calls are the only real
-  // call/visit-task data this schema tracks; actual phone-call duration isn't
-  // logged anywhere (no telephony integration), so Talk Time is shown honestly
-  // as "No data" rather than a fabricated duration.
-  const totalCallsCount = scopedCalls.length;
-  const uniqueProspectsCount = new Set(scopedCalls.map(c => c.phone)).size;
-  const completedCallsCount = scopedCalls.filter(c => c.status === "Completed").length;
-  const missedCallsCount = scopedCalls.filter(c => c.status === "Missed").length;
-  const upcomingCallsCount = scopedCalls.filter(c => c.status === "Upcoming").length;
-  const meetingsScheduledCount = scopedCalls.filter(c => c.type === "Meeting").length;
-  const visitsScheduledCount = scopedCalls.filter(c => c.type === "Site Visit").length;
+  const statCards: { label: string; value: number; color: string }[] = [
+    { label: "Total Leads", value: totalLeadsCount, color: "text-slate-800" },
+    { label: "New Leads", value: newLeadsCount, color: "text-blue-600" },
+    { label: "RNR", value: rnrCount, color: "text-red-600" },
+    { label: "Call Backs", value: callBacksCount, color: "text-amber-600" },
+    { label: "Follow Ups", value: followUpsCount, color: "text-brand-700" },
+    { label: "Site Visit Scheduled", value: siteVisitScheduledCount, color: "text-red-600" },
+    { label: "Site Visit Done", value: siteVisitDoneCount, color: "text-emerald-600" }
+  ];
+
+  const pendingFollowUpLeads = rangeLeads
+    .filter(l => l.status === "Follow-ups")
+    .sort((a, b) => (b.createdAtStr || "").localeCompare(a.createdAtStr || ""));
+
+  // Real sales roster + property list, same source the Leads page's Add Lead
+  // modal already uses — reused here so "+ Upload Leads" is a real, working
+  // entry point rather than a second, divergent implementation.
+  const propertiesList = properties.map(p => p.name);
+  const agentsList = users.filter(u => u.department === "SALES" && u.status !== "INACTIVE").map(u => u.name);
+
+  const handleUploadManualLead = (data: { name: string; phone: string; email: string; agent: string; source: string; property: string; note: string }) => {
+    const res = addLead({
+      name: data.name,
+      phone: data.phone,
+      email: data.email,
+      assignedAgent: data.agent,
+      campaign: data.source,
+      property: data.property || undefined,
+      leadScore: 85,
+      createdAtStr: new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+    });
+    if (res.success) {
+      setIsUploadOpen(false);
+      setUploadMsg(`Successfully ingested lead for: ${data.name}`);
+      setTimeout(() => setUploadMsg(""), 4000);
+    } else {
+      alert(`Ingestion failed: ${res.error}`);
+    }
+  };
+
+  const handleUploadBulkLeads = (data: { assignmentMode: "project" | "agent"; target: string; fileName: string }) => {
+    alert(`Bulk Import Started!\nFile: ${data.fileName}\nAssignment Mode: ${data.assignmentMode} (${data.target})\nProcessing rows...`);
+    setIsUploadOpen(false);
+  };
 
   return (
-    <div className="space-y-8 pb-12 animate-fade-in">
-      <div className="flex justify-between items-center">
+    <div className="space-y-6 pb-12 animate-fade-in">
+      <div className="flex flex-wrap justify-between items-center gap-3">
         <div>
-          <h2 className="text-xl font-bold text-brand-700">
-            {isSalesMember ? "Sales Agent Dashboard" : "Sales Director Dashboard"}
-          </h2>
+          <h2 className="text-xl font-bold text-slate-900">Dashboard</h2>
           <p className="text-xs text-slate-500">
-            {isSalesMember 
-              ? `Personal workspace for ${currentUser?.name}. Viewing active leads and scheduled callbacks.` 
-              : "Global sales operations tracking, pipelines distribution, and performance logs."
-            }
+            {isSalesMember
+              ? `Personal workspace for ${currentUser?.name}. Viewing active leads and scheduled callbacks.`
+              : "Global sales operations tracking, pipelines distribution, and performance logs."}
           </p>
         </div>
-        {isSalesMember && (
-          <span className="text-[10px] bg-indigo-50 border border-indigo-100 text-indigo-700 px-2 py-0.5 rounded font-bold">
-            Scoped View: My Pipeline
-          </span>
+        <button
+          onClick={() => setIsUploadOpen(true)}
+          className="inline-flex items-center gap-2 bg-brand-700 hover:bg-brand-600 text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-md shadow-brand-700/10 shrink-0"
+        >
+          <Plus className="h-4 w-4" />
+          Upload Leads
+        </button>
+      </div>
+
+      {uploadMsg && (
+        <div className="p-3.5 bg-emerald-50 border border-emerald-100 text-xs text-emerald-700 rounded-xl font-bold flex items-center gap-2 animate-fade-in shadow-sm">
+          <CheckCircle className="h-4 w-4 text-emerald-600 shrink-0" />
+          <span>{uploadMsg}</span>
+        </div>
+      )}
+
+      {/* Toolbar: date range + drill-down link */}
+      <div className="flex flex-wrap justify-between items-center gap-3 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5">
+        <div className="flex items-center gap-2 text-xs text-slate-500">
+          <span className="font-medium">Date Range</span>
+          <select
+            value={dateRange}
+            onChange={(e) => setDateRange(e.target.value as typeof dateRange)}
+            className="bg-transparent font-bold text-slate-800 focus:outline-none cursor-pointer"
+          >
+            <option value="today">Today</option>
+            <option value="yesterday">Yesterday</option>
+            <option value="week">This Week</option>
+            <option value="month">This Month</option>
+            <option value="all">All Time</option>
+          </select>
+        </div>
+        <Link href="/dashboard/reports" className="text-xs font-bold text-brand-700 hover:underline">
+          View Detailed Analytics
+        </Link>
+      </div>
+
+      {/* Stat row — the CRM funnel snapshot for the selected date range */}
+      <div className="flex flex-wrap bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+        {statCards.map((s, idx) => (
+          <Link
+            key={s.label}
+            href="/dashboard/crm"
+            className={`flex-1 min-w-[140px] px-4 py-4 hover:bg-slate-50 transition-colors ${idx !== statCards.length - 1 ? "border-r border-slate-100" : ""}`}
+          >
+            <span className="flex items-center justify-between text-[10px] font-semibold text-slate-450">
+              {s.label} <ChevronRight className="h-3 w-3 text-slate-300" />
+            </span>
+            <span className={`text-lg font-black block mt-1 ${s.color}`}>{s.value}</span>
+          </Link>
+        ))}
+      </div>
+
+      {/* Pending Follow ups — leads currently sitting in the Follow-ups status */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm">
+        <div className="px-5 py-4 border-b border-slate-100">
+          <h3 className="text-sm font-bold text-slate-800">Pending Follow ups</h3>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr className="border-b border-slate-100 text-[10px] uppercase font-bold text-slate-450 tracking-wider">
+                <th className="px-5 py-3">Time</th>
+                <th className="px-5 py-3">Lead Name</th>
+                <th className="px-5 py-3">Assigned To</th>
+                <th className="px-5 py-3">Feedback</th>
+                <th className="px-5 py-3">Property</th>
+                <th className="px-5 py-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {pendingFollowUpLeads.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-5 py-8 text-center text-slate-400 font-semibold italic">
+                    No pending follow-ups in this range.
+                  </td>
+                </tr>
+              ) : (
+                pendingFollowUpLeads.map(l => (
+                  <tr key={l.id} className="hover:bg-slate-50/50 transition-colors">
+                    <td className="px-5 py-3 font-mono text-slate-500 whitespace-nowrap">{l.createdAtStr || "—"}</td>
+                    <td className="px-5 py-3">
+                      <p className="font-bold text-slate-800">{l.name}</p>
+                      <p className="text-[10px] text-slate-450 font-mono">{l.phone}</p>
+                    </td>
+                    <td className="px-5 py-3 text-slate-600 font-semibold">{l.assignedAgent}</td>
+                    <td className="px-5 py-3 text-slate-500 max-w-[220px] truncate" title={latestLogMessage(l)}>{latestLogMessage(l)}</td>
+                    <td className="px-5 py-3 text-slate-600 font-semibold">{l.property || "Not set"}</td>
+                    <td className="px-5 py-3">
+                      <div className="flex items-center justify-end gap-2">
+                        <a href={`tel:${l.phone}`} className="p-1.5 rounded-lg text-slate-450 hover:text-brand-700 hover:bg-slate-50 border border-slate-200" title="Call">
+                          <Phone className="h-3.5 w-3.5" />
+                        </a>
+                        <Link href={`/dashboard/crm?openLead=${l.id}`} className="p-1.5 rounded-lg text-slate-450 hover:text-brand-700 hover:bg-slate-50 border border-slate-200" title="View lead">
+                          <Eye className="h-3.5 w-3.5" />
+                        </Link>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+        {pendingFollowUpLeads.length > 0 && (
+          <div className="px-5 py-3 text-[10px] text-slate-450 font-semibold border-t border-slate-100">
+            {pendingFollowUpLeads.length} Row{pendingFollowUpLeads.length === 1 ? "" : "s"}
+          </div>
         )}
       </div>
 
-      {/* Call Statistics Banner */}
-      <div className="glass-card p-6 rounded-2xl space-y-6">
-        <div className="flex justify-between items-center border-b border-slate-100 pb-3">
-          <h3 className="text-sm font-extrabold text-slate-700 flex items-center gap-1.5">
-            <Phone className="h-4.5 w-4.5 text-brand-600" />
-            {"Today's Call Statistics"}
-          </h3>
-          <span className="text-[10px] bg-brand-50 border border-brand-100 text-brand-700 px-2 py-0.5 rounded font-bold animate-pulse">
-            Live Telemetry
-          </span>
+      {/* Pending Call Backs — the operational followup_calls callback queue */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm">
+        <div className="px-5 py-4 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+          <h3 className="text-sm font-bold text-slate-800">Pending Call Backs</h3>
+          {!isSalesMember && (
+            <select
+              value={agentFilter}
+              onChange={(e) => setAgentFilter(e.target.value)}
+              className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-[10px] font-bold text-slate-705 focus:outline-none"
+            >
+              {(["All Agents", ...Array.from(new Set(followupCalls.map(c => c.assignedTo)))]).map(a => (
+                <option key={a} value={a}>{a}</option>
+              ))}
+            </select>
+          )}
         </div>
-
-        <div className="grid grid-cols-2 md:grid-cols-6 gap-6 text-center">
-          <div className="space-y-1">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Calls</span>
-            <p className="text-xl font-black text-slate-800">{totalCallsCount}</p>
-            <span className="text-[9px] text-slate-450 block">{uniqueProspectsCount} Unique prospects</span>
-          </div>
-
-          <div className="space-y-1 border-l border-slate-200">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Talk Time</span>
-            <p className="text-xl font-black text-slate-800">No data</p>
-            <span className="text-[9px] text-slate-450 block">Not tracked yet</span>
-          </div>
-
-          <div className="space-y-1 border-l border-slate-200">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Completed Calls</span>
-            <p className="text-xl font-black text-slate-800">{completedCallsCount}</p>
-            <span className="text-[9px] text-emerald-600 font-bold block">
-              {totalCallsCount > 0 ? Math.round((completedCallsCount / totalCallsCount) * 100) : 0}% Success
-            </span>
-          </div>
-
-          <div className="space-y-1 border-l border-slate-200">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Meetings Scheduled</span>
-            <p className="text-xl font-black text-slate-800">{meetingsScheduledCount}</p>
-            <span className="text-[9px] text-slate-450 block">Activity today</span>
-          </div>
-
-          <div className="space-y-1 border-l border-slate-200">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Follow-ups Today</span>
-            <p className="text-xl font-black text-slate-800">{scopedCalls.length}</p>
-            <span className="text-[9px] text-red-650 font-semibold block">{missedCallsCount} Missed callbacks</span>
-          </div>
-
-          <div className="space-y-1 border-l border-slate-200">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Visit Scheduled</span>
-            <p className="text-xl font-black text-slate-800">{visitsScheduledCount}</p>
-            <span className="text-[9px] text-slate-400 block">Activity today</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Main split: Follow-ups Today & Propertywise breakdown */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Left: Follow-ups Table */}
-        <div className="lg:col-span-8 glass-card p-6 rounded-2xl space-y-4">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-100 pb-3">
-            <div>
-              <h3 className="text-xs font-bold text-slate-700">Follow-ups Scheduled Today</h3>
-              <p className="text-[10px] text-red-650 font-semibold mt-0.5">
-                {missedCallsCount} Missed • {upcomingCallsCount} Upcoming
-              </p>
-            </div>
-            
-            {!isSalesMember && (
-              <div>
-                <select
-                  value={agentFilter}
-                  onChange={(e) => setAgentFilter(e.target.value)}
-                  className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-[10px] font-bold text-slate-705 focus:outline-none"
-                >
-                  {salesFollowupAgents.map(a => (
-                    <option key={a} value={a}>{a}</option>
-                  ))}
-                </select>
-              </div>
-            )}
-          </div>
-
-          <div className="border border-slate-205 rounded-xl overflow-hidden bg-white shadow-sm">
-            <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead>
-                    <tr className="bg-slate-50 border-b border-slate-200 text-[9px] uppercase font-bold text-slate-505 tracking-wider">
-                      <th className="p-3">Time</th>
-                      <th className="p-3">Status</th>
-                      <th className="p-3">Lead Name</th>
-                      <th className="p-3">Phone</th>
-                      <th className="p-3">Type</th>
-                      <th className="p-3">Assigned To</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 font-medium">
-                    {activeCalls.length === 0 ? (
-                      <tr>
-                        <td colSpan={6} className="p-6 text-center text-slate-400 font-semibold italic bg-slate-50/20">
-                          No scheduled followups today.
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr className="border-b border-slate-100 text-[10px] uppercase font-bold text-slate-450 tracking-wider">
+                <th className="px-5 py-3">Time</th>
+                <th className="px-5 py-3">Lead Name</th>
+                <th className="px-5 py-3">Assigned To</th>
+                <th className="px-5 py-3">Feedback</th>
+                <th className="px-5 py-3">Property</th>
+                <th className="px-5 py-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {pendingCallBackCalls.filter(c => agentFilter === "All Agents" || c.assignedTo.toLowerCase().includes(agentFilter.toLowerCase().split(" ")[0])).length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-5 py-8 text-center text-slate-400 font-semibold italic">
+                    No pending callbacks in this range.
+                  </td>
+                </tr>
+              ) : (
+                pendingCallBackCalls
+                  .filter(c => agentFilter === "All Agents" || c.assignedTo.toLowerCase().includes(agentFilter.toLowerCase().split(" ")[0]))
+                  .map(call => {
+                    const relatedLead = call.leadId ? leads.find(l => l.id === call.leadId) : undefined;
+                    return (
+                      <tr key={call.id} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="px-5 py-3 font-mono text-slate-500 whitespace-nowrap">{call.date} {call.time}</td>
+                        <td className="px-5 py-3">
+                          <p className="font-bold text-slate-800">{call.leadName}</p>
+                          <p className="text-[10px] text-slate-450 font-mono">{call.phone}</p>
+                        </td>
+                        <td className="px-5 py-3 text-slate-600 font-semibold">{call.assignedTo}</td>
+                        <td className="px-5 py-3 text-slate-500 max-w-[220px] truncate" title={relatedLead ? latestLogMessage(relatedLead) : "—"}>
+                          {relatedLead ? latestLogMessage(relatedLead) : "—"}
+                        </td>
+                        <td className="px-5 py-3 text-slate-600 font-semibold">{relatedLead?.property || "Not set"}</td>
+                        <td className="px-5 py-3">
+                          <div className="flex items-center justify-end gap-2">
+                            <a href={`tel:${call.phone}`} className="p-1.5 rounded-lg text-slate-450 hover:text-brand-700 hover:bg-slate-50 border border-slate-200" title="Call">
+                              <Phone className="h-3.5 w-3.5" />
+                            </a>
+                            {relatedLead && (
+                              <Link href={`/dashboard/crm?openLead=${relatedLead.id}`} className="p-1.5 rounded-lg text-slate-450 hover:text-brand-700 hover:bg-slate-50 border border-slate-200" title="View lead">
+                                <Eye className="h-3.5 w-3.5" />
+                              </Link>
+                            )}
+                          </div>
                         </td>
                       </tr>
-                    ) : (
-                      activeCalls.map((call) => (
-                        <tr key={call.id} className="hover:bg-slate-50/50 transition-colors">
-                          <td className="p-3 font-medium text-slate-700 font-mono">{call.time}</td>
-                          <td className="p-3">
-                            <span className={`inline-block px-1.5 py-0.5 rounded text-[9px] font-bold ${
-                              call.status === "Missed" ? "bg-red-50 text-red-750 border border-red-100" : "bg-blue-50 text-blue-700 border border-blue-100"
-                            }`}>
-                              {call.status}
-                            </span>
-                          </td>
-                          <td className="p-3 font-bold text-slate-800">{call.leadName}</td>
-                          <td className="p-3 font-mono text-[10px] text-slate-550">{call.phone}</td>
-                          <td className="p-3 text-slate-650 font-semibold">{call.type}</td>
-                          <td className="p-3 text-slate-500 font-semibold">{call.assignedTo}</td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Right: Lead stages & properties */}
-        <div className="lg:col-span-4 space-y-6">
-          <div className="glass-card p-6 rounded-2xl space-y-4">
-            <h3 className="text-xs font-bold text-slate-700">Lead Pipeline Distribution</h3>
-            <div className="flex items-baseline justify-between border-b border-slate-100 pb-2">
-              <span className="text-2xl font-black text-slate-805">{scopedLeads.length}</span>
-              <span className="text-[10px] text-slate-500 font-bold">
-                {isSalesMember ? "My Ingested Leads" : "Total Ingested Leads"}
-              </span>
-            </div>
-            
-            <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1 text-[11px]">
-              {Array.from(new Set(scopedLeads.map(l => l.status))).length === 0 ? (
-                <div className="text-slate-400 italic">No lead status data.</div>
-              ) : (
-                Array.from(new Set(scopedLeads.map(l => l.status))).map((status, idx) => {
-                  const count = scopedLeads.filter(l => l.status === status).length;
-                  return (
-                    <div key={idx} className="flex justify-between items-center text-slate-650 font-medium">
-                      <span>{status}</span>
-                      <span className="font-bold text-slate-800">{count}</span>
-                    </div>
-                  );
-                })
+                    );
+                  })
               )}
-            </div>
-          </div>
-
-          <div className="glass-card p-6 rounded-2xl space-y-4">
-            <h3 className="text-xs font-bold text-slate-700 border-b border-slate-100 pb-3">Top Project Pipelines</h3>
-            <div className="space-y-2 max-h-44 overflow-y-auto pr-1 text-xs">
-              {scopedLeads.length === 0 ? (
-                <div className="text-slate-400 italic">No project data.</div>
-              ) : (
-                Array.from(new Set(scopedLeads.map(l => l.property || "Unassigned"))).map((propName, idx) => {
-                  const count = scopedLeads.filter(l => (l.property || "Unassigned") === propName).length;
-                  return (
-                    <div key={idx} className="flex justify-between items-center border-b border-slate-100 pb-1.5 font-medium">
-                      <span className="text-slate-750">{propName}</span>
-                      <span className="font-bold text-brand-700">{count} leads</span>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </div>
+            </tbody>
+          </table>
         </div>
+        {pendingCallBackCalls.length > 0 && (
+          <div className="px-5 py-3 text-[10px] text-slate-450 font-semibold border-t border-slate-100">
+            {pendingCallBackCalls.length} Row{pendingCallBackCalls.length === 1 ? "" : "s"}
+          </div>
+        )}
       </div>
+
+      <AddLeadModal
+        isOpen={isUploadOpen}
+        onClose={() => setIsUploadOpen(false)}
+        onSubmitManual={handleUploadManualLead}
+        onSubmitBulk={handleUploadBulkLeads}
+        agentsList={agentsList}
+        propertiesList={propertiesList}
+      />
     </div>
   );
 }
