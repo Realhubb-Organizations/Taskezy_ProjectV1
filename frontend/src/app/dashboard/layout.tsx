@@ -22,9 +22,10 @@ import {
   Shield,
   X,
   Building,
-  Landmark,
   FileText,
   BarChart,
+  Megaphone,
+  Phone,
   HelpCircle,
   Video,
   LifeBuoy,
@@ -143,9 +144,18 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   // NotificationBell, the Home dashboard's per-role content) keeps working
   // exactly as before — only how the sidebar presents them changed.
   const crmItems = [
-    { name: "Leads", href: "/dashboard/crm", activeCheck: (p: string, t?: string | null) => p === "/dashboard/crm", icon: Users },
+    { name: "Dashboard", href: "/dashboard", activeCheck: (p: string, t?: string | null) => p === "/dashboard" && !t, icon: LayoutGrid },
     { name: "Properties", href: "/dashboard/properties", activeCheck: (p: string, t?: string | null) => p === "/dashboard/properties", icon: Building },
-    { name: "Resale Market", href: "/dashboard/resale", activeCheck: (p: string, t?: string | null) => p === "/dashboard/resale", icon: Landmark },
+    { name: "Leads", href: "/dashboard/crm", activeCheck: (p: string, t?: string | null) => p === "/dashboard/crm", icon: Users },
+    // Campaigns/Data Calling/Team Analysis don't have dedicated pages of
+    // their own yet — routed to the closest existing real, data-backed
+    // views (Marketing/Agent/Manager Reports) rather than a dead link or
+    // fake page. Reports' own role-scoping still applies (a sales Member
+    // following the Campaigns/Team Analysis link lands on their own Agent
+    // Reports instead, exactly like navigating there any other way).
+    { name: "Campaigns", href: "/dashboard/reports?tab=marketing", activeCheck: (p: string, t?: string | null) => p === "/dashboard/reports" && t === "marketing", icon: Megaphone },
+    { name: "Data Calling", href: "/dashboard/reports?tab=agent", activeCheck: (p: string, t?: string | null) => p === "/dashboard/reports" && t === "agent", icon: Phone },
+    { name: "Team Analysis", href: "/dashboard/reports?tab=manager", activeCheck: (p: string, t?: string | null) => p === "/dashboard/reports" && t === "manager", icon: BarChart },
     { name: "Calendar", href: "/dashboard/crm/calendar", activeCheck: (p: string, t?: string | null) => p === "/dashboard/crm/calendar", icon: Calendar },
     { name: "Settings", href: "/dashboard/settings", activeCheck: (p: string, t?: string | null) => p === "/dashboard/settings", icon: Settings },
     { name: "Reports", href: "/dashboard/reports", activeCheck: (p: string, t?: string | null) => p === "/dashboard/reports", icon: BarChart }
