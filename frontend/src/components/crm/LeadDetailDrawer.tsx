@@ -261,6 +261,8 @@ export default function LeadDetailDrawer({
                   <option value="New Lead">New Lead (Touchpoint)</option>
                   <option value="Assigned">Assigned to Agent</option>
                   <option value="Connected">Connected / Dialed</option>
+                  <option value="RNR">RNR (Ringing, No Response)</option>
+                  <option value="Call Back">Call Back Requested</option>
                   <option value="Interested">Interested Client</option>
                   <option value="Follow-ups">Follow-up Callback</option>
                   <option value="Visit Schedule">Visit Scheduled</option>

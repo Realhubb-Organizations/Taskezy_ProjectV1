@@ -61,10 +61,10 @@ export default function LeadDashboard() {
 
   // Unique status list gathered from the requested list of 20 statuses
   const availableStatuses: LeadStatus[] = [
-    "Unassigned", "RNR", "Switch off", "Booked", "New Leads", 
-    "Assigned", "Connected", "Interested", "Follow-ups", "Visit Schedule", 
-    "Not Interested", "EOI Customers", "Invalid", "Low Budget", 
-    "Meeting Scheduled", "Meeting Done", "Site Visit", "Completed", 
+    "Unassigned", "RNR", "Call Back", "Switch off", "Booked", "New Leads",
+    "Assigned", "Connected", "Interested", "Follow-ups", "Visit Schedule",
+    "Not Interested", "EOI Customers", "Invalid", "Low Budget",
+    "Meeting Scheduled", "Meeting Done", "Site Visit", "Completed",
     "In Negotiation", "Dead"
   ];
 

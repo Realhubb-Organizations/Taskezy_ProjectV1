@@ -66,10 +66,29 @@ export default function DashboardHome() {
     return d.getMonth() === refNow.getMonth() && d.getFullYear() === refNow.getFullYear();
   };
 
+  const sortedLogs = (l: Lead) => [...(l.logs || [])].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
   const latestLogMessage = (l: Lead): string => {
-    if (!l.logs || l.logs.length === 0) return "No feedback yet";
-    return [...l.logs].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0].message;
+    const logs = sortedLogs(l);
+    return logs.length > 0 ? logs[0].message : "No feedback yet";
   };
+
+  // "When did this lead actually enter its current pending state" — the most
+  // recent log entry, not the lead's original createdAtStr (which stays fixed
+  // from lead creation and would make a follow-up look "due" from weeks ago).
+  const formatDateTime = (iso: string | undefined): string => {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    return d.toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  };
+
+  const lastActivityIso = (l: Lead): string | undefined => {
+    const logs = sortedLogs(l);
+    return logs.length > 0 ? logs[0].timestamp : l.createdAtStr;
+  };
+
+  const lastActivityTime = (l: Lead): string => formatDateTime(lastActivityIso(l));
 
   // Finance metrics
   const totalInvoiced = invoices.reduce((sum, inv) => sum + inv.totalAmount, 0);
@@ -560,13 +579,6 @@ export default function DashboardHome() {
   // DEFAULT VIEW: SALES VIEW (Default view for sales department managers and members)
   const isSalesMember = currentUser?.role_type === "Member" && currentUser?.role !== "ADMIN";
 
-  const scopedCalls = followupCalls.filter(call => {
-    if (isSalesMember) {
-      return call.assignedTo.toLowerCase() === currentUser?.name.toLowerCase();
-    }
-    return true;
-  });
-
   const scopedLeads = leads.filter(l => {
     if (isSalesMember) {
       return l.assignedAgent.toLowerCase() === currentUser?.name.toLowerCase();
@@ -576,22 +588,22 @@ export default function DashboardHome() {
 
   const now = new Date();
   const rangeLeads = scopedLeads.filter(l => dateInRange(l.createdAtStr, dateRange, now));
-  const rangeCalls = scopedCalls.filter(c => dateInRange(c.date, dateRange, now));
 
   // Stat row mirrors the app's canonical lead-status funnel (leadStatusMapping.ts)
   // rather than inventing new categories — every number here is a real count
   // of leads currently sitting in that status, within the selected date range.
+  // "Call Backs" deliberately reads the lead's own status (like every other
+  // card here) rather than the followup_calls table: a FollowupCall row is
+  // only created when an agent also fills in the optional reminder date/time
+  // picker after changing status, so sourcing this metric from that table
+  // would silently show 0 even when leads are genuinely sitting in Call Back.
   const totalLeadsCount = rangeLeads.length;
   const newLeadsCount = rangeLeads.filter(l => l.status === "New Lead").length;
   const rnrCount = rangeLeads.filter(l => l.status === "RNR").length;
+  const callBacksCount = rangeLeads.filter(l => l.status === "Call Back").length;
   const followUpsCount = rangeLeads.filter(l => l.status === "Follow-ups").length;
   const siteVisitScheduledCount = rangeLeads.filter(l => l.status === "Visit Schedule").length;
   const siteVisitDoneCount = rangeLeads.filter(l => l.status === "Site Visit").length;
-  // "Call Backs" is the operational callback queue (followup_calls), same
-  // source the rest of this dashboard already used for call telemetry.
-  const pendingCallBackCalls = rangeCalls.filter(c => c.type === "Callback" && c.status !== "Completed")
-    .sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`));
-  const callBacksCount = pendingCallBackCalls.length;
 
   const statCards: { label: string; value: number; color: string }[] = [
     { label: "Total Leads", value: totalLeadsCount, color: "text-slate-900" },
@@ -603,9 +615,10 @@ export default function DashboardHome() {
     { label: "Site Visit Done", value: siteVisitDoneCount, color: "text-[#015814]" }
   ];
 
-  const pendingFollowUpLeads = rangeLeads
-    .filter(l => l.status === "Follow-ups")
-    .sort((a, b) => (b.createdAtStr || "").localeCompare(a.createdAtStr || ""));
+  const byMostRecentActivity = (a: Lead, b: Lead) => new Date(lastActivityIso(b) || 0).getTime() - new Date(lastActivityIso(a) || 0).getTime();
+
+  const pendingFollowUpLeads = rangeLeads.filter(l => l.status === "Follow-ups").sort(byMostRecentActivity);
+  const pendingCallBackLeads = rangeLeads.filter(l => l.status === "Call Back").sort(byMostRecentActivity);
 
   // Real sales roster + property list, same source the Leads page's Add Lead
   // modal already uses — reused here so "+ Upload Leads" is a real, working
@@ -640,7 +653,7 @@ export default function DashboardHome() {
 
   const followUpRows: PendingRow[] = pendingFollowUpLeads.map(l => ({
     id: l.id,
-    time: l.createdAtStr || "—",
+    time: lastActivityTime(l),
     name: l.name,
     phone: l.phone,
     assignedTo: l.assignedAgent,
@@ -649,19 +662,16 @@ export default function DashboardHome() {
     leadId: l.id
   }));
 
-  const callBackRows: PendingRow[] = pendingCallBackCalls.map(call => {
-    const relatedLead = call.leadId ? leads.find(l => l.id === call.leadId) : undefined;
-    return {
-      id: call.id,
-      time: `${call.date} ${call.time}`,
-      name: call.leadName,
-      phone: call.phone,
-      assignedTo: call.assignedTo,
-      feedback: relatedLead ? latestLogMessage(relatedLead) : "—",
-      property: relatedLead?.property || "Not set",
-      leadId: relatedLead?.id
-    };
-  });
+  const callBackRows: PendingRow[] = pendingCallBackLeads.map(l => ({
+    id: l.id,
+    time: lastActivityTime(l),
+    name: l.name,
+    phone: l.phone,
+    assignedTo: l.assignedAgent,
+    feedback: latestLogMessage(l),
+    property: l.property || "Not set",
+    leadId: l.id
+  }));
 
   return (
     <div className="space-y-6 pb-12 animate-fade-in">
