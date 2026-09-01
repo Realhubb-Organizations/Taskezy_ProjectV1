@@ -587,23 +587,28 @@ export default function DashboardHome() {
   });
 
   const now = new Date();
+  // "Date Range" filters by when a lead was *created* — meaningful for "how
+  // many leads came in today", but wrong for a status like RNR: a lead
+  // created last week that gets marked RNR today would be created-date
+  // "not today" and silently disappear from the count even though it's
+  // sitting in RNR right now. Total Leads/New Leads use it (they're about
+  // intake volume); every other card below reflects the lead's current
+  // status regardless of when it was created — a live pipeline snapshot,
+  // not an intake-date snapshot.
   const rangeLeads = scopedLeads.filter(l => dateInRange(l.createdAtStr, dateRange, now));
 
-  // Stat row mirrors the app's canonical lead-status funnel (leadStatusMapping.ts)
-  // rather than inventing new categories — every number here is a real count
-  // of leads currently sitting in that status, within the selected date range.
+  const totalLeadsCount = rangeLeads.length;
+  const newLeadsCount = rangeLeads.filter(l => l.status === "New Lead").length;
+  const rnrCount = scopedLeads.filter(l => l.status === "RNR").length;
   // "Call Backs" deliberately reads the lead's own status (like every other
   // card here) rather than the followup_calls table: a FollowupCall row is
   // only created when an agent also fills in the optional reminder date/time
   // picker after changing status, so sourcing this metric from that table
   // would silently show 0 even when leads are genuinely sitting in Call Back.
-  const totalLeadsCount = rangeLeads.length;
-  const newLeadsCount = rangeLeads.filter(l => l.status === "New Lead").length;
-  const rnrCount = rangeLeads.filter(l => l.status === "RNR").length;
-  const callBacksCount = rangeLeads.filter(l => l.status === "Call Back").length;
-  const followUpsCount = rangeLeads.filter(l => l.status === "Follow-ups").length;
-  const siteVisitScheduledCount = rangeLeads.filter(l => l.status === "Visit Schedule").length;
-  const siteVisitDoneCount = rangeLeads.filter(l => l.status === "Site Visit").length;
+  const callBacksCount = scopedLeads.filter(l => l.status === "Call Back").length;
+  const followUpsCount = scopedLeads.filter(l => l.status === "Follow-ups").length;
+  const siteVisitScheduledCount = scopedLeads.filter(l => l.status === "Visit Schedule").length;
+  const siteVisitDoneCount = scopedLeads.filter(l => l.status === "Site Visit").length;
 
   const statCards: { label: string; value: number; color: string }[] = [
     { label: "Total Leads", value: totalLeadsCount, color: "text-slate-900" },
@@ -617,8 +622,8 @@ export default function DashboardHome() {
 
   const byMostRecentActivity = (a: Lead, b: Lead) => new Date(lastActivityIso(b) || 0).getTime() - new Date(lastActivityIso(a) || 0).getTime();
 
-  const pendingFollowUpLeads = rangeLeads.filter(l => l.status === "Follow-ups").sort(byMostRecentActivity);
-  const pendingCallBackLeads = rangeLeads.filter(l => l.status === "Call Back").sort(byMostRecentActivity);
+  const pendingFollowUpLeads = scopedLeads.filter(l => l.status === "Follow-ups").sort(byMostRecentActivity);
+  const pendingCallBackLeads = scopedLeads.filter(l => l.status === "Call Back").sort(byMostRecentActivity);
 
   // Real sales roster + property list, same source the Leads page's Add Lead
   // modal already uses — reused here so "+ Upload Leads" is a real, working
