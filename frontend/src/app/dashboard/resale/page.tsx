@@ -176,7 +176,7 @@ export default function ResalePage() {
       {isPostOpen && (
         <>
           <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-30" onClick={() => setIsPostOpen(false)} />
-          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-white border border-slate-200 p-6 rounded-2xl shadow-2xl z-40 space-y-4">
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[calc(100%-2rem)] max-w-md bg-white border border-slate-200 p-6 rounded-2xl shadow-2xl z-40 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b border-slate-200 pb-2">
               <h3 className="text-sm font-bold text-brand-700">Post Resale Listing</h3>
               <button onClick={() => setIsPostOpen(false)} className="text-slate-400 hover:text-slate-655">
@@ -258,7 +258,7 @@ export default function ResalePage() {
       {activeUnit && (
         <>
           <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-30" onClick={() => setActiveUnit(null)} />
-          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg bg-white border border-slate-200 p-6 rounded-2xl shadow-2xl z-40 space-y-4">
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[calc(100%-2rem)] max-w-lg bg-white border border-slate-200 p-6 rounded-2xl shadow-2xl z-40 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b border-slate-200 pb-2">
               <h3 className="text-sm font-bold text-brand-700 flex items-center gap-1.5">
                 <Link2 className="h-4.5 w-4.5 text-brand-600" />

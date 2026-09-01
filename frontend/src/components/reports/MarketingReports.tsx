@@ -191,7 +191,7 @@ export default function MarketingReports({ dateRange }: { dateRange: DateRange }
         <div className="glass-card p-6 rounded-2xl space-y-4">
           <h3 className="text-xs font-bold text-slate-700">Individual Ad Account Performance</h3>
           <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm overflow-x-auto">
-            <table className="w-full text-left text-[11px] border-collapse">
+            <table className="w-full min-w-[760px] text-left text-[11px] border-collapse">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200 text-[9px] uppercase font-bold text-slate-500 tracking-wider">
                   <th className="p-3">Platform</th>
@@ -295,7 +295,7 @@ export default function MarketingReports({ dateRange }: { dateRange: DateRange }
             Property-wise Marketing Performance
           </h3>
           <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm overflow-x-auto">
-            <table className="w-full text-left text-[11px] border-collapse">
+            <table className="w-full min-w-[760px] text-left text-[11px] border-collapse">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200 text-[9px] uppercase font-bold text-slate-500 tracking-wider">
                   <th className="p-3">Property</th>

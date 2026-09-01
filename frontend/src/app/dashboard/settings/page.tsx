@@ -390,19 +390,22 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* Tabs Menu */}
-      <div className="flex border-b border-slate-200 gap-6 text-xs font-bold text-slate-500 mb-6">
-        {TABS.map((t) => (
-          <button
-            key={t}
-            onClick={() => setActiveTab(t)}
-            className={`pb-3 border-b-2 transition-all ${
-              activeTab === t ? "border-brand-500 text-brand-700 font-black" : "border-transparent hover:text-slate-800"
-            }`}
-          >
-            {t}
-          </button>
-        ))}
+      {/* Tabs Menu — 6 tabs at this width need to scroll on narrow phones
+          instead of overflowing the page horizontally. */}
+      <div className="border-b border-slate-200 mb-6 overflow-x-auto">
+        <div className="flex gap-6 text-xs font-bold text-slate-500 min-w-max">
+          {TABS.map((t) => (
+            <button
+              key={t}
+              onClick={() => setActiveTab(t)}
+              className={`pb-3 border-b-2 transition-all whitespace-nowrap ${
+                activeTab === t ? "border-brand-500 text-brand-700 font-black" : "border-transparent hover:text-slate-800"
+              }`}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* 1. Connected Apps */}
@@ -899,7 +902,7 @@ export default function SettingsPage() {
       {isAddOpen && (
         <>
           <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-30" onClick={() => setIsAddOpen(false)} />
-          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-white border border-slate-200 p-6 rounded-2xl shadow-2xl z-40 space-y-4 max-h-[90vh] overflow-y-auto">
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[calc(100%-2rem)] max-w-md bg-white border border-slate-200 p-6 rounded-2xl shadow-2xl z-40 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b border-slate-200 pb-2">
               <h3 className="text-sm font-bold text-brand-700 flex items-center gap-1.5">
                 <Plus className="h-4.5 w-4.5 text-brand-600" />
@@ -1065,7 +1068,7 @@ export default function SettingsPage() {
       {selectedUser && (
         <>
           <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-30" onClick={() => setSelectedUser(null)} />
-          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-white border border-slate-200 p-6 rounded-2xl shadow-2xl z-40 space-y-4">
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[calc(100%-2rem)] max-w-md bg-white border border-slate-200 p-6 rounded-2xl shadow-2xl z-40 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b border-slate-200 pb-2">
               <h3 className="text-sm font-bold text-brand-700 flex items-center gap-1.5">
                 <Edit className="h-4.5 w-4.5 text-brand-600" />

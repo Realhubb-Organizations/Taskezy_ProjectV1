@@ -602,7 +602,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
         </nav>
 
         {/* Core Container — bottom padding on mobile clears the fixed tab bar */}
-        <main className="flex-1 p-3 sm:p-6 lg:p-8 pb-24 md:pb-8 bg-slate-50/50 overflow-y-auto">
+        <main className="flex-1 p-3 sm:p-6 lg:p-8 pb-24 md:pb-8 bg-slate-50/50 overflow-y-auto overflow-x-hidden">
           {hasPageAccess ? children : (
             <div className="min-h-[60vh] flex flex-col items-center justify-center p-6 text-center space-y-6 bg-white border border-slate-200 rounded-3xl shadow-sm max-w-2xl mx-auto my-8 animate-fade-in">
               <div className="h-16 w-16 rounded-2xl bg-red-50 border border-red-200 flex items-center justify-center text-red-650 shadow-md">

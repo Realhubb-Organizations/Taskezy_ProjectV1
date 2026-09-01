@@ -92,7 +92,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="h-screen flex flex-col lg:flex-row bg-white text-slate-800 overflow-hidden">
+    <div className="min-h-screen lg:h-screen flex flex-col lg:flex-row bg-white text-slate-800 lg:overflow-hidden">
 
       {/* Left Panel: Carousel Slider */}
       <div className="hidden lg:flex flex-col justify-between w-[55%] h-full p-10 xl:p-14 bg-gradient-to-br from-[#779bf6] via-[#1f47d3] to-[#0b1d6e] text-white relative overflow-hidden">
@@ -164,8 +164,11 @@ export default function LoginPage() {
         </div>
       </div>
 
-      {/* Right Panel: Sign-In Container */}
-      <div className="flex-1 h-full flex flex-col justify-center items-center p-6 sm:p-10 lg:p-14 bg-white">
+      {/* Right Panel: Sign-In Container — natural height on mobile so the page
+          just scrolls normally; locked to the split-screen's full height (with
+          its own scroll if content is ever taller than a short viewport) on
+          desktop only, matching the fixed-height carousel beside it. */}
+      <div className="flex-1 lg:h-full flex flex-col justify-center items-center p-6 sm:p-10 lg:p-14 bg-white lg:overflow-y-auto">
         <div className="w-full max-w-[440px]">
 
           {/* Logo visible only on mobile/tablet — same crop-out-the-padding fix as the desktop logo above */}

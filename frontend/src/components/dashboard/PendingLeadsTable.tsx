@@ -124,7 +124,7 @@ export default function PendingLeadsTable({ title, rows }: { title: string; rows
                     )}
                   </button>
                   {propertyMenuOpen && (
-                    <div className="absolute left-0 top-9 z-20 w-56 bg-white border border-slate-200 rounded-lg shadow-lg py-1.5 max-h-56 overflow-y-auto">
+                    <div className="absolute right-0 top-9 z-20 w-56 bg-white border border-slate-200 rounded-lg shadow-lg py-1.5 max-h-56 overflow-y-auto">
                       {propertyOptions.length === 0 ? (
                         <p className="px-3 py-2 text-xs text-slate-400 italic font-normal">No data yet</p>
                       ) : (

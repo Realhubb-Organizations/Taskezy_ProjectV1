@@ -588,7 +588,7 @@ export default function FinancePage() {
       {isNewInvoiceOpen && (
         <>
           <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-30" onClick={() => setIsNewInvoiceOpen(false)} />
-          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-white border border-slate-200 p-6 rounded-2xl shadow-2xl z-40 space-y-4">
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[calc(100%-2rem)] max-w-md bg-white border border-slate-200 p-6 rounded-2xl shadow-2xl z-40 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b border-slate-200 pb-2">
               <h3 className="text-sm font-bold text-brand-700">Create Tax Invoice Ledger</h3>
               <button onClick={() => setIsNewInvoiceOpen(false)} className="text-slate-400 hover:text-slate-655">
