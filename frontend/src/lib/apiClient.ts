@@ -710,6 +710,33 @@ export function apiListGoogleAdsAccounts(): Promise<ApiGoogleAdsAccount[]> {
   return request<ApiGoogleAdsAccount[]>("/api/v1/google-ads/accounts");
 }
 
+// --- Tenant Settings (HRMS geofence/half-day threshold, Finance GST rate/invoice due window) ---
+export interface ApiTenantSettings {
+  office_lat: string;
+  office_lng: string;
+  geofence_radius_meters: number;
+  half_day_threshold_hours: string;
+  gst_rate: string;
+  invoice_due_days: number;
+}
+
+export function apiGetTenantSettings(): Promise<ApiTenantSettings> {
+  return request<ApiTenantSettings>("/api/v1/tenant-settings");
+}
+
+export interface UpdateTenantSettingsInput {
+  officeLat?: number;
+  officeLng?: number;
+  geofenceRadiusMeters?: number;
+  halfDayThresholdHours?: number;
+  gstRate?: number;
+  invoiceDueDays?: number;
+}
+
+export function apiUpdateTenantSettings(input: UpdateTenantSettingsInput): Promise<ApiTenantSettings> {
+  return request<ApiTenantSettings>("/api/v1/tenant-settings", { method: "PATCH", body: JSON.stringify(input) });
+}
+
 // --- Timesheets (HRMS punch in/out + regularization) ---
 export interface ApiTimesheetRow {
   id: string;

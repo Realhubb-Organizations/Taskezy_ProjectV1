@@ -165,8 +165,11 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     { name: "Attendance", href: "/dashboard/hrms?tab=attendance", activeCheck: (p: string, t?: string | null) => p === "/dashboard/hrms" && t === "attendance", icon: Clock },
     { name: "HR Dashboard", href: "/dashboard/hrms?tab=dashboard", activeCheck: (p: string, t?: string | null) => p === "/dashboard/hrms" && t === "dashboard", icon: LayoutDashboard },
     { name: "Calendar", href: "/dashboard/hrms?tab=calendar", activeCheck: (p: string, t?: string | null) => p === "/dashboard/hrms" && t === "calendar", icon: Calendar },
-    { name: "Settings", href: "/dashboard/settings", activeCheck: (p: string, t?: string | null) => p === "/dashboard/settings", icon: Settings },
-    { name: "Reports", href: "/dashboard/reports", activeCheck: (p: string, t?: string | null) => p === "/dashboard/reports", icon: BarChart }
+    // HRMS Settings/Reports are a distinct, HRMS-flavored view of the shared
+    // pages (geofence/half-day rules; all-employee attendance report) — not
+    // the same global destination CRM's Settings/Reports items point to.
+    { name: "Settings", href: "/dashboard/settings?tab=HRMS", activeCheck: (p: string, t?: string | null) => p === "/dashboard/settings" && t === "HRMS", icon: Settings },
+    { name: "Reports", href: "/dashboard/hrms?tab=reports", activeCheck: (p: string, t?: string | null) => p === "/dashboard/hrms" && t === "reports", icon: BarChart }
   ];
 
   const financeItems = [
@@ -174,8 +177,11 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     { name: "Reimbursements", href: "/dashboard/finance?tab=reimbursements", activeCheck: (p: string, t?: string | null) => p === "/dashboard/finance" && t === "reimbursements", icon: FileText },
     { name: "Finance Dashboard", href: "/dashboard/finance?tab=dashboard", activeCheck: (p: string, t?: string | null) => p === "/dashboard/finance" && t === "dashboard", icon: LayoutDashboard },
     { name: "Calendar", href: "/dashboard/finance?tab=calendar", activeCheck: (p: string, t?: string | null) => p === "/dashboard/finance" && t === "calendar", icon: Calendar },
-    { name: "Settings", href: "/dashboard/settings", activeCheck: (p: string, t?: string | null) => p === "/dashboard/settings", icon: Settings },
-    { name: "Reports", href: "/dashboard/reports", activeCheck: (p: string, t?: string | null) => p === "/dashboard/reports", icon: BarChart }
+    // Finance Settings/Reports are a distinct, Finance-flavored view (GST/
+    // due-date rules; upcoming/overdue/collected payments report) — not the
+    // same global destination CRM's Settings/Reports items point to.
+    { name: "Settings", href: "/dashboard/settings?tab=Finance", activeCheck: (p: string, t?: string | null) => p === "/dashboard/settings" && t === "Finance", icon: Settings },
+    { name: "Reports", href: "/dashboard/finance?tab=reports", activeCheck: (p: string, t?: string | null) => p === "/dashboard/finance" && t === "reports", icon: BarChart }
   ];
 
   const sidebarGroups = (

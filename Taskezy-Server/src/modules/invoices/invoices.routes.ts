@@ -8,6 +8,7 @@ import { ApiError } from "../../utils/ApiError";
 import { pool, query } from "../../db/pool";
 import { createNotification } from "../notifications/notifications.service";
 import { listActiveAdminAndFinanceIds } from "../users/users.repository";
+import { getTenantSettings } from "../tenant-settings/tenant-settings.repository";
 
 export const invoicesRouter = Router();
 
@@ -64,7 +65,8 @@ invoicesRouter.post(
   requireRole("ADMIN", "FINANCE"),
   validate({ body: createInvoiceSchema }),
   asyncHandler(async (req, res) => {
-    const dueDate = req.body.dueDate ?? new Date(Date.now() + 15 * 86400000).toISOString().slice(0, 10);
+    const { invoice_due_days: dueDays } = await getTenantSettings();
+    const dueDate = req.body.dueDate ?? new Date(Date.now() + dueDays * 86400000).toISOString().slice(0, 10);
     let insertedId: string;
     try {
       const { rows } = await pool.query(
@@ -112,6 +114,8 @@ invoicesRouter.patch(
   requireRole("ADMIN", "FINANCE"),
   validate({ params: idParamSchema }),
   asyncHandler(async (req, res) => {
+    const { gst_rate: gstRate } = await getTenantSettings();
+    const halfRate = Number(gstRate) / 2; // split evenly across CGST/SGST, matching how the rate has always been applied
     const MAX_ATTEMPTS = 5;
     let succeeded = false;
     for (let attempt = 0; attempt < MAX_ATTEMPTS && !succeeded; attempt++) {
@@ -120,11 +124,11 @@ invoicesRouter.patch(
         const { rows } = await pool.query(
           `UPDATE invoices
            SET invoice_number = $1,
-               cgst = ROUND(base_amount * 0.09, 2),
-               sgst = ROUND(base_amount * 0.09, 2)
+               cgst = ROUND(base_amount * $3 / 100, 2),
+               sgst = ROUND(base_amount * $3 / 100, 2)
            WHERE id = $2
            RETURNING id`,
-          [invoiceNumber, req.params.id]
+          [invoiceNumber, req.params.id, halfRate]
         );
         if (rows.length === 0) throw ApiError.notFound("Invoice not found");
         succeeded = true;

@@ -25,6 +25,7 @@ import { calendarEventsRouter } from "./modules/calendar-events/calendar-events.
 import { adSpendRouter } from "./modules/ad-spend/ad-spend.routes";
 import { metaRouter } from "./modules/meta/meta.routes";
 import { googleAdsRouter } from "./modules/google-ads/google-ads.routes";
+import { tenantSettingsRouter } from "./modules/tenant-settings/tenant-settings.routes";
 
 export function createApp(): Express {
   const app = express();
@@ -79,6 +80,7 @@ export function createApp(): Express {
   app.use("/api/v1/ad-spend", adSpendRouter);
   app.use("/api/v1/meta", metaRouter);
   app.use("/api/v1/google-ads", googleAdsRouter);
+  app.use("/api/v1/tenant-settings", tenantSettingsRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

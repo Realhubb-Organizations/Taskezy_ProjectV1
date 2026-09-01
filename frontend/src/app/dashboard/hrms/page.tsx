@@ -51,9 +51,9 @@ export default function HRMSPage() {
   const [salary, setSalary] = useState("₹80,000");
 
   // Punch Card state
-  const [punchLoc, setPunchLoc] = useState<"office" | "offsite">("office");
   const [punchStatusMsg, setPunchStatusMsg] = useState("");
   const [punchErrorMsg, setPunchErrorMsg] = useState("");
+  const [isPunching, setIsPunching] = useState(false);
 
   // Regularization modal state
   const [selectedLog, setSelectedLog] = useState<TimesheetLog | null>(null);
@@ -93,36 +93,58 @@ export default function HRMSPage() {
   const todayStr = new Date().toISOString().split("T")[0];
   const activePunch = myLogs.find(ts => ts.date === todayStr && !ts.punchOut);
 
+  // Real device GPS now, not a fake "office/offsite" preset toggle — the
+  // server enforces the real geofence (tenant_settings-driven), so sending
+  // a canned coordinate pair would just make punch-in randomly succeed/fail
+  // depending on which preset happened to fall inside the real radius.
   const handlePunch = () => {
     setPunchStatusMsg("");
     setPunchErrorMsg("");
 
     if (activePunch) {
-      // Punch Out
-      const res = punchOut();
-      if (res.success) {
-        setPunchStatusMsg("Successfully punched out for the day.");
-      } else {
-        setPunchErrorMsg(res.error || "Punch out failed.");
-      }
-    } else {
-      // Punch In
-      // Office: Mumbai Corporate Center (19.0760, 72.8777)
-      // Offsite: Bangalore Outer Ring Road (12.9716, 77.5946)
-      const lat = punchLoc === "office" ? 19.0760 : 12.9716;
-      const lng = punchLoc === "office" ? 72.8777 : 77.5946;
-
-      const res = punchIn(lat, lng);
-      if (res.success) {
-        setPunchStatusMsg("Successfully punched in! Geofenced telemetry checked.");
-      } else {
-        setPunchErrorMsg(res.error || "Punch In failed.");
-      }
+      setIsPunching(true);
+      punchOut()
+        .then((res) => {
+          if (res.success) setPunchStatusMsg("Successfully punched out for the day.");
+          else setPunchErrorMsg(res.error || "Punch out failed.");
+        })
+        .finally(() => {
+          setIsPunching(false);
+          setTimeout(() => {
+            setPunchStatusMsg("");
+            setPunchErrorMsg("");
+          }, 6000);
+        });
+      return;
     }
-    setTimeout(() => {
-      setPunchStatusMsg("");
-      setPunchErrorMsg("");
-    }, 6000);
+
+    if (!navigator.geolocation) {
+      setPunchErrorMsg("Your browser doesn't support location access — punch-in requires it.");
+      return;
+    }
+
+    setIsPunching(true);
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const res = await punchIn(position.coords.latitude, position.coords.longitude);
+        if (res.success) setPunchStatusMsg("Successfully punched in! Geofenced telemetry checked.");
+        else setPunchErrorMsg(res.error || "Punch In failed.");
+        setIsPunching(false);
+        setTimeout(() => {
+          setPunchStatusMsg("");
+          setPunchErrorMsg("");
+        }, 6000);
+      },
+      (geoErr) => {
+        setPunchErrorMsg(
+          geoErr.code === geoErr.PERMISSION_DENIED
+            ? "Location access was denied — allow location permission for this site to punch in."
+            : "Could not determine your location. Please try again."
+        );
+        setIsPunching(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
   };
 
   const handleRegSubmit = (e: React.FormEvent) => {
@@ -284,37 +306,20 @@ export default function HRMSPage() {
                   </div>
                 )}
 
-                <div className="space-y-2">
-                  <label className="block text-[9px] uppercase font-bold text-slate-400">Select Worksite</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      onClick={() => setPunchLoc("office")}
-                      className={`px-2 py-1.5 rounded-lg text-[10px] font-bold border text-center transition-all ${
-                        punchLoc === "office" ? "bg-brand-50 border-brand-200 text-brand-700" : "bg-slate-50 border-slate-200 text-slate-500"
-                      }`}
-                    >
-                      Corporate HQ (In-HQ)
-                    </button>
-                    <button
-                      onClick={() => setPunchLoc("offsite")}
-                      className={`px-2 py-1.5 rounded-lg text-[10px] font-bold border text-center transition-all ${
-                        punchLoc === "offsite" ? "bg-brand-50 border-brand-200 text-brand-700" : "bg-slate-50 border-slate-200 text-slate-500"
-                      }`}
-                    >
-                      Off-Site (Bangalore)
-                    </button>
-                  </div>
-                </div>
-
                 <button
                   onClick={handlePunch}
-                  className={`w-full py-3 rounded-xl text-xs font-bold text-white transition-all shadow-md ${
+                  disabled={isPunching}
+                  className={`w-full py-3 rounded-xl text-xs font-bold text-white transition-all shadow-md disabled:opacity-60 disabled:cursor-not-allowed ${
                     activePunch
                       ? "bg-red-650 hover:bg-red-600 shadow-red-200"
                       : "bg-brand-700 hover:bg-brand-600 shadow-brand-200"
                   }`}
                 >
-                  {activePunch ? "Clock Out / End Shift" : "Clock In / Punch Attendance"}
+                  {isPunching
+                    ? "Checking your location…"
+                    : activePunch
+                      ? "Clock Out / End Shift"
+                      : "Clock In / Punch Attendance"}
                 </button>
               </div>
 
@@ -442,30 +447,48 @@ export default function HRMSPage() {
                 </div>
               </div>
 
-              {/* Global Attendance Telemetry Table */}
-              <div className="glass-card p-6 rounded-2xl space-y-4">
-                <div className="flex justify-between items-center pb-2 border-b border-slate-100">
-                  <h3 className="text-xs font-bold text-slate-700">Departmental Roster Attendance Records</h3>
-                  <div className="flex gap-2 text-xs">
-                    <input type="text" readOnly value="01-07-2026" className="bg-slate-50 border border-slate-200 rounded px-2 py-1 text-[10px] focus:outline-none" />
-                    <input type="text" readOnly value="31-07-2026" className="bg-slate-50 border border-slate-200 rounded px-2 py-1 text-[10px] focus:outline-none" />
-                  </div>
-                </div>
+            </div>
+          )}
+        </div>
+      )}
 
-                <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs border-collapse">
-                      <thead>
-                        <tr className="bg-slate-50 border-b border-slate-200 text-[10px] uppercase font-bold text-slate-500 tracking-wider">
-                          <th className="p-4">Employee</th>
-                          <th className="p-4">Designation</th>
-                          <th className="p-4">Present Days</th>
-                          <th className="p-4">On Time</th>
-                          <th className="p-4 text-right">Late</th>
+      {/* HRMS Reports tab — all-employees attendance report for Admin,
+          a personal attendance summary for everyone else. Reuses the same
+          real attendanceRecords/timesheets data as the Attendance tab; this
+          is a distinct nav destination so it doesn't collide with it. */}
+      {activeTabParam === "reports" && (
+        <div className="space-y-6 animate-fade-in">
+          {isAdmin ? (
+            <div className="glass-card p-6 rounded-2xl space-y-4">
+              <div className="flex justify-between items-center pb-2 border-b border-slate-100">
+                <h3 className="text-xs font-bold text-slate-700">Departmental Roster Attendance Records</h3>
+                <div className="flex gap-2 text-xs">
+                  <input type="text" readOnly value="01-07-2026" className="bg-slate-50 border border-slate-200 rounded px-2 py-1 text-[10px] focus:outline-none" />
+                  <input type="text" readOnly value="31-07-2026" className="bg-slate-50 border border-slate-200 rounded px-2 py-1 text-[10px] focus:outline-none" />
+                </div>
+              </div>
+
+              <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-200 text-[10px] uppercase font-bold text-slate-500 tracking-wider">
+                        <th className="p-4">Employee</th>
+                        <th className="p-4">Designation</th>
+                        <th className="p-4">Present Days</th>
+                        <th className="p-4">On Time</th>
+                        <th className="p-4 text-right">Late</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
+                      {attendanceRecords.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="p-6 text-center text-slate-400 font-semibold italic">
+                            No attendance records yet.
+                          </td>
                         </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
-                        {attendanceRecords.map((item, idx) => (
+                      ) : (
+                        attendanceRecords.map((item, idx) => (
                           <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
                             <td className="p-4">
                               <p className="font-bold text-slate-800">{item.employeeName}</p>
@@ -476,13 +499,92 @@ export default function HRMSPage() {
                             <td className="p-4 text-emerald-650">{item.onTime}</td>
                             <td className="p-4 text-right text-red-655">{item.late}</td>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             </div>
+          ) : (
+            (() => {
+              const presentDays = myLogs.length;
+              const onTime = myLogs.filter(l => l.status !== "Regularization Pending" && l.status !== "Regularized").length;
+              const regularized = myLogs.filter(l => l.status === "Regularized").length;
+              const pending = myLogs.filter(l => l.status === "Regularization Pending").length;
+              return (
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Present Days</span>
+                      <p className="text-xl font-black text-slate-800 mt-1">{presentDays}</p>
+                    </div>
+                    <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Regularized</span>
+                      <p className="text-xl font-black text-emerald-600 mt-1">{regularized}</p>
+                    </div>
+                    <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Pending Correction</span>
+                      <p className="text-xl font-black text-amber-600 mt-1">{pending}</p>
+                    </div>
+                  </div>
+
+                  <div className="glass-card p-6 rounded-2xl space-y-4">
+                    <h3 className="text-xs font-bold text-slate-700 border-b border-slate-100 pb-3">My Attendance Report</h3>
+                    <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs border-collapse">
+                          <thead>
+                            <tr className="bg-slate-50 border-b border-slate-200 text-[9px] uppercase font-bold text-slate-405 tracking-wider">
+                              <th className="p-3">Date</th>
+                              <th className="p-3">Punch In</th>
+                              <th className="p-3">Punch Out</th>
+                              <th className="p-3">Duration</th>
+                              <th className="p-3 text-right">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                            {myLogs.length === 0 ? (
+                              <tr>
+                                <td colSpan={5} className="p-6 text-center text-slate-400 font-semibold italic">
+                                  No attendance punches recorded yet.
+                                </td>
+                              </tr>
+                            ) : (
+                              myLogs.map((log) => (
+                                <tr key={log.id} className="hover:bg-slate-50/50">
+                                  <td className="p-3 font-mono font-semibold">{log.date}</td>
+                                  <td className="p-3 font-mono text-slate-500">
+                                    {log.punchIn ? new Date(log.punchIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "—"}
+                                  </td>
+                                  <td className="p-3 font-mono text-slate-500">
+                                    {log.punchOut ? new Date(log.punchOut).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "—"}
+                                  </td>
+                                  <td className="p-3 font-mono">
+                                    {log.durationHours ? `${log.durationHours} hrs` : "In Progress"}
+                                  </td>
+                                  <td className="p-3 text-right">
+                                    <span className={`inline-block px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                                      log.status === "Regularized"
+                                        ? "bg-emerald-50 text-emerald-700 border border-emerald-100"
+                                        : log.status === "Regularization Pending"
+                                        ? "bg-amber-50 text-amber-700 border border-amber-100 animate-pulse"
+                                        : "bg-slate-100 text-slate-600 border border-slate-200"
+                                    }`}>
+                                      {log.status}
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              );
+            })()
           )}
         </div>
       )}
@@ -567,7 +669,7 @@ export default function HRMSPage() {
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm text-center">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Employees</span>
-              <p className="text-xl font-black text-slate-800">14</p>
+              <p className="text-xl font-black text-slate-800">{users.length}</p>
               <span className="text-[9px] text-slate-450">Active team members</span>
             </div>
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm text-center">
@@ -576,7 +678,7 @@ export default function HRMSPage() {
                 {timesheets.filter(ts => ts.date === todayStr).length}
               </p>
               <span className="text-[9px] text-slate-455">
-                Attendance rate: {Math.round((timesheets.filter(ts => ts.date === todayStr).length / 14) * 100)}%
+                Attendance rate: {users.length > 0 ? Math.round((timesheets.filter(ts => ts.date === todayStr).length / users.length) * 100) : 0}%
               </span>
             </div>
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm text-center">

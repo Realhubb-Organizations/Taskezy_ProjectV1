@@ -8,6 +8,7 @@ import { ApiError } from "../../utils/ApiError";
 import { pool, query } from "../../db/pool";
 import { createNotification } from "../notifications/notifications.service";
 import { listActiveAdminIds } from "../users/users.repository";
+import { getTenantSettings, distanceMeters } from "../tenant-settings/tenant-settings.repository";
 
 export const timesheetsRouter = Router();
 
@@ -49,6 +50,18 @@ timesheetsRouter.post(
     const now = new Date();
     const workDate = now.toISOString().split("T")[0];
 
+    // Server-side geofence enforcement — previously the punch-in location
+    // check only ever happened client-side (a scripted API call could punch
+    // in from anywhere). Re-checked here against the real admin-configured
+    // office location/radius, not just trusted from the client.
+    const settings = await getTenantSettings();
+    const distance = distanceMeters(lat, lng, Number(settings.office_lat), Number(settings.office_lng));
+    if (distance > settings.geofence_radius_meters) {
+      throw ApiError.badRequest(
+        `You are ${Math.round(distance)}m from the office — outside the ${settings.geofence_radius_meters}m geofence perimeter.`
+      );
+    }
+
     const { rows: existing } = await pool.query(
       `SELECT id FROM timesheet_logs WHERE user_id = $1 AND work_date = $2`,
       [req.user!.sub, workDate]
@@ -77,16 +90,17 @@ timesheetsRouter.patch(
     );
     if (open.length === 0) throw ApiError.badRequest("No active shift found to punch out.");
 
-    // FULL_DAY threshold (>= 4 hours) mirrors the frontend's punchOut logic —
-    // duration_hours itself is a generated column, but the status bucket it
-    // maps to is a business rule, so it's set here, not in the schema.
+    // FULL_DAY threshold is the admin-configured tenant_settings value, not a
+    // hardcoded constant — duration_hours itself is a generated column, but
+    // the status bucket it maps to is a business rule, so it's set here.
+    const { half_day_threshold_hours: thresholdHours } = await getTenantSettings();
     const { rows: updated } = await pool.query(
       `UPDATE timesheet_logs
        SET punch_out = now(),
-           status = (CASE WHEN EXTRACT(EPOCH FROM (now() - punch_in)) / 3600.0 >= 4.0 THEN 'FULL_DAY' ELSE 'HALF_DAY' END)::timesheet_status
+           status = (CASE WHEN EXTRACT(EPOCH FROM (now() - punch_in)) / 3600.0 >= $2 THEN 'FULL_DAY' ELSE 'HALF_DAY' END)::timesheet_status
        WHERE id = $1
        RETURNING id`,
-      [open[0].id]
+      [open[0].id, thresholdHours]
     );
     const { rows: result } = await query(`${SELECT} WHERE t.id = $1`, [updated[0].id]);
     sendOk(res, result[0]);
@@ -189,11 +203,12 @@ timesheetsRouter.patch(
       `UPDATE timesheet_regularization_requests SET decision = 'REJECTED', decided_by_id = $1, decided_at = now() WHERE id = $2`,
       [req.user!.sub, pending[0].id]
     );
+    const { half_day_threshold_hours: rejectThresholdHours } = await getTenantSettings();
     await pool.query(
       `UPDATE timesheet_logs
-       SET status = (CASE WHEN duration_hours >= 4.0 THEN 'FULL_DAY' ELSE 'HALF_DAY' END)::timesheet_status
+       SET status = (CASE WHEN duration_hours >= $2 THEN 'FULL_DAY' ELSE 'HALF_DAY' END)::timesheet_status
        WHERE id = $1`,
-      [req.params.id]
+      [req.params.id, rejectThresholdHours]
     );
 
     const { rows: result } = await query(`${SELECT} WHERE t.id = $1`, [req.params.id]);

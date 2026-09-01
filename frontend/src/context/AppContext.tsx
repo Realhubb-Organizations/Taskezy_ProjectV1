@@ -53,6 +53,9 @@ import {
   apiSubmitRegularization,
   apiApproveRegularization,
   apiRejectRegularization,
+  apiGetTenantSettings,
+  apiUpdateTenantSettings,
+  UpdateTenantSettingsInput,
   isApiSessionActive,
   clearApiSession,
   ApiUser,
@@ -68,6 +71,7 @@ import {
   ApiCalendarEventRow,
   ApiAdSpendRow,
   ApiTimesheetRow,
+  ApiTenantSettings,
   ApiRequestError
 } from "@/lib/apiClient";
 import { dbCodeToFrontendStatus, frontendStatusToDbCode, isRealLeadId, isRealId } from "@/lib/leadStatusMapping";
@@ -216,6 +220,17 @@ export interface AdSpendRecord {
   spend: number;
   leadsGenerated: number;
   campaignStatus?: "ACTIVE" | "INACTIVE"; // undefined for records with no linked Meta campaign (legacy/manual rows)
+}
+
+// Real, admin-editable business rules — previously hardcoded (geofence
+// coords client-side, half-day threshold/GST rate/due-days server-side).
+export interface TenantSettings {
+  officeLat: number;
+  officeLng: number;
+  geofenceRadiusMeters: number;
+  halfDayThresholdHours: number;
+  gstRate: number;
+  invoiceDueDays: number;
 }
 
 export type PropertyTeamAssignmentMode = "ALL_MEMBERS" | "CUSTOM_MEMBERS";
@@ -430,10 +445,12 @@ interface AppState {
   pendingSyncCount: number;
   isSyncing: boolean;
   metaConnected: boolean;
+  tenantSettings: TenantSettings | null;
 }
 
 interface AppActions {
   refreshMetaConnectionStatus: () => Promise<void>;
+  updateTenantSettings: (input: UpdateTenantSettingsInput) => Promise<{ success: boolean; error?: string }>;
   // SaaS actions
   setSeats: (role: Role, count: number) => void;
   processPayment: () => Promise<boolean>;
@@ -474,8 +491,8 @@ interface AppActions {
   rejectClaim: (id: string) => void;
 
   // HRMS actions
-  punchIn: (lat: number, lng: number) => { success: boolean; error?: string };
-  punchOut: () => { success: boolean; error?: string };
+  punchIn: (lat: number, lng: number) => Promise<{ success: boolean; error?: string }>;
+  punchOut: () => Promise<{ success: boolean; error?: string }>;
   submitRegularization: (timesheetId: string, requestedIn: string, requestedOut: string, reason: string) => void;
   approveRegularization: (timesheetId: string) => void;
   rejectRegularization: (timesheetId: string) => void;
@@ -776,6 +793,17 @@ function mapApiTimesheetToFrontend(row: ApiTimesheetRow): TimesheetLog {
   };
 }
 
+function mapApiTenantSettingsToFrontend(row: ApiTenantSettings): TenantSettings {
+  return {
+    officeLat: Number(row.office_lat),
+    officeLng: Number(row.office_lng),
+    geofenceRadiusMeters: row.geofence_radius_meters,
+    halfDayThresholdHours: Number(row.half_day_threshold_hours),
+    gstRate: Number(row.gst_rate),
+    invoiceDueDays: row.invoice_due_days
+  };
+}
+
 function mapApiAdSpendToFrontend(row: ApiAdSpendRow): AdSpendRecord {
   return {
     id: row.id,
@@ -827,7 +855,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // from the real database. Nothing in this file falls back to mock data.
   const loadAllRealData = async (role?: Role) => {
     try {
-      const [apiLeads, apiUsers, apiProperties, apiResaleUnits, apiFollowups, apiAttendance, apiReimbursements, apiInvoices, apiNotifications, apiCalendarEvents, apiAdSpend, apiTimesheets] = await Promise.all([
+      const [apiLeads, apiUsers, apiProperties, apiResaleUnits, apiFollowups, apiAttendance, apiReimbursements, apiInvoices, apiNotifications, apiCalendarEvents, apiAdSpend, apiTimesheets, apiTenantSettings] = await Promise.all([
         apiListAllLeads(),
         apiListUsers(),
         apiListProperties(),
@@ -839,7 +867,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         apiListNotifications(),
         apiListCalendarEvents(),
         apiListAdSpend(),
-        apiListTimesheets()
+        apiListTimesheets(),
+        apiGetTenantSettings()
       ]);
       setLeads(apiLeads.map(mapApiLeadToFrontendLead));
       setUsers(apiUsers.map(mapApiUserDirectoryEntryToFrontendUser));
@@ -853,6 +882,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setCalendarEvents(apiCalendarEvents.map(mapApiCalendarEventToFrontend));
       setAdSpendRecords(apiAdSpend.map(mapApiAdSpendToFrontend));
       setTimesheets(apiTimesheets.map(mapApiTimesheetToFrontend));
+      setTenantSettings(mapApiTenantSettingsToFrontend(apiTenantSettings));
 
       // /api/v1/meta/connections is ADMIN-only — only attempt it for admins,
       // other roles keep the default false rather than eating a guaranteed 403.
@@ -899,6 +929,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Reflects whether any meta_connections row is ACTIVE — set on initial load
   // for ADMINs (see loadAllRealData) and refreshed after Connect/Disconnect.
   const [metaConnected, setMetaConnected] = useState(false);
+  const [tenantSettings, setTenantSettings] = useState<TenantSettings | null>(null);
 
   const refreshMetaConnectionStatus = async () => {
     try {
@@ -906,6 +937,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setMetaConnected(connections.some(c => c.status === "ACTIVE"));
     } catch {
       // Non-admin or unreachable — leave metaConnected as-is.
+    }
+  };
+
+  const updateTenantSettings = async (input: UpdateTenantSettingsInput): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const updated = await apiUpdateTenantSettings(input);
+      setTenantSettings(mapApiTenantSettingsToFrontend(updated));
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err instanceof ApiRequestError ? err.message : "Could not save settings." };
     }
   };
 
@@ -1491,68 +1532,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // HRMS actions
-  const punchIn = (lat: number, lng: number) => {
-    const centralLat = 19.0760;
-    const centralLng = 72.8777;
-    const distance = Math.sqrt(Math.pow(lat - centralLat, 2) + Math.pow(lng - centralLng, 2));
-
-    if (distance > 0.15) {
-      return { success: false, error: `GPS Telemetry Check Failed: Coordinates [${lat.toFixed(4)}, ${lng.toFixed(4)}] fall outside geofence perimeter.` };
+  // Geofence enforcement is real and server-side now (tenant_settings-driven,
+  // see Taskezy-Server) — this used to do its own (inaccurate, hardcoded)
+  // client-side pre-check and optimistically show "success" before the real
+  // API call resolved, which could tell a user they'd punched in while the
+  // actual database write silently failed. Now genuinely async: the UI only
+  // reflects what the server actually accepted.
+  const punchIn = async (lat: number, lng: number): Promise<{ success: boolean; error?: string }> => {
+    if (!isApiSessionActive()) {
+      return { success: false, error: "You must be signed in to punch in." };
     }
-
-    const todayStr = new Date().toISOString().split("T")[0];
-    const newLog: TimesheetLog = {
-      id: `ts-${Date.now()}`,
-      userId: currentUser?.id || "user-agent",
-      userName: currentUser?.name || "Amit Sharma",
-      date: todayStr,
-      punchIn: new Date().toISOString(),
-      punchInLat: lat,
-      punchInLng: lng,
-      status: "Half Day"
-    };
-
-    setTimesheets(prev => [newLog, ...prev]);
-
-    if (isApiSessionActive()) {
-      apiPunchIn(lat, lng)
-        .then((created) => {
-          setTimesheets(prev => prev.map(ts => (ts.id === newLog.id ? mapApiTimesheetToFrontend(created) : ts)));
-        })
-        .catch((err) => console.warn("Could not persist punch-in to the database:", err));
+    try {
+      const created = await apiPunchIn(lat, lng);
+      setTimesheets(prev => [mapApiTimesheetToFrontend(created), ...prev]);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err instanceof ApiRequestError ? err.message : "Punch-in failed." };
     }
-
-    return { success: true };
   };
 
-  const punchOut = () => {
+  const punchOut = async (): Promise<{ success: boolean; error?: string }> => {
     const todayStr = new Date().toISOString().split("T")[0];
     const active = timesheets.find(ts => ts.date === todayStr && !ts.punchOut);
     if (!active) return { success: false, error: "No active shift found to punch out." };
 
-    setTimesheets(prev => prev.map(ts => {
-      if (ts.id === active.id) {
-        const outTime = new Date().toISOString();
-        const diffMs = new Date(outTime).getTime() - new Date(ts.punchIn).getTime();
-        const hours = Number((diffMs / 3600000).toFixed(2));
-        
-        return {
-          ...ts,
-          punchOut: outTime,
-          durationHours: hours,
-          status: hours >= 4.0 ? "Full Day" : "Half Day"
-        };
-      }
-      return ts;
-    }));
-
-    if (isApiSessionActive() && isRealId(active.id)) {
-      apiPunchOut()
-        .then((updated) => setTimesheets(prev => prev.map(ts => (ts.id === active.id ? mapApiTimesheetToFrontend(updated) : ts))))
-        .catch((err) => console.warn("Could not persist punch-out to the database:", err));
+    if (!isApiSessionActive() || !isRealId(active.id)) {
+      return { success: false, error: "You must be signed in to punch out." };
     }
-
-    return { success: true };
+    try {
+      const updated = await apiPunchOut();
+      setTimesheets(prev => prev.map(ts => (ts.id === active.id ? mapApiTimesheetToFrontend(updated) : ts)));
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err instanceof ApiRequestError ? err.message : "Punch-out failed." };
+    }
   };
 
   const submitRegularization = (timesheetId: string, reqIn: string, reqOut: string, reason: string) => {
@@ -1895,6 +1908,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         isSyncing,
         metaConnected,
         refreshMetaConnectionStatus,
+        tenantSettings,
+        updateTenantSettings,
         setSeats,
         processPayment,
         provisionTenant,

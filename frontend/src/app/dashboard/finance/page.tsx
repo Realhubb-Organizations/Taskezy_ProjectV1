@@ -464,10 +464,10 @@ export default function FinancePage() {
                       <p className="text-[10px] text-slate-500 font-mono mt-0.5">+91-{l.phone} • {l.email}</p>
                       <div className="flex gap-2 mt-2">
                         <span className="bg-brand-50 border border-brand-100 text-brand-700 px-1.5 py-0.5 rounded text-[9px] font-bold">
-                          Property: {l.property || "Granada"}
+                          Property: {l.property || "Not set"}
                         </span>
                         <span className="bg-slate-200 border border-slate-250 text-slate-700 px-1.5 py-0.5 rounded text-[9px] font-bold">
-                          Draft Value: ₹{(l.dealValue || 12000000).toLocaleString("en-IN")}
+                          Draft Value: {l.dealValue ? `₹${l.dealValue.toLocaleString("en-IN")}` : "Not set"}
                         </span>
                       </div>
                     </div>
@@ -491,6 +491,96 @@ export default function FinancePage() {
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* 4. Finance Reports Tab — upcoming/overdue/collected, computed live from
+          real invoice due_date/status/collectedAmount (no "overdue" background
+          job exists in the backend to set that status automatically, so it's
+          derived here from the actual due date rather than trusted from a
+          status value nothing ever transitions to it). */}
+      {activeTabParam === "reports" && (
+        <div className="space-y-6 animate-fade-in">
+          {(() => {
+            const todayStr = new Date().toISOString().slice(0, 10);
+            const unpaid = invoices.filter(i => i.status !== "Paid");
+            const overdue = unpaid.filter(i => i.dueDate < todayStr);
+            const upcoming = unpaid.filter(i => i.dueDate >= todayStr);
+            const totalCollected = invoices.filter(i => i.status === "Paid").reduce((sum, i) => sum + i.totalAmount, 0);
+            const overdueTotal = overdue.reduce((sum, i) => sum + (i.totalAmount - (i.collectedAmount || 0)), 0);
+            const upcomingTotal = upcoming.reduce((sum, i) => sum + (i.totalAmount - (i.collectedAmount || 0)), 0);
+
+            const rows = [...unpaid].sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+
+            return (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Upcoming Payments</span>
+                    <p className="text-xl font-black text-slate-800 mt-1">₹{upcomingTotal.toLocaleString("en-IN")}</p>
+                    <span className="text-[9px] text-slate-450">{upcoming.length} invoice{upcoming.length === 1 ? "" : "s"} not yet due</span>
+                  </div>
+                  <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Overdue Payments</span>
+                    <p className="text-xl font-black text-red-600 mt-1">₹{overdueTotal.toLocaleString("en-IN")}</p>
+                    <span className="text-[9px] text-slate-450">{overdue.length} invoice{overdue.length === 1 ? "" : "s"} past due date</span>
+                  </div>
+                  <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Collected</span>
+                    <p className="text-xl font-black text-emerald-600 mt-1">₹{totalCollected.toLocaleString("en-IN")}</p>
+                    <span className="text-[9px] text-slate-450">All-time, fully paid invoices</span>
+                  </div>
+                </div>
+
+                <div className="glass-card p-6 rounded-2xl space-y-4">
+                  <h3 className="text-xs font-bold text-slate-700 border-b border-slate-100 pb-3">Outstanding Invoices, by Due Date</h3>
+                  <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs border-collapse">
+                        <thead>
+                          <tr className="bg-slate-50 border-b border-slate-200 text-[10px] uppercase font-bold text-slate-500 tracking-wider">
+                            <th className="p-4">Client</th>
+                            <th className="p-4">Project</th>
+                            <th className="p-4">Due Date</th>
+                            <th className="p-4">Amount Due</th>
+                            <th className="p-4 text-right">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
+                          {rows.length === 0 ? (
+                            <tr>
+                              <td colSpan={5} className="p-6 text-center text-slate-400 font-semibold italic">
+                                No outstanding invoices — everything is settled.
+                              </td>
+                            </tr>
+                          ) : (
+                            rows.map((inv) => {
+                              const isOverdue = inv.dueDate < todayStr;
+                              return (
+                                <tr key={inv.id} className="hover:bg-slate-50/50">
+                                  <td className="p-4 font-bold text-slate-800">{inv.clientName}</td>
+                                  <td className="p-4 text-slate-500">{inv.projectName || "N/A"}</td>
+                                  <td className="p-4 font-mono">{inv.dueDate}</td>
+                                  <td className="p-4 font-mono">₹{(inv.totalAmount - (inv.collectedAmount || 0)).toLocaleString("en-IN")}</td>
+                                  <td className="p-4 text-right">
+                                    <span className={`inline-block border px-2 py-0.5 rounded text-[10px] font-bold ${
+                                      isOverdue ? "bg-red-50 text-red-700 border-red-100" : "bg-amber-50 text-amber-700 border-amber-100"
+                                    }`}>
+                                      {isOverdue ? "Overdue" : "Upcoming"}
+                                    </span>
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </>
+            );
+          })()}
         </div>
       )}
 

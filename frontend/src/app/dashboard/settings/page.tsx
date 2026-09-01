@@ -25,10 +25,12 @@ import {
   ScrollText,
   LogOut,
   TrendingUp,
-  Users
+  Users,
+  MapPin,
+  Percent
 } from "lucide-react";
 
-const TABS = ["Connected Apps", "Leads", "Manage Users", "About"] as const;
+const TABS = ["Connected Apps", "Leads", "HRMS", "Finance", "Manage Users", "About"] as const;
 type Tab = (typeof TABS)[number];
 
 const DEPT_BADGE: Record<string, string> = {
@@ -47,8 +49,20 @@ function initialsFor(name: string): string {
 export default function SettingsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { users, leads, activeRole, activeSystem, logout, updateUserFields, addTeamMember, deleteTeamMember, refreshMetaConnectionStatus } = useApp();
-  const [activeTab, setActiveTab] = useState<Tab>("Connected Apps");
+  const { users, leads, activeRole, activeSystem, logout, updateUserFields, addTeamMember, deleteTeamMember, refreshMetaConnectionStatus, tenantSettings, updateTenantSettings } = useApp();
+
+  const initialTabParam = searchParams.get("tab");
+  const initialTab = (TABS as readonly string[]).includes(initialTabParam || "") ? (initialTabParam as Tab) : "Connected Apps";
+  const [activeTab, setActiveTab] = useState<Tab>(initialTab);
+
+  // Deep-links from the sidebar (?tab=HRMS / ?tab=Finance) should re-select the tab
+  // even when this page instance is already mounted (client-side navigation).
+  useEffect(() => {
+    const t = searchParams.get("tab");
+    if (t && (TABS as readonly string[]).includes(t)) {
+      setActiveTab(t as Tab);
+    }
+  }, [searchParams]);
 
   // --- Connected Apps ---
   // Every entry other than Meta Ads and Google Ads is still a placeholder —
@@ -160,6 +174,64 @@ export default function SettingsPage() {
       .map(([name, count]) => ({ name, count, percent: (count / total) * 100 }))
       .sort((a, b) => b.count - a.count);
   }, [leads]);
+
+  // --- HRMS Settings: geofence + half-day threshold, admin-editable, tenant-wide ---
+  const [officeLat, setOfficeLat] = useState("");
+  const [officeLng, setOfficeLng] = useState("");
+  const [geofenceRadius, setGeofenceRadius] = useState("");
+  const [halfDayThreshold, setHalfDayThreshold] = useState("");
+  const [hrmsSaving, setHrmsSaving] = useState(false);
+  const [hrmsMsg, setHrmsMsg] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+
+  // --- Finance Settings: GST rate + invoice due-date window, admin-editable, tenant-wide ---
+  const [gstRate, setGstRate] = useState("");
+  const [invoiceDueDays, setInvoiceDueDays] = useState("");
+  const [financeSaving, setFinanceSaving] = useState(false);
+  const [financeMsg, setFinanceMsg] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+
+  // Sync local form fields whenever real tenant settings arrive/change —
+  // covers the initial async load and any update made from elsewhere.
+  useEffect(() => {
+    if (!tenantSettings) return;
+    setOfficeLat(String(tenantSettings.officeLat));
+    setOfficeLng(String(tenantSettings.officeLng));
+    setGeofenceRadius(String(tenantSettings.geofenceRadiusMeters));
+    setHalfDayThreshold(String(tenantSettings.halfDayThresholdHours));
+    setGstRate(String(tenantSettings.gstRate));
+    setInvoiceDueDays(String(tenantSettings.invoiceDueDays));
+  }, [tenantSettings]);
+
+  const handleSaveHrmsSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setHrmsSaving(true);
+    setHrmsMsg(null);
+    const result = await updateTenantSettings({
+      officeLat: parseFloat(officeLat),
+      officeLng: parseFloat(officeLng),
+      geofenceRadiusMeters: parseInt(geofenceRadius, 10),
+      halfDayThresholdHours: parseFloat(halfDayThreshold)
+    });
+    setHrmsSaving(false);
+    setHrmsMsg(result.success
+      ? { kind: "success", text: "HRMS settings saved. This applies to every employee immediately." }
+      : { kind: "error", text: result.error || "Could not save HRMS settings." });
+    if (result.success) setTimeout(() => setHrmsMsg(null), 5000);
+  };
+
+  const handleSaveFinanceSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setFinanceSaving(true);
+    setFinanceMsg(null);
+    const result = await updateTenantSettings({
+      gstRate: parseFloat(gstRate),
+      invoiceDueDays: parseInt(invoiceDueDays, 10)
+    });
+    setFinanceSaving(false);
+    setFinanceMsg(result.success
+      ? { kind: "success", text: "Finance settings saved. This applies to every new invoice immediately." }
+      : { kind: "error", text: result.error || "Could not save Finance settings." });
+    if (result.success) setTimeout(() => setFinanceMsg(null), 5000);
+  };
 
   // --- Manage Users ---
   const [searchQuery, setSearchQuery] = useState("");
@@ -489,7 +561,168 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* 3. Manage Users */}
+      {/* 3. HRMS Settings — geofence + half-day threshold, admin-editable, applies tenant-wide */}
+      {activeTab === "HRMS" && (
+        <div className="max-w-xl space-y-4 animate-fade-in">
+          {hrmsMsg && (
+            <div className={`p-3.5 rounded-xl border text-xs font-bold flex items-center gap-2 shadow-sm ${
+              hrmsMsg.kind === "success" ? "bg-emerald-50 border-emerald-105 text-emerald-700" : "bg-red-50 border-red-150 text-red-700"
+            }`}>
+              {hrmsMsg.kind === "success" ? <CheckCircle className="h-4.5 w-4.5" /> : <AlertTriangle className="h-4.5 w-4.5" />}
+              <span>{hrmsMsg.text}</span>
+            </div>
+          )}
+          <div className="glass-card p-6 rounded-2xl space-y-5">
+            <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
+              <MapPin className="h-4.5 w-4.5 text-brand-600" />
+              <div>
+                <h3 className="text-xs font-bold text-slate-700">Office Geofence &amp; Attendance Rules</h3>
+                <p className="text-[10px] text-slate-450 mt-0.5">Controls where employees are allowed to punch in from, and the hours threshold for a half-day.</p>
+              </div>
+            </div>
+
+            {activeRole !== "ADMIN" ? (
+              <p className="text-[11px] text-slate-400 italic py-4 text-center">Only an Admin can edit HRMS settings.</p>
+            ) : (
+              <form onSubmit={handleSaveHrmsSettings} className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Office Latitude</label>
+                    <input
+                      type="number"
+                      step="0.000001"
+                      required
+                      value={officeLat}
+                      onChange={(e) => setOfficeLat(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:border-brand-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Office Longitude</label>
+                    <input
+                      type="number"
+                      step="0.000001"
+                      required
+                      value={officeLng}
+                      onChange={(e) => setOfficeLng(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:border-brand-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Geofence Radius (meters)</label>
+                    <input
+                      type="number"
+                      min="1"
+                      required
+                      value={geofenceRadius}
+                      onChange={(e) => setGeofenceRadius(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:border-brand-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Half-Day Threshold (hours)</label>
+                    <input
+                      type="number"
+                      step="0.25"
+                      min="0"
+                      required
+                      value={halfDayThreshold}
+                      onChange={(e) => setHalfDayThreshold(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:border-brand-500"
+                    />
+                  </div>
+                </div>
+
+                <p className="text-[10px] text-slate-450 leading-relaxed">
+                  Punch-ins are rejected server-side if the employee&apos;s GPS location is beyond the radius from the office coordinates above.
+                  A shift shorter than the threshold is marked as a half-day.
+                </p>
+
+                <button
+                  type="submit"
+                  disabled={hrmsSaving}
+                  className="w-full bg-brand-700 hover:bg-brand-600 text-white font-bold py-2.5 rounded-lg text-xs transition-all shadow-sm disabled:opacity-60"
+                >
+                  {hrmsSaving ? "Saving…" : "Save HRMS Settings"}
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 4. Finance Settings — GST rate + invoice due-date window, admin-editable, applies tenant-wide */}
+      {activeTab === "Finance" && (
+        <div className="max-w-xl space-y-4 animate-fade-in">
+          {financeMsg && (
+            <div className={`p-3.5 rounded-xl border text-xs font-bold flex items-center gap-2 shadow-sm ${
+              financeMsg.kind === "success" ? "bg-emerald-50 border-emerald-105 text-emerald-700" : "bg-red-50 border-red-150 text-red-700"
+            }`}>
+              {financeMsg.kind === "success" ? <CheckCircle className="h-4.5 w-4.5" /> : <AlertTriangle className="h-4.5 w-4.5" />}
+              <span>{financeMsg.text}</span>
+            </div>
+          )}
+          <div className="glass-card p-6 rounded-2xl space-y-5">
+            <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
+              <Percent className="h-4.5 w-4.5 text-brand-600" />
+              <div>
+                <h3 className="text-xs font-bold text-slate-700">Billing &amp; Invoicing Rules</h3>
+                <p className="text-[10px] text-slate-450 mt-0.5">Controls the GST split applied when generating an invoice, and the default payment window.</p>
+              </div>
+            </div>
+
+            {activeRole !== "ADMIN" ? (
+              <p className="text-[11px] text-slate-400 italic py-4 text-center">Only an Admin can edit Finance settings.</p>
+            ) : (
+              <form onSubmit={handleSaveFinanceSettings} className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">GST Rate (%)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      required
+                      value={gstRate}
+                      onChange={(e) => setGstRate(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:border-brand-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Invoice Due Days</label>
+                    <input
+                      type="number"
+                      min="0"
+                      required
+                      value={invoiceDueDays}
+                      onChange={(e) => setInvoiceDueDays(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:border-brand-500"
+                    />
+                  </div>
+                </div>
+
+                <p className="text-[10px] text-slate-450 leading-relaxed">
+                  The GST rate is split evenly across CGST and SGST when an invoice is generated. Invoice due dates default to this many
+                  days after creation unless a different date is specified manually.
+                </p>
+
+                <button
+                  type="submit"
+                  disabled={financeSaving}
+                  className="w-full bg-brand-700 hover:bg-brand-600 text-white font-bold py-2.5 rounded-lg text-xs transition-all shadow-sm disabled:opacity-60"
+                >
+                  {financeSaving ? "Saving…" : "Save Finance Settings"}
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 5. Manage Users */}
       {activeTab === "Manage Users" && (
         <div className="space-y-6 animate-fade-in">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -609,7 +842,7 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* 4. About */}
+      {/* 6. About */}
       {activeTab === "About" && (
         <div className="max-w-xl space-y-4 animate-fade-in">
           <div className="glass-card p-6 rounded-2xl space-y-4">
