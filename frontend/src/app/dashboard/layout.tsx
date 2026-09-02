@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useApp, SystemType } from "@/context/AppContext";
 import NotificationBell from "@/components/dashboard/NotificationBell";
+import LoginAnimationOverlay from "@/components/LoginAnimationOverlay";
 import {
   LayoutDashboard,
   LayoutGrid,
@@ -92,7 +93,9 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     triggerSync,
     logout,
     activeSystem,
-    setActiveSystem
+    setActiveSystem,
+    showLoginSplash,
+    setShowLoginSplash
   } = useApp();
 
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
@@ -633,6 +636,10 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
           )}
         </main>
       </div>
+
+      {showLoginSplash && (
+        <LoginAnimationOverlay onComplete={() => setShowLoginSplash(false)} />
+      )}
     </div>
   );
 }

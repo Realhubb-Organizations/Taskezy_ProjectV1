@@ -426,6 +426,8 @@ interface AppState {
   authLoading: boolean;
   activeRole: Role; // For easy switcher
   activeSystem: SystemType;
+  showLoginSplash: boolean;
+  setShowLoginSplash: (show: boolean) => void;
   
   // App Modules Data
   leads: Lead[];
@@ -835,6 +837,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [authLoading, setAuthLoading] = useState(true);
   const [activeRole, setActiveRole] = useState<Role>("ADMIN");
   const [activeSystem, setActiveSystem] = useState<SystemType>("ADMIN");
+  const [showLoginSplash, setShowLoginSplash] = useState(false);
 
   // Core Module States — all fetched from the real API now (see the
   // session-restore effect and loadAllRealData below). Empty until a real
@@ -1180,6 +1183,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setActiveRole(mapped.role);
       setActiveSystem(getDefaultSystem(mapped));
       await loadAllRealData(mapped.role);
+      setShowLoginSplash(true);
       return mapped;
     } catch (err) {
       // Any failure — bad credentials (401), inactive account, or the API
@@ -1202,6 +1206,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return u;
     }));
     setCurrentUser(prev => prev ? { ...prev, passwordStatus: "ACTIVE" } : null);
+    setShowLoginSplash(true);
   };
 
   const logout = () => {
@@ -1891,6 +1896,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         authLoading,
         activeRole,
         activeSystem,
+        showLoginSplash,
+        setShowLoginSplash,
         setActiveSystem,
         leads,
         properties,
