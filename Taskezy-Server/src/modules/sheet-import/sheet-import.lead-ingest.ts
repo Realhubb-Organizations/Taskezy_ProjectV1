@@ -71,13 +71,21 @@ export async function ingestSheetLead(row: SheetLeadRow): Promise<SheetLeadInges
   const source = row.source || "Google Ads Sheet";
   const campaign = row.campaign || row.formSource || row.sourceSheet || undefined;
 
+  // created_at defaults to now() at the DB level, which is wrong here — that
+  // would date every lead by when the sync happened to run, not when the
+  // prospect actually submitted the form. Use the sheet's own Timestamp
+  // column when it parses to a real date; fall back to "now" (still better
+  // than crashing the whole row) if it's missing/unparseable.
+  const parsedTimestamp = row.timestamp ? new Date(row.timestamp) : undefined;
+  const createdAt = parsedTimestamp && !isNaN(parsedTimestamp.getTime()) ? parsedTimestamp : new Date();
+
   try {
     const { rows, rowCount } = await pool.query<{ id: string }>(
-      `INSERT INTO leads (name, phone, email, source, campaign, assigned_agent_id, status_code, assigned_at, sheet_lead_key, property_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, now(), $8, $9)
+      `INSERT INTO leads (name, phone, email, source, campaign, assigned_agent_id, status_code, assigned_at, sheet_lead_key, property_id, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, now(), $8, $9, $10)
        ON CONFLICT (sheet_lead_key) DO NOTHING
        RETURNING id`,
-      [name, phone, row.email || null, source, campaign ?? null, assignedAgentId, statusCode, row.leadKey, propertyId ?? null]
+      [name, phone, row.email || null, source, campaign ?? null, assignedAgentId, statusCode, row.leadKey, propertyId ?? null, createdAt]
     );
 
     // rowCount is 0 when ON CONFLICT DO NOTHING suppressed the insert (a

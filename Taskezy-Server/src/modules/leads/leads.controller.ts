@@ -41,6 +41,11 @@ export async function reassignUnassignedSheetLeadsHandler(req: Request, res: Res
   sendOk(res, result);
 }
 
+export async function fixSheetLeadTimestampsHandler(_req: Request, res: Response): Promise<void> {
+  const result = await leadsService.fixSheetLeadTimestamps();
+  sendOk(res, result);
+}
+
 export async function deleteLeadHandler(req: Request, res: Response): Promise<void> {
   await leadsService.deleteLead(req.params.id);
   sendOk(res, { deleted: true });

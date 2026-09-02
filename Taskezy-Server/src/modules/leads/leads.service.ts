@@ -273,6 +273,40 @@ export async function reassignUnassignedSheetLeads(caller: AccessTokenPayload): 
   return { reassigned, stillUnassigned, total: candidates.length };
 }
 
+/**
+ * One-time (safe to re-run) maintenance action: ingestSheetLead used to let
+ * created_at default to now() at insert time, dating every sheet-imported
+ * lead by when the sync happened to run rather than when the prospect
+ * actually submitted the form. That's since been fixed for new imports —
+ * this corrects every lead imported before the fix, recovering the sheet's
+ * real Timestamp from the "Original sheet timestamp: ..." line each lead
+ * already has in its own first import log entry. A lead whose created_at
+ * already matches (new imports, or a lead this has already fixed) is left
+ * untouched.
+ */
+export async function fixSheetLeadTimestamps(): Promise<{ fixed: number; alreadyCorrect: number; total: number }> {
+  const leads = await repo.findAllSheetLeads();
+  let fixed = 0;
+  let alreadyCorrect = 0;
+
+  for (const lead of leads) {
+    const originalTimestamp = await repo.findImportedOriginalTimestamp(lead.id);
+    if (!originalTimestamp) {
+      alreadyCorrect++;
+      continue;
+    }
+    const currentCreatedAt = new Date(lead.created_at);
+    if (Math.abs(currentCreatedAt.getTime() - originalTimestamp.getTime()) < 1000) {
+      alreadyCorrect++;
+      continue;
+    }
+    await repo.setLeadCreatedAt(lead.id, originalTimestamp);
+    fixed++;
+  }
+
+  return { fixed, alreadyCorrect, total: leads.length };
+}
+
 export async function deleteLead(leadId: string): Promise<void> {
   const existing = await repo.findById(leadId);
   if (!existing) throw ApiError.notFound("Lead not found");

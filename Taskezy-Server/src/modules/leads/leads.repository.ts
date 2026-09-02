@@ -198,6 +198,37 @@ export async function markLeadNewIfUnassigned(leadId: string): Promise<void> {
   await pool.query(`UPDATE leads SET status_code = 'NEW' WHERE id = $1 AND status_code = 'UNASSIGNED'`, [leadId]);
 }
 
+export interface SheetLeadForTimestampFix {
+  id: string;
+  created_at: string;
+}
+
+/** Every sheet-imported lead, for the one-time created_at backfill (see leads.service.fixSheetLeadTimestamps) — this INSERT started setting created_at correctly itself, so this is only relevant for leads imported before that fix shipped. */
+export async function findAllSheetLeads(): Promise<SheetLeadForTimestampFix[]> {
+  const { rows } = await query<SheetLeadForTimestampFix>(
+    `SELECT id, created_at FROM leads WHERE sheet_lead_key IS NOT NULL`
+  );
+  return rows;
+}
+
+const IMPORTED_TIMESTAMP_RE = /Original sheet timestamp: (.+)$/;
+
+/** Recovers the sheet's own Timestamp column value from a lead's first import log entry — leads imported before ingestSheetLead started setting created_at directly had it silently default to whenever the sync happened to run. */
+export async function findImportedOriginalTimestamp(leadId: string): Promise<Date | undefined> {
+  const { rows } = await query<{ message: string }>(
+    `SELECT message FROM lead_logs WHERE lead_id = $1 AND message LIKE 'Imported from Google Ads lead-form sheet (%' ORDER BY created_at ASC LIMIT 1`,
+    [leadId]
+  );
+  const match = rows[0]?.message.match(IMPORTED_TIMESTAMP_RE);
+  if (!match) return undefined;
+  const parsed = new Date(match[1].trim());
+  return isNaN(parsed.getTime()) ? undefined : parsed;
+}
+
+export async function setLeadCreatedAt(leadId: string, createdAt: Date): Promise<void> {
+  await pool.query(`UPDATE leads SET created_at = $1 WHERE id = $2`, [createdAt, leadId]);
+}
+
 export interface EditLeadInput {
   name?: string;
   email?: string;

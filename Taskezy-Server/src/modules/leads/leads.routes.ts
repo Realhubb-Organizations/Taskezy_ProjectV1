@@ -14,6 +14,7 @@ import {
   createLeadHandler,
   deleteLeadHandler,
   editLeadHandler,
+  fixSheetLeadTimestampsHandler,
   getLeadHandler,
   listLeadsHandler,
   reassignLeadHandler,
@@ -63,6 +64,16 @@ leadsRouter.post(
   "/reassign-sheet-fallback",
   requireRole("ADMIN"),
   asyncHandler(reassignUnassignedSheetLeadsHandler)
+);
+// Maintenance action for the Google Ads sheet import: created_at used to
+// default to whenever the sync ran rather than the sheet's own Timestamp —
+// this backfills the real date onto every lead imported before that was
+// fixed, recovered from each lead's own import log entry. Safe to re-run —
+// a lead whose created_at is already correct is left untouched.
+leadsRouter.post(
+  "/fix-sheet-lead-timestamps",
+  requireRole("ADMIN"),
+  asyncHandler(fixSheetLeadTimestampsHandler)
 );
 // KYC verification is restricted to ADMIN/FINANCE — matches the frontend's
 // verifyKYC action, which only ever appears in the Finance module UI.
