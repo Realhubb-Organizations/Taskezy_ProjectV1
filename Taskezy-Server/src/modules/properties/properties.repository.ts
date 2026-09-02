@@ -264,6 +264,12 @@ export async function findPropertyIdByCampaignName(campaignName: string): Promis
   return rows[0]?.property_id;
 }
 
+/** Used by the Google Ads sheet-lead importer to auto-fill leads.property_id — the sheet's per-project tab name is expected to match a property's display name (case-insensitive). */
+export async function findPropertyIdByName(name: string): Promise<string | undefined> {
+  const { rows } = await query<{ id: string }>(`SELECT id FROM properties WHERE lower(name) = lower($1) LIMIT 1`, [name]);
+  return rows[0]?.id;
+}
+
 // --- Google Ads campaign linking (see Taskezy_DB/migrations/009_*.sql) ---
 // No lead-ingest webhook for Google (spend-sync only, per scoping decision),
 // so suggestions come from the synced google_ads_campaigns cache rather than

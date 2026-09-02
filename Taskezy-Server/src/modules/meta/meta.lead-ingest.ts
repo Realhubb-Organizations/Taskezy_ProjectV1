@@ -1,6 +1,6 @@
 import { pool, withTransaction } from "../../db/pool";
 import { logger } from "../../utils/logger";
-import { insertLeadLog } from "../leads/leads.repository";
+import { insertLeadLog, normalizeIndianMobile } from "../leads/leads.repository";
 import { isUniqueViolation } from "../users/users.repository";
 import { createNotification } from "../notifications/notifications.service";
 import { findPropertyIdByCampaignName } from "../properties/properties.repository";
@@ -12,12 +12,6 @@ function firstFieldValue(fieldData: MetaLeadData["field_data"], keys: string[]):
     if (keys.includes(datum.name.toLowerCase()) && datum.values[0]) return datum.values[0];
   }
   return undefined;
-}
-
-/** leads.phone is CHECK'd to a bare 10-digit Indian mobile — strip formatting/country code before insert. */
-function normalizeIndianMobile(raw: string): string | undefined {
-  const last10 = raw.replace(/\D/g, "").slice(-10);
-  return /^[6-9][0-9]{9}$/.test(last10) ? last10 : undefined;
 }
 
 /**

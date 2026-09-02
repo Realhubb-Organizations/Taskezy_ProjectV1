@@ -26,6 +26,7 @@ import { adSpendRouter } from "./modules/ad-spend/ad-spend.routes";
 import { metaRouter } from "./modules/meta/meta.routes";
 import { googleAdsRouter } from "./modules/google-ads/google-ads.routes";
 import { tenantSettingsRouter } from "./modules/tenant-settings/tenant-settings.routes";
+import { sheetImportRouter } from "./modules/sheet-import/sheet-import.routes";
 
 export function createApp(): Express {
   const app = express();
@@ -81,6 +82,11 @@ export function createApp(): Express {
   app.use("/api/v1/meta", metaRouter);
   app.use("/api/v1/google-ads", googleAdsRouter);
   app.use("/api/v1/tenant-settings", tenantSettingsRouter);
+  // Public: the Google Ads lead-form sheet's Apps Script calls this directly
+  // with a static API key (see sheet-import.routes.ts) — deliberately its own
+  // top-level mount, not nested under /api/v1/leads, so it never runs through
+  // that router's blanket requireAuth (leads.routes.ts:26).
+  app.use("/api/v1/integrations/sheet-leads", sheetImportRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

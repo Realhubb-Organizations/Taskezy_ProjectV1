@@ -44,7 +44,12 @@ const envSchema = z.object({
   GOOGLE_ADS_REFRESH_TOKEN: z.string().min(1, "GOOGLE_ADS_REFRESH_TOKEN is required"),
   // The Manager (MCC) account's Customer ID, digits only, e.g. 3349503286
   GOOGLE_ADS_LOGIN_CUSTOMER_ID: z.string().regex(/^\d+$/, "GOOGLE_ADS_LOGIN_CUSTOMER_ID must be digits only, no dashes"),
-  GOOGLE_ADS_API_VERSION: z.string().default("v25") // v18 is sunset — see google-ads-client.ts
+  GOOGLE_ADS_API_VERSION: z.string().default("v25"), // v18 is sunset — see google-ads-client.ts
+
+  // Google Ads lead-form sheet import (see src/modules/sheet-import) — a
+  // static shared secret the Apps Script sends as `Authorization: Bearer
+  // <key>`. Generate with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+  SHEET_IMPORT_API_KEY: z.string().min(16, "SHEET_IMPORT_API_KEY must be at least 16 characters")
 });
 
 const parsed = envSchema.safeParse(process.env);

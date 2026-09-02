@@ -1,6 +1,12 @@
 import { PoolClient } from "pg";
 import { pool, query } from "../../db/pool";
 
+/** leads.phone is CHECK'd to a bare 10-digit Indian mobile — strip formatting/country code before insert. Shared by every external lead-ingest source (Meta webhook, sheet import). */
+export function normalizeIndianMobile(raw: string): string | undefined {
+  const last10 = raw.replace(/\D/g, "").slice(-10);
+  return /^[6-9][0-9]{9}$/.test(last10) ? last10 : undefined;
+}
+
 export interface LeadListRow {
   id: string;
   name: string;
