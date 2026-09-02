@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useApp } from "@/context/AppContext";
 import { ShieldCheck, AlertCircle, Eye, EyeOff, Sparkles } from "lucide-react";
 import Link from "next/link";
+import LoginAnimationOverlay from "@/components/LoginAnimationOverlay";
 
 const slides = [
   {
@@ -40,6 +41,7 @@ export default function LoginPage() {
   const [resetError, setResetError] = useState("");
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isShowingSplash, setIsShowingSplash] = useState(false);
   const [currentSlide, setCurrentSlide] = useState(0);
 
   useEffect(() => {
@@ -365,7 +367,6 @@ export default function LoginPage() {
           )}
         </div>
       </div>
-
     </div>
   );
 }

@@ -128,6 +128,14 @@ body {
     animation: shimmer-sweep 1s ease-in-out;
   }
 
+  @keyframes logo-shimmer {
+    0% { transform: translateX(-100%) skewX(-15deg); }
+    100% { transform: translateX(200%) skewX(-15deg); }
+  }
+  .animate-logo-shimmer {
+    animation: logo-shimmer 2.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  }
+
   /* Scroll-reveal: paired with a small IntersectionObserver hook (see
      page.tsx) — starts hidden, gets .is-visible added once in viewport. */
   .reveal-on-scroll {
