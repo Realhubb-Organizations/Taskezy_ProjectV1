@@ -27,6 +27,12 @@ propertiesRouter.get(
 );
 
 propertiesRouter.get(
+  "/sheet-source-suggestions",
+  requireRole("ADMIN"),
+  asyncHandler(async (_req, res) => sendOk(res, await repo.listUnlinkedSheetSourceNames()))
+);
+
+propertiesRouter.get(
   "/",
   asyncHandler(async (_req, res) => sendOk(res, await repo.findAll()))
 );
@@ -164,5 +170,38 @@ propertiesRouter.put(
       throw err;
     }
     sendOk(res, await repo.listGoogleCampaignNamesForProperty(req.params.id));
+  })
+);
+
+propertiesRouter.get(
+  "/:id/sheet-sources",
+  validate({ params: propertyIdParamSchema }),
+  asyncHandler(async (req, res) => {
+    const existing = await repo.findById(req.params.id);
+    if (!existing) throw ApiError.notFound("Property not found");
+    sendOk(res, await repo.listSheetSourceNamesForProperty(req.params.id));
+  })
+);
+
+const setSheetSourcesSchema = z.object({
+  sheetSourceNames: z.array(z.string().trim().min(1)).max(50)
+});
+
+propertiesRouter.put(
+  "/:id/sheet-sources",
+  requireRole("ADMIN"),
+  validate({ params: propertyIdParamSchema, body: setSheetSourcesSchema }),
+  asyncHandler(async (req, res) => {
+    const existing = await repo.findById(req.params.id);
+    if (!existing) throw ApiError.notFound("Property not found");
+    try {
+      await repo.replaceSheetSourcesForProperty(req.params.id, req.body.sheetSourceNames);
+    } catch (err) {
+      if (typeof err === "object" && err !== null && "code" in err && (err as { code: string }).code === "23505") {
+        throw ApiError.conflict("One of these sheet sources is already linked to a different property.");
+      }
+      throw err;
+    }
+    sendOk(res, await repo.listSheetSourceNamesForProperty(req.params.id));
   })
 );

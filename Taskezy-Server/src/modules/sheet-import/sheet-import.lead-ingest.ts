@@ -3,7 +3,7 @@ import { logger } from "../../utils/logger";
 import { insertLeadLog, normalizeIndianMobile } from "../leads/leads.repository";
 import { isUniqueViolation, listActiveAdminIds } from "../users/users.repository";
 import { createNotification } from "../notifications/notifications.service";
-import { findPropertyIdByName } from "../properties/properties.repository";
+import { findPropertyIdBySheetSource, recordSheetSourceSeen } from "../properties/properties.repository";
 import { pickAgentForProperty } from "../properties/properties.assignment";
 
 export interface SheetLeadRow {
@@ -33,8 +33,10 @@ export type SheetLeadIngestResult =
 /**
  * Turns one row from the Google Ads lead-form Master sheet into a `leads`
  * row. `sourceSheet` (the sheet's per-project tab name, e.g. "Neopolis") is
- * matched against a property's display name; if that property has a
- * configured team, the lead is routed through the same Round Robin /
+ * matched against an explicit property_sheet_sources link (set by an admin
+ * in the Property editor — see properties.routes.ts's /:id/sheet-sources),
+ * not a fuzzy match against the property's display name; if that property
+ * has a configured team, the lead is routed through the same Round Robin /
  * Percentage rule a manually created lead for that property would use —
  * mirrors ingestMetaLead (see modules/meta/meta.lead-ingest.ts) almost
  * exactly, just keyed by sheet_lead_key instead of meta_leadgen_id.
@@ -51,7 +53,13 @@ export async function ingestSheetLead(row: SheetLeadRow): Promise<SheetLeadInges
     return { outcome: "skipped", reason: "name is required" };
   }
 
-  const propertyId = row.sourceSheet ? await findPropertyIdByName(row.sourceSheet) : undefined;
+  if (row.sourceSheet) {
+    // Fire-and-record regardless of match outcome — this is what lets an
+    // admin see "Neopolis" as a pickable suggestion in the Property editor
+    // the moment its first lead arrives, with no code change needed.
+    await recordSheetSourceSeen(row.sourceSheet);
+  }
+  const propertyId = row.sourceSheet ? await findPropertyIdBySheetSource(row.sourceSheet) : undefined;
   const autoAssignedAgentId = propertyId ? await pickAgentForProperty(propertyId) : undefined;
 
   const assignedAgentId = autoAssignedAgentId ?? (await listActiveAdminIds())[0];

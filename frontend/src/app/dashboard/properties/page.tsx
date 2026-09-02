@@ -23,6 +23,7 @@ import {
 import AddPropertyModal from "@/components/properties/AddPropertyModal";
 import MetaCampaignLinker from "@/components/properties/MetaCampaignLinker";
 import GoogleCampaignLinker from "@/components/properties/GoogleCampaignLinker";
+import SheetSourceLinker from "@/components/properties/SheetSourceLinker";
 
 const ROWS_PER_PAGE_OPTIONS = [25, 50, 100];
 
@@ -589,6 +590,9 @@ export default function PropertiesPage() {
                   <div className="border-t border-slate-200 pt-4">
                     <GoogleCampaignLinker propertyId={selectedProperty.id} isAdmin={isAdmin} />
                   </div>
+                  <div className="border-t border-slate-200 pt-4">
+                    <SheetSourceLinker propertyId={selectedProperty.id} isAdmin={isAdmin} />
+                  </div>
 
                   <div className="flex gap-2 pt-2">
                     <button type="submit" className="flex-1 bg-brand-700 hover:bg-brand-600 text-white font-bold py-2 rounded-lg text-xs transition-all shadow-sm">
@@ -645,6 +649,9 @@ export default function PropertiesPage() {
                   </div>
                   <div className="border-t border-slate-200 pt-4">
                     <GoogleCampaignLinker propertyId={selectedProperty.id} isAdmin={isAdmin} />
+                  </div>
+                  <div className="border-t border-slate-200 pt-4">
+                    <SheetSourceLinker propertyId={selectedProperty.id} isAdmin={isAdmin} />
                   </div>
 
                   <div className="border-t border-slate-200 pt-4 space-y-4">

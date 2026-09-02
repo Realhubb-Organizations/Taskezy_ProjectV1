@@ -396,6 +396,25 @@ export function apiSetPropertyGoogleCampaigns(propertyId: string, campaignNames:
   });
 }
 
+// --- Google Ads lead-form sheet linking (see modules/sheet-import) ---
+// Same shape as the Meta/Google campaign linking above, except suggestions
+// come from every sheet source name actually seen on an incoming lead (no
+// sync job auto-discovers these the way ad campaigns get discovered).
+export function apiGetSheetSourceSuggestions(): Promise<string[]> {
+  return request<string[]>("/api/v1/properties/sheet-source-suggestions");
+}
+
+export function apiGetPropertySheetSources(propertyId: string): Promise<string[]> {
+  return request<string[]>(`/api/v1/properties/${propertyId}/sheet-sources`);
+}
+
+export function apiSetPropertySheetSources(propertyId: string, sheetSourceNames: string[]): Promise<string[]> {
+  return request<string[]>(`/api/v1/properties/${propertyId}/sheet-sources`, {
+    method: "PUT",
+    body: JSON.stringify({ sheetSourceNames })
+  });
+}
+
 export function apiSetPropertyTeamMembers(
   propertyId: string,
   members: { userId: string; percentage?: number }[]

@@ -264,10 +264,61 @@ export async function findPropertyIdByCampaignName(campaignName: string): Promis
   return rows[0]?.property_id;
 }
 
-/** Used by the Google Ads sheet-lead importer to auto-fill leads.property_id — the sheet's per-project tab name is expected to match a property's display name (case-insensitive). */
-export async function findPropertyIdByName(name: string): Promise<string | undefined> {
-  const { rows } = await query<{ id: string }>(`SELECT id FROM properties WHERE lower(name) = lower($1) LIMIT 1`, [name]);
-  return rows[0]?.id;
+// --- Google Ads lead-form sheet linking (see Taskezy_DB/migrations/013_*.sql) ---
+// Same shape as Meta/Google campaign linking above, except there's no sync
+// job auto-discovering sheet sources the way one exists for ad campaigns —
+// recordSheetSourceSeen is what populates the "unlinked" suggestions instead,
+// called every time a lead arrives from a sheet source regardless of whether
+// it's linked yet.
+
+export async function listSheetSourceNamesForProperty(propertyId: string): Promise<string[]> {
+  const { rows } = await query<{ sheet_source_name: string }>(
+    `SELECT sheet_source_name FROM property_sheet_sources WHERE property_id = $1 ORDER BY sheet_source_name`,
+    [propertyId]
+  );
+  return rows.map(r => r.sheet_source_name);
+}
+
+/** Sheet source names seen on at least one incoming lead that aren't linked to any property yet. */
+export async function listUnlinkedSheetSourceNames(): Promise<string[]> {
+  const { rows } = await query<{ name: string }>(
+    `SELECT s.name FROM sheet_source_names_seen s
+     LEFT JOIN property_sheet_sources pss ON pss.sheet_source_name = s.name
+     WHERE pss.id IS NULL
+     ORDER BY s.name`
+  );
+  return rows.map(r => r.name);
+}
+
+/** Atomically replaces the full sheet-source-name set for a property. Throws a unique-violation (23505) if a name is already linked to a different property. */
+export async function replaceSheetSourcesForProperty(propertyId: string, sheetSourceNames: string[]): Promise<void> {
+  await withTransaction(async (client) => {
+    await client.query(`DELETE FROM property_sheet_sources WHERE property_id = $1`, [propertyId]);
+    for (const name of sheetSourceNames) {
+      await client.query(
+        `INSERT INTO property_sheet_sources (property_id, sheet_source_name) VALUES ($1, $2)`,
+        [propertyId, name]
+      );
+    }
+  });
+}
+
+/** Used by the Google Ads sheet-lead importer to auto-fill leads.property_id when a lead's sheet source name matches a linked sheet source. */
+export async function findPropertyIdBySheetSource(sheetSourceName: string): Promise<string | undefined> {
+  const { rows } = await query<{ property_id: string }>(
+    `SELECT property_id FROM property_sheet_sources WHERE sheet_source_name = $1`,
+    [sheetSourceName]
+  );
+  return rows[0]?.property_id;
+}
+
+/** Records that a lead arrived tagged with this sheet source name, whether or not it's linked to a property yet — see listUnlinkedSheetSourceNames. */
+export async function recordSheetSourceSeen(sheetSourceName: string): Promise<void> {
+  await pool.query(
+    `INSERT INTO sheet_source_names_seen (name) VALUES ($1)
+     ON CONFLICT (name) DO UPDATE SET last_seen_at = now()`,
+    [sheetSourceName]
+  );
 }
 
 // --- Google Ads campaign linking (see Taskezy_DB/migrations/009_*.sql) ---
