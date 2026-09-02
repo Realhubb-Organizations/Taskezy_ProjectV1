@@ -413,7 +413,7 @@ export default function EnterpriseModulesShowcase() {
                     <div className="text-emerald-600 font-bold text-[11px]">+₹18,000 GST (18%)</div>
                   </div>
                   <div className="text-right font-black text-slate-900 text-base">
-                    ₹{animatedInv1.toLocaleString("en-IN")}
+                    ₹{Number(animatedInv1).toLocaleString("en-IN")}
                   </div>
                 </div>
               </div>
@@ -437,7 +437,7 @@ export default function EnterpriseModulesShowcase() {
                     <div className="text-emerald-600 font-bold text-[11px]">+₹13,500 GST (18%)</div>
                   </div>
                   <div className="text-right font-black text-slate-900 text-base">
-                    ₹{animatedInv2.toLocaleString("en-IN")}
+                    ₹{Number(animatedInv2).toLocaleString("en-IN")}
                   </div>
                 </div>
               </div>
