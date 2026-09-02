@@ -5,6 +5,8 @@ import * as repo from "./leads.repository";
 import { CreateLeadInput } from "./leads.repository";
 import * as usersRepo from "../users/users.repository";
 import { createNotification } from "../notifications/notifications.service";
+import { findPropertyIdByName } from "../properties/properties.repository";
+import { pickAgentForProperty } from "../properties/properties.assignment";
 
 /**
  * Mirrors the frontend's isSalesMember scoping rule (AppContext.tsx /
@@ -221,6 +223,52 @@ export async function reassignLead(caller: AccessTokenPayload, leadId: string, n
     });
   }
   return updated;
+}
+
+/**
+ * One-time (but safe to re-run anytime) maintenance action: re-checks every
+ * sheet-imported lead currently sitting UNASSIGNED — i.e. one that fell back
+ * to an admin at ingest time because its property either didn't match a real
+ * property yet, or matched one with no configured sales team — and moves it
+ * to a real agent via the exact same Round Robin / Percentage rule a fresh
+ * import would use, now that property names/team configuration have been
+ * fixed. A lead whose property still doesn't resolve to an assignable team
+ * is left exactly as it was; nothing here ever assigns anyone speculatively.
+ */
+export async function reassignUnassignedSheetLeads(caller: AccessTokenPayload): Promise<{ reassigned: number; stillUnassigned: number; total: number }> {
+  const candidates = await repo.findUnassignedSheetLeads();
+  let reassigned = 0;
+  let stillUnassigned = 0;
+
+  for (const lead of candidates) {
+    let propertyId = lead.property_id ?? undefined;
+
+    // No property matched at ingest time — recover the sheet's project name
+    // from the lead's own first log entry and try the name match again now
+    // that the property name may have been corrected.
+    if (!propertyId) {
+      const sourceSheetName = await repo.findImportedSourceSheetName(lead.id);
+      if (sourceSheetName) {
+        propertyId = await findPropertyIdByName(sourceSheetName);
+        if (propertyId) {
+          await repo.setLeadPropertyId(lead.id, propertyId);
+        }
+      }
+    }
+
+    const newAgentId = propertyId ? await pickAgentForProperty(propertyId) : undefined;
+
+    if (!newAgentId || newAgentId === lead.assigned_agent_id) {
+      stillUnassigned++;
+      continue;
+    }
+
+    await reassignLead(caller, lead.id, newAgentId);
+    await repo.markLeadNewIfUnassigned(lead.id);
+    reassigned++;
+  }
+
+  return { reassigned, stillUnassigned, total: candidates.length };
 }
 
 export async function deleteLead(leadId: string): Promise<void> {

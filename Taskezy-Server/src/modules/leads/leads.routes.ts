@@ -17,6 +17,7 @@ import {
   getLeadHandler,
   listLeadsHandler,
   reassignLeadHandler,
+  reassignUnassignedSheetLeadsHandler,
   updateLeadStatusHandler,
   verifyLeadKycHandler
 } from "./leads.controller";
@@ -52,6 +53,16 @@ leadsRouter.delete(
   requireRole("ADMIN"),
   validate({ params: leadIdParamSchema }),
   asyncHandler(deleteLeadHandler)
+);
+// Maintenance action for the Google Ads sheet import (see modules/sheet-import):
+// re-checks every sheet-imported lead that fell back to an admin because its
+// property didn't match/had no team configured yet, and moves it to a real
+// agent now that that's been fixed. Safe to call more than once — a lead
+// that still doesn't resolve to a real agent is left untouched.
+leadsRouter.post(
+  "/reassign-sheet-fallback",
+  requireRole("ADMIN"),
+  asyncHandler(reassignUnassignedSheetLeadsHandler)
 );
 // KYC verification is restricted to ADMIN/FINANCE — matches the frontend's
 // verifyKYC action, which only ever appears in the Finance module UI.

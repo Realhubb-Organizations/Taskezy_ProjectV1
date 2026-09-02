@@ -162,6 +162,42 @@ export async function insertLeadLog(client: PoolClient, leadId: string, userId: 
   );
 }
 
+export interface UnassignedSheetLead {
+  id: string;
+  property_id: string | null;
+  assigned_agent_id: string;
+}
+
+/** Sheet-imported leads that fell back to an admin at ingest time — see modules/sheet-import — because no property match and/or no configured team pool was found yet. Re-checked by reassignUnassignedSheetLeads once that's fixed. */
+export async function findUnassignedSheetLeads(): Promise<UnassignedSheetLead[]> {
+  const { rows } = await query<UnassignedSheetLead>(
+    `SELECT id, property_id, assigned_agent_id FROM leads WHERE sheet_lead_key IS NOT NULL AND status_code = 'UNASSIGNED'`
+  );
+  return rows;
+}
+
+const IMPORTED_SHEET_NAME_RE = /^Imported from Google Ads lead-form sheet \(([^)]+)\)/;
+
+/** Recovers the sheet's per-project tab name from a lead's own first import log entry, for leads that had no property_id set at ingest time (name didn't match a property yet). */
+export async function findImportedSourceSheetName(leadId: string): Promise<string | undefined> {
+  const { rows } = await query<{ message: string }>(
+    `SELECT message FROM lead_logs WHERE lead_id = $1 AND message LIKE 'Imported from Google Ads lead-form sheet (%' ORDER BY created_at ASC LIMIT 1`,
+    [leadId]
+  );
+  const match = rows[0]?.message.match(IMPORTED_SHEET_NAME_RE);
+  const name = match?.[1];
+  return name && name !== "unknown project" ? name : undefined;
+}
+
+export async function setLeadPropertyId(leadId: string, propertyId: string): Promise<void> {
+  await pool.query(`UPDATE leads SET property_id = $1 WHERE id = $2`, [propertyId, leadId]);
+}
+
+/** Flips UNASSIGNED -> NEW once a real agent has actually been resolved for a previously-fallback-assigned lead — matches the status a successful auto-assignment would have set at ingest time. */
+export async function markLeadNewIfUnassigned(leadId: string): Promise<void> {
+  await pool.query(`UPDATE leads SET status_code = 'NEW' WHERE id = $1 AND status_code = 'UNASSIGNED'`, [leadId]);
+}
+
 export interface EditLeadInput {
   name?: string;
   email?: string;

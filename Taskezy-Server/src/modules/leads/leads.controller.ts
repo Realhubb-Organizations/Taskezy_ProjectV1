@@ -36,6 +36,11 @@ export async function reassignLeadHandler(req: Request, res: Response): Promise<
   sendOk(res, lead);
 }
 
+export async function reassignUnassignedSheetLeadsHandler(req: Request, res: Response): Promise<void> {
+  const result = await leadsService.reassignUnassignedSheetLeads(req.user!);
+  sendOk(res, result);
+}
+
 export async function deleteLeadHandler(req: Request, res: Response): Promise<void> {
   await leadsService.deleteLead(req.params.id);
   sendOk(res, { deleted: true });
