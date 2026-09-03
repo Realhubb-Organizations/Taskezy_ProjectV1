@@ -184,7 +184,7 @@ export default function LeadDashboard() {
     email: string;
     agent: string;
     source: string;
-    property: string;
+    property?: string;
     note: string;
   }) => {
     // API Integration Point: call addLead in AppContext
