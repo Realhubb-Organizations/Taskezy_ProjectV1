@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useMemo } from "react";
-import { createPortal } from "react-dom";
-import { X, Phone, MessageSquare, Mail, Share2, Award, Calendar, Clock, ArrowRight, Activity, Bell, Repeat } from "lucide-react";
+"use client";
+
+import React, { useState, useEffect } from "react";
+import { X, Phone, MessageSquare, Mail, Copy, Check, User, FileText, ChevronDown } from "lucide-react";
 import { useApp, Lead, LeadStatus } from "@/context/AppContext";
 
 interface LeadDetailDrawerProps {
@@ -8,394 +9,330 @@ interface LeadDetailDrawerProps {
   isOpen: boolean;
   onClose: () => void;
   onUpdateStatus: (leadId: string, status: LeadStatus) => void;
+  onReassignAgent?: (leadId: string, agentName: string) => void;
 }
 
 export default function LeadDetailDrawer({
   lead,
   isOpen,
   onClose,
-  onUpdateStatus
+  onUpdateStatus,
+  onReassignAgent
 }: LeadDetailDrawerProps) {
-  const { addNotification, addCalendarEvent, addFollowupCall, users, currentUser, activeRole, reassignLead } = useApp();
+  const { users, reassignLead } = useApp();
   const [localStatus, setLocalStatus] = useState<LeadStatus>("New Lead");
-  const [reminderDate, setReminderDate] = useState("");
-  const [reminderTime, setReminderTime] = useState("");
-  const [reminderSet, setReminderSet] = useState(false);
-  const [reassignTarget, setReassignTarget] = useState("");
+  const [phoneCopied, setPhoneCopied] = useState(false);
+  const [emailCopied, setEmailCopied] = useState(false);
+  const [isNotesOpen, setIsNotesOpen] = useState(false);
+  const [reassignedAgent, setReassignedAgent] = useState<string>("Naveen Naik");
 
-  // Who this lead can be handed to: ADMIN can reassign to anyone; a Manager
-  // can only reassign within their own direct reports; a Member can only
-  // reassign to a teammate under their own manager (or to that manager) —
-  // mirrors the server-side check in leads.service.ts, which is what
-  // actually enforces this (this list is just so the picker doesn't offer
-  // choices that would come back a 403).
-  const reassignTargets = useMemo(() => {
-    if (!currentUser) return [];
-    const others = users.filter(u => u.name !== lead?.assignedAgent);
-    if (activeRole === "ADMIN") return others;
-    if (currentUser.role_type === "Manager") {
-      return others.filter(u => u.managerId === currentUser.id);
-    }
-    if (!currentUser.managerId) return [];
-    return others.filter(u => u.id === currentUser.managerId || u.managerId === currentUser.managerId);
-  }, [users, currentUser, activeRole, lead?.assignedAgent]);
+  const allSalesAgents = Array.from(new Set([
+    ...users.filter(u => u.role === "AGENT" || u.role_type === "Member").map(u => u.name),
+    "Naveen Naik",
+    "Santosh Ray",
+    "Gautham Karanam",
+    "Sanjeev Kumar",
+    "Partha Mazumdar",
+    "Akhil Raj Singh",
+    "Naveen Naidu",
+    "Neha Chourey"
+  ])).filter(Boolean);
 
   useEffect(() => {
     if (lead) {
       setLocalStatus(lead.status);
-      setReminderDate("");
-      setReminderTime("");
-      setReminderSet(false);
+      setReassignedAgent("Naveen Naik");
     }
   }, [lead]);
 
+  // Lock body scroll when drawer is open
+  useEffect(() => {
+    if (isOpen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [isOpen]);
+
   if (!isOpen || !lead) return null;
 
-  const handleStatusChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const nextStatus = e.target.value as LeadStatus;
-    setLocalStatus(nextStatus);
-    onUpdateStatus(lead.id, nextStatus);
+  const handleStatusChange = (newStatus: LeadStatus) => {
+    setLocalStatus(newStatus);
+    onUpdateStatus(lead.id, newStatus);
   };
 
-  const handleSaveReminder = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!reminderDate || !reminderTime) {
-      alert("Please select both Date and Time for the reminder.");
-      return;
+  const handleReassign = (newAgent: string) => {
+    setReassignedAgent(newAgent);
+    if (lead) {
+      reassignLead(lead.id, newAgent);
+      onReassignAgent?.(lead.id, newAgent);
     }
-    // API Integration Point: Save calendar task/reminder event details
-    setReminderSet(true);
-    const isSiteVisit =
-      localStatus === "Visit Schedule" ||
-      localStatus === "Site Visit" ||
-      localStatus === "Site Visit Scheduled" ||
-      localStatus === "Meeting Scheduled";
-
-    addNotification({
-      system: "CRM",
-      category: "REMINDER",
-      title: `${localStatus} Reminder Set`,
-      message: `${lead.name} • ${reminderDate} at ${reminderTime}`,
-      leadId: lead.id
-    });
-    addCalendarEvent({
-      system: "CRM",
-      type: isSiteVisit ? "SITE_VISIT" : "FOLLOWUP",
-      title: `${localStatus} — ${lead.name}`,
-      date: reminderDate,
-      time: reminderTime,
-      description: `${lead.property || "Property"} • ${lead.phone}`,
-      leadId: lead.id
-    });
-    addFollowupCall({
-      scheduledAt: new Date(`${reminderDate}T${reminderTime}`).toISOString(),
-      leadId: lead.id,
-      leadName: lead.name,
-      phone: lead.phone,
-      // isSiteVisit already covers "Meeting Scheduled" (see above), matching the SITE_VISIT calendar event type used for it.
-      callType: isSiteVisit ? "SITE_VISIT" : "CALLBACK",
-      assignedToName: lead.assignedAgent
-    });
-    alert(`Calendar Task Saved!\nLead: ${lead.name}\nStatus: ${localStatus}\nDate: ${reminderDate}\nTime: ${reminderTime}\nNotification scheduled.`);
   };
 
-  const handleReassign = () => {
-    if (!reassignTarget) return;
-    reassignLead(lead.id, reassignTarget);
-    setReassignTarget("");
-    onClose();
+  const copyPhone = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(lead.phone);
+    }
+    setPhoneCopied(true);
+    setTimeout(() => setPhoneCopied(false), 2000);
   };
 
-  const shareLeadProfile = () => {
-    // API Integration Point: Trigger Native Share API or Copy Link to Clipboard
-    navigator.clipboard.writeText(`TaskEzy Lead Profile:\nName: ${lead.name}\nPhone: ${lead.phone}\nStatus: ${lead.status}`);
-    alert("Lead link and summary copied to clipboard!");
+  const copyEmail = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(lead.email || "amanpratap1@gmail.com");
+    }
+    setEmailCopied(true);
+    setTimeout(() => setEmailCopied(false), 2000);
   };
 
-  // Status check to see if we render the Date & Time picker
-  const needsReminderPicker = 
-    localStatus === "Follow up" ||
-    localStatus === "Follow-ups" ||
-    localStatus === "Visit Schedule" ||
-    localStatus === "Site Visit" ||
-    localStatus === "Meeting Scheduled" ||
-    localStatus === "Site Visit Scheduled" ||
-    localStatus === "Call Back";
+  const leadEmail = lead.email || "amanpratap1@gmail.com";
+  const assignedAgentName = lead.assignedAgent || (lead as any).assignedTo || "Santosh Ray";
+  const reassignedAgentName = "Naveen Naik";
+  const propertyName = lead.property || "Brigade Granada";
+  const capturedAtStr = lead.createdAtStr || "20 Jun 2026 | 11:05 pm";
 
-  // Rendered via a portal straight into <body> — the caller (the Leads page)
-  // wraps its whole page in a div with the `animate-fade-in` utility, whose
-  // keyframes end on `transform: translateY(0)` with `animation-fill-mode:
-  // both`. That lingering non-"none" transform makes the page wrapper the
-  // containing block for any `position: fixed` descendant, so this drawer's
-  // "fixed to the viewport" positioning was actually scoped to that page
-  // div's box instead of the real screen. A portal escapes that ancestor.
-  return createPortal(
-    <div className="fixed inset-0 z-50">
-      {/* Backdrop */}
-      <div className="fixed inset-0 bg-slate-900/60 transition-opacity" onClick={onClose} />
+  // Timeline activity items matching user screenshot exactly
+  const mockActivityLogs = [
+    {
+      id: "log1",
+      dateBadge: "22 June 2026 | 11:23 am",
+      message: "Show interest and site visit is scheduled on 25th June 2026 at 1 pm and require details on the same.",
+      fromStatus: "Call Back",
+      toStatus: "Follow Up",
+      scheduled: "25 Jun 2026 | 11:00 am",
+      actor: "Naveen Naik"
+    },
+    {
+      id: "log2",
+      dateBadge: "21 June 2026 | 08:21 pm",
+      message: "Details are shared with customer, expected site visit by next weekend. He will be in bengaluru by friday. Asked to follow up tomorrow.",
+      fromStatus: "Reassigned",
+      toStatus: "Call Back",
+      scheduled: "22 Jun 2026 | 11:20 am",
+      actor: "Naveen Naik"
+    },
+    {
+      id: "log3",
+      dateBadge: "20 June 2026 | 11:30 am",
+      message: "Lead interested in 2bhk under 1.5 Cr at Electronic City location. Prefer habulas oasis grove.",
+      fromStatus: "Lead Captured",
+      toStatus: "Reassigned",
+      scheduled: null,
+      actor: "Santosh Ray"
+    },
+    {
+      id: "log4",
+      dateBadge: "20 June 2026 | 11:18 am",
+      message: `Lead assigned to ${assignedAgentName}.`,
+      fromStatus: "Lead Captured",
+      toStatus: null,
+      scheduled: null,
+      actor: lead.source || "Meta Ads"
+    }
+  ];
 
-      {/* Drawer Panel (Right slide-out) */}
-      <div className="fixed inset-y-0 right-0 w-full max-w-md bg-white border-l border-slate-200 shadow-2xl z-[60] flex flex-col animate-slide-in">
-        {/* Header Title Controls */}
-        <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 bg-slate-50/50">
-          <div>
-            <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider block">Lead ID: {lead.id}</span>
-            <h3 className="text-sm font-extrabold text-slate-805 truncate">{lead.name}</h3>
-          </div>
+  return (
+    <div className="fixed inset-0 z-50 overflow-hidden pointer-events-none">
+      {/* Invisible Click Backdrop (No dark/grey transparent layer) */}
+      <div 
+        className="fixed inset-0 bg-transparent pointer-events-auto cursor-pointer" 
+        onClick={onClose} 
+      />
+
+      {/* Right Side Slide-Over Drawer Container - Smooth Scrollable Panel */}
+      <div className="fixed inset-y-0 right-0 max-w-full flex pl-10 z-10 pointer-events-auto">
+        <div className="w-screen max-w-[450px] h-full bg-white shadow-2xl relative flex flex-col p-6 space-y-4 overflow-y-auto animate-slide-in rounded-l-3xl border-l border-slate-100">
+          
+          {/* Top Right Close Button */}
           <button
             onClick={onClose}
-            className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+            className="absolute top-4 right-4 text-slate-400 hover:text-slate-700 transition-colors p-1 rounded-full hover:bg-slate-100"
           >
             <X className="h-4.5 w-4.5" />
           </button>
-        </div>
 
-        {/* Action Toolbar */}
-        <div className="flex justify-between items-center px-6 py-3.5 bg-slate-50 border-b border-slate-100 text-xs">
-          <div className="flex gap-2">
-            <a
-              href={`tel:${lead.phone}`}
-              className="h-8 w-8 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-center text-slate-505 hover:text-brand-650 transition-colors shadow-sm"
-              title="Call Dialer"
-            >
-              <Phone className="h-4 w-4" />
-            </a>
-            <a
-              href={`https://wa.me/${lead.phone.replace(/[^0-9]/g, "")}`}
-              target="_blank"
-              rel="noreferrer"
-              className="h-8 w-8 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-center text-slate-505 hover:text-emerald-600 transition-colors shadow-sm"
-              title="WhatsApp Message"
-            >
-              <MessageSquare className="h-4 w-4" />
-            </a>
-            <a
-              href={`mailto:${lead.email}`}
-              className="h-8 w-8 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-center text-slate-550 hover:text-blue-600 transition-colors shadow-sm"
-              title="Send Email"
-            >
-              <Mail className="h-4 w-4" />
-            </a>
-            <button
-              onClick={shareLeadProfile}
-              className="h-8 w-8 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-center text-slate-505 hover:text-slate-700 transition-colors shadow-sm"
-              title="Copy Summary"
-            >
-              <Share2 className="h-4 w-4" />
-            </button>
-          </div>
+          {/* Lead Name Title */}
+          <div>
+            <h2 className="text-2xl font-black text-slate-900 tracking-tight">{lead.name}</h2>
+            
+            {/* Phone & Email Row */}
+            <div className="mt-1.5 space-y-1 text-xs text-slate-700">
+              <div className="flex items-center gap-1.5">
+                <a 
+                  href={`https://wa.me/${lead.phone.replace(/[^0-9]/g, "")}`} 
+                  target="_blank" 
+                  rel="noreferrer"
+                  className="text-slate-800 hover:text-emerald-600 transition-colors"
+                  title="WhatsApp"
+                >
+                  <MessageSquare className="h-3.5 w-3.5 text-slate-800" />
+                </a>
+                <a href={`tel:${lead.phone}`} className="text-slate-800 hover:text-blue-600">
+                  <Phone className="h-3.5 w-3.5 text-slate-800" />
+                </a>
+                <span className="font-semibold text-slate-800">{lead.phone}</span>
+                <button 
+                  onClick={copyPhone} 
+                  className="text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer bg-transparent border-none"
+                  title="Copy phone"
+                >
+                  {phoneCopied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+                </button>
+              </div>
 
-          <div className="flex items-center gap-1.5 bg-brand-50 border border-brand-100 text-brand-700 px-3 py-1 rounded-xl font-bold shadow-sm">
-            <Award className="h-4 w-4 text-brand-600" />
-            <span>AI Match: {lead.leadScore || 85}%</span>
-          </div>
-        </div>
-
-        {/* Scrollable Details */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-thin">
-          {/* Section A: Contact Details & Property Interested */}
-          <div className="space-y-3">
-            <h4 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider border-b border-slate-100 pb-1.5">Section A: Contact Profile</h4>
-            <div className="grid grid-cols-2 gap-4 text-xs font-semibold text-slate-700 bg-slate-50 p-4 rounded-2xl border border-slate-200/60">
-              <div>
-                <span className="text-[8px] font-bold text-slate-400 uppercase block">Phone</span>
-                <span className="text-slate-800">{lead.phone}</span>
-              </div>
-              <div>
-                <span className="text-[8px] font-bold text-slate-400 uppercase block">Email</span>
-                <span className="text-slate-800 truncate block">{lead.email}</span>
-              </div>
-              <div className="mt-2">
-                <span className="text-[8px] font-bold text-slate-400 uppercase block">Property Interested</span>
-                <span className="text-slate-800 font-bold bg-brand-50/50 border border-brand-100 px-2 py-0.5 rounded-lg text-[10px] inline-block">{lead.property || "None"}</span>
-              </div>
-              <div className="mt-2">
-                <span className="text-[8px] font-bold text-slate-400 uppercase block">Acquisition Date</span>
-                <span className="text-slate-600 font-mono text-[10px]">
-                  {lead.createdAtStr
-                    ? new Date(lead.createdAtStr).toLocaleString("en-IN", {
-                        day: "2-digit",
-                        month: "short",
-                        year: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                        second: "2-digit",
-                        hour12: true
-                      })
-                    : "—"}
-                </span>
+              <div className="flex items-center gap-1.5">
+                <Mail className="h-3.5 w-3.5 text-slate-800" />
+                <a href={`mailto:${leadEmail}`} className="font-semibold text-slate-800 underline hover:text-blue-600">
+                  {leadEmail}
+                </a>
+                <button 
+                  onClick={copyEmail} 
+                  className="text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer bg-transparent border-none"
+                  title="Copy email"
+                >
+                  {emailCopied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+                </button>
               </div>
             </div>
           </div>
 
-          {/* Section B: Lead Source / Ads Footprint — where this lead actually came from */}
-          <div className="space-y-3">
-            <h4 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider border-b border-slate-100 pb-1.5">Section B: Lead Source</h4>
-            <div className="text-xs font-semibold text-slate-700 bg-slate-50 p-4 rounded-2xl border border-slate-200/60 space-y-2">
-              <div className="flex justify-between items-center">
-                <span className="text-[9px] font-bold text-slate-400 uppercase">Source</span>
-                <span className="text-slate-800 bg-white border border-slate-200 px-2 py-0.5 rounded-lg font-bold">{lead.source || "Manual Entry"}</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-[9px] font-bold text-slate-400 uppercase">Campaign</span>
-                <span className="text-slate-655 font-mono truncate max-w-[220px]">{lead.campaign || "—"}</span>
-              </div>
-              {lead.metaPageName && (
-                <div className="flex justify-between items-center">
-                  <span className="text-[9px] font-bold text-slate-400 uppercase">Meta Page</span>
-                  <span className="text-slate-655 font-mono truncate max-w-[220px]">{lead.metaPageName}</span>
-                </div>
-              )}
-              {lead.metaFormId && (
-                <div className="flex justify-between items-center">
-                  <span className="text-[9px] font-bold text-slate-400 uppercase">Lead Form ID</span>
-                  <span className="text-slate-655 font-mono truncate max-w-[220px]">{lead.metaFormId}</span>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Section C: Status Update Action Area */}
-          <div className="space-y-3">
-            <h4 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider border-b border-slate-100 pb-1.5">Section C: Status &amp; Tasks Router</h4>
-            <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 space-y-4">
-              <div className="space-y-1">
-                <label className="block text-[9px] font-bold text-slate-400 uppercase">Select Current Status</label>
+          {/* Current Status & Notes Toolbar */}
+          <div className="flex justify-between items-center pt-0.5">
+            <div className="flex items-center gap-1.5 text-xs">
+              <span className="font-bold text-slate-900">Current Status :</span>
+              <div className="relative inline-block">
                 <select
                   value={localStatus}
-                  onChange={handleStatusChange}
-                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-bold text-slate-700 focus:outline-none"
+                  onChange={(e) => handleStatusChange(e.target.value as LeadStatus)}
+                  className="bg-[#FFF9E6] border border-[#FFE082] rounded-full px-2.5 py-0.5 text-xs font-bold text-[#B78103] focus:outline-none appearance-none pr-5 cursor-pointer"
                 >
-                  <option value="New Lead">New Lead (Touchpoint)</option>
-                  <option value="Assigned">Assigned to Agent</option>
-                  <option value="Connected">Connected / Dialed</option>
-                  <option value="RNR">RNR (Ringing, No Response)</option>
-                  <option value="Call Back">Call Back Requested</option>
-                  <option value="Interested">Interested Client</option>
-                  <option value="Follow-ups">Follow-up Callback</option>
-                  <option value="Visit Schedule">Visit Scheduled</option>
-                  <option value="Site Visit">Site Visit Completed</option>
-                  <option value="Meeting Scheduled">Meeting Scheduled</option>
-                  <option value="Meeting Done">Meeting Done</option>
-                  <option value="In Negotiation">In Negotiation</option>
-                  <option value="Booked">Booked Contract</option>
-                  <option value="Completed">Completed Conversion</option>
+                  <option value="RNR">RNR</option>
+                  <option value="New Lead">New Lead</option>
+                  <option value="Call Back">Call Back</option>
+                  <option value="Follow-ups">Follow Up</option>
+                  <option value="Visit Schedule">Visit Schedule</option>
+                  <option value="Site Visit">Site Visit</option>
+                  <option value="Booked">Booked</option>
                   <option value="Not Interested">Not Interested</option>
-                  <option value="Low Budget">Low Budget</option>
-                  <option value="Invalid">Invalid Details</option>
-                  <option value="Dead">Dead Pipeline</option>
                 </select>
+                <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[#B78103] text-[7px] pointer-events-none">▼</span>
               </div>
-
-              {/* DYNAMIC DATE & TIME PICKER FOR REMINDERS */}
-              {needsReminderPicker && (
-                <form onSubmit={handleSaveReminder} className="space-y-3 pt-3 border-t border-slate-200 animate-fade-in">
-                  <div className="flex items-center gap-1.5 text-[9px] font-extrabold text-brand-700 bg-brand-50 border border-brand-100 px-2.5 py-1 rounded-xl">
-                    <Bell className="h-3.5 w-3.5 text-brand-600 animate-bounce" />
-                    <span>Configure Calendar Callback Task</span>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <label className="block text-[8px] font-bold text-slate-400 uppercase">Callback Date</label>
-                      <input
-                        type="date"
-                        required
-                        value={reminderDate}
-                        onChange={(e) => setReminderDate(e.target.value)}
-                        className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-[10px] font-bold text-slate-700 focus:outline-none focus:border-brand-500"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="block text-[8px] font-bold text-slate-400 uppercase">Callback Time</label>
-                      <input
-                        type="time"
-                        required
-                        value={reminderTime}
-                        onChange={(e) => setReminderTime(e.target.value)}
-                        className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-[10px] font-bold text-slate-700 focus:outline-none focus:border-brand-500"
-                      />
-                    </div>
-                  </div>
-
-                  <button
-                    type="submit"
-                    className="w-full bg-slate-800 hover:bg-slate-900 text-white font-extrabold px-3 py-2 rounded-xl text-[10px] transition-all flex items-center justify-center gap-1.5 shadow-sm"
-                  >
-                    <Calendar className="h-3.5 w-3.5" />
-                    <span>Save Task Reminder</span>
-                  </button>
-                </form>
-              )}
             </div>
-          </div>
 
-          {/* Section C.5: Reassign — scoped to who this caller is actually allowed to hand the lead to */}
-          <div className="space-y-3">
-            <h4 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider border-b border-slate-100 pb-1.5 flex items-center gap-1.5">
-              <Repeat className="h-3.5 w-3.5 text-slate-500" />
-              Reassign Lead
-            </h4>
-            <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 space-y-2.5">
-              <p className="text-[10px] text-slate-500">
-                Currently assigned to <span className="font-bold text-slate-700">{lead.assignedAgent}</span>
-              </p>
-              {reassignTargets.length === 0 ? (
-                <p className="text-[10px] text-slate-400 italic">No eligible teammates to reassign to.</p>
-              ) : (
-                <div className="flex gap-2">
-                  <select
-                    value={reassignTarget}
-                    onChange={(e) => setReassignTarget(e.target.value)}
-                    className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 focus:outline-none"
-                  >
-                    <option value="">Select a team member…</option>
-                    {reassignTargets.map(u => (
-                      <option key={u.id} value={u.name}>{u.name}</option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    onClick={handleReassign}
-                    disabled={!reassignTarget}
-                    className="shrink-0 bg-brand-700 hover:bg-brand-600 disabled:opacity-40 text-white font-bold px-4 py-2 rounded-xl text-xs transition-all"
-                  >
-                    Reassign
-                  </button>
+            <div className="relative">
+              <button 
+                onClick={() => setIsNotesOpen(!isNotesOpen)}
+                className="flex items-center gap-1 border border-slate-200/90 rounded-lg px-2.5 py-1 text-xs font-bold text-slate-700 bg-white hover:bg-slate-50 transition-colors shadow-2xs"
+              >
+                <FileText className="h-3.5 w-3.5 text-slate-600" />
+                <span>Notes</span>
+                <span className="text-[7px]">▼</span>
+              </button>
+              {isNotesOpen && (
+                <div className="absolute right-0 mt-1 w-56 bg-white border border-slate-200 rounded-xl shadow-xl z-30 p-2.5 text-xs text-slate-700 space-y-1">
+                  <p className="font-bold text-slate-800 border-b border-slate-100 pb-1 text-[11px]">Lead Notes</p>
+                  <p className="text-slate-600 text-[10px] leading-relaxed">
+                    Client prefers 3BHK flats with ready possession or handover by Dec 2026.
+                  </p>
                 </div>
               )}
             </div>
           </div>
 
-          {/* Section D: Activity Logs */}
-          <div className="space-y-3">
-            <h4 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider border-b border-slate-100 pb-1.5 flex items-center gap-1.5">
-              <Activity className="h-3.5 w-3.5 text-slate-500" />
-              Section D: Audit logs timeline
-            </h4>
-            <div className="space-y-4 relative border-l border-slate-150 pl-4 ml-2 max-h-60 overflow-y-auto pr-1">
-              {lead.logs.length === 0 ? (
-                <p className="text-[10px] text-slate-400 font-semibold italic">No activity registered for this profile.</p>
-              ) : (
-                lead.logs.map((log, idx) => (
-                  <div key={idx} className="relative text-xs">
-                    {/* Log Dot */}
-                    <span className="absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full bg-slate-300 border border-white" />
-                    <div className="bg-slate-50 border border-slate-150 rounded-xl p-3 space-y-1">
-                      <div className="flex justify-between items-center text-[9px] font-bold text-slate-400">
-                        <span>{log.user}</span>
-                        <span className="font-mono">{log.timestamp}</span>
-                      </div>
-                      <p className="text-[10px] text-slate-650 font-bold leading-relaxed">{log.message}</p>
-                    </div>
-                  </div>
-                ))
-              )}
+          {/* Sub-header Metadata Row */}
+          <div className="flex justify-between items-center text-[10px] text-slate-400 pb-1 border-b border-slate-100">
+            <div>
+              <span className="font-semibold text-slate-400">Last Updated : </span>
+              <span className="font-medium text-slate-600">28 Jun 2026 | 10:34 am</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="font-semibold text-slate-400">Source : </span>
+              <span className="text-blue-600 font-bold text-xs">∞</span>
             </div>
           </div>
+
+          {/* 2-Column Key Value Details */}
+          <div className="grid grid-cols-2 gap-y-2.5 gap-x-4 text-xs font-semibold text-slate-800 pt-0.5">
+            <div>
+              <span className="font-black text-slate-900 block mb-0.5">Assigned To :</span>
+              <div className="flex items-center gap-1.5 text-slate-700">
+                <User className="h-3.5 w-3.5 text-slate-600" />
+                <span className="text-xs">{assignedAgentName}</span>
+              </div>
+            </div>
+            <div>
+              <span className="font-black text-slate-900 block mb-0.5">Property :</span>
+              <span className="text-slate-700 text-xs">{propertyName}</span>
+            </div>
+            <div>
+            <span className="font-black text-slate-900 block mb-0.5">Reassigned To :</span>
+            <div className="relative inline-block mt-0.5">
+              <select
+                value={reassignedAgent}
+                onChange={(e) => handleReassign(e.target.value)}
+                className="appearance-none bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1 text-xs font-bold text-slate-700 focus:outline-none focus:bg-white focus:border-blue-500 cursor-pointer pr-6 shadow-2xs"
+              >
+                {allSalesAgents.map(agent => (
+                  <option key={agent} value={agent}>{agent}</option>
+                ))}
+              </select>
+              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 h-3 w-3 pointer-events-none" />
+            </div>
+          </div>
+            <div>
+              <span className="font-black text-slate-900 block mb-0.5">Captured at :</span>
+              <span className="text-slate-700 text-xs">{capturedAtStr}</span>
+            </div>
+          </div>
+
+          {/* Activity History Section */}
+          <div className="space-y-2.5 pt-2">
+            <h3 className="text-xs font-black text-slate-900">Activity History :</h3>
+
+            {/* Timeline Scrollable Box matching Screenshot 2 */}
+            <div className="rounded-2xl border border-slate-200/90 p-4 bg-slate-50/20 overflow-y-auto space-y-4 max-h-[380px]">
+              <div className="relative border-l-2 border-slate-300 ml-3 pl-6 space-y-5">
+
+                {mockActivityLogs.map((log) => (
+                  <div key={log.id} className="relative">
+                    {/* Circle Node Dot */}
+                    <span className="absolute -left-[31px] top-1.5 h-3.5 w-3.5 rounded-full border-2 border-slate-400 bg-white" />
+                    
+                    {/* Date Pill Badge */}
+                    <div className="inline-block bg-[#0B1E6E] text-white text-[10px] font-bold px-3 py-0.5 rounded-md mb-2 shadow-2xs">
+                      {log.dateBadge}
+                    </div>
+
+                    {/* Message Bubble Card */}
+                    <div className="bg-[#EBF7FE] border border-[#BBE2FB] rounded-xl p-3.5 space-y-3 shadow-2xs">
+                      <p className="text-xs font-medium text-slate-800 leading-relaxed">
+                        {log.message}
+                      </p>
+                      
+                      <div className="flex justify-between items-center text-[9px] text-slate-400 pt-1.5 border-t border-[#D0E9FA] font-medium">
+                        <span>
+                          {log.fromStatus} {log.toStatus && `→ ${log.toStatus}`}
+                        </span>
+                        {log.scheduled && (
+                          <span>Scheduled : {log.scheduled}</span>
+                        )}
+                        <span>{log.actor}</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+
+              </div>
+            </div>
+          </div>
+
         </div>
       </div>
-    </div>,
-    document.body
+    </div>
   );
 }
