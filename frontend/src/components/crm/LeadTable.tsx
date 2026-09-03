@@ -1,6 +1,36 @@
-import React from "react";
-import { Phone, MessageSquare, Mail, Eye, Trash2, ShieldAlert, Award } from "lucide-react";
+import React, { useState } from "react";
+import { Phone, MessageSquare, Mail, Eye, Trash2, ShieldAlert, Award, Search, X, Copy, Check } from "lucide-react";
 import { Lead, LeadStatus } from "@/context/AppContext";
+
+const CopyablePhone = ({ phone }: { phone: string }) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(phone);
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <span className="inline-flex items-center gap-1.5 text-[10px] text-slate-500 font-mono mt-0.5">
+      <span>{phone}</span>
+      <button 
+        onClick={handleCopy}
+        title="Copy phone number"
+        className="p-0.5 hover:text-slate-800 text-slate-400 transition-colors cursor-pointer bg-transparent border-none"
+      >
+        {copied ? (
+          <Check className="h-3 w-3 text-emerald-500 shrink-0" />
+        ) : (
+          <Copy className="h-3 w-3 text-slate-400 hover:text-slate-600 shrink-0" />
+        )}
+      </button>
+    </span>
+  );
+};
 
 interface LeadTableProps {
   leads: Lead[];
@@ -15,6 +45,43 @@ export default function LeadTable({
   onDelete,
   activeRole
 }: LeadTableProps) {
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const [selectedAgent, setSelectedAgent] = useState<string>("all");
+  const [showAgentDropdown, setShowAgentDropdown] = useState(false);
+  const [agentSearch, setAgentSearch] = useState("");
+
+  const [selectedProperty, setSelectedProperty] = useState<string>("all");
+  const [showPropertyDropdown, setShowPropertyDropdown] = useState(false);
+  const [propertySearch, setPropertySearch] = useState("");
+
+  const allAgentsList = Array.from(new Set([
+    ...leads.map(l => l.assignedAgent).filter(Boolean),
+    "Santosh Ray",
+    "Gautham Karanam",
+    "Sanjeev Kumar",
+    "Partha Mazumdar",
+    "Akhil Raj Singh",
+    "Naveen Naidu",
+    "Neha Chourey"
+  ]));
+
+  const allPropertiesList: string[] = Array.from(new Set([
+    ...leads.map(l => l.property).filter((p): p is string => Boolean(p)),
+    "Brigade Eternia",
+    "Altura",
+    "Granada",
+    "Habulus",
+    "Altura Project"
+  ]));
+
+  const displayedLeads = leads.filter(l => {
+    const matchesSearch = !searchQuery || l.name.toLowerCase().includes(searchQuery.toLowerCase()) || l.phone.includes(searchQuery);
+    const matchesAgent = selectedAgent === "all" || l.assignedAgent === selectedAgent;
+    const matchesProp = selectedProperty === "all" || l.property === selectedProperty;
+    return matchesSearch && matchesAgent && matchesProp;
+  });
 
   const getStatusColor = (status: LeadStatus) => {
     switch (status) {
@@ -163,23 +230,207 @@ export default function LeadTable({
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-slate-50 border-b border-slate-200 text-[10px] uppercase font-extrabold text-slate-500 tracking-wider">
-              <th className="p-4">Lead Name</th>
-              <th className="p-4">Property</th>
-              <th className="p-4">Assigned Agent</th>
+              <th className="p-4">
+                {showSearch ? (
+                  <div className="flex items-center gap-1.5 bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-700 shadow-sm w-44">
+                    <Search className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                    <input
+                      type="text"
+                      placeholder="Search..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full bg-transparent text-xs font-semibold text-slate-800 focus:outline-none placeholder:text-slate-400 placeholder:font-normal"
+                      autoFocus
+                    />
+                    <X
+                      className="h-3.5 w-3.5 text-slate-400 hover:text-slate-600 cursor-pointer shrink-0"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSearchQuery("");
+                        setShowSearch(false);
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <div 
+                    className="flex items-center gap-1.5 cursor-pointer hover:text-slate-800 transition-colors select-none"
+                    onClick={() => setShowSearch(true)}
+                  >
+                    <span>Lead Name</span>
+                    <Search className="h-3.5 w-3.5 text-slate-400 hover:text-blue-600" />
+                  </div>
+                )}
+              </th>
+              <th className="p-4 relative">
+                <div 
+                  className="flex items-center gap-1 cursor-pointer select-none hover:text-slate-800 transition-colors"
+                  onClick={() => setShowPropertyDropdown(!showPropertyDropdown)}
+                >
+                  <span>Property</span>
+                  <span className="text-[8px]">▼</span>
+                  {selectedProperty !== "all" && (
+                    <span className="bg-blue-600 text-white text-[9px] rounded-full px-1.5 py-0.2 font-bold ml-0.5">
+                      1
+                    </span>
+                  )}
+                </div>
+
+                {showPropertyDropdown && (
+                  <>
+                    <div 
+                      className="fixed inset-0 z-20 cursor-default" 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowPropertyDropdown(false);
+                      }} 
+                    />
+                    <div className="absolute left-0 mt-2 w-52 bg-white border border-slate-200 rounded-xl shadow-xl z-30 p-3 space-y-2 normal-case text-slate-700 font-medium text-xs">
+                      <div className="flex justify-between items-center pb-1.5 border-b border-slate-100 text-[10px] text-slate-400 font-bold">
+                        <span>Filter Property</span>
+                        {selectedProperty !== "all" && (
+                          <button 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedProperty("all");
+                            }}
+                            className="text-blue-600 hover:underline cursor-pointer bg-transparent border-none font-bold"
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
+                      
+                      <div className="relative">
+                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                        <input 
+                          type="text"
+                          placeholder="Search property..."
+                          value={propertySearch}
+                          onChange={(e) => setPropertySearch(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-8 pr-3 py-1.5 text-xs focus:outline-none focus:bg-white focus:border-blue-500 font-medium"
+                          autoFocus
+                        />
+                      </div>
+
+                      <div className="max-h-48 overflow-y-auto space-y-1 text-xs text-slate-700">
+                        <button
+                          onClick={() => {
+                            setSelectedProperty("all");
+                            setShowPropertyDropdown(false);
+                          }}
+                          className={`w-full text-left px-2 py-1 rounded text-xs font-semibold ${selectedProperty === "all" ? "bg-blue-50 text-blue-700 font-bold" : "hover:bg-slate-50 text-slate-700"}`}
+                        >
+                          All Properties
+                        </button>
+                        {allPropertiesList.filter(p => p.toLowerCase().includes(propertySearch.toLowerCase())).map((prop) => (
+                          <button
+                            key={prop}
+                            onClick={() => {
+                              setSelectedProperty(prop);
+                              setShowPropertyDropdown(false);
+                            }}
+                            className={`w-full text-left px-2 py-1 rounded text-xs font-semibold ${selectedProperty === prop ? "bg-blue-50 text-blue-700 font-bold" : "hover:bg-slate-50 text-slate-700"}`}
+                          >
+                            {prop}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </th>
+              <th className="p-4 relative">
+                <div 
+                  className="flex items-center gap-1 cursor-pointer select-none hover:text-slate-800 transition-colors"
+                  onClick={() => setShowAgentDropdown(!showAgentDropdown)}
+                >
+                  <span>Assigned Agent</span>
+                  <span className="text-[8px]">▼</span>
+                  {selectedAgent !== "all" && (
+                    <span className="bg-blue-600 text-white text-[9px] rounded-full px-1.5 py-0.2 font-bold ml-0.5">
+                      1
+                    </span>
+                  )}
+                </div>
+
+                {showAgentDropdown && (
+                  <>
+                    <div 
+                      className="fixed inset-0 z-20 cursor-default" 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowAgentDropdown(false);
+                      }} 
+                    />
+                    <div className="absolute left-0 mt-2 w-52 bg-white border border-slate-200 rounded-xl shadow-xl z-30 p-3 space-y-2 normal-case text-slate-700 font-medium text-xs">
+                      <div className="flex justify-between items-center pb-1.5 border-b border-slate-100 text-[10px] text-slate-400 font-bold">
+                        <span>Filter Sales Agent</span>
+                        {selectedAgent !== "all" && (
+                          <button 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedAgent("all");
+                            }}
+                            className="text-blue-600 hover:underline cursor-pointer bg-transparent border-none font-bold"
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
+                      
+                      <div className="relative">
+                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                        <input 
+                          type="text"
+                          placeholder="Search agent..."
+                          value={agentSearch}
+                          onChange={(e) => setAgentSearch(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-8 pr-3 py-1.5 text-xs focus:outline-none focus:bg-white focus:border-blue-500 font-medium"
+                          autoFocus
+                        />
+                      </div>
+
+                      <div className="max-h-48 overflow-y-auto space-y-1 text-xs text-slate-700">
+                        <button
+                          onClick={() => {
+                            setSelectedAgent("all");
+                            setShowAgentDropdown(false);
+                          }}
+                          className={`w-full text-left px-2 py-1 rounded text-xs font-semibold ${selectedAgent === "all" ? "bg-blue-50 text-blue-700 font-bold" : "hover:bg-slate-50 text-slate-700"}`}
+                        >
+                          All Sales Agents
+                        </button>
+                        {allAgentsList.filter(a => a.toLowerCase().includes(agentSearch.toLowerCase())).map((agent) => (
+                          <button
+                            key={agent}
+                            onClick={() => {
+                              setSelectedAgent(agent);
+                              setShowAgentDropdown(false);
+                            }}
+                            className={`w-full text-left px-2 py-1 rounded text-xs font-semibold ${selectedAgent === agent ? "bg-blue-50 text-blue-700 font-bold" : "hover:bg-slate-50 text-slate-700"}`}
+                          >
+                            {agent}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </th>
               <th className="p-4">Status</th>
               <th className="p-4">AI Score</th>
               <th className="p-4 text-center">Quick Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 font-semibold text-xs text-slate-700">
-            {leads.length === 0 ? (
+            {displayedLeads.length === 0 ? (
               <tr>
                 <td colSpan={6} className="p-8 text-center text-slate-400 font-medium italic">
                   No matching lead accounts found in this partition.
                 </td>
               </tr>
             ) : (
-              leads.map((lead) => (
+              displayedLeads.map((lead) => (
                 <tr
                   key={lead.id}
                   onClick={() => onViewDetails(lead)}
@@ -192,7 +443,7 @@ export default function LeadTable({
                       </div>
                       <div className="min-w-0">
                         <p className="font-extrabold text-slate-800 truncate">{lead.name}</p>
-                        <p className="text-[10px] text-slate-400 font-mono mt-0.5">{lead.phone}</p>
+                        <CopyablePhone phone={lead.phone} />
                       </div>
                     </div>
                   </td>
