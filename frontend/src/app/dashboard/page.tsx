@@ -631,7 +631,7 @@ export default function DashboardHome() {
   const propertiesList = properties.map(p => p.name);
   const agentsList = users.filter(u => u.department === "SALES" && u.status !== "INACTIVE").map(u => u.name);
 
-  const handleUploadManualLead = (data: { name: string; phone: string; email: string; agent: string; source: string; property: string; note: string }) => {
+  const handleUploadManualLead = (data: { name: string; phone: string; email: string; agent: string; source: string; property?: string; note: string }) => {
     const res = addLead({
       name: data.name,
       phone: data.phone,
