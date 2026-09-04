@@ -55,106 +55,106 @@ export default function HomePage() {
   const bookingsCount = leads.filter(l => ["Booked", "Booking Done", "Booking Approved"].includes(l.status)).length;
 
   return (
-    <div className="space-y-8 pb-12 animate-fade-in">
+    <div className="space-y-5 pb-8 animate-fade-in">
       <div>
-        <h2 className="text-2xl font-bold text-slate-900">Hey, {currentUser?.name}!</h2>
-        <p className="text-sm text-slate-450">Are you ready to experience how the growth process work?</p>
+        <h2 className="text-base font-bold text-slate-900">Hey, {currentUser?.name}!</h2>
+        <p className="text-xs text-slate-450">Are you ready to experience how the growth process work?</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* CRM */}
-        <Link href="/crm/dashboard" className="bg-white rounded-[2rem] shadow-sm border border-slate-100 p-7 flex flex-col justify-between hover:shadow-md hover:border-brand-200 transition-all cursor-pointer">
-          <div className="space-y-5">
-            <h3 className="text-2xl font-extrabold text-brand-700 flex items-center gap-2">
-              <Activity className="h-6 w-6 text-brand-600" />
+        <Link href="/crm/dashboard" className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 flex flex-col justify-between hover:shadow-md hover:border-brand-200 transition-all cursor-pointer">
+          <div className="space-y-3.5">
+            <h3 className="text-sm font-extrabold text-brand-700 flex items-center gap-1.5">
+              <Activity className="h-4 w-4 text-brand-600" />
               CRM
             </h3>
             <div>
-              <p className="text-sm text-slate-450">Leads in last 7 days</p>
-              <p className="text-3xl font-black text-slate-900 mt-1">{leadsLast7Days}</p>
-              <p className="text-sm font-bold text-[#006AFF] mt-1">{activeCampaignsCount} Active Campaigns</p>
+              <p className="text-xs text-slate-450">Leads in last 7 days</p>
+              <p className="text-xl font-black text-slate-900 mt-0.5">{leadsLast7Days}</p>
+              <p className="text-xs font-bold text-[#006AFF] mt-0.5">{activeCampaignsCount} Active Campaigns</p>
             </div>
-            <div className="grid grid-cols-3 gap-3 pt-2 border-t border-slate-100">
+            <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-100">
               <div>
-                <p className="text-xs text-slate-450">Spends</p>
-                <p className="text-lg font-bold text-slate-900">{spendLast7Days >= 1000 ? `${(spendLast7Days / 1000).toFixed(1)}K` : spendLast7Days.toFixed(0)}</p>
+                <p className="text-[10px] text-slate-450">Spends</p>
+                <p className="text-sm font-bold text-slate-900">{spendLast7Days >= 1000 ? `${(spendLast7Days / 1000).toFixed(1)}K` : spendLast7Days.toFixed(0)}</p>
               </div>
               <div>
-                <p className="text-xs text-slate-450">Avg CPL</p>
-                <p className="text-lg font-bold text-slate-900">{avgCplLast7Days.toFixed(2)}</p>
+                <p className="text-[10px] text-slate-450">Avg CPL</p>
+                <p className="text-sm font-bold text-slate-900">{avgCplLast7Days.toFixed(2)}</p>
               </div>
               <div>
-                <p className="text-xs text-slate-450">Follow Ups</p>
-                <p className="text-lg font-bold text-slate-900">{pendingFollowUps}</p>
+                <p className="text-[10px] text-slate-450">Follow Ups</p>
+                <p className="text-sm font-bold text-slate-900">{pendingFollowUps}</p>
               </div>
             </div>
           </div>
-          <span className="text-sm font-bold text-[#006AFF] mt-6 inline-flex items-center gap-1">
-            Know More <ArrowRight className="h-3.5 w-3.5" />
+          <span className="text-xs font-bold text-[#006AFF] mt-4 inline-flex items-center gap-1">
+            Know More <ArrowRight className="h-3 w-3" />
           </span>
         </Link>
 
         {/* HRMS */}
-        <Link href="/hrms/dashboard" className="bg-white rounded-[2rem] shadow-sm border border-slate-100 p-7 flex flex-col justify-between hover:shadow-md hover:border-brand-200 transition-all cursor-pointer">
-          <div className="space-y-5">
-            <h3 className="text-2xl font-extrabold text-brand-700 flex items-center gap-2">
-              <Users className="h-6 w-6 text-brand-600" />
+        <Link href="/hrms/dashboard" className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 flex flex-col justify-between hover:shadow-md hover:border-brand-200 transition-all cursor-pointer">
+          <div className="space-y-3.5">
+            <h3 className="text-sm font-extrabold text-brand-700 flex items-center gap-1.5">
+              <Users className="h-4 w-4 text-brand-600" />
               HRMS
             </h3>
             <div>
-              <p className="text-sm text-slate-450">Applied Leaves in last 7 days</p>
-              <p className="text-3xl font-black text-slate-900 mt-1">{leavesAppliedLast7Days}</p>
-              <p className="text-sm font-bold text-[#006AFF] mt-1">{employeesOnLeave} Employees Applied</p>
+              <p className="text-xs text-slate-450">Applied Leaves in last 7 days</p>
+              <p className="text-xl font-black text-slate-900 mt-0.5">{leavesAppliedLast7Days}</p>
+              <p className="text-xs font-bold text-[#006AFF] mt-0.5">{employeesOnLeave} Employees Applied</p>
             </div>
-            <div className="grid grid-cols-3 gap-3 pt-2 border-t border-slate-100">
+            <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-100">
               <div>
-                <p className="text-xs text-slate-450">Present</p>
-                <p className="text-lg font-bold text-slate-900">{presentTodayCount}</p>
+                <p className="text-[10px] text-slate-450">Present</p>
+                <p className="text-sm font-bold text-slate-900">{presentTodayCount}</p>
               </div>
               <div>
-                <p className="text-xs text-slate-450">Pending Info</p>
-                <p className="text-lg font-bold text-red-600">{pendingRegularizations}</p>
+                <p className="text-[10px] text-slate-450">Pending Info</p>
+                <p className="text-sm font-bold text-red-600">{pendingRegularizations}</p>
               </div>
               <div>
-                <p className="text-xs text-slate-450">WFH</p>
-                <p className="text-lg font-bold text-slate-900">{wfhCount}</p>
+                <p className="text-[10px] text-slate-450">WFH</p>
+                <p className="text-sm font-bold text-slate-900">{wfhCount}</p>
               </div>
             </div>
           </div>
-          <span className="text-sm font-bold text-[#006AFF] mt-6 inline-flex items-center gap-1">
-            Know More <ArrowRight className="h-3.5 w-3.5" />
+          <span className="text-xs font-bold text-[#006AFF] mt-4 inline-flex items-center gap-1">
+            Know More <ArrowRight className="h-3 w-3" />
           </span>
         </Link>
 
         {/* Finance */}
-        <Link href="/finance/dashboard" className="bg-white rounded-[2rem] shadow-sm border border-slate-100 p-7 flex flex-col justify-between hover:shadow-md hover:border-brand-200 transition-all cursor-pointer">
-          <div className="space-y-5">
-            <h3 className="text-2xl font-extrabold text-brand-700 flex items-center gap-2">
-              <TrendingUp className="h-6 w-6 text-brand-600" />
+        <Link href="/finance/dashboard" className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 flex flex-col justify-between hover:shadow-md hover:border-brand-200 transition-all cursor-pointer">
+          <div className="space-y-3.5">
+            <h3 className="text-sm font-extrabold text-brand-700 flex items-center gap-1.5">
+              <TrendingUp className="h-4 w-4 text-brand-600" />
               Finance
             </h3>
             <div>
-              <p className="text-sm text-slate-450">Raised Invoices in last 7 days</p>
-              <p className="text-3xl font-black text-slate-900 mt-1">{invoicesLast7Days.length}</p>
-              <p className="text-sm font-bold text-[#006AFF] mt-1">{propertiesInvoicedLast7Days} Properties Included</p>
+              <p className="text-xs text-slate-450">Raised Invoices in last 7 days</p>
+              <p className="text-xl font-black text-slate-900 mt-0.5">{invoicesLast7Days.length}</p>
+              <p className="text-xs font-bold text-[#006AFF] mt-0.5">{propertiesInvoicedLast7Days} Properties Included</p>
             </div>
-            <div className="grid grid-cols-3 gap-3 pt-2 border-t border-slate-100">
+            <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-100">
               <div>
-                <p className="text-xs text-slate-450">Bookings</p>
-                <p className="text-lg font-bold text-slate-900">{bookingsCount}</p>
+                <p className="text-[10px] text-slate-450">Bookings</p>
+                <p className="text-sm font-bold text-slate-900">{bookingsCount}</p>
               </div>
               <div>
-                <p className="text-xs text-slate-450">Transactions</p>
-                <p className="text-lg font-bold text-slate-900">{invoices.length}</p>
+                <p className="text-[10px] text-slate-450">Transactions</p>
+                <p className="text-sm font-bold text-slate-900">{invoices.length}</p>
               </div>
               <div>
-                <p className="text-xs text-slate-450">Reimbursements</p>
-                <p className="text-lg font-bold text-slate-900">{reimbursements.length}</p>
+                <p className="text-[10px] text-slate-450">Reimbursements</p>
+                <p className="text-sm font-bold text-slate-900">{reimbursements.length}</p>
               </div>
             </div>
           </div>
-          <span className="text-sm font-bold text-[#006AFF] mt-6 inline-flex items-center gap-1">
-            Know More <ArrowRight className="h-3.5 w-3.5" />
+          <span className="text-xs font-bold text-[#006AFF] mt-4 inline-flex items-center gap-1">
+            Know More <ArrowRight className="h-3 w-3" />
           </span>
         </Link>
       </div>

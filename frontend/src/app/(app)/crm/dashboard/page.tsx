@@ -167,23 +167,23 @@ export default function CrmDashboardPage() {
   }));
 
   return (
-    <div className="space-y-6 pb-12 animate-fade-in">
+    <div className="space-y-4 pb-8 animate-fade-in">
       {/* No in-page title here — the shared app header above already shows
           "Dashboard" for this route, so repeating it as a page heading was
           just duplication. */}
       <div className="flex justify-end">
         <button
           onClick={() => setIsUploadOpen(true)}
-          className="inline-flex items-center gap-2 bg-[#0B0447] hover:opacity-90 text-white px-6 py-3.5 rounded-2xl text-base font-semibold transition-all shadow-md shrink-0"
+          className="inline-flex items-center gap-1.5 bg-[#0B0447] hover:opacity-90 text-white px-4 py-2 rounded-xl text-xs font-semibold transition-all shadow-md shrink-0"
         >
-          <Plus className="h-5 w-5" />
+          <Plus className="h-3.5 w-3.5" />
           Upload Leads
         </button>
       </div>
 
       {uploadMsg && (
-        <div className="p-3.5 bg-emerald-50 border border-emerald-100 text-xs text-emerald-700 rounded-xl font-bold flex items-center gap-2 animate-fade-in shadow-sm">
-          <CheckCircle className="h-4 w-4 text-emerald-600 shrink-0" />
+        <div className="p-2.5 bg-emerald-50 border border-emerald-100 text-[11px] text-emerald-700 rounded-xl font-bold flex items-center gap-2 animate-fade-in shadow-sm">
+          <CheckCircle className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
           <span>{uploadMsg}</span>
         </div>
       )}
@@ -194,13 +194,13 @@ export default function CrmDashboardPage() {
           cards with gaps between them. */}
       <div className="bg-slate-100/70 border border-slate-200/60 rounded-2xl overflow-hidden shadow-sm">
         {/* Header bar */}
-        <div className="flex justify-between items-center px-5 py-3 text-xs border-b border-slate-200/60">
+        <div className="flex justify-between items-center px-4 py-2.5 text-[11px] border-b border-slate-200/60">
           <div className="flex items-center gap-1.5 font-bold text-slate-700">
             <span className="font-normal text-slate-500">Date Range</span>
             <select
               value={dateRange}
               onChange={(e) => setDateRange(e.target.value as typeof dateRange)}
-              className="bg-transparent border border-slate-300/80 rounded-md px-2 py-0.5 font-black text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer text-xs"
+              className="bg-transparent border border-slate-300/80 rounded-md px-1.5 py-0.5 font-black text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer text-[11px]"
             >
               <option value="today">Today</option>
               <option value="yesterday">Yesterday</option>
@@ -220,13 +220,13 @@ export default function CrmDashboardPage() {
             <Link
               key={s.label}
               href="/dashboard/crm"
-              className="p-4 flex flex-col justify-between min-h-[90px] min-w-[130px] md:min-w-0 flex-1 group transition-colors hover:bg-slate-50/50"
+              className="p-3 flex flex-col justify-between min-h-[70px] min-w-[110px] md:min-w-0 flex-1 group transition-colors hover:bg-slate-50/50"
             >
-              <span className="flex items-center justify-between text-xs font-medium text-slate-500">
+              <span className="flex items-center justify-between text-[11px] font-medium text-slate-500">
                 {s.label}
-                <ChevronRight className="h-3.5 w-3.5 text-slate-300 shrink-0 group-hover:translate-x-0.5 transition-transform" />
+                <ChevronRight className="h-3 w-3 text-slate-300 shrink-0 group-hover:translate-x-0.5 transition-transform" />
               </span>
-              <span className={`text-2xl font-extrabold block mt-2 ${s.color}`}>{s.value}</span>
+              <span className={`text-lg font-extrabold block mt-1.5 ${s.color}`}>{s.value}</span>
             </Link>
           ))}
         </div>
