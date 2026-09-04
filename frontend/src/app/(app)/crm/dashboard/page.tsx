@@ -168,15 +168,10 @@ export default function CrmDashboardPage() {
 
   return (
     <div className="space-y-6 pb-12 animate-fade-in">
-      <div className="flex flex-wrap justify-between items-center gap-3">
-        <div>
-          <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900">Dashboard</h2>
-          <p className="text-sm text-slate-500 mt-1">
-            {isSalesMember
-              ? `Personal workspace for ${currentUser?.name}. Viewing active leads and scheduled callbacks.`
-              : "Global sales operations tracking, pipelines distribution, and performance logs."}
-          </p>
-        </div>
+      {/* No in-page title here — the shared app header above already shows
+          "Dashboard" for this route, so repeating it as a page heading was
+          just duplication. */}
+      <div className="flex justify-end">
         <button
           onClick={() => setIsUploadOpen(true)}
           className="inline-flex items-center gap-2 bg-[#0B0447] hover:opacity-90 text-white px-6 py-3.5 rounded-2xl text-base font-semibold transition-all shadow-md shrink-0"
