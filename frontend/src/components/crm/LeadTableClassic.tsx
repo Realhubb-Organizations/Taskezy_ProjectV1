@@ -108,12 +108,10 @@ export default function LeadTable({
                     className={`h-full rounded-full ${
                       (lead.leadScore || 0) > 70 ? "bg-emerald-500" : (lead.leadScore || 0) > 40 ? "bg-amber-500" : "bg-red-500"
                     }`}
-                    style={{ width: `${lead.leadScore ?? 0}%` }}
+                    style={{ width: `${lead.leadScore || 20}%` }}
                   />
                 </div>
-                <span className="text-[9px] font-black text-slate-500 shrink-0">
-                  {lead.leadScore != null ? `${lead.leadScore}% AI Score` : "Not scored"}
-                </span>
+                <span className="text-[9px] font-black text-slate-500 shrink-0">{lead.leadScore || 20}% AI Score</span>
               </div>
 
               <div className="flex items-center justify-end gap-1 pt-1 border-t border-slate-100" onClick={(e) => e.stopPropagation()}>
@@ -225,12 +223,10 @@ export default function LeadTable({
                                 ? "bg-amber-500"
                                 : "bg-red-500"
                           }`}
-                          style={{ width: `${lead.leadScore ?? 0}%` }}
+                          style={{ width: `${lead.leadScore || 20}%` }}
                         />
                       </div>
-                      <span className="text-[10px] font-black text-slate-600">
-                        {lead.leadScore != null ? `${lead.leadScore}%` : "—"}
-                      </span>
+                      <span className="text-[10px] font-black text-slate-600">{lead.leadScore || 20}%</span>
                     </div>
                   </td>
                   <td className="p-4" onClick={(e) => e.stopPropagation()}>
