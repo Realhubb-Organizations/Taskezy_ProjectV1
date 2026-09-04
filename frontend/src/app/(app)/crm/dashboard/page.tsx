@@ -166,6 +166,14 @@ export default function CrmDashboardPage() {
     }
   };
 
+  // Pending Follow ups/Call Backs rows only carry a summary shape
+  // (PendingRow), not the full Lead the quick-view needs — look the real
+  // record up by id from the same `leads` list everything else here reads.
+  const openQuickView = (leadId: string) => {
+    const found = leads.find(l => l.id === leadId);
+    if (found) setQuickViewLead(found);
+  };
+
   const byMostRecentActivity = (a: Lead, b: Lead) => new Date(lastActivityIso(b) || 0).getTime() - new Date(lastActivityIso(a) || 0).getTime();
 
   const pendingFollowUpLeads = scopedLeads.filter(l => l.status === "Follow-ups").sort(byMostRecentActivity);
@@ -420,10 +428,10 @@ export default function CrmDashboardPage() {
       )}
 
       {/* Pending Follow ups — leads currently sitting in the Follow-ups status */}
-      <PendingLeadsTable title="Pending Follow ups" rows={followUpRows} />
+      <PendingLeadsTable title="Pending Follow ups" rows={followUpRows} onViewLead={openQuickView} />
 
       {/* Pending Call Backs — the operational followup_calls callback queue */}
-      <PendingLeadsTable title="Pending Call Backs" rows={callBackRows} />
+      <PendingLeadsTable title="Pending Call Backs" rows={callBackRows} onViewLead={openQuickView} />
 
       <AddLeadModal
         isOpen={isUploadOpen}

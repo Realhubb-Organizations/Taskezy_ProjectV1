@@ -1,8 +1,7 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import Link from "next/link";
-import { Search, ChevronDown, ChevronLeft, ChevronRight, Copy, Check, Phone, Eye } from "lucide-react";
+import { Search, ChevronDown, ChevronLeft, ChevronRight, Copy, Check, Phone, MessageSquare } from "lucide-react";
 
 export interface PendingRow {
   id: string;
@@ -15,7 +14,15 @@ export interface PendingRow {
   leadId?: string; // present when this row can deep-link to a real lead in the CRM
 }
 
-export default function PendingLeadsTable({ title, rows }: { title: string; rows: PendingRow[] }) {
+export default function PendingLeadsTable({
+  title,
+  rows,
+  onViewLead
+}: {
+  title: string;
+  rows: PendingRow[];
+  onViewLead?: (leadId: string) => void;
+}) {
   const [search, setSearch] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [assignedFilter, setAssignedFilter] = useState<string[]>([]);
@@ -154,7 +161,16 @@ export default function PendingLeadsTable({ title, rows }: { title: string; rows
                 <tr key={row.id} className="hover:bg-slate-50/60 transition-colors text-xs">
                   <td className="px-4 py-3 font-mono text-slate-700 whitespace-nowrap align-top">{row.time}</td>
                   <td className="px-4 py-3 align-top">
-                    <p className="font-bold text-slate-900 text-xs">{row.name}</p>
+                    {row.leadId && onViewLead ? (
+                      <button
+                        onClick={() => onViewLead(row.leadId!)}
+                        className="font-bold text-[#0B1E6E] hover:underline text-xs text-left"
+                      >
+                        {row.name}
+                      </button>
+                    ) : (
+                      <p className="font-bold text-slate-900 text-xs">{row.name}</p>
+                    )}
                     <div className="flex items-center gap-1.5 mt-0.5">
                       <span className="text-[11px] text-slate-500 font-mono">{row.phone}</span>
                       <button onClick={() => handleCopy(row)} className="text-slate-350 hover:text-brand-700" title="Copy phone number">
@@ -168,21 +184,21 @@ export default function PendingLeadsTable({ title, rows }: { title: string; rows
                   <td className="px-4 py-3 align-top">
                     <div className="flex items-center justify-end gap-1.5">
                       <a
+                        href={`https://wa.me/${row.phone.replace(/[^0-9]/g, "")}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="h-7 w-7 rounded-full border border-slate-300 text-slate-500 hover:border-emerald-500 hover:text-emerald-600 flex items-center justify-center transition-colors shrink-0"
+                        title="WhatsApp"
+                      >
+                        <MessageSquare className="h-3.5 w-3.5" />
+                      </a>
+                      <a
                         href={`tel:${row.phone}`}
-                        className="h-7 w-7 rounded-full bg-slate-900 hover:bg-brand-700 text-white flex items-center justify-center transition-colors shrink-0"
+                        className="h-7 w-7 rounded-full border border-slate-300 text-slate-500 hover:border-brand-500 hover:text-brand-700 flex items-center justify-center transition-colors shrink-0"
                         title="Call"
                       >
                         <Phone className="h-3.5 w-3.5" />
                       </a>
-                      {row.leadId && (
-                        <Link
-                          href={`/dashboard/crm?openLead=${row.leadId}`}
-                          className="h-7 w-7 rounded-full bg-slate-900 hover:bg-brand-700 text-white flex items-center justify-center transition-colors shrink-0"
-                          title="View lead"
-                        >
-                          <Eye className="h-3.5 w-3.5" />
-                        </Link>
-                      )}
                     </div>
                   </td>
                 </tr>
