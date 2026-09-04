@@ -448,9 +448,9 @@ export default function CrmDashboardPage() {
           root wrapper carries animate-fade-in, which would otherwise become
           the containing block for a fixed-position overlay. */}
       {quickViewLead && createPortal(
-        <div className="fixed inset-0 z-50 flex items-start justify-end p-4 sm:p-6">
-          <div className="fixed inset-0 bg-slate-900/40" onClick={() => setQuickViewLead(null)} />
-          <div className="relative w-full max-w-xs max-h-[calc(100vh-3rem)] bg-white rounded-2xl shadow-2xl overflow-y-auto animate-fade-in">
+        <div className="fixed inset-0 z-50 pointer-events-none flex items-start justify-end p-4 sm:p-6">
+          <div className="fixed inset-0 pointer-events-auto" onClick={() => setQuickViewLead(null)} />
+          <div className="relative pointer-events-auto w-full max-w-xs max-h-[calc(100vh-3rem)] bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-y-auto animate-fade-in">
             <div className="px-4 pt-4 pb-3 border-b border-slate-100">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5">
