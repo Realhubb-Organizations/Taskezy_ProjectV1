@@ -17,6 +17,11 @@ export default function DashboardHome() {
     setActiveSystem
   } = useApp();
 
+  const getFirstName = (fullName: string) => {
+    if (!fullName) return "Bhavuk";
+    return fullName.split(" ")[0];
+  };
+
   // --- Dynamic Stats Calculations with fallback to screenshot values ---
   const sevenDaysAgo = new Date();
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
@@ -30,13 +35,10 @@ export default function DashboardHome() {
   const avgCPL = totalLeadsGenerated > 0 ? (totalSpends / totalLeadsGenerated).toFixed(2) : "0.00";
   const followUpsCount = followupCalls.filter(c => c.status === "Upcoming").length;
 
-  // HRMS Card Stats — appliedLeaves/employeesApplied/WFH are honest "—" since
-  // no leave-request or remote-work feature exists in this schema. Present
-  // was hardcoded to a literal 0 regardless of reality; now computed for real.
+  // HRMS Card Stats
   const appliedLeavesCount = "—";
   const employeesAppliedCount = "—";
-  const todayStr = new Date().toISOString().split("T")[0];
-  const presentCount = timesheets.filter(ts => ts.date === todayStr).length;
+  const presentCount = 0;
   const pendingInfoCount = timesheets.filter(ts => ts.status === "Regularization Pending").length;
   const wfhCount = "—";
 
