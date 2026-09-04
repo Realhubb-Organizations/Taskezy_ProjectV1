@@ -8,7 +8,7 @@ import AddLeadModal from "@/components/crm/AddLeadModal";
 import PendingLeadsTable, { PendingRow } from "@/components/dashboard/PendingLeadsTable";
 import { DB_CODE_TO_FRONTEND_STATUS } from "@/lib/leadStatusMapping";
 import { WhatsAppIcon, CallIcon } from "@/components/icons/ContactIcons";
-import { ChevronDown, Plus, CheckCircle, Phone, Mail, X, Copy, Check, User } from "lucide-react";
+import { ChevronDown, Plus, CheckCircle, Phone, Mail, X, Copy, Check, User, Search } from "lucide-react";
 
 const STATUS_OPTIONS = Array.from(new Set(Object.values(DB_CODE_TO_FRONTEND_STATUS)));
 
@@ -29,6 +29,19 @@ export default function CrmDashboardPage() {
   const [drillRowsPerPage, setDrillRowsPerPage] = useState(10);
   const [quickViewLead, setQuickViewLead] = useState<Lead | null>(null);
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [drillSearch, setDrillSearch] = useState("");
+  const [drillSearchOpen, setDrillSearchOpen] = useState(false);
+  const [drillStatusFilter, setDrillStatusFilter] = useState<string[]>([]);
+  const [drillStatusMenuOpen, setDrillStatusMenuOpen] = useState(false);
+  const [drillAssignedFilter, setDrillAssignedFilter] = useState<string[]>([]);
+  const [drillAssignedMenuOpen, setDrillAssignedMenuOpen] = useState(false);
+  const [drillCampaignFilter, setDrillCampaignFilter] = useState<string[]>([]);
+  const [drillCampaignMenuOpen, setDrillCampaignMenuOpen] = useState(false);
+
+  const toggleDrillFilter = (list: string[], value: string, setList: (v: string[]) => void) => {
+    setDrillPage(1);
+    setList(list.includes(value) ? list.filter(v => v !== value) : [...list, value]);
+  };
 
   const copyToClipboard = (field: string, value: string) => {
     navigator.clipboard.writeText(value).then(() => {
@@ -172,9 +185,27 @@ export default function CrmDashboardPage() {
   const toggleCategory = (label: string) => {
     setSelectedCategory(prev => (prev === label ? null : label));
     setDrillPage(1);
+    setDrillSearch("");
+    setDrillStatusFilter([]);
+    setDrillAssignedFilter([]);
+    setDrillCampaignFilter([]);
   };
 
-  const drillLeads = selectedCategory ? categoryLeads[selectedCategory] : [];
+  // The full, unfiltered set behind the selected stat card — filter option
+  // lists are built from this so they don't shrink as filters are applied.
+  const drillCategoryLeads = selectedCategory ? categoryLeads[selectedCategory] : [];
+  const drillStatusOptions = Array.from(new Set(drillCategoryLeads.map(l => l.status)));
+  const drillAssignedOptions = Array.from(new Set(drillCategoryLeads.map(l => l.assignedAgent).filter(Boolean)));
+  const drillCampaignOptions = Array.from(new Set(drillCategoryLeads.map(l => l.campaign || l.source).filter(Boolean))) as string[];
+
+  const drillLeads = drillCategoryLeads.filter(l => {
+    const matchesSearch = !drillSearch || l.name.toLowerCase().includes(drillSearch.toLowerCase()) || l.phone.includes(drillSearch);
+    const matchesStatus = drillStatusFilter.length === 0 || drillStatusFilter.includes(l.status);
+    const matchesAssigned = drillAssignedFilter.length === 0 || drillAssignedFilter.includes(l.assignedAgent);
+    const campaignVal = l.campaign || l.source || "";
+    const matchesCampaign = drillCampaignFilter.length === 0 || drillCampaignFilter.includes(campaignVal);
+    return matchesSearch && matchesStatus && matchesAssigned && matchesCampaign;
+  });
   const drillTotalPages = Math.max(1, Math.ceil(drillLeads.length / drillRowsPerPage));
   const drillCurrentPage = Math.min(drillPage, drillTotalPages);
   const drillPageLeads = drillLeads.slice((drillCurrentPage - 1) * drillRowsPerPage, drillCurrentPage * drillRowsPerPage);
@@ -360,14 +391,103 @@ export default function CrmDashboardPage() {
             <table className="w-full text-left border-collapse min-w-[900px]">
               <thead>
                 <tr className="border-b border-slate-200 text-xs font-bold text-slate-800">
-                  <th className="px-4 py-2.5">Lead Name</th>
+                  <th className="px-4 py-2.5">
+                    <div className="relative flex items-center gap-1.5">
+                      Lead Name
+                      <button onClick={() => setDrillSearchOpen(o => !o)} className="text-slate-400 hover:text-brand-700" title="Search">
+                        <Search className="h-3.5 w-3.5" />
+                      </button>
+                      {drillSearchOpen && (
+                        <input
+                          autoFocus
+                          value={drillSearch}
+                          onChange={(e) => { setDrillSearch(e.target.value); setDrillPage(1); }}
+                          onBlur={() => { if (!drillSearch) setDrillSearchOpen(false); }}
+                          placeholder="Search name or phone..."
+                          className="absolute left-0 top-8 z-20 w-52 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-normal shadow-lg focus:outline-none focus:border-brand-500"
+                        />
+                      )}
+                    </div>
+                  </th>
                   <th className="px-4 py-2.5">Email</th>
-                  <th className="px-4 py-2.5">Status</th>
-                  <th className="px-4 py-2.5">Assigned To</th>
+                  <th className="px-4 py-2.5">
+                    <div className="relative">
+                      <button onClick={() => setDrillStatusMenuOpen(o => !o)} className="flex items-center gap-1.5 hover:text-brand-700">
+                        Status
+                        <ChevronDown className="h-3 w-3" />
+                        {drillStatusFilter.length > 0 && (
+                          <span className="text-[9px] bg-brand-50 text-brand-700 rounded-full px-1.5 py-0.5 font-bold">{drillStatusFilter.length}</span>
+                        )}
+                      </button>
+                      {drillStatusMenuOpen && (
+                        <div className="absolute left-0 top-8 z-20 w-52 bg-white border border-slate-200 rounded-lg shadow-lg py-1.5 max-h-56 overflow-y-auto">
+                          {drillStatusOptions.length === 0 ? (
+                            <p className="px-3 py-2 text-xs text-slate-400 italic font-normal">No data yet</p>
+                          ) : (
+                            drillStatusOptions.map(opt => (
+                              <label key={opt} className="flex items-center gap-2 px-3 py-1.5 text-xs font-normal text-slate-700 hover:bg-slate-50 cursor-pointer">
+                                <input type="checkbox" checked={drillStatusFilter.includes(opt)} onChange={() => toggleDrillFilter(drillStatusFilter, opt, setDrillStatusFilter)} />
+                                {opt}
+                              </label>
+                            ))
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </th>
+                  <th className="px-4 py-2.5">
+                    <div className="relative">
+                      <button onClick={() => setDrillAssignedMenuOpen(o => !o)} className="flex items-center gap-1.5 hover:text-brand-700">
+                        Assigned To
+                        <ChevronDown className="h-3 w-3" />
+                        {drillAssignedFilter.length > 0 && (
+                          <span className="text-[9px] bg-brand-50 text-brand-700 rounded-full px-1.5 py-0.5 font-bold">{drillAssignedFilter.length}</span>
+                        )}
+                      </button>
+                      {drillAssignedMenuOpen && (
+                        <div className="absolute left-0 top-8 z-20 w-52 bg-white border border-slate-200 rounded-lg shadow-lg py-1.5 max-h-56 overflow-y-auto">
+                          {drillAssignedOptions.length === 0 ? (
+                            <p className="px-3 py-2 text-xs text-slate-400 italic font-normal">No data yet</p>
+                          ) : (
+                            drillAssignedOptions.map(opt => (
+                              <label key={opt} className="flex items-center gap-2 px-3 py-1.5 text-xs font-normal text-slate-700 hover:bg-slate-50 cursor-pointer">
+                                <input type="checkbox" checked={drillAssignedFilter.includes(opt)} onChange={() => toggleDrillFilter(drillAssignedFilter, opt, setDrillAssignedFilter)} />
+                                {opt}
+                              </label>
+                            ))
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </th>
                   <th className="px-4 py-2.5">Date</th>
                   <th className="px-4 py-2.5">Feedback</th>
                   <th className="px-4 py-2.5">Next Call Date</th>
-                  <th className="px-4 py-2.5">Campaign</th>
+                  <th className="px-4 py-2.5">
+                    <div className="relative">
+                      <button onClick={() => setDrillCampaignMenuOpen(o => !o)} className="flex items-center gap-1.5 hover:text-brand-700">
+                        Campaign
+                        <ChevronDown className="h-3 w-3" />
+                        {drillCampaignFilter.length > 0 && (
+                          <span className="text-[9px] bg-brand-50 text-brand-700 rounded-full px-1.5 py-0.5 font-bold">{drillCampaignFilter.length}</span>
+                        )}
+                      </button>
+                      {drillCampaignMenuOpen && (
+                        <div className="absolute right-0 top-8 z-20 w-56 bg-white border border-slate-200 rounded-lg shadow-lg py-1.5 max-h-56 overflow-y-auto">
+                          {drillCampaignOptions.length === 0 ? (
+                            <p className="px-3 py-2 text-xs text-slate-400 italic font-normal">No data yet</p>
+                          ) : (
+                            drillCampaignOptions.map(opt => (
+                              <label key={opt} className="flex items-center gap-2 px-3 py-1.5 text-xs font-normal text-slate-700 hover:bg-slate-50 cursor-pointer">
+                                <input type="checkbox" checked={drillCampaignFilter.includes(opt)} onChange={() => toggleDrillFilter(drillCampaignFilter, opt, setDrillCampaignFilter)} />
+                                {opt}
+                              </label>
+                            ))
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </th>
                   <th className="px-4 py-2.5 text-right">Actions</th>
                 </tr>
               </thead>
