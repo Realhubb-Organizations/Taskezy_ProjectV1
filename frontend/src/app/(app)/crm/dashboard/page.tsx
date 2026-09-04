@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useApp, Lead, LeadStatus } from "@/context/AppContext";
@@ -38,6 +38,36 @@ export default function CrmDashboardPage() {
   const [drillCampaignFilter, setDrillCampaignFilter] = useState<string[]>([]);
   const [drillCampaignMenuOpen, setDrillCampaignMenuOpen] = useState(false);
   const [dateRangeMenuOpen, setDateRangeMenuOpen] = useState(false);
+  const [dateRangeMenuPos, setDateRangeMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const dateRangeBtnRef = useRef<HTMLButtonElement>(null);
+  const [drillSearchPos, setDrillSearchPos] = useState<{ top: number; left: number } | null>(null);
+  const drillSearchBtnRef = useRef<HTMLButtonElement>(null);
+  const [drillStatusMenuPos, setDrillStatusMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const drillStatusBtnRef = useRef<HTMLButtonElement>(null);
+  const [drillAssignedMenuPos, setDrillAssignedMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const drillAssignedBtnRef = useRef<HTMLButtonElement>(null);
+  const [drillCampaignMenuPos, setDrillCampaignMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const drillCampaignBtnRef = useRef<HTMLButtonElement>(null);
+
+  // The table's own horizontal-scroll wrapper (overflow-x-auto) and the
+  // stat-cards card (overflow-hidden, for its rounded corners) both clip any
+  // descendant that visually extends past them — which every one of these
+  // dropdown/search panels does. Portaled to <body> and positioned from the
+  // trigger's real screen coordinates instead of relying on CSS `absolute`
+  // inside a clipped ancestor.
+  const openPositionedMenu = (
+    ref: React.RefObject<HTMLButtonElement>,
+    setPos: (p: { top: number; left: number } | null) => void,
+    setOpen: (fn: (o: boolean) => boolean) => void,
+    align: "left" | "right" = "left",
+    panelWidth = 208
+  ) => {
+    const rect = ref.current?.getBoundingClientRect();
+    if (rect) setPos({ top: rect.bottom + 6, left: align === "left" ? rect.left : rect.right - panelWidth });
+    setOpen(o => !o);
+  };
+
+  const openDateRangeMenu = () => openPositionedMenu(dateRangeBtnRef, setDateRangeMenuPos, setDateRangeMenuOpen, "left", 144);
 
   const DATE_RANGE_OPTIONS: { value: typeof dateRange; label: string }[] = [
     { value: "today", label: "Today" },
@@ -346,16 +376,20 @@ export default function CrmDashboardPage() {
             <span className="font-normal text-slate-500">Date Range</span>
             <div className="relative">
               <button
-                onClick={() => setDateRangeMenuOpen(o => !o)}
+                ref={dateRangeBtnRef}
+                onClick={openDateRangeMenu}
                 className="flex items-center gap-1.5 bg-white border border-slate-300/80 rounded-md px-2 py-0.5 font-black text-slate-800 text-[11px] hover:bg-slate-50 transition-colors"
               >
                 {DATE_RANGE_OPTIONS.find(o => o.value === dateRange)?.label}
                 <ChevronDown className={`h-3 w-3 text-slate-400 transition-transform ${dateRangeMenuOpen ? "rotate-180" : ""}`} />
               </button>
-              {dateRangeMenuOpen && (
+              {dateRangeMenuOpen && dateRangeMenuPos && createPortal(
                 <>
-                  <div className="fixed inset-0 z-20" onClick={() => setDateRangeMenuOpen(false)} />
-                  <div className="absolute left-0 top-7 z-30 w-36 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 overflow-hidden">
+                  <div className="fixed inset-0 z-[60]" onClick={() => setDateRangeMenuOpen(false)} />
+                  <div
+                    className="fixed z-[70] w-36 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 overflow-hidden"
+                    style={{ top: dateRangeMenuPos.top, left: dateRangeMenuPos.left }}
+                  >
                     {DATE_RANGE_OPTIONS.map((opt) => (
                       <button
                         key={opt.value}
@@ -368,7 +402,8 @@ export default function CrmDashboardPage() {
                       </button>
                     ))}
                   </div>
-                </>
+                </>,
+                document.body
               )}
             </div>
           </div>
@@ -430,69 +465,100 @@ export default function CrmDashboardPage() {
                   <th className="px-4 py-2.5">
                     <div className="relative flex items-center gap-1.5">
                       Lead Name
-                      <button onClick={() => setDrillSearchOpen(o => !o)} className="text-slate-400 hover:text-brand-700" title="Search">
+                      <button
+                        ref={drillSearchBtnRef}
+                        onClick={() => openPositionedMenu(drillSearchBtnRef, setDrillSearchPos, setDrillSearchOpen, "left", 208)}
+                        className="text-slate-400 hover:text-brand-700"
+                        title="Search"
+                      >
                         <Search className="h-3.5 w-3.5" />
                       </button>
-                      {drillSearchOpen && (
-                        <input
-                          autoFocus
-                          value={drillSearch}
-                          onChange={(e) => { setDrillSearch(e.target.value); setDrillPage(1); }}
-                          onBlur={() => { if (!drillSearch) setDrillSearchOpen(false); }}
-                          placeholder="Search name or phone..."
-                          className="absolute left-0 top-8 z-20 w-52 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-normal shadow-lg focus:outline-none focus:border-brand-500"
-                        />
+                      {drillSearchOpen && drillSearchPos && createPortal(
+                        <>
+                          <div className="fixed inset-0 z-[60]" onClick={() => { if (!drillSearch) setDrillSearchOpen(false); }} />
+                          <input
+                            autoFocus
+                            value={drillSearch}
+                            onChange={(e) => { setDrillSearch(e.target.value); setDrillPage(1); }}
+                            placeholder="Search name or phone..."
+                            className="fixed z-[70] w-52 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-normal shadow-lg focus:outline-none focus:border-brand-500"
+                            style={{ top: drillSearchPos.top, left: drillSearchPos.left }}
+                          />
+                        </>,
+                        document.body
                       )}
                     </div>
                   </th>
                   <th className="px-4 py-2.5 whitespace-nowrap">Email</th>
                   <th className="px-4 py-2.5">
                     <div className="relative">
-                      <button onClick={() => setDrillStatusMenuOpen(o => !o)} className="flex items-center gap-1.5 hover:text-brand-700 whitespace-nowrap">
+                      <button
+                        ref={drillStatusBtnRef}
+                        onClick={() => openPositionedMenu(drillStatusBtnRef, setDrillStatusMenuPos, setDrillStatusMenuOpen, "left", 208)}
+                        className="flex items-center gap-1.5 hover:text-brand-700 whitespace-nowrap"
+                      >
                         Status
                         <ChevronDown className="h-3 w-3" />
                         {drillStatusFilter.length > 0 && (
                           <span className="text-[9px] bg-brand-50 text-brand-700 rounded-full px-1.5 py-0.5 font-bold">{drillStatusFilter.length}</span>
                         )}
                       </button>
-                      {drillStatusMenuOpen && (
-                        <div className="absolute left-0 top-8 z-20 w-52 bg-white border border-slate-200 rounded-lg shadow-lg py-1.5 max-h-56 overflow-y-auto">
-                          {drillStatusOptions.length === 0 ? (
-                            <p className="px-3 py-2 text-xs text-slate-400 italic font-normal">No data yet</p>
-                          ) : (
-                            drillStatusOptions.map(opt => (
-                              <label key={opt} className="flex items-center gap-2 px-3 py-1.5 text-xs font-normal text-slate-700 hover:bg-slate-50 cursor-pointer">
-                                <input type="checkbox" checked={drillStatusFilter.includes(opt)} onChange={() => toggleDrillFilter(drillStatusFilter, opt, setDrillStatusFilter)} />
-                                {opt}
-                              </label>
-                            ))
-                          )}
-                        </div>
+                      {drillStatusMenuOpen && drillStatusMenuPos && createPortal(
+                        <>
+                          <div className="fixed inset-0 z-[60]" onClick={() => setDrillStatusMenuOpen(false)} />
+                          <div
+                            className="fixed z-[70] w-52 bg-white border border-slate-200 rounded-lg shadow-lg py-1.5 max-h-56 overflow-y-auto"
+                            style={{ top: drillStatusMenuPos.top, left: drillStatusMenuPos.left }}
+                          >
+                            {drillStatusOptions.length === 0 ? (
+                              <p className="px-3 py-2 text-xs text-slate-400 italic font-normal">No data yet</p>
+                            ) : (
+                              drillStatusOptions.map(opt => (
+                                <label key={opt} className="flex items-center gap-2 px-3 py-1.5 text-xs font-normal text-slate-700 hover:bg-slate-50 cursor-pointer">
+                                  <input type="checkbox" checked={drillStatusFilter.includes(opt)} onChange={() => toggleDrillFilter(drillStatusFilter, opt, setDrillStatusFilter)} />
+                                  {opt}
+                                </label>
+                              ))
+                            )}
+                          </div>
+                        </>,
+                        document.body
                       )}
                     </div>
                   </th>
                   <th className="px-4 py-2.5">
                     <div className="relative">
-                      <button onClick={() => setDrillAssignedMenuOpen(o => !o)} className="flex items-center gap-1.5 hover:text-brand-700 whitespace-nowrap">
+                      <button
+                        ref={drillAssignedBtnRef}
+                        onClick={() => openPositionedMenu(drillAssignedBtnRef, setDrillAssignedMenuPos, setDrillAssignedMenuOpen, "left", 208)}
+                        className="flex items-center gap-1.5 hover:text-brand-700 whitespace-nowrap"
+                      >
                         Assigned To
                         <ChevronDown className="h-3 w-3" />
                         {drillAssignedFilter.length > 0 && (
                           <span className="text-[9px] bg-brand-50 text-brand-700 rounded-full px-1.5 py-0.5 font-bold">{drillAssignedFilter.length}</span>
                         )}
                       </button>
-                      {drillAssignedMenuOpen && (
-                        <div className="absolute left-0 top-8 z-20 w-52 bg-white border border-slate-200 rounded-lg shadow-lg py-1.5 max-h-56 overflow-y-auto">
-                          {drillAssignedOptions.length === 0 ? (
-                            <p className="px-3 py-2 text-xs text-slate-400 italic font-normal">No data yet</p>
-                          ) : (
-                            drillAssignedOptions.map(opt => (
-                              <label key={opt} className="flex items-center gap-2 px-3 py-1.5 text-xs font-normal text-slate-700 hover:bg-slate-50 cursor-pointer">
-                                <input type="checkbox" checked={drillAssignedFilter.includes(opt)} onChange={() => toggleDrillFilter(drillAssignedFilter, opt, setDrillAssignedFilter)} />
-                                {opt}
-                              </label>
-                            ))
-                          )}
-                        </div>
+                      {drillAssignedMenuOpen && drillAssignedMenuPos && createPortal(
+                        <>
+                          <div className="fixed inset-0 z-[60]" onClick={() => setDrillAssignedMenuOpen(false)} />
+                          <div
+                            className="fixed z-[70] w-52 bg-white border border-slate-200 rounded-lg shadow-lg py-1.5 max-h-56 overflow-y-auto"
+                            style={{ top: drillAssignedMenuPos.top, left: drillAssignedMenuPos.left }}
+                          >
+                            {drillAssignedOptions.length === 0 ? (
+                              <p className="px-3 py-2 text-xs text-slate-400 italic font-normal">No data yet</p>
+                            ) : (
+                              drillAssignedOptions.map(opt => (
+                                <label key={opt} className="flex items-center gap-2 px-3 py-1.5 text-xs font-normal text-slate-700 hover:bg-slate-50 cursor-pointer">
+                                  <input type="checkbox" checked={drillAssignedFilter.includes(opt)} onChange={() => toggleDrillFilter(drillAssignedFilter, opt, setDrillAssignedFilter)} />
+                                  {opt}
+                                </label>
+                              ))
+                            )}
+                          </div>
+                        </>,
+                        document.body
                       )}
                     </div>
                   </th>
@@ -501,15 +567,24 @@ export default function CrmDashboardPage() {
                   <th className="px-4 py-2.5 whitespace-nowrap">Next Call Date</th>
                   <th className="px-4 py-2.5">
                     <div className="relative">
-                      <button onClick={() => setDrillCampaignMenuOpen(o => !o)} className="flex items-center gap-1.5 hover:text-brand-700 whitespace-nowrap">
+                      <button
+                        ref={drillCampaignBtnRef}
+                        onClick={() => openPositionedMenu(drillCampaignBtnRef, setDrillCampaignMenuPos, setDrillCampaignMenuOpen, "right", 224)}
+                        className="flex items-center gap-1.5 hover:text-brand-700 whitespace-nowrap"
+                      >
                         Campaign
                         <ChevronDown className="h-3 w-3" />
                         {drillCampaignFilter.length > 0 && (
                           <span className="text-[9px] bg-brand-50 text-brand-700 rounded-full px-1.5 py-0.5 font-bold">{drillCampaignFilter.length}</span>
                         )}
                       </button>
-                      {drillCampaignMenuOpen && (
-                        <div className="absolute right-0 top-8 z-20 w-56 bg-white border border-slate-200 rounded-lg shadow-lg py-1.5 max-h-56 overflow-y-auto">
+                      {drillCampaignMenuOpen && drillCampaignMenuPos && createPortal(
+                        <>
+                          <div className="fixed inset-0 z-[60]" onClick={() => setDrillCampaignMenuOpen(false)} />
+                          <div
+                            className="fixed z-[70] w-56 bg-white border border-slate-200 rounded-lg shadow-lg py-1.5 max-h-56 overflow-y-auto"
+                            style={{ top: drillCampaignMenuPos.top, left: drillCampaignMenuPos.left }}
+                          >
                           {drillCampaignOptions.length === 0 ? (
                             <p className="px-3 py-2 text-xs text-slate-400 italic font-normal">No data yet</p>
                           ) : (
@@ -520,7 +595,9 @@ export default function CrmDashboardPage() {
                               </label>
                             ))
                           )}
-                        </div>
+                          </div>
+                        </>,
+                        document.body
                       )}
                     </div>
                   </th>
