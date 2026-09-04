@@ -37,6 +37,15 @@ export default function CrmDashboardPage() {
   const [drillAssignedMenuOpen, setDrillAssignedMenuOpen] = useState(false);
   const [drillCampaignFilter, setDrillCampaignFilter] = useState<string[]>([]);
   const [drillCampaignMenuOpen, setDrillCampaignMenuOpen] = useState(false);
+  const [dateRangeMenuOpen, setDateRangeMenuOpen] = useState(false);
+
+  const DATE_RANGE_OPTIONS: { value: typeof dateRange; label: string }[] = [
+    { value: "today", label: "Today" },
+    { value: "yesterday", label: "Yesterday" },
+    { value: "week", label: "This Week" },
+    { value: "month", label: "This Month" },
+    { value: "all", label: "All Time" }
+  ];
 
   const toggleDrillFilter = (list: string[], value: string, setList: (v: string[]) => void) => {
     setDrillPage(1);
@@ -335,17 +344,33 @@ export default function CrmDashboardPage() {
         <div className="flex justify-between items-center px-4 py-2.5 text-[11px] border-b border-slate-200/60">
           <div className="flex items-center gap-1.5 font-bold text-slate-700">
             <span className="font-normal text-slate-500">Date Range</span>
-            <select
-              value={dateRange}
-              onChange={(e) => setDateRange(e.target.value as typeof dateRange)}
-              className="bg-transparent border border-slate-300/80 rounded-md px-1.5 py-0.5 font-black text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer text-[11px]"
-            >
-              <option value="today">Today</option>
-              <option value="yesterday">Yesterday</option>
-              <option value="week">This Week</option>
-              <option value="month">This Month</option>
-              <option value="all">All Time</option>
-            </select>
+            <div className="relative">
+              <button
+                onClick={() => setDateRangeMenuOpen(o => !o)}
+                className="flex items-center gap-1.5 bg-white border border-slate-300/80 rounded-md px-2 py-0.5 font-black text-slate-800 text-[11px] hover:bg-slate-50 transition-colors"
+              >
+                {DATE_RANGE_OPTIONS.find(o => o.value === dateRange)?.label}
+                <ChevronDown className={`h-3 w-3 text-slate-400 transition-transform ${dateRangeMenuOpen ? "rotate-180" : ""}`} />
+              </button>
+              {dateRangeMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-20" onClick={() => setDateRangeMenuOpen(false)} />
+                  <div className="absolute left-0 top-7 z-30 w-36 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 overflow-hidden">
+                    {DATE_RANGE_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.value}
+                        onClick={() => { setDateRange(opt.value); setDateRangeMenuOpen(false); }}
+                        className={`w-full text-left px-3 py-1.5 text-xs font-bold transition-colors ${
+                          dateRange === opt.value ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
           </div>
           <Link href="/dashboard/reports" className="text-blue-600 font-extrabold hover:underline">
             View Detailed Analytics
