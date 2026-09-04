@@ -74,7 +74,15 @@ export default function PendingLeadsTable({
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full text-left border-collapse min-w-[760px]">
+        <table className="w-full text-left border-collapse table-fixed min-w-[900px]">
+          <colgroup>
+            <col className="w-[130px]" />
+            <col className="w-[170px]" />
+            <col className="w-[150px]" />
+            <col className="w-[220px]" />
+            <col className="w-[160px]" />
+            <col className="w-[90px]" />
+          </colgroup>
           <thead>
             <tr className="border-b border-slate-200 text-xs font-bold text-slate-800">
               <th className="px-4 py-2.5 whitespace-nowrap">Time</th>
@@ -160,28 +168,29 @@ export default function PendingLeadsTable({
             ) : (
               pageRows.map(row => (
                 <tr key={row.id} className="hover:bg-slate-50/60 transition-colors text-xs">
-                  <td className="px-4 py-3 font-mono text-slate-700 whitespace-nowrap align-top">{row.time}</td>
-                  <td className="px-4 py-3 align-top">
+                  <td className="px-4 py-3 font-mono text-slate-700 truncate align-top">{row.time}</td>
+                  <td className="px-4 py-3 align-top overflow-hidden">
                     {row.leadId && onViewLead ? (
                       <button
                         onClick={() => onViewLead(row.leadId!)}
-                        className="font-bold text-[#0B1E6E] hover:underline text-xs text-left"
+                        className="font-bold text-[#0B1E6E] hover:underline text-xs text-left truncate block max-w-full"
+                        title={row.name}
                       >
                         {row.name}
                       </button>
                     ) : (
-                      <p className="font-bold text-slate-900 text-xs">{row.name}</p>
+                      <p className="font-bold text-slate-900 text-xs truncate">{row.name}</p>
                     )}
                     <div className="flex items-center gap-1.5 mt-0.5">
-                      <span className="text-[11px] text-slate-500 font-mono">{row.phone}</span>
-                      <button onClick={() => handleCopy(row)} className="text-slate-350 hover:text-brand-700" title="Copy phone number">
+                      <span className="text-[11px] text-slate-500 font-mono truncate">{row.phone}</span>
+                      <button onClick={() => handleCopy(row)} className="text-slate-350 hover:text-brand-700 shrink-0" title="Copy phone number">
                         {copiedId === row.id ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
                       </button>
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-slate-700 font-medium align-top">{row.assignedTo}</td>
-                  <td className="px-4 py-3 text-slate-600 max-w-[220px] truncate align-top" title={row.feedback}>{row.feedback}</td>
-                  <td className="px-4 py-3 text-slate-700 font-medium align-top">{row.property}</td>
+                  <td className="px-4 py-3 text-slate-700 font-medium align-top truncate" title={row.assignedTo}>{row.assignedTo}</td>
+                  <td className="px-4 py-3 text-slate-600 truncate align-top" title={row.feedback}>{row.feedback}</td>
+                  <td className="px-4 py-3 text-slate-700 font-medium align-top truncate" title={row.property}>{row.property}</td>
                   <td className="px-4 py-3 align-top">
                     <div className="flex items-center justify-end gap-2.5">
                       <a

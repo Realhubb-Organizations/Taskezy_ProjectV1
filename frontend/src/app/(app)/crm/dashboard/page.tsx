@@ -388,7 +388,18 @@ export default function CrmDashboardPage() {
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse min-w-[900px]">
+            <table className="w-full text-left border-collapse table-fixed min-w-[1080px]">
+              <colgroup>
+                <col className="w-[150px]" />
+                <col className="w-[160px]" />
+                <col className="w-[140px]" />
+                <col className="w-[120px]" />
+                <col className="w-[110px]" />
+                <col className="w-[180px]" />
+                <col className="w-[120px]" />
+                <col className="w-[150px]" />
+                <col className="w-[90px]" />
+              </colgroup>
               <thead>
                 <tr className="border-b border-slate-200 text-xs font-bold text-slate-800">
                   <th className="px-4 py-2.5">
@@ -409,10 +420,10 @@ export default function CrmDashboardPage() {
                       )}
                     </div>
                   </th>
-                  <th className="px-4 py-2.5">Email</th>
+                  <th className="px-4 py-2.5 whitespace-nowrap">Email</th>
                   <th className="px-4 py-2.5">
                     <div className="relative">
-                      <button onClick={() => setDrillStatusMenuOpen(o => !o)} className="flex items-center gap-1.5 hover:text-brand-700">
+                      <button onClick={() => setDrillStatusMenuOpen(o => !o)} className="flex items-center gap-1.5 hover:text-brand-700 whitespace-nowrap">
                         Status
                         <ChevronDown className="h-3 w-3" />
                         {drillStatusFilter.length > 0 && (
@@ -437,7 +448,7 @@ export default function CrmDashboardPage() {
                   </th>
                   <th className="px-4 py-2.5">
                     <div className="relative">
-                      <button onClick={() => setDrillAssignedMenuOpen(o => !o)} className="flex items-center gap-1.5 hover:text-brand-700">
+                      <button onClick={() => setDrillAssignedMenuOpen(o => !o)} className="flex items-center gap-1.5 hover:text-brand-700 whitespace-nowrap">
                         Assigned To
                         <ChevronDown className="h-3 w-3" />
                         {drillAssignedFilter.length > 0 && (
@@ -460,12 +471,12 @@ export default function CrmDashboardPage() {
                       )}
                     </div>
                   </th>
-                  <th className="px-4 py-2.5">Date</th>
-                  <th className="px-4 py-2.5">Feedback</th>
-                  <th className="px-4 py-2.5">Next Call Date</th>
+                  <th className="px-4 py-2.5 whitespace-nowrap">Date</th>
+                  <th className="px-4 py-2.5 whitespace-nowrap">Feedback</th>
+                  <th className="px-4 py-2.5 whitespace-nowrap">Next Call Date</th>
                   <th className="px-4 py-2.5">
                     <div className="relative">
-                      <button onClick={() => setDrillCampaignMenuOpen(o => !o)} className="flex items-center gap-1.5 hover:text-brand-700">
+                      <button onClick={() => setDrillCampaignMenuOpen(o => !o)} className="flex items-center gap-1.5 hover:text-brand-700 whitespace-nowrap">
                         Campaign
                         <ChevronDown className="h-3 w-3" />
                         {drillCampaignFilter.length > 0 && (
@@ -501,21 +512,22 @@ export default function CrmDashboardPage() {
                 ) : (
                   drillPageLeads.map((l) => (
                     <tr key={l.id} className="hover:bg-slate-50/60 transition-colors">
-                      <td className="px-4 py-3 align-top">
+                      <td className="px-4 py-3 align-top overflow-hidden">
                         <button
                           onClick={() => setQuickViewLead(l)}
-                          className="font-bold text-[#0B1E6E] hover:underline text-left"
+                          className="font-bold text-[#0B1E6E] hover:underline text-left truncate block max-w-full"
+                          title={l.name}
                         >
                           {l.name}
                         </button>
-                        <p className="text-[11px] text-slate-500 font-mono mt-0.5">{l.phone}</p>
+                        <p className="text-[11px] text-slate-500 font-mono mt-0.5 truncate">{l.phone}</p>
                       </td>
-                      <td className="px-4 py-3 text-slate-600 align-top">{l.email || "—"}</td>
+                      <td className="px-4 py-3 text-slate-600 align-top truncate" title={l.email || "—"}>{l.email || "—"}</td>
                       <td className="px-4 py-3 align-top">
                         <select
                           value={l.status}
                           onChange={(e) => handleDrillStatusChange(l.id, e.target.value as LeadStatus)}
-                          className="bg-slate-50 border border-slate-200 rounded-md px-1.5 py-0.5 text-[11px] font-bold text-slate-700 focus:outline-none cursor-pointer"
+                          className="w-full max-w-[110px] bg-slate-50 border border-slate-200 rounded-md px-1.5 py-0.5 text-[11px] font-bold text-slate-700 focus:outline-none cursor-pointer"
                         >
                           {!STATUS_OPTIONS.includes(l.status) && <option value={l.status}>{l.status}</option>}
                           {STATUS_OPTIONS.map((opt) => (
@@ -523,11 +535,11 @@ export default function CrmDashboardPage() {
                           ))}
                         </select>
                       </td>
-                      <td className="px-4 py-3 text-slate-700 font-medium align-top">{l.assignedAgent || "Unassigned"}</td>
-                      <td className="px-4 py-3 text-slate-500 font-mono align-top whitespace-nowrap">{l.createdAtStr || "—"}</td>
-                      <td className="px-4 py-3 text-slate-600 max-w-[220px] truncate align-top" title={latestLogMessage(l)}>{latestLogMessage(l)}</td>
-                      <td className="px-4 py-3 text-slate-500 font-mono align-top whitespace-nowrap">{nextCallDateFor(l.id)}</td>
-                      <td className="px-4 py-3 text-slate-700 font-medium align-top">{l.campaign || l.source || "—"}</td>
+                      <td className="px-4 py-3 text-slate-700 font-medium align-top truncate" title={l.assignedAgent || "Unassigned"}>{l.assignedAgent || "Unassigned"}</td>
+                      <td className="px-4 py-3 text-slate-500 align-top truncate">{formatDateTime(l.createdAtStr)}</td>
+                      <td className="px-4 py-3 text-slate-600 truncate align-top" title={latestLogMessage(l)}>{latestLogMessage(l)}</td>
+                      <td className="px-4 py-3 text-slate-500 align-top truncate">{nextCallDateFor(l.id)}</td>
+                      <td className="px-4 py-3 text-slate-700 font-medium align-top truncate" title={l.campaign || l.source || "—"}>{l.campaign || l.source || "—"}</td>
                       <td className="px-4 py-3 align-top text-right">
                         <a
                           href={`https://wa.me/${l.phone.replace(/[^0-9]/g, "")}`}
