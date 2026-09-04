@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useApp, Lead, LeadStatus } from "@/context/AppContext";
 import { Sliders, Sparkles, Plus, Minus, Check, ChevronRight, ChevronLeft, Search, X, Mail, Phone, Users, Copy, FileText, Calendar, Download, ArrowLeft } from "lucide-react";
@@ -48,7 +49,9 @@ export default function LeadDashboard() {
     editLead,
     currentUser,
     properties,
-    calendarEvents
+    calendarEvents,
+    users,
+    reassignLead
   } = useApp();
 
   const router = useRouter();
@@ -214,32 +217,28 @@ export default function LeadDashboard() {
     return d.getMonth() === today.getMonth() && d.getFullYear() === today.getFullYear();
   }).length;
 
-  // Define baseLeads using context leads if present, otherwise mockLeads
+  // Real leads only — this used to fall back to 9 fabricated leads (Aman
+  // Pratap, Hidayat Jha, etc.) whenever `leads` was empty, which would
+  // mask a genuine "no leads yet" state (or a failed data load) behind
+  // fake data that looked real. An empty dashboard is honest; fake rows
+  // pretending to be real leads are not.
   const todayStr = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-  const baseLeads: any[] = leads.length > 0
-    ? scopedLeads.map(l => ({
-        id: l.id,
-        name: l.name,
-        phone: l.phone,
-        email: l.email,
-        status: l.status,
-        assignedTo: l.assignedAgent,
-        assignedAgent: l.assignedAgent,
-        date: l.createdAtStr || todayStr,
-        createdAtStr: l.createdAtStr || todayStr,
-        feedback: l.logs && l.logs.length > 0 ? l.logs[l.logs.length - 1].message : "No feedback yet",
-        nextCallDate: "N/A",
-        campaign: l.campaign || l.source || "Organic",
-        source: l.source || "Organic",
-        rawLead: l
-      }))
-    : mockLeads.map(l => ({
-        ...l,
-        assignedAgent: l.assignedTo,
-        createdAtStr: l.date,
-        source: "Organic",
-        rawLead: l
-      }));
+  const baseLeads: any[] = scopedLeads.map(l => ({
+    id: l.id,
+    name: l.name,
+    phone: l.phone,
+    email: l.email,
+    status: l.status,
+    assignedTo: l.assignedAgent,
+    assignedAgent: l.assignedAgent,
+    date: l.createdAtStr || todayStr,
+    createdAtStr: l.createdAtStr || todayStr,
+    feedback: l.logs && l.logs.length > 0 ? l.logs[l.logs.length - 1].message : "No feedback yet",
+    nextCallDate: "N/A",
+    campaign: l.campaign || l.source || "Organic",
+    source: l.source || "Organic",
+    rawLead: l
+  }));
 
   const matchDateRange = (dateStr: string | undefined, range: string) => {
     if (!dateStr || range === "All Time") return true;
@@ -351,14 +350,13 @@ export default function LeadDashboard() {
   // Extract properties lists for Bulk Upload assignments
   const propertiesList = properties.map(p => p.name);
   const campaignsList = Array.from(new Set(baseLeads.map(l => l.campaign).filter(Boolean))) as string[];
-  // Dedicated Agent list
-  const agentsList = [
-    "Santosh Ray",
-    "Gautham Karanam",
-    "Sanjeev Kumar",
-    "Partha Mazumdar",
-    "Akhil Raj Singh"
-  ];
+  // Dedicated Agent list — real sales roster, not hardcoded names. A fake
+  // name here silently breaks assignment: AddLeadModal/reassign both look
+  // up the selected name against real `users`, and any name that doesn't
+  // match one just fails to persist to the database.
+  const agentsList = users
+    .filter(u => u.department === "SALES" && u.status !== "INACTIVE")
+    .map(u => u.name);
 
   // Dynamic counts for telemetry cards
   const totalLeadsCount = dateFilteredBaseLeads.length;
@@ -375,9 +373,23 @@ export default function LeadDashboard() {
   };
 
   const handleUpdateLeadStatus = (leadId: string, status: LeadStatus) => {
-    // API Integration Point: call AppContext update status function
-    updateLeadStatus(leadId, status, 500000, "contract.pdf");
-    
+    // Booking a lead auto-generates a real invoice (see AppContext's
+    // updateLeadStatus) using this deal value as the base amount — this used
+    // to hardcode a fake ₹5,00,000 regardless of the actual deal, silently
+    // creating a wrong real invoice in the database every time. Real deal
+    // value is required here, not invented.
+    if (status === "Booking Done" || status === "Booking Approved") {
+      const input = prompt("Enter the real deal value for this booking (INR):");
+      const dealValue = input ? parseFloat(input.replace(/[^0-9.]/g, "")) : NaN;
+      if (!input || isNaN(dealValue) || dealValue <= 0) {
+        alert("A valid deal value is required to mark a lead as Booked.");
+        return;
+      }
+      updateLeadStatus(leadId, status, dealValue);
+    } else {
+      updateLeadStatus(leadId, status);
+    }
+
     // Update local drawer state if active
     if (selectedLead && selectedLead.id === leadId) {
       setSelectedLead(prev => prev ? { ...prev, status } : null);
@@ -402,7 +414,10 @@ export default function LeadDashboard() {
       email: data.email,
       assignedAgent: data.agent,
       campaign: data.source,
-      property: propertiesList[0] || "Altura Project",
+      // The current Add Lead form has no property selector (a gap worth
+      // revisiting), so this is left genuinely unset rather than defaulted
+      // to an arbitrary/fake property name.
+      property: undefined,
       leadScore: 85,
       createdAtStr: new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
     });
@@ -421,27 +436,16 @@ export default function LeadDashboard() {
     target: string;
     fileName: string;
   }) => {
-    // API Integration Point: Upload spreadsheet to S3, parse rows, and insert leads
-    alert(`Bulk Import Started!\nFile: ${data.fileName}\nAssignment Mode: ${data.assignmentMode} (${data.target})\nProcessing rows...`);
+    // No real spreadsheet-parsing backend exists yet (no S3 upload, no CSV
+    // parser, no bulk-import endpoint) — this used to silently create 3
+    // fake leads (Rohit Sharma, Virat Kohli, Jasprit Bumrah) and claim
+    // success regardless of what file was actually selected. Saying so
+    // honestly instead of injecting garbage data.
+    alert(
+      `Bulk spreadsheet import isn't wired up to a real backend yet — "${data.fileName}" was not processed.\n` +
+      `Use Manual Ingestion Entry to add leads one at a time for now.`
+    );
 
-    // Ingest 3 mock spreadsheet leads to demonstrate reactivity
-    const mockNames = ["Rohit Sharma", "Virat Kohli", "Jasprit Bumrah"];
-    mockNames.forEach((n, idx) => {
-      addLead({
-        name: n,
-        phone: `+91 99002233${idx}${idx}`,
-        email: `${n.toLowerCase().replace(" ", "")}@inbox.com`,
-        assignedAgent: data.assignmentMode === "agent" ? data.target : "Sanjeev Kumar",
-        campaign: "Bulk Import",
-        property: data.assignmentMode === "project" ? data.target : "Granada",
-        leadScore: 75,
-        createdAtStr: new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
-      });
-    });
-
-    setIsAddOpen(false);
-    setSuccessMsg(`Import Complete! Successfully processed and distributed leads from ${data.fileName}`);
-    setTimeout(() => setSuccessMsg(""), 5000);
   };
 
   const handleDeleteLead = (leadId: string) => {
@@ -621,33 +625,19 @@ export default function LeadDashboard() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-slate-700 font-medium">
-                      {(leads.length > 0
-                        ? leads.map(l => ({
-                            id: l.id,
-                            name: l.name,
-                            phone: l.phone,
-                            email: l.email,
-                            status: l.status,
-                            assignedTo: l.assignedAgent,
-                            date: l.createdAtStr || "2026-07-16 08:00:00",
-                            notes: l.property || "No notes",
-                            nextCallDate: l.createdAtStr ? new Date(new Date(l.createdAtStr).getTime() + 86400000).toISOString().split('T')[0] : "2026-07-17",
-                            campaign: l.campaign || "Campaign",
-                            rawLead: l
-                          }))
-                        : mockLeads.map(l => ({
-                            id: l.id,
-                            name: l.name,
-                            phone: l.phone,
-                            email: l.email,
-                            status: l.status,
-                            assignedTo: l.assignedTo,
-                            date: l.date,
-                            notes: l.feedback,
-                            nextCallDate: l.nextCallDate,
-                            campaign: l.campaign,
-                            rawLead: l
-                          }))
+                      {(scopedLeads.map(l => ({
+                          id: l.id,
+                          name: l.name,
+                          phone: l.phone,
+                          email: l.email,
+                          status: l.status,
+                          assignedTo: l.assignedAgent,
+                          date: l.createdAtStr || todayStr,
+                          notes: l.property || "No notes",
+                          nextCallDate: l.createdAtStr ? new Date(new Date(l.createdAtStr).getTime() + 86400000).toISOString().split('T')[0] : "—",
+                          campaign: l.campaign || "Campaign",
+                          rawLead: l
+                        }))
                       )
                         .filter((l) => {
                           const agentName = l.assignedTo || "";
@@ -1976,7 +1966,7 @@ export default function LeadDashboard() {
                     {/* Email row */}
                     <div className="flex items-center gap-2">
                       <Mail className="h-3.5 w-3.5 text-slate-900" />
-                      <span className="underline text-slate-700 hover:text-slate-900 font-bold">{selectedLead.email || "amanpratap1@gmail.com"}</span>
+                      <span className="underline text-slate-700 hover:text-slate-900 font-bold">{selectedLead.email || "Not provided"}</span>
                       <button className="text-slate-350 hover:text-slate-650 p-0.5" title="Copy Email">
                         <Copy className="h-3 w-3" />
                       </button>
@@ -2014,10 +2004,16 @@ export default function LeadDashboard() {
 
                 {/* Timestamps and Meta Sources */}
                 <div className="flex justify-between items-center text-[10px] text-slate-400 font-bold">
-                  <span>Last Updated : <strong className="text-slate-500">28 Jun 2026 | 10:34 am</strong></span>
+                  <span>Last Updated : <strong className="text-slate-500">
+                    {selectedLead.logs && selectedLead.logs.length > 0
+                      ? new Date([...selectedLead.logs].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0].timestamp).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })
+                      : (selectedLead.createdAtStr || "—")}
+                  </strong></span>
                   <span className="flex items-center gap-1">
-                    Source : 
-                    <span className="text-blue-500 text-sm font-extrabold leading-none" title="Meta Ads">∞</span>
+                    Source :
+                    <span className="text-blue-600 font-extrabold truncate max-w-[120px]" title={selectedLead.source || selectedLead.campaign || "Direct"}>
+                      {selectedLead.source || selectedLead.campaign || "Direct"}
+                    </span>
                   </span>
                 </div>
 
@@ -2029,28 +2025,28 @@ export default function LeadDashboard() {
                       <svg className="w-3.5 h-3.5 text-slate-450 mr-1 fill-current" viewBox="0 0 24 24">
                         <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
                       </svg>
-                      <span>{selectedLead.assignedAgent || "Santosh Ray"}</span>
+                      <span>{selectedLead.assignedAgent || "Unassigned"}</span>
                     </div>
                   </div>
 
                   <div>
                     <span className="text-slate-900 font-bold block">Property :</span>
-                    <span className="block mt-1 font-semibold text-slate-655">{selectedLead.property || "Brigade Granada"}</span>
+                    <span className="block mt-1 font-semibold text-slate-655">{selectedLead.property || "Not set"}</span>
                   </div>
 
                   <div>
-                    <span className="text-slate-900 font-bold block">Reassigned To :</span>
+                    <span className="text-slate-900 font-bold block">Previous Agent :</span>
                     <div className="flex items-center gap-1 mt-1 font-semibold text-slate-655">
                       <svg className="w-3.5 h-3.5 text-slate-450 mr-1 fill-current" viewBox="0 0 24 24">
                         <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
                       </svg>
-                      <span>Naveen Naik</span>
+                      <span>{selectedLead.previousAgent || "—"}</span>
                     </div>
                   </div>
 
                   <div>
                     <span className="text-slate-900 font-bold block">Captured at :</span>
-                    <span className="block mt-1 font-semibold text-slate-655">20 Jun 2026 | 11:05 pm</span>
+                    <span className="block mt-1 font-semibold text-slate-655">{selectedLead.createdAtStr || "—"}</span>
                   </div>
                 </div>
 
@@ -2058,97 +2054,35 @@ export default function LeadDashboard() {
                 <div className="space-y-4 flex-1">
                   <h4 className="text-sm font-bold text-slate-900">Activity History :</h4>
                   
-                  {/* Unified timeline wrap box */}
+                  {/* Unified timeline wrap box — real lead.logs, most recent first.
+                      This used to render 4 hardcoded fake events (fixed June
+                      2026 dates, "Naveen Naik"/"Santosh Ray") identically for
+                      every lead regardless of its actual history. */}
                   <div className="border border-slate-200 rounded-2xl p-4 bg-slate-50/50 shadow-sm">
-                    <div className="relative pl-6 space-y-6 border-l-2 border-[#5C73E5]/60 ml-2">
-                      
-                      {/* Event 1 */}
-                      <div className="relative">
-                        <span className="absolute -left-[30px] top-1.5 w-2.5 h-2.5 rounded-full border-2 border-white bg-slate-400 shadow-sm" />
-                        
-                        <div className="space-y-2">
-                          <span className="inline-block bg-[#0B2545] text-white text-[9.5px] font-bold px-2 py-0.5 rounded-md">
-                            22 June 2026 | 11:23 am
-                          </span>
-                          
-                          <div className="bg-white rounded-lg p-3 border border-slate-200 shadow-sm space-y-2.5 text-slate-655 font-semibold leading-relaxed">
-                            <p className="text-xs">
-                              Show interest and site visit is scheduled on 25th June 2026 at 1 pm and require details on the same.
-                            </p>
-                            <div className="flex justify-between items-center text-[9px] text-slate-400 pt-2 border-t border-slate-100 font-bold">
-                              <span className="text-slate-500">Call Back &rarr; Follow Up</span>
-                              <span>Scheduled : 25 Jun 2026 | 11:00 am</span>
-                              <span className="text-slate-600">Naveen Naik</span>
+                    {(!selectedLead.logs || selectedLead.logs.length === 0) ? (
+                      <p className="text-xs text-slate-400 italic text-center py-4">No activity recorded yet.</p>
+                    ) : (
+                      <div className="relative pl-6 space-y-6 border-l-2 border-[#5C73E5]/60 ml-2">
+                        {[...selectedLead.logs]
+                          .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+                          .map((log, idx) => (
+                            <div key={`${log.timestamp}-${idx}`} className="relative">
+                              <span className="absolute -left-[30px] top-1.5 w-2.5 h-2.5 rounded-full border-2 border-white bg-slate-400 shadow-sm" />
+                              <div className="space-y-2">
+                                <span className="inline-block bg-[#0B2545] text-white text-[9.5px] font-bold px-2 py-0.5 rounded-md">
+                                  {new Date(log.timestamp).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                                </span>
+                                <div className="bg-white rounded-lg p-3 border border-slate-200 shadow-sm space-y-2.5 text-slate-655 font-semibold leading-relaxed">
+                                  <p className="text-xs">{log.message}</p>
+                                  <div className="flex justify-end items-center text-[9px] text-slate-400 pt-2 border-t border-slate-100 font-bold">
+                                    <span className="text-slate-600">{log.user}</span>
+                                  </div>
+                                </div>
+                              </div>
                             </div>
-                          </div>
-                        </div>
+                          ))}
                       </div>
-
-                      {/* Event 2 */}
-                      <div className="relative">
-                        <span className="absolute -left-[30px] top-1.5 w-2.5 h-2.5 rounded-full border-2 border-white bg-slate-400 shadow-sm" />
-                        
-                        <div className="space-y-2">
-                          <span className="inline-block bg-[#0B2545] text-white text-[9.5px] font-bold px-2 py-0.5 rounded-md">
-                            21 June 2026 | 08:21 pm
-                          </span>
-                          
-                          <div className="bg-white rounded-lg p-3 border border-slate-200 shadow-sm space-y-2.5 text-slate-655 font-semibold leading-relaxed">
-                            <p className="text-xs">
-                              Details are shared with customer, expected site visit by next weekend. He will be in bengaluru by friday. Asked to follow up tomorrow.
-                            </p>
-                            <div className="flex justify-between items-center text-[9px] text-slate-400 pt-2 border-t border-slate-100 font-bold">
-                              <span className="text-slate-500">Reassigned &rarr; Call Back</span>
-                              <span>Scheduled : 22 Jun 2026 | 11:20 am</span>
-                              <span className="text-slate-600">Naveen Naik</span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Event 3 */}
-                      <div className="relative">
-                        <span className="absolute -left-[30px] top-1.5 w-2.5 h-2.5 rounded-full border-2 border-white bg-slate-400 shadow-sm" />
-                        
-                        <div className="space-y-2">
-                          <span className="inline-block bg-[#0B2545] text-white text-[9.5px] font-bold px-2 py-0.5 rounded-md">
-                            20 June 2026 | 11:30 am
-                          </span>
-                          
-                          <div className="bg-white rounded-lg p-3 border border-slate-200 shadow-sm space-y-2.5 text-slate-655 font-semibold leading-relaxed">
-                            <p className="text-xs">
-                              Lead interested in 2bhk under 1.5 Cr at Electronic City location. Prefer habulus oasis grove.
-                            </p>
-                            <div className="flex justify-between items-center text-[9px] text-slate-400 pt-2 border-t border-slate-100 font-bold">
-                              <span className="text-slate-500">Lead Captured &rarr; Reassigned</span>
-                              <span className="text-slate-605">Santosh Ray</span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Event 4 */}
-                      <div className="relative">
-                        <span className="absolute -left-[30px] top-1.5 w-2.5 h-2.5 rounded-full border-2 border-white bg-slate-400 shadow-sm" />
-                        
-                        <div className="space-y-2">
-                          <span className="inline-block bg-[#0B2545] text-white text-[9.5px] font-bold px-2 py-0.5 rounded-md">
-                            20 June 2026 | 11:18 am
-                          </span>
-                          
-                          <div className="bg-white rounded-lg p-3 border border-slate-200 shadow-sm space-y-2.5 text-slate-655 font-semibold leading-relaxed">
-                            <p className="text-xs">
-                              Lead assigned to Santosh Ray.
-                            </p>
-                            <div className="flex justify-between items-center text-[9px] text-slate-400 pt-2 border-t border-slate-100 font-bold">
-                              <span className="text-slate-505">Lead Captured</span>
-                              <span className="text-slate-605 font-bold">Meta Ads</span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                    </div>
+                    )}
                   </div>
                 </div>
 
@@ -2325,8 +2259,11 @@ export default function LeadDashboard() {
         }}
       />
 
-      {/* Premium Centered Success Toast Card */}
-      {toastMessage && (
+      {/* Premium Centered Success Toast Card — portaled to <body> since this
+          page's root wrapper carries animate-fade-in, whose keyframes end on
+          a lingering transform that would otherwise make it the containing
+          block for this fixed-position toast, breaking true-viewport centering. */}
+      {toastMessage && createPortal(
         <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[100] bg-white/95 backdrop-blur-md border border-slate-200/90 rounded-2xl p-5 shadow-2xl flex items-center gap-4 min-w-[320px] max-w-sm animate-scale-in">
           <div className="h-10 w-10 rounded-xl bg-emerald-50 border border-emerald-200/80 flex items-center justify-center text-emerald-600 shrink-0">
             <Check className="h-5 w-5 stroke-[2.5]" />
@@ -2335,7 +2272,8 @@ export default function LeadDashboard() {
             <h4 className="text-[11px] font-black text-slate-900 uppercase tracking-wider">Lead Reassigned</h4>
             <p className="text-xs font-semibold text-slate-600 mt-0.5 truncate">{toastMessage}</p>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
