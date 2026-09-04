@@ -1,12 +1,13 @@
 "use client";
 
 import React, { useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useApp, Lead, LeadStatus } from "@/context/AppContext";
 import AddLeadModal from "@/components/crm/AddLeadModal";
 import PendingLeadsTable, { PendingRow } from "@/components/dashboard/PendingLeadsTable";
 import { DB_CODE_TO_FRONTEND_STATUS } from "@/lib/leadStatusMapping";
-import { ChevronDown, Plus, CheckCircle, Eye, Phone } from "lucide-react";
+import { ChevronDown, Plus, CheckCircle, Phone, MessageSquare, Mail, X } from "lucide-react";
 
 const STATUS_OPTIONS = Array.from(new Set(Object.values(DB_CODE_TO_FRONTEND_STATUS)));
 
@@ -25,6 +26,7 @@ export default function CrmDashboardPage() {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [drillPage, setDrillPage] = useState(1);
   const [drillRowsPerPage, setDrillRowsPerPage] = useState(10);
+  const [quickViewLead, setQuickViewLead] = useState<Lead | null>(null);
 
   const dateInRange = (dateStr: string | undefined, range: typeof dateRange, refNow: Date): boolean => {
     if (!dateStr) return false;
@@ -331,7 +333,12 @@ export default function CrmDashboardPage() {
                   drillPageLeads.map((l) => (
                     <tr key={l.id} className="hover:bg-slate-50/60 transition-colors">
                       <td className="px-4 py-3 align-top">
-                        <p className="font-bold text-slate-900">{l.name}</p>
+                        <button
+                          onClick={() => setQuickViewLead(l)}
+                          className="font-bold text-[#0B1E6E] hover:underline text-left"
+                        >
+                          {l.name}
+                        </button>
                         <p className="text-[11px] text-slate-500 font-mono mt-0.5">{l.phone}</p>
                       </td>
                       <td className="px-4 py-3 text-slate-600 align-top">{l.email || "—"}</td>
@@ -354,19 +361,21 @@ export default function CrmDashboardPage() {
                       <td className="px-4 py-3 text-slate-700 font-medium align-top">{l.campaign || l.source || "—"}</td>
                       <td className="px-4 py-3 align-top text-right">
                         <a
+                          href={`https://wa.me/${l.phone.replace(/[^0-9]/g, "")}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex h-7 w-7 rounded-full border border-slate-300 text-slate-500 hover:border-emerald-500 hover:text-emerald-600 items-center justify-center transition-colors"
+                          title="WhatsApp"
+                        >
+                          <MessageSquare className="h-3.5 w-3.5" />
+                        </a>
+                        <a
                           href={`tel:${l.phone}`}
-                          className="inline-flex h-7 w-7 rounded-full bg-slate-900 hover:bg-brand-700 text-white items-center justify-center transition-colors"
+                          className="inline-flex h-7 w-7 rounded-full border border-slate-300 text-slate-500 hover:border-brand-500 hover:text-brand-700 items-center justify-center transition-colors ml-1.5"
                           title="Call"
                         >
                           <Phone className="h-3.5 w-3.5" />
                         </a>
-                        <Link
-                          href={`/dashboard/crm?openLead=${l.id}`}
-                          className="inline-flex h-7 w-7 rounded-full bg-slate-900 hover:bg-brand-700 text-white items-center justify-center transition-colors ml-1.5"
-                          title="View lead"
-                        >
-                          <Eye className="h-3.5 w-3.5" />
-                        </Link>
                       </td>
                     </tr>
                   ))
@@ -424,6 +433,105 @@ export default function CrmDashboardPage() {
         agentsList={agentsList}
         propertiesList={propertiesList}
       />
+
+      {/* Lead quick-view — opened by clicking a lead's name in the drill-down
+          table above. Scoped to this page only (the shared LeadDetailDrawer
+          used elsewhere is untouched); portaled to <body> since this page's
+          root wrapper carries animate-fade-in, which would otherwise become
+          the containing block for a fixed-position overlay. */}
+      {quickViewLead && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-slate-900/50" onClick={() => setQuickViewLead(null)} />
+          <div className="relative w-full max-w-xs bg-white rounded-2xl shadow-2xl overflow-hidden animate-fade-in">
+            <div className="px-4 pt-4 pb-3 border-b border-slate-100">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <a
+                    href={`tel:${quickViewLead.phone}`}
+                    className="h-7 w-7 rounded-full border border-slate-300 text-slate-500 hover:border-brand-500 hover:text-brand-700 flex items-center justify-center transition-colors"
+                    title="Call"
+                  >
+                    <Phone className="h-3.5 w-3.5" />
+                  </a>
+                  <a
+                    href={`mailto:${quickViewLead.email || ""}`}
+                    className="h-7 w-7 rounded-full border border-slate-300 text-slate-500 hover:border-blue-500 hover:text-blue-600 flex items-center justify-center transition-colors"
+                    title="Email"
+                  >
+                    <Mail className="h-3.5 w-3.5" />
+                  </a>
+                </div>
+                <button onClick={() => setQuickViewLead(null)} className="text-slate-400 hover:text-slate-700">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <p className="text-sm font-extrabold text-slate-900 mt-2">{quickViewLead.name}</p>
+              {quickViewLead.email && <p className="text-[11px] text-slate-500 mt-0.5">{quickViewLead.email}</p>}
+            </div>
+
+            <div className="px-4 py-3 border-b border-slate-100 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-slate-400 uppercase">Current Status</span>
+                <select
+                  value={quickViewLead.status}
+                  onChange={(e) => {
+                    const nextStatus = e.target.value as LeadStatus;
+                    handleDrillStatusChange(quickViewLead.id, nextStatus);
+                    setQuickViewLead({ ...quickViewLead, status: nextStatus });
+                  }}
+                  className="bg-slate-50 border border-slate-200 rounded-md px-1.5 py-0.5 text-[11px] font-bold text-slate-700 focus:outline-none cursor-pointer"
+                >
+                  {!STATUS_OPTIONS.includes(quickViewLead.status) && <option value={quickViewLead.status}>{quickViewLead.status}</option>}
+                  {STATUS_OPTIONS.map((opt) => (
+                    <option key={opt} value={opt}>{opt}</option>
+                  ))}
+                </select>
+              </div>
+              <p className="text-[9px] text-slate-400 font-bold uppercase">Last Updated: {lastActivityTime(quickViewLead)}</p>
+            </div>
+
+            <div className="px-4 py-3 border-b border-slate-100 grid grid-cols-2 gap-x-3 gap-y-2 text-[11px]">
+              <div>
+                <span className="text-slate-400 font-bold uppercase text-[9px] block">Assigned To</span>
+                <span className="text-slate-800 font-semibold">{quickViewLead.assignedAgent || "Unassigned"}</span>
+              </div>
+              <div>
+                <span className="text-slate-400 font-bold uppercase text-[9px] block">Property</span>
+                <span className="text-slate-800 font-semibold">{quickViewLead.property || "Not set"}</span>
+              </div>
+              <div>
+                <span className="text-slate-400 font-bold uppercase text-[9px] block">Reassigned To</span>
+                <span className="text-slate-800 font-semibold">{quickViewLead.previousAgent || "—"}</span>
+              </div>
+              <div>
+                <span className="text-slate-400 font-bold uppercase text-[9px] block">Captured at</span>
+                <span className="text-slate-800 font-semibold">{formatDateTime(quickViewLead.createdAtStr)}</span>
+              </div>
+            </div>
+
+            <div className="px-4 py-3">
+              <span className="text-[10px] font-bold text-slate-400 uppercase block mb-2">Activity History</span>
+              <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                {quickViewLead.logs.length === 0 ? (
+                  <p className="text-[10px] text-slate-400 italic">No activity recorded yet.</p>
+                ) : (
+                  [...quickViewLead.logs]
+                    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+                    .map((log, idx) => (
+                      <div key={idx} className="flex justify-end">
+                        <div className="max-w-[85%] bg-[#0B1E6E] text-white rounded-2xl rounded-tr-sm px-3 py-1.5">
+                          <p className="text-[11px] leading-snug">{log.message}</p>
+                          <p className="text-[9px] text-white/70 mt-0.5 text-right">{formatDateTime(log.timestamp)}</p>
+                        </div>
+                      </div>
+                    ))
+                )}
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }
