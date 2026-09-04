@@ -70,7 +70,7 @@ export default function LoginPage() {
     if (user.passwordStatus === "TEMPORARY") {
       setIsResetRequired(true);
     } else {
-      router.push("/home");
+      router.push("/dashboard");
     }
   };
 
@@ -90,7 +90,7 @@ export default function LoginPage() {
 
     // Update password status to active in global context
     setCurrentUserPasswordActive();
-    router.push("/home");
+    router.push("/dashboard");
   };
 
   return (

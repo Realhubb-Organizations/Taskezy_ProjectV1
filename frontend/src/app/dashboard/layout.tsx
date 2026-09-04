@@ -228,7 +228,6 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     for (const item of staticBottomLinks) {
       if (item.activeCheck(pathname)) return item.name;
     }
-    if (pathname === "/home") return "Home";
     return "Dashboard";
   };
 
