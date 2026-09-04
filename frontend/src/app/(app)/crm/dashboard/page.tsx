@@ -7,7 +7,8 @@ import { useApp, Lead, LeadStatus } from "@/context/AppContext";
 import AddLeadModal from "@/components/crm/AddLeadModal";
 import PendingLeadsTable, { PendingRow } from "@/components/dashboard/PendingLeadsTable";
 import { DB_CODE_TO_FRONTEND_STATUS } from "@/lib/leadStatusMapping";
-import { ChevronDown, Plus, CheckCircle, Phone, MessageSquare, Mail, X, Copy, Check, User } from "lucide-react";
+import { WhatsAppIcon, CallIcon } from "@/components/icons/ContactIcons";
+import { ChevronDown, Plus, CheckCircle, Phone, Mail, X, Copy, Check, User } from "lucide-react";
 
 const STATUS_OPTIONS = Array.from(new Set(Object.values(DB_CODE_TO_FRONTEND_STATUS)));
 
@@ -412,17 +413,17 @@ export default function CrmDashboardPage() {
                           href={`https://wa.me/${l.phone.replace(/[^0-9]/g, "")}`}
                           target="_blank"
                           rel="noreferrer"
-                          className="inline-flex h-7 w-7 rounded-full border border-slate-300 text-slate-500 hover:border-emerald-500 hover:text-emerald-600 items-center justify-center transition-colors"
+                          className="inline-flex items-center justify-center text-slate-900 hover:text-emerald-600 transition-colors"
                           title="WhatsApp"
                         >
-                          <MessageSquare className="h-3.5 w-3.5" />
+                          <WhatsAppIcon className="h-6 w-6" />
                         </a>
                         <a
                           href={`tel:${l.phone}`}
-                          className="inline-flex h-7 w-7 rounded-full border border-slate-300 text-slate-500 hover:border-brand-500 hover:text-brand-700 items-center justify-center transition-colors ml-1.5"
+                          className="inline-flex items-center justify-center text-slate-900 hover:text-brand-700 transition-colors ml-2.5"
                           title="Call"
                         >
-                          <Phone className="h-3.5 w-3.5" />
+                          <CallIcon className="h-4 w-4" />
                         </a>
                       </td>
                     </tr>

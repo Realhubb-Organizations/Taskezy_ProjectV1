@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import { Search, ChevronDown, ChevronLeft, ChevronRight, Copy, Check, Phone, MessageSquare } from "lucide-react";
+import { Search, ChevronDown, ChevronLeft, ChevronRight, Copy, Check } from "lucide-react";
+import { WhatsAppIcon, CallIcon } from "@/components/icons/ContactIcons";
 
 export interface PendingRow {
   id: string;
@@ -182,22 +183,22 @@ export default function PendingLeadsTable({
                   <td className="px-4 py-3 text-slate-600 max-w-[220px] truncate align-top" title={row.feedback}>{row.feedback}</td>
                   <td className="px-4 py-3 text-slate-700 font-medium align-top">{row.property}</td>
                   <td className="px-4 py-3 align-top">
-                    <div className="flex items-center justify-end gap-1.5">
+                    <div className="flex items-center justify-end gap-2.5">
                       <a
                         href={`https://wa.me/${row.phone.replace(/[^0-9]/g, "")}`}
                         target="_blank"
                         rel="noreferrer"
-                        className="h-7 w-7 rounded-full border border-slate-300 text-slate-500 hover:border-emerald-500 hover:text-emerald-600 flex items-center justify-center transition-colors shrink-0"
+                        className="inline-flex items-center justify-center text-slate-900 hover:text-emerald-600 transition-colors shrink-0"
                         title="WhatsApp"
                       >
-                        <MessageSquare className="h-3.5 w-3.5" />
+                        <WhatsAppIcon className="h-6 w-6" />
                       </a>
                       <a
                         href={`tel:${row.phone}`}
-                        className="h-7 w-7 rounded-full border border-slate-300 text-slate-500 hover:border-brand-500 hover:text-brand-700 flex items-center justify-center transition-colors shrink-0"
+                        className="inline-flex items-center justify-center text-slate-900 hover:text-brand-700 transition-colors shrink-0"
                         title="Call"
                       >
-                        <Phone className="h-3.5 w-3.5" />
+                        <CallIcon className="h-4 w-4" />
                       </a>
                     </div>
                   </td>
