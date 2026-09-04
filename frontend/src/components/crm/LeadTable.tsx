@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { createPortal } from "react-dom";
 import { Phone, MessageSquare, Mail, Eye, Trash2, ShieldAlert, Award, Search, X, Copy, Check } from "lucide-react";
 import { Lead, LeadStatus } from "@/context/AppContext";
 
@@ -56,25 +57,9 @@ export default function LeadTable({
   const [showPropertyDropdown, setShowPropertyDropdown] = useState(false);
   const [propertySearch, setPropertySearch] = useState("");
 
-  const allAgentsList = Array.from(new Set([
-    ...leads.map(l => l.assignedAgent).filter(Boolean),
-    "Santosh Ray",
-    "Gautham Karanam",
-    "Sanjeev Kumar",
-    "Partha Mazumdar",
-    "Akhil Raj Singh",
-    "Naveen Naidu",
-    "Neha Chourey"
-  ]));
+  const allAgentsList = Array.from(new Set(leads.map(l => l.assignedAgent).filter(Boolean)));
 
-  const allPropertiesList: string[] = Array.from(new Set([
-    ...leads.map(l => l.property).filter((p): p is string => Boolean(p)),
-    "Brigade Eternia",
-    "Altura",
-    "Granada",
-    "Habulus",
-    "Altura Project"
-  ]));
+  const allPropertiesList: string[] = Array.from(new Set(leads.map(l => l.property).filter((p): p is string => Boolean(p))));
 
   const displayedLeads = leads.filter(l => {
     const matchesSearch = !searchQuery || l.name.toLowerCase().includes(searchQuery.toLowerCase()) || l.phone.includes(searchQuery);
@@ -175,10 +160,12 @@ export default function LeadTable({
                     className={`h-full rounded-full ${
                       (lead.leadScore || 0) > 70 ? "bg-emerald-500" : (lead.leadScore || 0) > 40 ? "bg-amber-500" : "bg-red-500"
                     }`}
-                    style={{ width: `${lead.leadScore || 20}%` }}
+                    style={{ width: `${lead.leadScore ?? 0}%` }}
                   />
                 </div>
-                <span className="text-[9px] font-black text-slate-500 shrink-0">{lead.leadScore || 20}% AI Score</span>
+                <span className="text-[9px] font-black text-slate-500 shrink-0">
+                  {lead.leadScore != null ? `${lead.leadScore}% AI Score` : "Not scored"}
+                </span>
               </div>
 
               <div className="flex items-center justify-end gap-1 pt-1 border-t border-slate-100" onClick={(e) => e.stopPropagation()}>
@@ -277,13 +264,16 @@ export default function LeadTable({
 
                 {showPropertyDropdown && (
                   <>
-                    <div 
-                      className="fixed inset-0 z-20 cursor-default" 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setShowPropertyDropdown(false);
-                      }} 
-                    />
+                    {createPortal(
+                      <div
+                        className="fixed inset-0 z-20 cursor-default"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setShowPropertyDropdown(false);
+                        }}
+                      />,
+                      document.body
+                    )}
                     <div className="absolute left-0 mt-2 w-52 bg-white border border-slate-200 rounded-xl shadow-xl z-30 p-3 space-y-2 normal-case text-slate-700 font-medium text-xs">
                       <div className="flex justify-between items-center pb-1.5 border-b border-slate-100 text-[10px] text-slate-400 font-bold">
                         <span>Filter Property</span>
@@ -355,13 +345,16 @@ export default function LeadTable({
 
                 {showAgentDropdown && (
                   <>
-                    <div 
-                      className="fixed inset-0 z-20 cursor-default" 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setShowAgentDropdown(false);
-                      }} 
-                    />
+                    {createPortal(
+                      <div
+                        className="fixed inset-0 z-20 cursor-default"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setShowAgentDropdown(false);
+                        }}
+                      />,
+                      document.body
+                    )}
                     <div className="absolute left-0 mt-2 w-52 bg-white border border-slate-200 rounded-xl shadow-xl z-30 p-3 space-y-2 normal-case text-slate-700 font-medium text-xs">
                       <div className="flex justify-between items-center pb-1.5 border-b border-slate-100 text-[10px] text-slate-400 font-bold">
                         <span>Filter Sales Agent</span>
@@ -474,10 +467,12 @@ export default function LeadTable({
                                 ? "bg-amber-500"
                                 : "bg-red-500"
                           }`}
-                          style={{ width: `${lead.leadScore || 20}%` }}
+                          style={{ width: `${lead.leadScore ?? 0}%` }}
                         />
                       </div>
-                      <span className="text-[10px] font-black text-slate-600">{lead.leadScore || 20}%</span>
+                      <span className="text-[10px] font-black text-slate-600">
+                        {lead.leadScore != null ? `${lead.leadScore}%` : "—"}
+                      </span>
                     </div>
                   </td>
                   <td className="p-4" onClick={(e) => e.stopPropagation()}>
