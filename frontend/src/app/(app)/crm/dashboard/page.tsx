@@ -188,41 +188,48 @@ export default function CrmDashboardPage() {
         </div>
       )}
 
-      {/* Toolbar: date range + drill-down link */}
-      <div className="flex flex-wrap justify-between items-center gap-3 bg-white shadow-sm rounded-xl px-5 py-4">
-        <div className="flex items-center gap-2 text-base text-slate-500">
-          <span>Date Range</span>
-          <select
-            value={dateRange}
-            onChange={(e) => setDateRange(e.target.value as typeof dateRange)}
-            className="bg-transparent font-bold text-slate-900 focus:outline-none cursor-pointer"
-          >
-            <option value="today">Today</option>
-            <option value="yesterday">Yesterday</option>
-            <option value="week">This Week</option>
-            <option value="month">This Month</option>
-            <option value="all">All Time</option>
-          </select>
-        </div>
-        <Link href="/dashboard/reports" className="text-base font-semibold text-[#0F2D90] hover:underline">
-          View Detailed Analytics
-        </Link>
-      </div>
-
-      {/* Stat row — the CRM funnel snapshot for the selected date range */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
-        {statCards.map((s) => (
-          <Link
-            key={s.label}
-            href="/dashboard/crm"
-            className="bg-white rounded-2xl shadow-md px-4 py-5 hover:shadow-lg transition-shadow"
-          >
-            <span className="flex items-center justify-between text-sm font-medium text-slate-500">
-              {s.label} <ChevronRight className="h-3.5 w-3.5 text-slate-300 shrink-0" />
-            </span>
-            <span className={`text-3xl font-extrabold block mt-2 ${s.color}`}>{s.value}</span>
+      {/* Date Filter & Metrics — one unified card: a header bar (date range +
+          drill-down link) sitting directly on top of the stat columns,
+          separated by dividers rather than floating as separate shadowed
+          cards with gaps between them. */}
+      <div className="bg-slate-100/70 border border-slate-200/60 rounded-2xl overflow-hidden shadow-sm">
+        {/* Header bar */}
+        <div className="flex justify-between items-center px-5 py-3 text-xs border-b border-slate-200/60">
+          <div className="flex items-center gap-1.5 font-bold text-slate-700">
+            <span className="font-normal text-slate-500">Date Range</span>
+            <select
+              value={dateRange}
+              onChange={(e) => setDateRange(e.target.value as typeof dateRange)}
+              className="bg-transparent border border-slate-300/80 rounded-md px-2 py-0.5 font-black text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer text-xs"
+            >
+              <option value="today">Today</option>
+              <option value="yesterday">Yesterday</option>
+              <option value="week">This Week</option>
+              <option value="month">This Month</option>
+              <option value="all">All Time</option>
+            </select>
+          </div>
+          <Link href="/dashboard/reports" className="text-blue-600 font-extrabold hover:underline">
+            View Detailed Analytics
           </Link>
-        ))}
+        </div>
+
+        {/* Stat columns — the CRM funnel snapshot for the selected date range */}
+        <div className="flex md:grid md:grid-cols-7 bg-white divide-x divide-slate-100 overflow-x-auto min-w-full">
+          {statCards.map((s) => (
+            <Link
+              key={s.label}
+              href="/dashboard/crm"
+              className="p-4 flex flex-col justify-between min-h-[90px] min-w-[130px] md:min-w-0 flex-1 group transition-colors hover:bg-slate-50/50"
+            >
+              <span className="flex items-center justify-between text-xs font-medium text-slate-500">
+                {s.label}
+                <ChevronRight className="h-3.5 w-3.5 text-slate-300 shrink-0 group-hover:translate-x-0.5 transition-transform" />
+              </span>
+              <span className={`text-2xl font-extrabold block mt-2 ${s.color}`}>{s.value}</span>
+            </Link>
+          ))}
+        </div>
       </div>
 
       {/* Pending Follow ups — leads currently sitting in the Follow-ups status */}
