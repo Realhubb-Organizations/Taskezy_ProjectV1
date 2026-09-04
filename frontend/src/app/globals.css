@@ -2,6 +2,15 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Every page in this app is built with Tailwind's rem-based scale (text
+   sizes, padding, gaps, even icon width/height), all relative to this root
+   font-size. The browser default of 16px reads oversized for a dense
+   business app; dropping to 14px scales every one of those utilities down
+   proportionally in one place instead of hand-editing every page. */
+html {
+  font-size: 87.5%;
+}
+
 :root {
   --foreground-rgb: 15, 23, 42; /* Slate 900 */
   --background-start-rgb: 248, 250, 252; /* Slate 50 */
