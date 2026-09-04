@@ -7,7 +7,7 @@ import { useApp, Lead, LeadStatus } from "@/context/AppContext";
 import AddLeadModal from "@/components/crm/AddLeadModal";
 import PendingLeadsTable, { PendingRow } from "@/components/dashboard/PendingLeadsTable";
 import { DB_CODE_TO_FRONTEND_STATUS } from "@/lib/leadStatusMapping";
-import { ChevronDown, Plus, CheckCircle, Phone, MessageSquare, Mail, X } from "lucide-react";
+import { ChevronDown, Plus, CheckCircle, Phone, MessageSquare, Mail, X, Copy, Check, User } from "lucide-react";
 
 const STATUS_OPTIONS = Array.from(new Set(Object.values(DB_CODE_TO_FRONTEND_STATUS)));
 
@@ -27,6 +27,46 @@ export default function CrmDashboardPage() {
   const [drillPage, setDrillPage] = useState(1);
   const [drillRowsPerPage, setDrillRowsPerPage] = useState(10);
   const [quickViewLead, setQuickViewLead] = useState<Lead | null>(null);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+
+  const copyToClipboard = (field: string, value: string) => {
+    navigator.clipboard.writeText(value).then(() => {
+      setCopiedField(field);
+      setTimeout(() => setCopiedField(null), 1500);
+    });
+  };
+
+  const statusBadgeClasses = (status: LeadStatus) => {
+    switch (status) {
+      case "Booked":
+      case "Booking Done":
+      case "Booking Approved":
+      case "Completed":
+        return "bg-emerald-50 text-emerald-700 border-emerald-200";
+      case "New Lead":
+      case "New Leads":
+      case "New":
+        return "bg-blue-50 text-blue-700 border-blue-200";
+      case "Interested":
+      case "Connected":
+      case "EOI Customers":
+        return "bg-indigo-50 text-indigo-700 border-indigo-200";
+      case "Follow up":
+      case "Follow-ups":
+      case "Visit Schedule":
+      case "Site Visit Scheduled":
+      case "Meeting Scheduled":
+      case "Call Back":
+      case "RNR":
+        return "bg-amber-50 text-amber-700 border-amber-200";
+      case "Dead":
+      case "Invalid":
+      case "Finance Rejected":
+        return "bg-red-50 text-red-700 border-red-200";
+      default:
+        return "bg-slate-50 text-slate-700 border-slate-200";
+    }
+  };
 
   const dateInRange = (dateStr: string | undefined, range: typeof dateRange, refNow: Date): boolean => {
     if (!dateStr) return false;
@@ -448,38 +488,43 @@ export default function CrmDashboardPage() {
           root wrapper carries animate-fade-in, which would otherwise become
           the containing block for a fixed-position overlay. */}
       {quickViewLead && createPortal(
-        <div className="fixed inset-0 z-50 pointer-events-none flex items-start justify-end p-4 sm:p-6">
-          <div className="fixed inset-0 pointer-events-auto" onClick={() => setQuickViewLead(null)} />
-          <div className="relative pointer-events-auto w-full max-w-xs max-h-[calc(100vh-3rem)] bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-y-auto animate-fade-in">
-            <div className="px-4 pt-4 pb-3 border-b border-slate-100">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <a
-                    href={`tel:${quickViewLead.phone}`}
-                    className="h-7 w-7 rounded-full border border-slate-300 text-slate-500 hover:border-brand-500 hover:text-brand-700 flex items-center justify-center transition-colors"
-                    title="Call"
-                  >
-                    <Phone className="h-3.5 w-3.5" />
-                  </a>
-                  <a
-                    href={`mailto:${quickViewLead.email || ""}`}
-                    className="h-7 w-7 rounded-full border border-slate-300 text-slate-500 hover:border-blue-500 hover:text-blue-600 flex items-center justify-center transition-colors"
-                    title="Email"
-                  >
-                    <Mail className="h-3.5 w-3.5" />
-                  </a>
-                </div>
-                <button onClick={() => setQuickViewLead(null)} className="text-slate-400 hover:text-slate-700">
-                  <X className="h-4 w-4" />
+        <div className="fixed inset-0 z-50">
+          {/* Invisible click-outside-to-close catcher — no dark backdrop, the rest of the page stays fully visible */}
+          <div className="fixed inset-0" onClick={() => setQuickViewLead(null)} />
+
+          <div className="fixed inset-y-0 right-0 w-full max-w-sm bg-white border-l border-slate-200 shadow-2xl flex flex-col animate-slide-in">
+            {/* Header */}
+            <div className="px-5 pt-5 pb-4 border-b border-slate-100 shrink-0">
+              <div className="flex items-start justify-between">
+                <p className="text-base font-extrabold text-slate-900">{quickViewLead.name}</p>
+                <button onClick={() => setQuickViewLead(null)} className="text-slate-400 hover:text-slate-700 -mt-1">
+                  <X className="h-4.5 w-4.5" />
                 </button>
               </div>
-              <p className="text-sm font-extrabold text-slate-900 mt-2">{quickViewLead.name}</p>
-              {quickViewLead.email && <p className="text-[11px] text-slate-500 mt-0.5">{quickViewLead.email}</p>}
+              <div className="mt-2 space-y-1">
+                <div className="flex items-center gap-1.5 text-xs text-slate-600">
+                  <Phone className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                  <a href={`tel:${quickViewLead.phone}`} className="hover:text-brand-700">{quickViewLead.phone}</a>
+                  <button onClick={() => copyToClipboard("phone", quickViewLead.phone)} className="text-slate-350 hover:text-brand-700" title="Copy phone">
+                    {copiedField === "phone" ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
+                  </button>
+                </div>
+                {quickViewLead.email && (
+                  <div className="flex items-center gap-1.5 text-xs text-slate-600">
+                    <Mail className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                    <a href={`mailto:${quickViewLead.email}`} className="hover:text-brand-700 truncate">{quickViewLead.email}</a>
+                    <button onClick={() => copyToClipboard("email", quickViewLead.email!)} className="text-slate-350 hover:text-brand-700 shrink-0" title="Copy email">
+                      {copiedField === "email" ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
 
-            <div className="px-4 py-3 border-b border-slate-100 space-y-1.5">
+            {/* Status + meta */}
+            <div className="px-5 py-3 border-b border-slate-100 shrink-0 space-y-1.5">
               <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold text-slate-400 uppercase">Current Status</span>
+                <span className="text-[11px] font-bold text-slate-500">Current Status :</span>
                 <select
                   value={quickViewLead.status}
                   onChange={(e) => {
@@ -487,7 +532,7 @@ export default function CrmDashboardPage() {
                     handleDrillStatusChange(quickViewLead.id, nextStatus);
                     setQuickViewLead({ ...quickViewLead, status: nextStatus });
                   }}
-                  className="bg-slate-50 border border-slate-200 rounded-md px-1.5 py-0.5 text-[11px] font-bold text-slate-700 focus:outline-none cursor-pointer"
+                  className={`border rounded-lg px-2 py-0.5 text-[11px] font-bold focus:outline-none cursor-pointer ${statusBadgeClasses(quickViewLead.status)}`}
                 >
                   {!STATUS_OPTIONS.includes(quickViewLead.status) && <option value={quickViewLead.status}>{quickViewLead.status}</option>}
                   {STATUS_OPTIONS.map((opt) => (
@@ -495,42 +540,50 @@ export default function CrmDashboardPage() {
                   ))}
                 </select>
               </div>
-              <p className="text-[9px] text-slate-400 font-bold uppercase">Last Updated: {lastActivityTime(quickViewLead)}</p>
+              <div className="flex items-center justify-between text-[10px] text-slate-400 font-semibold">
+                <span>Last Updated : {lastActivityTime(quickViewLead)}</span>
+                <span>Source : {quickViewLead.source || quickViewLead.campaign || "Direct / Manual Entry"}</span>
+              </div>
             </div>
 
-            <div className="px-4 py-3 border-b border-slate-100 grid grid-cols-2 gap-x-3 gap-y-2 text-[11px]">
+            {/* Assigned / Property / Reassigned / Captured */}
+            <div className="px-5 py-3 border-b border-slate-100 shrink-0 grid grid-cols-2 gap-x-3 gap-y-2.5 text-xs">
               <div>
-                <span className="text-slate-400 font-bold uppercase text-[9px] block">Assigned To</span>
-                <span className="text-slate-800 font-semibold">{quickViewLead.assignedAgent || "Unassigned"}</span>
+                <span className="text-slate-400 font-bold text-[10px] block mb-0.5">Assigned To :</span>
+                <span className="flex items-center gap-1 text-slate-800 font-semibold">
+                  <User className="h-3 w-3 text-slate-400" /> {quickViewLead.assignedAgent || "Unassigned"}
+                </span>
               </div>
               <div>
-                <span className="text-slate-400 font-bold uppercase text-[9px] block">Property</span>
+                <span className="text-slate-400 font-bold text-[10px] block mb-0.5">Property :</span>
                 <span className="text-slate-800 font-semibold">{quickViewLead.property || "Not set"}</span>
               </div>
               <div>
-                <span className="text-slate-400 font-bold uppercase text-[9px] block">Reassigned To</span>
-                <span className="text-slate-800 font-semibold">{quickViewLead.previousAgent || "—"}</span>
+                <span className="text-slate-400 font-bold text-[10px] block mb-0.5">Reassigned To :</span>
+                <span className="flex items-center gap-1 text-slate-800 font-semibold">
+                  {quickViewLead.previousAgent && <User className="h-3 w-3 text-slate-400" />} {quickViewLead.previousAgent || "—"}
+                </span>
               </div>
               <div>
-                <span className="text-slate-400 font-bold uppercase text-[9px] block">Captured at</span>
+                <span className="text-slate-400 font-bold text-[10px] block mb-0.5">Captured at :</span>
                 <span className="text-slate-800 font-semibold">{formatDateTime(quickViewLead.createdAtStr)}</span>
               </div>
             </div>
 
-            <div className="px-4 py-3">
-              <span className="text-[10px] font-bold text-slate-400 uppercase block mb-2">Activity History</span>
-              <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+            {/* Activity History */}
+            <div className="px-5 py-3 flex-1 min-h-0 flex flex-col">
+              <span className="text-[11px] font-bold text-slate-500 block mb-2 shrink-0">Activity History :</span>
+              <div className="space-y-2.5 overflow-y-auto pr-1 flex-1">
                 {quickViewLead.logs.length === 0 ? (
-                  <p className="text-[10px] text-slate-400 italic">No activity recorded yet.</p>
+                  <p className="text-[11px] text-slate-400 italic">No activity recorded yet.</p>
                 ) : (
                   [...quickViewLead.logs]
                     .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
                     .map((log, idx) => (
-                      <div key={idx} className="flex justify-end">
-                        <div className="max-w-[85%] bg-[#0B1E6E] text-white rounded-2xl rounded-tr-sm px-3 py-1.5">
-                          <p className="text-[11px] leading-snug">{log.message}</p>
-                          <p className="text-[9px] text-white/70 mt-0.5 text-right">{formatDateTime(log.timestamp)}</p>
-                        </div>
+                      <div key={idx} className="bg-[#EEF2FF] border border-[#DCE3FA] rounded-xl px-3 py-2">
+                        <p className="text-[10px] font-bold text-slate-500">{formatDateTime(log.timestamp)}</p>
+                        <p className="text-[11px] text-slate-700 leading-snug mt-1">{log.message}</p>
+                        <p className="text-[9px] text-slate-400 font-semibold mt-1 text-right">by {log.user}</p>
                       </div>
                     ))
                 )}
