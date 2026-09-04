@@ -47,17 +47,17 @@ function checkUserAccess(user: { role: string; department?: string; role_type?: 
   if (user.role === "ADMIN") return true; // GOD ADMIN has absolute monitoring access
 
   // CRM: accessible only to SALES department
-  if (path.startsWith("/dashboard/crm")) {
+  if (path.startsWith("/dashboard/crm") || path.startsWith("/crm/dashboard")) {
     return user.department === "SALES";
   }
 
   // HRMS: accessible to all departments (SALES, TECH, MARKETING, FINANCE)
-  if (path.startsWith("/dashboard/hrms")) {
+  if (path.startsWith("/dashboard/hrms") || path.startsWith("/hrms/dashboard")) {
     return !!(user.department && ["SALES", "TECH", "MARKETING", "FINANCE"].includes(user.department));
   }
 
   // Finance: accessible only to FINANCE department
-  if (path.startsWith("/dashboard/finance")) {
+  if (path.startsWith("/dashboard/finance") || path.startsWith("/finance/dashboard")) {
     return user.department === "FINANCE" || user.role === "FINANCE";
   }
 
@@ -147,7 +147,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   // NotificationBell, the Home dashboard's per-role content) keeps working
   // exactly as before — only how the sidebar presents them changed.
   const crmItems = [
-    { name: "Dashboard", href: "/dashboard", activeCheck: (p: string, t?: string | null) => p === "/dashboard" && !t, icon: LayoutGrid },
+    { name: "Dashboard", href: "/crm/dashboard", activeCheck: (p: string, t?: string | null) => p === "/crm/dashboard", icon: LayoutGrid },
     { name: "Properties", href: "/dashboard/properties", activeCheck: (p: string, t?: string | null) => p === "/dashboard/properties", icon: Building },
     { name: "Leads", href: "/dashboard/crm", activeCheck: (p: string, t?: string | null) => p === "/dashboard/crm", icon: Users },
     // Campaigns/Data Calling don't have dedicated pages of their own yet —
@@ -166,7 +166,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   const hrmsItems = [
     { name: "Teams", href: "/dashboard/hrms?tab=teams", activeCheck: (p: string, t?: string | null) => p === "/dashboard/hrms" && t === "teams", icon: Users },
     { name: "Attendance", href: "/dashboard/hrms?tab=attendance", activeCheck: (p: string, t?: string | null) => p === "/dashboard/hrms" && t === "attendance", icon: Clock },
-    { name: "HR Dashboard", href: "/dashboard/hrms?tab=dashboard", activeCheck: (p: string, t?: string | null) => p === "/dashboard/hrms" && t === "dashboard", icon: LayoutDashboard },
+    { name: "HR Dashboard", href: "/hrms/dashboard", activeCheck: (p: string, t?: string | null) => p === "/hrms/dashboard", icon: LayoutDashboard },
     { name: "Calendar", href: "/dashboard/hrms?tab=calendar", activeCheck: (p: string, t?: string | null) => p === "/dashboard/hrms" && t === "calendar", icon: Calendar },
     // HRMS Settings/Reports are a distinct, HRMS-flavored view of the shared
     // pages (geofence/half-day rules; all-employee attendance report) — not
@@ -178,7 +178,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   const financeItems = [
     { name: "Billing", href: "/dashboard/finance?tab=billing", activeCheck: (p: string, t?: string | null) => p === "/dashboard/finance" && t === "billing", icon: DollarSign },
     { name: "Reimbursements", href: "/dashboard/finance?tab=reimbursements", activeCheck: (p: string, t?: string | null) => p === "/dashboard/finance" && t === "reimbursements", icon: FileText },
-    { name: "Finance Dashboard", href: "/dashboard/finance?tab=dashboard", activeCheck: (p: string, t?: string | null) => p === "/dashboard/finance" && t === "dashboard", icon: LayoutDashboard },
+    { name: "Finance Dashboard", href: "/finance/dashboard", activeCheck: (p: string, t?: string | null) => p === "/finance/dashboard", icon: LayoutDashboard },
     { name: "Calendar", href: "/dashboard/finance?tab=calendar", activeCheck: (p: string, t?: string | null) => p === "/dashboard/finance" && t === "calendar", icon: Calendar },
     // Finance Settings/Reports are a distinct, Finance-flavored view (GST/
     // due-date rules; upcoming/overdue/collected payments report) — not the
@@ -215,11 +215,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   };
 
   const getActiveTabName = () => {
-    // The CRM group's own "Dashboard" item already has an activeCheck that
-    // matches bare /dashboard, so the loop below finds it naturally for
-    // anyone with CRM access (including Admins) — no special case needed.
-    // A hardcoded "Home" here previously fought with that and with the page's
-    // own on-screen heading, which also says "Dashboard".
+    if (pathname === "/home") return "Home";
     for (const group of sidebarGroups) {
       for (const item of group.items) {
         if (item.activeCheck(pathname, activeTabParam)) return item.name;
@@ -245,7 +241,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
           {/* Logo + collapse toggle */}
           <div className={`flex items-center flex-shrink-0 mb-6 ${isSidebarCollapsed ? "justify-center px-2" : "justify-between px-6"}`}>
             {!isSidebarCollapsed && (
-              <Link href="/dashboard" className="flex items-center min-w-0">
+              <Link href="/home" className="flex items-center min-w-0">
                 <img
                   src="/Blue White Professional Minimal Company Business Card.png"
                   alt="TASKEZY Logo"
@@ -419,7 +415,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
             />
             <div className="fixed inset-y-0 left-0 w-[82vw] max-w-72 bg-white border-r border-slate-200 p-5 flex flex-col z-40 md:hidden overflow-y-auto">
               <div className="flex items-center justify-between mb-4 border-b border-slate-100 pb-4">
-                <Link href="/dashboard" className="flex items-center">
+                <Link href="/home" className="flex items-center">
                   <img
                     src="/Blue White Professional Minimal Company Business Card.png"
                     alt="TASKEZY Logo"
@@ -626,10 +622,10 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
               </div>
               <div className="pt-2">
                 <Link
-                  href="/dashboard"
+                  href="/home"
                   className="bg-brand-700 hover:bg-brand-600 text-white font-bold px-4 py-2.5 rounded-lg text-xs transition-all shadow-md shadow-brand-700/10"
                 >
-                  Return to Dashboard
+                  Return to Home
                 </Link>
               </div>
             </div>
