@@ -2,10 +2,13 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
-import { useApp, Lead } from "@/context/AppContext";
+import { useApp, Lead, LeadStatus } from "@/context/AppContext";
 import AddLeadModal from "@/components/crm/AddLeadModal";
 import PendingLeadsTable, { PendingRow } from "@/components/dashboard/PendingLeadsTable";
-import { ChevronRight, Plus, CheckCircle } from "lucide-react";
+import { DB_CODE_TO_FRONTEND_STATUS } from "@/lib/leadStatusMapping";
+import { ChevronDown, Plus, CheckCircle, Eye, Phone } from "lucide-react";
+
+const STATUS_OPTIONS = Array.from(new Set(Object.values(DB_CODE_TO_FRONTEND_STATUS)));
 
 // CRM's own overview — moved out of the old bare /dashboard route (which
 // branched its content by department/activeSystem, so the same URL showed a
@@ -14,11 +17,14 @@ import { ChevronRight, Plus, CheckCircle } from "lucide-react";
 // this rendered, even for users who weren't in CRM at all) into its own
 // real path, alongside /hrms/dashboard and /finance/dashboard.
 export default function CrmDashboardPage() {
-  const { leads, properties, users, currentUser, addLead } = useApp();
+  const { leads, properties, users, currentUser, addLead, followupCalls, updateLeadStatus } = useApp();
 
   const [dateRange, setDateRange] = useState<"today" | "yesterday" | "week" | "month" | "all">("today");
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [uploadMsg, setUploadMsg] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [drillPage, setDrillPage] = useState(1);
+  const [drillRowsPerPage, setDrillRowsPerPage] = useState(10);
 
   const dateInRange = (dateStr: string | undefined, range: typeof dateRange, refNow: Date): boolean => {
     if (!dateStr) return false;
@@ -98,6 +104,18 @@ export default function CrmDashboardPage() {
   const siteVisitScheduledCount = scopedLeads.filter(l => l.status === "Visit Schedule").length;
   const siteVisitDoneCount = scopedLeads.filter(l => l.status === "Site Visit").length;
 
+  // Each card's real underlying lead list — same predicates as the counts
+  // above — so clicking a card can drill into exactly what it counted.
+  const categoryLeads: Record<string, Lead[]> = {
+    "Total Leads": rangeLeads,
+    "New Leads": rangeLeads.filter(l => l.status === "New Lead"),
+    "RNR": scopedLeads.filter(l => l.status === "RNR"),
+    "Call Backs": scopedLeads.filter(l => l.status === "Call Back"),
+    "Follow Ups": scopedLeads.filter(l => l.status === "Follow-ups"),
+    "Site Visit Scheduled": scopedLeads.filter(l => l.status === "Visit Schedule"),
+    "Site Visit Done": scopedLeads.filter(l => l.status === "Site Visit")
+  };
+
   const statCards: { label: string; value: number; color: string }[] = [
     { label: "Total Leads", value: totalLeadsCount, color: "text-slate-900" },
     { label: "New Leads", value: newLeadsCount, color: "text-[#0084FF]" },
@@ -107,6 +125,44 @@ export default function CrmDashboardPage() {
     { label: "Site Visit Scheduled", value: siteVisitScheduledCount, color: "text-[#FF0000]" },
     { label: "Site Visit Done", value: siteVisitDoneCount, color: "text-[#015814]" }
   ];
+
+  const toggleCategory = (label: string) => {
+    setSelectedCategory(prev => (prev === label ? null : label));
+    setDrillPage(1);
+  };
+
+  const drillLeads = selectedCategory ? categoryLeads[selectedCategory] : [];
+  const drillTotalPages = Math.max(1, Math.ceil(drillLeads.length / drillRowsPerPage));
+  const drillCurrentPage = Math.min(drillPage, drillTotalPages);
+  const drillPageLeads = drillLeads.slice((drillCurrentPage - 1) * drillRowsPerPage, drillCurrentPage * drillRowsPerPage);
+
+  // Real next-scheduled-call date, from the actual followup_calls queue —
+  // "—" when no reminder was ever set for this lead, rather than a
+  // fabricated createdAt+1day placeholder.
+  const nextCallDateFor = (leadId: string): string => {
+    const upcoming = followupCalls
+      .filter(c => c.leadId === leadId && c.status === "Upcoming")
+      .sort((a, b) => new Date(`${a.date}T${a.time}`).getTime() - new Date(`${b.date}T${b.time}`).getTime());
+    return upcoming.length > 0 ? `${upcoming[0].date} ${upcoming[0].time}` : "—";
+  };
+
+  // Booking a lead auto-generates a real invoice using this deal value as
+  // the base amount (see AppContext's updateLeadStatus) — a real value is
+  // required here, not invented, matching the same guard used everywhere
+  // else in the app a status dropdown can reach a Booking status.
+  const handleDrillStatusChange = (leadId: string, status: LeadStatus) => {
+    if (status === "Booking Done" || status === "Booking Approved" || status === "Booked") {
+      const input = prompt("Enter the real deal value for this booking (INR):");
+      const dealValue = input ? parseFloat(input.replace(/[^0-9.]/g, "")) : NaN;
+      if (!input || isNaN(dealValue) || dealValue <= 0) {
+        alert("A valid deal value is required to mark a lead as Booked.");
+        return;
+      }
+      updateLeadStatus(leadId, status, dealValue);
+    } else {
+      updateLeadStatus(leadId, status);
+    }
+  };
 
   const byMostRecentActivity = (a: Lead, b: Lead) => new Date(lastActivityIso(b) || 0).getTime() - new Date(lastActivityIso(a) || 0).getTime();
 
@@ -214,23 +270,145 @@ export default function CrmDashboardPage() {
           </Link>
         </div>
 
-        {/* Stat columns — the CRM funnel snapshot for the selected date range */}
+        {/* Stat columns — the CRM funnel snapshot for the selected date range.
+            Clicking a column drills into its real leads in the table below,
+            instead of navigating away to the Leads page. */}
         <div className="flex md:grid md:grid-cols-7 bg-white divide-x divide-slate-100 overflow-x-auto min-w-full">
-          {statCards.map((s) => (
-            <Link
-              key={s.label}
-              href="/dashboard/crm"
-              className="p-3 flex flex-col justify-between min-h-[70px] min-w-[110px] md:min-w-0 flex-1 group transition-colors hover:bg-slate-50/50"
-            >
-              <span className="flex items-center justify-between text-[11px] font-medium text-slate-500">
-                {s.label}
-                <ChevronRight className="h-3 w-3 text-slate-300 shrink-0 group-hover:translate-x-0.5 transition-transform" />
-              </span>
-              <span className={`text-lg font-extrabold block mt-1.5 ${s.color}`}>{s.value}</span>
-            </Link>
-          ))}
+          {statCards.map((s) => {
+            const isActive = selectedCategory === s.label;
+            return (
+              <button
+                key={s.label}
+                onClick={() => toggleCategory(s.label)}
+                className={`p-3 flex flex-col justify-between min-h-[70px] min-w-[110px] md:min-w-0 flex-1 text-left group transition-colors ${
+                  isActive ? "bg-blue-50/70" : "hover:bg-slate-50/50"
+                }`}
+              >
+                <span className="flex items-center justify-between text-[11px] font-medium text-slate-500">
+                  {s.label}
+                  <ChevronDown className={`h-3 w-3 text-slate-300 shrink-0 transition-transform ${isActive ? "rotate-180 text-blue-500" : ""}`} />
+                </span>
+                <span className={`text-lg font-extrabold block mt-1.5 ${s.color}`}>{s.value}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
+
+      {/* Drill-down table — the real leads behind whichever stat column is selected */}
+      {selectedCategory && (
+        <div className="bg-white rounded-2xl shadow-md animate-fade-in">
+          <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+            <h3 className="text-sm font-extrabold text-slate-900">{selectedCategory}</h3>
+            <button onClick={() => setSelectedCategory(null)} className="text-[11px] font-bold text-slate-400 hover:text-slate-700">
+              Close ✕
+            </button>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse min-w-[900px]">
+              <thead>
+                <tr className="border-b border-slate-200 text-xs font-bold text-slate-800">
+                  <th className="px-4 py-2.5">Lead Name</th>
+                  <th className="px-4 py-2.5">Email</th>
+                  <th className="px-4 py-2.5">Status</th>
+                  <th className="px-4 py-2.5">Assigned To</th>
+                  <th className="px-4 py-2.5">Date</th>
+                  <th className="px-4 py-2.5">Feedback</th>
+                  <th className="px-4 py-2.5">Next Call Date</th>
+                  <th className="px-4 py-2.5">Campaign</th>
+                  <th className="px-4 py-2.5 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-xs">
+                {drillPageLeads.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} className="px-4 py-8 text-center text-slate-400 font-semibold italic">
+                      No leads in this category for the selected date range.
+                    </td>
+                  </tr>
+                ) : (
+                  drillPageLeads.map((l) => (
+                    <tr key={l.id} className="hover:bg-slate-50/60 transition-colors">
+                      <td className="px-4 py-3 align-top">
+                        <p className="font-bold text-slate-900">{l.name}</p>
+                        <p className="text-[11px] text-slate-500 font-mono mt-0.5">{l.phone}</p>
+                      </td>
+                      <td className="px-4 py-3 text-slate-600 align-top">{l.email || "—"}</td>
+                      <td className="px-4 py-3 align-top">
+                        <select
+                          value={l.status}
+                          onChange={(e) => handleDrillStatusChange(l.id, e.target.value as LeadStatus)}
+                          className="bg-slate-50 border border-slate-200 rounded-md px-1.5 py-0.5 text-[11px] font-bold text-slate-700 focus:outline-none cursor-pointer"
+                        >
+                          {!STATUS_OPTIONS.includes(l.status) && <option value={l.status}>{l.status}</option>}
+                          {STATUS_OPTIONS.map((opt) => (
+                            <option key={opt} value={opt}>{opt}</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="px-4 py-3 text-slate-700 font-medium align-top">{l.assignedAgent || "Unassigned"}</td>
+                      <td className="px-4 py-3 text-slate-500 font-mono align-top whitespace-nowrap">{l.createdAtStr || "—"}</td>
+                      <td className="px-4 py-3 text-slate-600 max-w-[220px] truncate align-top" title={latestLogMessage(l)}>{latestLogMessage(l)}</td>
+                      <td className="px-4 py-3 text-slate-500 font-mono align-top whitespace-nowrap">{nextCallDateFor(l.id)}</td>
+                      <td className="px-4 py-3 text-slate-700 font-medium align-top">{l.campaign || l.source || "—"}</td>
+                      <td className="px-4 py-3 align-top text-right">
+                        <a
+                          href={`tel:${l.phone}`}
+                          className="inline-flex h-7 w-7 rounded-full bg-slate-900 hover:bg-brand-700 text-white items-center justify-center transition-colors"
+                          title="Call"
+                        >
+                          <Phone className="h-3.5 w-3.5" />
+                        </a>
+                        <Link
+                          href={`/dashboard/crm?openLead=${l.id}`}
+                          className="inline-flex h-7 w-7 rounded-full bg-slate-900 hover:bg-brand-700 text-white items-center justify-center transition-colors ml-1.5"
+                          title="View lead"
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                        </Link>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="px-4 py-3 flex flex-wrap justify-between items-center gap-3 border-t border-slate-100 text-[11px] text-slate-500 font-semibold">
+            <span>{drillLeads.length} Row{drillLeads.length === 1 ? "" : "s"}</span>
+            <div className="flex items-center gap-4">
+              <span className="flex items-center gap-1.5">
+                Rows per page
+                <select
+                  value={drillRowsPerPage}
+                  onChange={(e) => { setDrillRowsPerPage(Number(e.target.value)); setDrillPage(1); }}
+                  className="bg-slate-50 border border-slate-200 rounded px-1.5 py-1 font-bold text-slate-700 focus:outline-none"
+                >
+                  {[10, 25, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
+                </select>
+              </span>
+              <span>{drillLeads.length === 0 ? 0 : (drillCurrentPage - 1) * drillRowsPerPage + 1}-{Math.min(drillCurrentPage * drillRowsPerPage, drillLeads.length)} of {drillLeads.length}</span>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setDrillPage(p => Math.max(1, p - 1))}
+                  disabled={drillCurrentPage <= 1}
+                  className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  ‹
+                </button>
+                <button
+                  onClick={() => setDrillPage(p => Math.min(drillTotalPages, p + 1))}
+                  disabled={drillCurrentPage >= drillTotalPages}
+                  className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  ›
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Pending Follow ups — leads currently sitting in the Follow-ups status */}
       <PendingLeadsTable title="Pending Follow ups" rows={followUpRows} />
