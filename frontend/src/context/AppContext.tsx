@@ -1701,22 +1701,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const generateInvoice = (invoiceId: string) => {
+    // Optimistic placeholder only — the real server /generate endpoint
+    // assigns the authoritative invoice_number and never touches status
+    // (mark-paid is a separate step, see markInvoicePaid below). This used
+    // to also flip status straight to "Paid" here, so an invoice looked
+    // paid the instant it was generated, before any payment was ever
+    // recorded.
     setInvoices(prev => prev.map(inv => {
       if (inv.id === invoiceId) {
         const base = inv.baseAmount;
         const cgst = base * 0.09;
         const sgst = base * 0.09;
         const total = base + cgst + sgst;
-        const invoiceNum = `INV-2026-${Math.floor(1000 + Math.random() * 9000)}`;
+        const invoiceNum = `INV-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
 
         return {
           ...inv,
           invoiceNumber: invoiceNum,
           cgst: Number(cgst.toFixed(2)),
           sgst: Number(sgst.toFixed(2)),
-          totalAmount: Number(total.toFixed(2)),
-          status: "Paid",
-          createdAt: new Date().toISOString()
+          totalAmount: Number(total.toFixed(2))
         };
       }
       return inv;

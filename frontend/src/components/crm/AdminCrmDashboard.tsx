@@ -81,8 +81,12 @@ export default function AdminCrmDashboard() {
     if (isNaN(d.getTime())) return true;
 
     const now = new Date();
-    // Reference date for mock data (2026-07-16) or real dates
-    const refDate = (d.getFullYear() === 2026 && d.getMonth() === 6) ? new Date(2026, 6, 16) : now;
+    // This used to force refDate to the fixed mock date 2026-07-16 whenever
+    // the lead's own date fell in July 2026, instead of using the real
+    // current date — miscategorizing any real lead created that month
+    // under Today/Yesterday/This Week/etc regardless of when "today"
+    // actually is.
+    const refDate = now;
     const startOfRef = new Date(refDate.getFullYear(), refDate.getMonth(), refDate.getDate());
 
     if (range === "Today") {

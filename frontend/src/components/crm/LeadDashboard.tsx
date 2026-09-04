@@ -74,8 +74,6 @@ export default function LeadDashboard() {
 
   const [leadsPage, setLeadsPage] = useState(1);
   const [leadsRowsPerPage, setLeadsRowsPerPage] = useState(100);
-  const [campaignFilter, setCampaignFilter] = useState("all");
-  const [dateFilter, setDateFilter] = useState("2026-07-16");
   const [dateRange, setDateRange] = useState("Today");
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [selectedColumns, setSelectedColumns] = useState<string[]>([
@@ -92,7 +90,7 @@ export default function LeadDashboard() {
   const [analyticsMemberFilter, setAnalyticsMemberFilter] = useState("all");
   const [analyticsPropertyFilter, setAnalyticsPropertyFilter] = useState("all");
   const [analyticsCampaignFilter, setAnalyticsCampaignFilter] = useState("all");
-  const [analyticsDateRange, setAnalyticsDateRange] = useState("2026-07-16 - 2026-07-22");
+  const [analyticsDateRange, setAnalyticsDateRange] = useState("Last 7 Days");
   const [rnrSearchQuery, setRnrSearchQuery] = useState("");
   const [showMemberSearch, setShowMemberSearch] = useState(false);
   const [expandedMembers, setExpandedMembers] = useState<string[]>([]);
@@ -103,33 +101,6 @@ export default function LeadDashboard() {
     setTimeout(() => setToastMessage(null), 3000);
   };
   const [analyticsDetailFilter, setAnalyticsDetailFilter] = useState<{ memberName: string; category: string } | null>(null);
-
-  const [uploadMode, setUploadMode] = useState<"single" | "bulk">("single");
-  const [formLeadName, setFormLeadName] = useState("");
-  const [formLeadEmail, setFormLeadEmail] = useState("");
-  const [formLeadPhone, setFormLeadPhone] = useState("");
-  const [formLeadStatus, setFormLeadStatus] = useState("");
-  const [formLeadSource, setFormLeadSource] = useState("");
-  const [formLeadAssignedTo, setFormLeadAssignedTo] = useState("");
-  const [formLeadSubSource, setFormLeadSubSource] = useState("");
-  const [formLeadProperty, setFormLeadProperty] = useState("");
-  const [formLeadNotes, setFormLeadNotes] = useState("");
-
-  const [formBulkProperty, setFormBulkProperty] = useState("");
-  const [formBulkSource, setFormBulkSource] = useState("");
-  const [formBulkFileName, setFormBulkFileName] = useState<string | null>(null);
-
-  const mockLeads = [
-    { id: "l1", name: "Aman Pratap", phone: "+919997523452", email: "amanjanu@gmail.com", status: "RNR", assignedTo: "Naveen Naidu", date: "2026-07-15 08:34:04", feedback: "Looking for 4bhk under 1 Cr", nextCallDate: "2026-07-16 08:30:00", campaign: "RH Granada Loc Vid Al" },
-    { id: "l2", name: "Hidayat Jha", phone: "+919997523452", email: "jhakan5@gmail.com", status: "Call Back", assignedTo: "Neha Chourey", date: "2026-07-14 08:35:04", feedback: "Looking for 2bhk under 1.5 Cr", nextCallDate: "2026-07-15 06:30:00", campaign: "RH Eternia Loc Vid Al" },
-    { id: "l3", name: "Shubham Ahmed", phone: "+919997523452", email: "ahmedu3@gmail.com", status: "Follow Up", assignedTo: "Santhosh Ray", date: "2026-07-14 07:14:34", feedback: "Asking for cashback to pr...", nextCallDate: "2026-07-15 16:30:00", campaign: "RH Habulus Loc Vid Al" },
-    { id: "l4", name: "Aman Pratap", phone: "+919997523452", email: "amanjanu@gmail.com", status: "RNR", assignedTo: "Naveen Naidu", date: "2026-07-15 08:34:04", feedback: "Looking for 4bhk under 1 Cr", nextCallDate: "2026-07-16 08:30:00", campaign: "RH Granada Loc Vid Al" },
-    { id: "l5", name: "Hidayat Jha", phone: "+919997523452", email: "jhakan5@gmail.com", status: "Call Back", assignedTo: "Neha Chourey", date: "2026-07-14 08:35:04", feedback: "Looking for 2bhk under 1.5 Cr", nextCallDate: "2026-07-15 06:30:00", campaign: "RH Eternia Loc Vid Al" },
-    { id: "l6", name: "Shubham Ahmed", phone: "+919997523452", email: "ahmedu3@gmail.com", status: "Follow Up", assignedTo: "Santhosh Ray", date: "2026-07-14 07:14:34", feedback: "Asking for cashback to pr...", nextCallDate: "2026-07-15 16:30:00", campaign: "RH Habulus Loc Vid Al" },
-    { id: "l7", name: "Aman Pratap", phone: "+919997523452", email: "amanjanu@gmail.com", status: "RNR", assignedTo: "Naveen Naidu", date: "2026-07-15 08:34:04", feedback: "Looking for 4bhk under 1 Cr", nextCallDate: "2026-07-16 08:30:00", campaign: "RH Granada Loc Vid Al" },
-    { id: "l8", name: "Hidayat Jha", phone: "+919997523452", email: "jhakan5@gmail.com", status: "Call Back", assignedTo: "Neha Chourey", date: "2026-07-14 08:35:04", feedback: "Looking for 2bhk under 1.5 Cr", nextCallDate: "2026-07-15 06:30:00", campaign: "RH Granada Loc Vid Al" },
-    { id: "l9", name: "Shubham Ahmed", phone: "+919997523452", email: "ahmedu3@gmail.com", status: "Follow Up", assignedTo: "Santhosh Ray", date: "2026-07-14 07:14:34", feedback: "Asking for cashback to pr...", nextCallDate: "2026-07-15 16:30:00", campaign: "RH Habulus Loc Vid Al" },
-  ];
 
   let paginatedMockLeads: any[] = [];
   let totalMockLeadsPages = 1;
@@ -253,8 +224,12 @@ export default function LeadDashboard() {
     if (isNaN(d.getTime())) return true;
 
     const now = new Date();
-    // Reference date for mock data (2026-07-16) or real dates
-    const refDate = (d.getFullYear() === 2026 && d.getMonth() === 6) ? new Date(2026, 6, 16) : now;
+    // This used to force refDate to the fixed mock date 2026-07-16 whenever
+    // the lead's own date fell in July 2026, instead of using the real
+    // current date — miscategorizing any real lead created that month
+    // under Today/Yesterday/This Week/etc regardless of when "today"
+    // actually is.
+    const refDate = now;
     const startOfRef = new Date(refDate.getFullYear(), refDate.getMonth(), refDate.getDate());
 
     if (range === "Today") {
@@ -309,21 +284,28 @@ export default function LeadDashboard() {
       });
     }
 
-    // Match activeMetricFilter
+    // Match activeMetricFilter — these used to match on fixed literal date
+    // strings ("06 Jul"/"07 Jul"/"08 Jul") for "today" and on a lead's ID
+    // containing "2" or "4" as a fake stand-in for "weekend", both left over
+    // from the fabricated 2026-07 mock dataset. Real dates and real status
+    // fields only, kept consistent with the same regexes used to compute
+    // metaSubAccounts/googleSubAccounts above.
     let matchesMetric = true;
     if (activeMetricFilter === "today") {
-      matchesMetric = l.createdAtStr?.includes("06 Jul") || l.createdAtStr?.includes("07 Jul") || l.createdAtStr?.includes("08 Jul") || false;
+      matchesMetric = isSameLocalDay(l.createdAtStr, today);
     } else if (activeMetricFilter === "visits") {
       matchesMetric = l.status === "Visit Schedule" || l.status === "Site Visit" || l.status === "Site Visit Scheduled" || l.status === "Meeting Scheduled";
     } else if (activeMetricFilter === "weekend") {
-      // simulate weekend subset based on ID/attributes
-      matchesMetric = (l.status === "Visit Schedule" || l.status === "Site Visit Scheduled" || l.status === "Follow up" || l.status === "New Lead") && (l.id.includes("2") || l.id.includes("4"));
+      const isVisitStatus = ["Visit Schedule", "Site Visit Scheduled", "Meeting Scheduled", "Site Visit"].includes(l.status);
+      const d = l.createdAtStr ? new Date(l.createdAtStr) : null;
+      const isWeekendDay = !!d && !isNaN(d.getTime()) && (d.getDay() === 0 || d.getDay() === 6);
+      matchesMetric = isVisitStatus && isWeekendDay;
     } else if (activeMetricFilter === "bookings") {
       matchesMetric = l.status === "Booked" || l.status === "Booking Done" || l.status === "Booking Approved";
     } else if (activeMetricFilter === "meta") {
-      matchesMetric = l.campaign?.toLowerCase().includes("meta") || l.source?.toLowerCase().includes("meta") || l.campaign === "Facebook Lead Ads" || false;
+      matchesMetric = /meta|facebook|instagram/i.test(`${l.campaign || ""} ${l.source || ""}`);
     } else if (activeMetricFilter === "google") {
-      matchesMetric = l.campaign?.toLowerCase().includes("google") || l.source?.toLowerCase().includes("google") || false;
+      matchesMetric = /google/i.test(`${l.campaign || ""} ${l.source || ""}`);
     }
 
     // Match any of the selected agents in multi-select pool (if empty, matches all)
@@ -471,19 +453,79 @@ export default function LeadDashboard() {
       router.push(`/dashboard/crm/leads?${params.toString()}`);
     };
 
-    const mockMemberAnalytics = [
-      { name: "Santosh Ray", total: 209, qualified: 53, unqualified: 156, siteVisits: 22, qlPct: "23.35%", ql2svPct: "41.50%" },
-      { name: "Partha M", total: 209, qualified: 53, unqualified: 156, siteVisits: 22, qlPct: "23.35%", ql2svPct: "41.50%" },
-      { name: "Santosh Ray", total: 209, qualified: 53, unqualified: 156, siteVisits: 22, qlPct: "23.35%", ql2svPct: "41.50%" },
-      { name: "Naveen Naik", total: 209, qualified: 53, unqualified: 156, siteVisits: 22, qlPct: "23.35%", ql2svPct: "41.50%" },
-      { name: "Santosh Ray", total: 209, qualified: 53, unqualified: 156, siteVisits: 22, qlPct: "23.35%", ql2svPct: "41.50%" },
-    ];
+    // Real per-agent lead-quality breakdown, computed from actual scoped
+    // leads — this used to be 5 hardcoded rows (with "Santosh Ray" repeated
+    // 3 times) showing the same fabricated 209/53/156/22 numbers regardless
+    // of any real activity.
+    const QUALIFIED_STATUSES = ["Connected", "Interested", "Booked", "Follow-ups", "Visit Schedule", "Meeting Scheduled", "Meeting Done", "Site Visit"];
+    const UNQUALIFIED_STATUSES = ["Unassigned", "RNR", "Switch off", "Not Interested", "Invalid", "Low Budget", "Dead"];
+    const SITE_VISIT_STATUSES = ["Site Visit", "Meeting Done", "Visit Schedule"];
 
-    const filteredMemberAnalytics = mockMemberAnalytics.filter((row) => {
+    // Property/Campaign filter bar above this table used to be fully
+    // unwired — visible controls that changed value but never touched any
+    // computation below them.
+    const analyticsScopedLeads = scopedLeads.filter((l) => {
+      const matchProperty = analyticsPropertyFilter === "all" || l.property === analyticsPropertyFilter;
+      const matchCampaign = analyticsCampaignFilter === "all" || l.campaign === analyticsCampaignFilter;
+      return matchProperty && matchCampaign;
+    });
+
+    const computeMemberStats = (agentName: string) => {
+      const agentLeads = analyticsScopedLeads.filter(l => l.assignedAgent === agentName);
+      const total = agentLeads.length;
+      const qualified = agentLeads.filter(l => QUALIFIED_STATUSES.includes(l.status)).length;
+      const unqualified = agentLeads.filter(l => UNQUALIFIED_STATUSES.includes(l.status)).length;
+      const siteVisits = agentLeads.filter(l => SITE_VISIT_STATUSES.includes(l.status)).length;
+      const qlPct = total > 0 ? `${((qualified / total) * 100).toFixed(2)}%` : "0.00%";
+      const ql2svPct = qualified > 0 ? `${((siteVisits / qualified) * 100).toFixed(2)}%` : "0.00%";
+      return { total, qualified, unqualified, siteVisits, qlPct, ql2svPct };
+    };
+
+    const agentNamesWithLeads = Array.from(new Set(analyticsScopedLeads.map(l => l.assignedAgent).filter(Boolean))) as string[];
+
+    const memberAnalytics = agentNamesWithLeads.map((name) => {
+      const user = users.find(u => u.name === name);
+      const directReports = user ? users.filter(u => u.managerId === user.id) : [];
+      return {
+        name,
+        directReports,
+        ...computeMemberStats(name)
+      };
+    });
+
+    const filteredMemberAnalytics = memberAnalytics.filter((row) => {
       const matchSearch = row.name.toLowerCase().includes(analyticsMemberSearch.toLowerCase());
       const matchMember = analyticsMemberFilter === "all" || row.name === analyticsMemberFilter;
       return matchSearch && matchMember;
     });
+
+    // Drill-down rows behind "View Detailed Analytics" clicks — was reading
+    // a hardcoded "6 Rows" / "1-8 of 8" footer regardless of how many leads
+    // actually matched.
+    const analyticsDetailRows = analyticsDetailFilter
+      ? analyticsScopedLeads
+          .filter((l) => {
+            const agentName = l.assignedAgent || "";
+            const matchMember = analyticsDetailFilter.memberName.toLowerCase() === "all" || agentName === analyticsDetailFilter.memberName;
+            if (analyticsDetailFilter.category === "Qualified") return matchMember && QUALIFIED_STATUSES.includes(l.status);
+            if (analyticsDetailFilter.category === "Unqualified") return matchMember && UNQUALIFIED_STATUSES.includes(l.status);
+            if (analyticsDetailFilter.category === "Site Visit") return matchMember && SITE_VISIT_STATUSES.includes(l.status);
+            return matchMember;
+          })
+          .map((l) => ({
+            id: l.id,
+            name: l.name,
+            phone: l.phone,
+            email: l.email,
+            status: l.status,
+            assignedTo: l.assignedAgent,
+            date: l.createdAtStr || todayStr,
+            notes: l.property || "No notes",
+            nextCallDate: l.createdAtStr ? new Date(new Date(l.createdAtStr).getTime() + 86400000).toISOString().split("T")[0] : "—",
+            campaign: l.campaign || "Campaign",
+            rawLead: l
+          }))
+      : [];
 
     const toggleExpand = (key: string) => {
       setExpandedMembers((prev) =>
@@ -531,14 +573,14 @@ export default function LeadDashboard() {
             <div className="flex items-center gap-3">
               <div className="relative">
                 <select
-                  value={campaignFilter}
-                  onChange={(e) => setCampaignFilter(e.target.value)}
+                  value={selectedCampaigns.length === 1 ? selectedCampaigns[0] : "all"}
+                  onChange={(e) => setSelectedCampaigns(e.target.value === "all" ? [] : [e.target.value])}
                   className="bg-white border border-slate-200 rounded-lg px-4 py-2.5 text-xs text-slate-700 font-bold focus:outline-none appearance-none pr-8 cursor-pointer"
                 >
                   <option value="all">Campaigns</option>
-                  <option value="RH Granada Loc Vid Al">RH Granada Loc Vid Al</option>
-                  <option value="RH Eternia Loc Vid Al">RH Eternia Loc Vid Al</option>
-                  <option value="RH Habulus Loc Vid Al">RH Habulus Loc Vid Al</option>
+                  {campaignsList.map((campaign) => (
+                    <option key={campaign} value={campaign}>{campaign}</option>
+                  ))}
                 </select>
                 <span className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[8px]">▼</span>
               </div>
@@ -584,24 +626,28 @@ export default function LeadDashboard() {
 
                   <div className="relative">
                     <select
+                      value={analyticsPropertyFilter}
+                      onChange={(e) => setAnalyticsPropertyFilter(e.target.value)}
                       className="bg-white border border-slate-200 rounded-xl px-4 py-2 text-xs text-slate-700 font-bold focus:outline-none appearance-none pr-8 cursor-pointer hover:border-slate-300 transition-all"
                     >
                       <option value="all">Property</option>
-                      <option value="Granada">Granada</option>
-                      <option value="Eternia">Eternia</option>
-                      <option value="Habulus">Habulus</option>
+                      {propertiesList.map((prop) => (
+                        <option key={prop} value={prop}>{prop}</option>
+                      ))}
                     </select>
                     <span className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[8px]">▼</span>
                   </div>
 
                   <div className="relative">
                     <select
+                      value={analyticsCampaignFilter}
+                      onChange={(e) => setAnalyticsCampaignFilter(e.target.value)}
                       className="bg-white border border-slate-200 rounded-xl px-4 py-2 text-xs text-slate-700 font-bold focus:outline-none appearance-none pr-8 cursor-pointer hover:border-slate-300 transition-all"
                     >
                       <option value="all">Campaigns</option>
-                      <option value="RH Granada Loc Vid Al">RH Granada Loc Vid Al</option>
-                      <option value="RH Eternia Loc Vid Al">RH Eternia Loc Vid Al</option>
-                      <option value="RH Habulus Loc Vid Al">RH Habulus Loc Vid Al</option>
+                      {campaignsList.map((campaign) => (
+                        <option key={campaign} value={campaign}>{campaign}</option>
+                      ))}
                     </select>
                     <span className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[8px]">▼</span>
                   </div>
@@ -625,38 +671,14 @@ export default function LeadDashboard() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-slate-700 font-medium">
-                      {(scopedLeads.map(l => ({
-                          id: l.id,
-                          name: l.name,
-                          phone: l.phone,
-                          email: l.email,
-                          status: l.status,
-                          assignedTo: l.assignedAgent,
-                          date: l.createdAtStr || todayStr,
-                          notes: l.property || "No notes",
-                          nextCallDate: l.createdAtStr ? new Date(new Date(l.createdAtStr).getTime() + 86400000).toISOString().split('T')[0] : "—",
-                          campaign: l.campaign || "Campaign",
-                          rawLead: l
-                        }))
-                      )
-                        .filter((l) => {
-                          const agentName = l.assignedTo || "";
-                          const matchMember = 
-                            analyticsDetailFilter.memberName.toLowerCase() === "all" ||
-                            agentName.toLowerCase().includes(analyticsDetailFilter.memberName.toLowerCase().split(" ")[0]);
-                          
-                          if (analyticsDetailFilter.category === "Qualified") {
-                            return matchMember && ["Connected", "Interested", "Booked", "Follow-ups", "Visit Schedule", "Meeting Scheduled", "Meeting Done", "Site Visit"].includes(l.status);
-                          }
-                          if (analyticsDetailFilter.category === "Unqualified") {
-                            return matchMember && ["Unassigned", "RNR", "Switch off", "Not Interested", "Invalid", "Low Budget", "Dead"].includes(l.status);
-                          }
-                          if (analyticsDetailFilter.category === "Site Visit") {
-                            return matchMember && ["Site Visit", "Meeting Done", "Visit Schedule"].includes(l.status);
-                          }
-                          return matchMember;
-                        })
-                        .map((lead, index) => (
+                      {analyticsDetailRows.length === 0 ? (
+                        <tr>
+                          <td colSpan={8} className="py-8 text-center text-slate-400 font-medium italic">
+                            No matching leads found.
+                          </td>
+                        </tr>
+                      ) : (
+                        analyticsDetailRows.map((lead, index) => (
                           <tr key={lead.id || index} className="hover:bg-slate-50/40 transition-colors text-xs">
                             <td className="py-3 px-3 font-bold text-slate-800">
                               <div
@@ -715,13 +737,14 @@ export default function LeadDashboard() {
                             <td className="py-3 px-3 text-slate-500">{lead.nextCallDate}</td>
                             <td className="py-3 px-3 text-slate-600 font-semibold">{lead.campaign}</td>
                           </tr>
-                        ))}
+                        ))
+                      )}
                     </tbody>
                   </table>
                 </div>
 
                 <div className="flex justify-between items-center text-[11px] font-bold text-slate-400 border-t border-slate-100 pt-4">
-                  <span>6 Rows</span>
+                  <span>{analyticsDetailRows.length} Rows</span>
                   <div className="flex items-center gap-6 text-slate-500">
                     <div className="flex items-center gap-1.5">
                       <span>Rows per page:</span>
@@ -732,7 +755,7 @@ export default function LeadDashboard() {
                       </select>
                       <span className="text-[8px]">▼</span>
                     </div>
-                    <span>1-8 of 8</span>
+                    <span>{analyticsDetailRows.length > 0 ? `1-${analyticsDetailRows.length} of ${analyticsDetailRows.length}` : "0 of 0"}</span>
                     <div className="flex items-center gap-2">
                       <button className="p-1 rounded hover:bg-slate-50 text-slate-300 disabled:opacity-50 cursor-not-allowed" disabled>
                         <ChevronLeft className="h-4 w-4" />
@@ -774,8 +797,9 @@ export default function LeadDashboard() {
                   className="bg-white border border-slate-200 rounded-xl px-4 py-2 text-xs text-slate-700 font-bold focus:outline-none appearance-none pr-8 cursor-pointer hover:border-slate-300 transition-all"
                 >
                   <option value="all">Member</option>
-                  <option value="Santosh Ray">Santosh Ray</option>
-                  <option value="Naveen Naik">Naveen Naik</option>
+                  {agentNamesWithLeads.map((name) => (
+                    <option key={name} value={name}>{name}</option>
+                  ))}
                 </select>
                 <span className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[8px]">▼</span>
               </div>
@@ -787,9 +811,9 @@ export default function LeadDashboard() {
                   className="bg-white border border-slate-200 rounded-xl px-4 py-2 text-xs text-slate-700 font-bold focus:outline-none appearance-none pr-8 cursor-pointer hover:border-slate-300 transition-all"
                 >
                   <option value="all">Property</option>
-                  <option value="Granada">Granada</option>
-                  <option value="Eternia">Eternia</option>
-                  <option value="Habulus">Habulus</option>
+                  {propertiesList.map((prop) => (
+                    <option key={prop} value={prop}>{prop}</option>
+                  ))}
                 </select>
                 <span className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[8px]">▼</span>
               </div>
@@ -801,9 +825,9 @@ export default function LeadDashboard() {
                   className="bg-white border border-slate-200 rounded-xl px-4 py-2 text-xs text-slate-700 font-bold focus:outline-none appearance-none pr-8 cursor-pointer hover:border-slate-300 transition-all"
                 >
                   <option value="all">Campaigns</option>
-                  <option value="RH Granada Loc Vid Al">RH Granada Loc Vid Al</option>
-                  <option value="RH Eternia Loc Vid Al">RH Eternia Loc Vid Al</option>
-                  <option value="RH Habulus Loc Vid Al">RH Habulus Loc Vid Al</option>
+                  {campaignsList.map((campaign) => (
+                    <option key={campaign} value={campaign}>{campaign}</option>
+                  ))}
                 </select>
                 <span className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[8px]">▼</span>
               </div>
@@ -849,16 +873,19 @@ export default function LeadDashboard() {
                           <tr className={`hover:bg-slate-50/40 transition-colors font-medium text-slate-700 text-xs ${isExpanded ? "bg-slate-50" : ""}`}>
                             <td className="py-3 px-3 font-bold text-slate-800 flex items-center gap-1.5">
                               <span>{row.name}</span>
-                              <button
-                                onClick={() => toggleExpand(rowKey)}
-                                className="text-slate-500 hover:text-slate-800 focus:outline-none select-none cursor-pointer flex items-center justify-center p-0.5 hover:bg-slate-100 rounded transition-all"
-                              >
-                                {isExpanded ? (
-                                  <Minus className="h-3.5 w-3.5 stroke-[2]" />
-                                ) : (
-                                  <Plus className="h-3.5 w-3.5 stroke-[2]" />
-                                )}
-                              </button>
+                              {row.directReports.length > 0 && (
+                                <button
+                                  onClick={() => toggleExpand(rowKey)}
+                                  className="text-slate-500 hover:text-slate-800 focus:outline-none select-none cursor-pointer flex items-center justify-center p-0.5 hover:bg-slate-100 rounded transition-all"
+                                  title={`${row.directReports.length} direct report(s)`}
+                                >
+                                  {isExpanded ? (
+                                    <Minus className="h-3.5 w-3.5 stroke-[2]" />
+                                  ) : (
+                                    <Plus className="h-3.5 w-3.5 stroke-[2]" />
+                                  )}
+                                </button>
+                              )}
                             </td>
                             <td className="py-3 px-3">
                               <button onClick={() => setAnalyticsDetailFilter({ memberName: row.name, category: "Total" })} className="text-blue-600 hover:underline font-bold bg-transparent border-none cursor-pointer focus:outline-none">
@@ -899,81 +926,36 @@ export default function LeadDashboard() {
                                     </tr>
                                   </thead>
                                   <tbody className="divide-y divide-slate-100 text-slate-655 font-semibold">
-                                    <tr className="hover:bg-slate-50/50 transition-colors">
-                                      <td className="py-2.5 pr-3 text-slate-700 font-bold">Naveen Naik</td>
-                                      <td className="py-2.5 px-3">
-                                        <button onClick={() => setAnalyticsDetailFilter({ memberName: "Naveen Naik", category: "Total" })} className="text-blue-600 hover:underline font-bold bg-transparent border-none cursor-pointer focus:outline-none">
-                                          89
-                                        </button>
-                                      </td>
-                                      <td className="py-2.5 px-3">
-                                        <button onClick={() => setAnalyticsDetailFilter({ memberName: "Naveen Naik", category: "Qualified" })} className="text-blue-600 hover:underline font-bold bg-transparent border-none cursor-pointer focus:outline-none">
-                                          22
-                                        </button>
-                                      </td>
-                                      <td className="py-2.5 px-3">
-                                        <button onClick={() => setAnalyticsDetailFilter({ memberName: "Naveen Naik", category: "Unqualified" })} className="text-blue-600 hover:underline font-bold bg-transparent border-none cursor-pointer focus:outline-none">
-                                          67
-                                        </button>
-                                      </td>
-                                      <td className="py-2.5 px-3">
-                                        <button onClick={() => setAnalyticsDetailFilter({ memberName: "Naveen Naik", category: "Site Visit" })} className="text-blue-600 hover:underline font-bold bg-transparent border-none cursor-pointer focus:outline-none">
-                                          2
-                                        </button>
-                                      </td>
-                                      <td className="py-2.5 px-3">24.7%</td>
-                                      <td className="py-2.5 px-3">9.02%</td>
-                                    </tr>
-                                    <tr className="hover:bg-slate-50/50 transition-colors">
-                                      <td className="py-2.5 pr-3 text-slate-700 font-bold">Neha Chourey</td>
-                                      <td className="py-2.5 px-3">
-                                        <button onClick={() => setAnalyticsDetailFilter({ memberName: "Neha Chourey", category: "Total" })} className="text-blue-600 hover:underline font-bold bg-transparent border-none cursor-pointer focus:outline-none">
-                                          90
-                                        </button>
-                                      </td>
-                                      <td className="py-2.5 px-3">
-                                        <button onClick={() => setAnalyticsDetailFilter({ memberName: "Neha Chourey", category: "Qualified" })} className="text-blue-600 hover:underline font-bold bg-transparent border-none cursor-pointer focus:outline-none">
-                                          20
-                                        </button>
-                                      </td>
-                                      <td className="py-2.5 px-3">
-                                        <button onClick={() => setAnalyticsDetailFilter({ memberName: "Neha Chourey", category: "Unqualified" })} className="text-blue-600 hover:underline font-bold bg-transparent border-none cursor-pointer focus:outline-none">
-                                          70
-                                        </button>
-                                      </td>
-                                      <td className="py-2.5 px-3">
-                                        <button onClick={() => setAnalyticsDetailFilter({ memberName: "Neha Chourey", category: "Site Visit" })} className="text-blue-600 hover:underline font-bold bg-transparent border-none cursor-pointer focus:outline-none">
-                                          10
-                                        </button>
-                                      </td>
-                                      <td className="py-2.5 px-3">22.2%</td>
-                                      <td className="py-2.5 px-3">50%</td>
-                                    </tr>
-                                    <tr className="hover:bg-slate-55/50 transition-colors">
-                                      <td className="py-2.5 pr-3 text-slate-700 font-bold">Navdeep Babra</td>
-                                      <td className="py-2.5 px-3">
-                                        <button onClick={() => setAnalyticsDetailFilter({ memberName: "Navdeep Babra", category: "Total" })} className="text-blue-600 hover:underline font-bold bg-transparent border-none cursor-pointer focus:outline-none">
-                                          31
-                                        </button>
-                                      </td>
-                                      <td className="py-2.5 px-3">
-                                        <button onClick={() => setAnalyticsDetailFilter({ memberName: "Navdeep Babra", category: "Qualified" })} className="text-blue-600 hover:underline font-bold bg-transparent border-none cursor-pointer focus:outline-none">
-                                          11
-                                        </button>
-                                      </td>
-                                      <td className="py-2.5 px-3">
-                                        <button onClick={() => setAnalyticsDetailFilter({ memberName: "Navdeep Babra", category: "Unqualified" })} className="text-blue-600 hover:underline font-bold bg-transparent border-none cursor-pointer focus:outline-none">
-                                          20
-                                        </button>
-                                      </td>
-                                      <td className="py-2.5 px-3">
-                                        <button onClick={() => setAnalyticsDetailFilter({ memberName: "Navdeep Babra", category: "Site Visit" })} className="text-blue-600 hover:underline font-bold bg-transparent border-none cursor-pointer focus:outline-none">
-                                          10
-                                        </button>
-                                      </td>
-                                      <td className="py-2.5 px-3">35.4%</td>
-                                      <td className="py-2.5 px-3">90.9%</td>
-                                    </tr>
+                                    {row.directReports.map((report) => {
+                                      const reportStats = computeMemberStats(report.name);
+                                      return (
+                                        <tr key={report.id} className="hover:bg-slate-50/50 transition-colors">
+                                          <td className="py-2.5 pr-3 text-slate-700 font-bold">{report.name}</td>
+                                          <td className="py-2.5 px-3">
+                                            <button onClick={() => setAnalyticsDetailFilter({ memberName: report.name, category: "Total" })} className="text-blue-600 hover:underline font-bold bg-transparent border-none cursor-pointer focus:outline-none">
+                                              {reportStats.total}
+                                            </button>
+                                          </td>
+                                          <td className="py-2.5 px-3">
+                                            <button onClick={() => setAnalyticsDetailFilter({ memberName: report.name, category: "Qualified" })} className="text-blue-600 hover:underline font-bold bg-transparent border-none cursor-pointer focus:outline-none">
+                                              {reportStats.qualified}
+                                            </button>
+                                          </td>
+                                          <td className="py-2.5 px-3">
+                                            <button onClick={() => setAnalyticsDetailFilter({ memberName: report.name, category: "Unqualified" })} className="text-blue-600 hover:underline font-bold bg-transparent border-none cursor-pointer focus:outline-none">
+                                              {reportStats.unqualified}
+                                            </button>
+                                          </td>
+                                          <td className="py-2.5 px-3">
+                                            <button onClick={() => setAnalyticsDetailFilter({ memberName: report.name, category: "Site Visit" })} className="text-blue-600 hover:underline font-bold bg-transparent border-none cursor-pointer focus:outline-none">
+                                              {reportStats.siteVisits}
+                                            </button>
+                                          </td>
+                                          <td className="py-2.5 px-3">{reportStats.qlPct}</td>
+                                          <td className="py-2.5 px-3">{reportStats.ql2svPct}</td>
+                                        </tr>
+                                      );
+                                    })}
                                   </tbody>
                                 </table>
                               </td>
@@ -998,7 +980,7 @@ export default function LeadDashboard() {
                     </select>
                     <span className="text-[8px]">▼</span>
                   </div>
-                  <span>1-8 of 8</span>
+                  <span>{filteredMemberAnalytics.length > 0 ? `1-${filteredMemberAnalytics.length} of ${filteredMemberAnalytics.length}` : "0 of 0"}</span>
                   <div className="flex items-center gap-2">
                     <button className="p-1 rounded hover:bg-slate-50 text-slate-300 disabled:opacity-50 cursor-not-allowed" disabled>
                       <ChevronLeft className="h-4 w-4" />
@@ -1031,27 +1013,49 @@ export default function LeadDashboard() {
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
                     <tr className="border-b border-slate-100 text-[11px] uppercase font-bold text-slate-400 tracking-wider">
-                      <th className="pb-3 pt-1 px-3">Total Leads</th>
-                      <th className="pb-3 pt-1 px-3">Avg Call Back Initiation Per Lead / Day</th>
-                      <th className="pb-3 pt-1 px-3">Avg Calling Per Lead before dead</th>
+                      <th className="pb-3 pt-1 px-3">Lead Name</th>
+                      <th className="pb-3 pt-1 px-3">Phone</th>
+                      <th className="pb-3 pt-1 px-3">Assigned Agent</th>
                       <th className="pb-3 pt-1 px-3">Date</th>
-                      <th className="pb-3 pt-1 px-3">AI Notes</th>
+                      <th className="pb-3 pt-1 px-3">Last Note</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {rnrSearchQuery === "" || "103".includes(rnrSearchQuery) || "80%".toLowerCase().includes(rnrSearchQuery.toLowerCase()) ? (
-                      <tr className="hover:bg-slate-50/40 transition-colors font-medium text-slate-700 text-xs">
-                        <td className="py-3.5 px-3">103</td>
-                        <td className="py-3.5 px-3">3</td>
-                        <td className="py-3.5 px-3">8</td>
-                        <td className="py-3.5 px-3">2026-07-16</td>
-                        <td className="py-3.5 px-3 text-[#0b1e6e] font-bold">80% time call is on RNR and rest 20% have low budget.</td>
-                      </tr>
-                    ) : (
-                      <tr>
-                        <td colSpan={5} className="py-4 text-center text-slate-400 font-bold">No records match your search</td>
-                      </tr>
-                    )}
+                    {(() => {
+                      const rnrLeads = dateFilteredBaseLeads.filter(l => l.status === "RNR");
+                      const filteredRnrLeads = rnrSearchQuery
+                        ? rnrLeads.filter(l => l.name.toLowerCase().includes(rnrSearchQuery.toLowerCase()))
+                        : rnrLeads;
+
+                      if (filteredRnrLeads.length === 0) {
+                        return (
+                          <tr>
+                            <td colSpan={5} className="py-4 text-center text-slate-400 font-bold">
+                              {rnrSearchQuery ? "No records match your search" : "No RNR leads in this range"}
+                            </td>
+                          </tr>
+                        );
+                      }
+
+                      return filteredRnrLeads.map((lead) => {
+                        const lastLog = lead.logs.length > 0 ? lead.logs[lead.logs.length - 1] : undefined;
+                        return (
+                          <tr
+                            key={lead.id}
+                            onClick={() => setSelectedLead(lead)}
+                            className="hover:bg-slate-50/40 transition-colors font-medium text-slate-700 text-xs cursor-pointer"
+                          >
+                            <td className="py-3.5 px-3 font-bold text-[#0B1E6E]">{lead.name}</td>
+                            <td className="py-3.5 px-3">{lead.phone}</td>
+                            <td className="py-3.5 px-3">{lead.assignedAgent || "Unassigned"}</td>
+                            <td className="py-3.5 px-3">{lead.createdAtStr || "—"}</td>
+                            <td className="py-3.5 px-3 text-slate-600 truncate max-w-[220px]" title={lastLog?.message}>
+                              {lastLog?.message || "No notes yet"}
+                            </td>
+                          </tr>
+                        );
+                      });
+                    })()}
                   </tbody>
                 </table>
               </div>
@@ -1195,7 +1199,7 @@ export default function LeadDashboard() {
         <div className="flex justify-end items-center gap-3">
           <div className="flex items-center gap-2 border border-slate-200 bg-white rounded-lg px-3 py-1.5 text-xs text-slate-700 font-bold shadow-sm">
             <Calendar className="h-4 w-4 text-blue-600" />
-            <span>2026-07-16</span>
+            <span>{todayStr}</span>
           </div>
 
           <button 
@@ -1578,351 +1582,14 @@ export default function LeadDashboard() {
         </div>
       </div>
     )}
-          {isAddOpen && (
-          <>
-            <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[60]" onClick={() => setIsAddOpen(false)} />
-            <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
-              <div className="w-full max-w-4xl bg-white rounded-[28px] shadow-2xl flex flex-col overflow-hidden animate-scale-up text-xs">
-                {/* Header */}
-                <div className="flex justify-between items-start px-12 pt-10 pb-4 shrink-0">
-                  <div>
-                    <h3 className="text-2xl font-black text-slate-900">Upload New Lead</h3>
-                    <p className="text-xs text-slate-500 mt-2 font-medium">Enter a single new lead or upload multiple leads from an Excel file.</p>
-                  </div>
-                  <button onClick={() => setIsAddOpen(false)} className="text-slate-400 hover:text-slate-655 cursor-pointer mt-1">
-                    <X className="h-5 w-5" />
-                  </button>
-                </div>
-                <div className="px-12 shrink-0">
-                  <hr className="border-slate-100/80" />
-                </div>
-
-                {/* Body */}
-                <div className="flex-1 px-12 pt-6 pb-10 space-y-6 text-xs">
-                  {/* Mode Toggles */}
-                  <div className="flex items-center gap-8 font-bold text-slate-700">
-                    <label className="flex items-center gap-2 cursor-pointer select-none">
-                      <input
-                        type="radio"
-                        name="uploadMode"
-                        checked={uploadMode === "single"}
-                        onChange={() => setUploadMode("single")}
-                        className="h-4 w-4 text-[#0B1E6E] focus:ring-[#0B1E6E] border-slate-300"
-                      />
-                      <span>Single Entry</span>
-                    </label>
-
-                    <label className="flex items-center gap-2 cursor-pointer select-none">
-                      <input
-                        type="radio"
-                        name="uploadMode"
-                        checked={uploadMode === "bulk"}
-                        onChange={() => setUploadMode("bulk")}
-                        className="h-4 w-4 text-[#0B1E6E] focus:ring-[#0B1E6E] border-slate-300"
-                      />
-                      <span>Bulk Upload</span>
-                    </label>
-                  </div>
-
-                  {/* Single Entry Screen */}
-                  {uploadMode === "single" && (
-                    <div className="grid grid-cols-3 gap-6 animate-fade-in text-slate-900">
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-900 mb-1.5 uppercase">Lead Full Name</label>
-                        <input
-                          type="text"
-                          value={formLeadName}
-                          onChange={(e) => setFormLeadName(e.target.value)}
-                          placeholder="e.g. lead name"
-                          className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[#0B1E6E] shadow-sm"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-900 mb-1.5 uppercase">Email</label>
-                        <input
-                          type="email"
-                          value={formLeadEmail}
-                          onChange={(e) => setFormLeadEmail(e.target.value)}
-                          placeholder="e.g. enter email"
-                          className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[#0B1E6E] shadow-sm"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-900 mb-1.5 uppercase">Phone Number</label>
-                        <input
-                          type="tel"
-                          value={formLeadPhone}
-                          onChange={(e) => setFormLeadPhone(e.target.value)}
-                          placeholder="e.g. phone number"
-                          className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[#0B1E6E] shadow-sm"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-900 mb-1.5 uppercase">Status</label>
-                        <div className="relative">
-                          <select
-                            value={formLeadStatus}
-                            onChange={(e) => setFormLeadStatus(e.target.value)}
-                            className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none focus:border-[#0B1E6E] shadow-sm appearance-none cursor-pointer"
-                          >
-                            <option value="">Select Status</option>
-                            <option value="RNR">RNR</option>
-                            <option value="Call Back">Call Back</option>
-                            <option value="Follow Up">Follow Up</option>
-                            <option value="Visit Schedule">Visit Schedule</option>
-                          </select>
-                          <span className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-450 text-[9px]">▼</span>
-                        </div>
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-900 mb-1.5 uppercase">Source</label>
-                        <div className="relative">
-                          <select
-                            value={formLeadSource}
-                            onChange={(e) => setFormLeadSource(e.target.value)}
-                            className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none focus:border-[#0B1E6E] shadow-sm appearance-none cursor-pointer"
-                          >
-                            <option value="">Select Source</option>
-                            <option value="Meta Ads">Meta Ads</option>
-                            <option value="Google Ads">Google Ads</option>
-                            <option value="Organic">Organic</option>
-                            <option value="Direct">Direct</option>
-                          </select>
-                          <span className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-455 text-[9px]">▼</span>
-                        </div>
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-900 mb-1.5 uppercase">Assigned To</label>
-                        <div className="relative">
-                          <select
-                            value={formLeadAssignedTo}
-                            onChange={(e) => setFormLeadAssignedTo(e.target.value)}
-                            className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none focus:border-[#0B1E6E] shadow-sm appearance-none cursor-pointer"
-                          >
-                            <option value="">Select Member</option>
-                            <option value="Naveen Naidu">Naveen Naidu</option>
-                            <option value="Neha Chourey">Neha Chourey</option>
-                            <option value="Santhosh Ray">Santhosh Ray</option>
-                          </select>
-                          <span className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-455 text-[9px]">▼</span>
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-900 mb-1.5 uppercase">Sub Source</label>
-                        <input
-                          type="text"
-                          value={formLeadSubSource}
-                          onChange={(e) => setFormLeadSubSource(e.target.value)}
-                          placeholder="enter sub source"
-                          className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[#0B1E6E] shadow-sm"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-900 mb-1.5 uppercase">Property</label>
-                        <div className="relative">
-                          <select
-                            value={formLeadProperty}
-                            onChange={(e) => setFormLeadProperty(e.target.value)}
-                            className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none focus:border-[#0B1E6E] shadow-sm appearance-none cursor-pointer"
-                          >
-                            <option value="">Select property</option>
-                            <option value="RH Granada Loc Vid Al">RH Granada Loc Vid Al</option>
-                            <option value="RH Eternia Loc Vid Al">RH Eternia Loc Vid Al</option>
-                            <option value="RH Habulus Loc Vid Al">RH Habulus Loc Vid Al</option>
-                          </select>
-                          <span className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-455 text-[9px]">▼</span>
-                        </div>
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-900 mb-1.5 uppercase">Notes</label>
-                        <input
-                          type="text"
-                          value={formLeadNotes}
-                          onChange={(e) => setFormLeadNotes(e.target.value)}
-                          placeholder="Add notes"
-                          className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[#0B1E6E] shadow-sm"
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Bulk Upload Screen */}
-                  {uploadMode === "bulk" && (
-                    <div className="grid grid-cols-1 md:grid-cols-12 gap-8 animate-fade-in text-slate-900 items-start">
-                      {/* Left inputs */}
-                      <div className="col-span-7 space-y-5">
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-[10px] font-extrabold text-slate-900 mb-1.5 uppercase">Select Property</label>
-                            <div className="relative">
-                              <select
-                                value={formBulkProperty}
-                                onChange={(e) => setFormBulkProperty(e.target.value)}
-                                className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none focus:border-[#0B1E6E] shadow-sm appearance-none cursor-pointer"
-                              >
-                                <option value="">Select property</option>
-                                <option value="RH Granada Loc Vid Al">RH Granada Loc Vid Al</option>
-                                <option value="RH Eternia Loc Vid Al">RH Eternia Loc Vid Al</option>
-                                <option value="RH Habulus Loc Vid Al">RH Habulus Loc Vid Al</option>
-                              </select>
-                              <span className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-450 text-[9px]">▼</span>
-                            </div>
-                          </div>
-
-                          <div>
-                            <label className="block text-[10px] font-extrabold text-slate-900 mb-1.5 uppercase">Source</label>
-                            <div className="relative">
-                              <select
-                                value={formBulkSource}
-                                onChange={(e) => setFormBulkSource(e.target.value)}
-                                className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none focus:border-[#0B1E6E] shadow-sm appearance-none cursor-pointer"
-                              >
-                                <option value="">Select source</option>
-                                <option value="Meta Ads">Meta Ads</option>
-                                <option value="Google Ads">Google Ads</option>
-                                <option value="Organic">Organic</option>
-                                <option value="Direct">Direct</option>
-                              </select>
-                              <span className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-450 text-[9px]">▼</span>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* File Upload Box */}
-                        <div 
-                          onClick={() => {
-                            const n = prompt("Enter simulated Excel sheet filename (e.g. leads_sheet.xlsx):");
-                            if (n) setFormBulkFileName(n);
-                          }}
-                          className="border border-dashed border-[#5C73E5]/30 bg-blue-50/10 rounded-2xl p-8 text-center cursor-pointer hover:bg-blue-50/20 transition-all flex flex-col items-center justify-center min-h-[160px] space-y-2 shadow-sm"
-                        >
-                          <div className="h-10 w-10 bg-blue-50 rounded-full flex items-center justify-center mb-1">
-                            <span className="text-blue-600 text-lg">↑</span>
-                          </div>
-                          <span className="text-xs font-bold text-blue-600 block">Upload a file</span>
-                          <span className="text-[10px] text-slate-400 block font-medium">Click to browse, or drag &amp; drop files here</span>
-                          {formBulkFileName && (
-                            <span className="text-[10px] font-bold text-emerald-600 mt-2 block">✓ {formBulkFileName}</span>
-                          )}
-                        </div>
-
-                        <div className="flex justify-center">
-                          <button className="flex items-center gap-1.5 border border-slate-200 bg-white rounded-lg px-4 py-2 text-[10px] text-slate-700 font-bold shadow-sm hover:bg-slate-50 transition-all cursor-pointer">
-                            <span className="text-xs font-mono">⤓</span>
-                            <span>Download Template</span>
-                          </button>
-                        </div>
-
-                        <p className="text-[10px] text-slate-400 font-semibold mt-4">
-                          Still facing issues? <a href="#" className="text-blue-600 hover:underline">Contact support</a>
-                        </p>
-                      </div>
-
-                      {/* Right vector illustration & action buttons */}
-                      <div className="col-span-5 flex flex-col items-end justify-between self-stretch pt-2">
-                        <div className="flex items-center justify-center w-full flex-1">
-                          <svg className="w-full max-w-[360px] h-auto" viewBox="0 0 280 200" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            {/* Cloud shadow and main cloud */}
-                            <path d="M120 70C120 53.4315 133.431 40 150 40C166.569 40 180 53.4315 180 70C191.046 70 200 78.9543 200 90C200 101.046 191.046 110 180 110H120C108.954 110 100 101.046 100 90C100 78.9543 108.954 70 120 70Z" fill="#93C5FD" opacity="0.6"/>
-                            <path d="M125 75C125 61.1929 136.193 50 150 50C163.807 50 175 61.1929 175 75C183.284 75 190 81.7157 190 90C190 98.2843 183.284 105 175 105H125C116.716 105 110 98.2843 110 90C110 81.7157 116.716 75 125 75Z" fill="#3B82F6" opacity="0.8"/>
-                            <path d="M150 60V95M140 70L150 60L160 70" stroke="white" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>
-                            
-                            {/* Box */}
-                            <rect x="110" y="120" width="70" height="50" rx="4" fill="#3B82F6"/>
-                            <path d="M106 120H184L176 110H114L106 120Z" fill="#2563EB"/>
-                            <rect x="125" y="115" width="20" height="15" fill="#10B981" rx="2"/>
-                            <rect x="150" y="112" width="15" height="20" fill="#EF4444" rx="2"/>
-
-                            {/* Left Person (Green shirt, Orange hair, Pink pants) */}
-                            <circle cx="85" cy="98" r="7" fill="#FDBA74"/>
-                            <path d="M80 91C80 91 88 88 92 93C96 98 90 102 90 102L83 102L80 91Z" fill="#F97316"/>
-                            <path d="M75 105C75 105 88 105 92 112L85 128H75L75 105Z" fill="#047857"/>
-                            <path d="M75 128H85L85 155H80L78 140L75 155H70L75 128Z" fill="#EC4899"/>
-                            <path d="M88 112L105 102" stroke="#FDBA74" strokeWidth="3" strokeLinecap="round"/>
-
-                            {/* Right Person (Purple shirt, Brown hair, Pink pants) */}
-                            <circle cx="215" cy="95" r="7" fill="#FDBA74"/>
-                            <path d="M210 88C215 88 220 90 220 95C220 100 212 102 210 98" fill="#78350F"/>
-                            <path d="M205 102C210 102 220 105 220 115L215 130H200L205 102Z" fill="#7C3AED"/>
-                            <path d="M200 130H215L220 158H215L210 142L205 158H200L200 130Z" fill="#EC4899"/>
-                            <path d="M205 110L185 118" stroke="#FDBA74" strokeWidth="3" strokeLinecap="round"/>
-
-                            {/* Photo Asset being held */}
-                            <rect x="95" y="85" width="28" height="28" rx="4" fill="#EF4444" transform="rotate(-15 95 85)"/>
-                            <circle cx="105" cy="95" r="3" fill="white"/>
-                            <path d="M98 108L108 98L118 108" fill="white"/>
-                          </svg>
-                        </div>
-
-                        {/* Action buttons */}
-                        <div className="flex justify-end gap-3 mt-6">
-                          <button
-                            onClick={() => setIsAddOpen(false)}
-                            className="px-6 py-2.5 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-50 transition-all cursor-pointer bg-white"
-                          >
-                            Cancel
-                          </button>
-                          <button
-                            onClick={() => {
-                              if (!formBulkFileName) {
-                                alert("Please select or drop a file to bulk upload.");
-                                return;
-                              }
-                              setSuccessMsg(`Successfully processed spreadsheet: ${formBulkFileName}`);
-                              setIsAddOpen(false);
-                              setTimeout(() => setSuccessMsg(""), 3000);
-                            }}
-                            className="bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold px-6 py-2.5 rounded-xl text-xs transition-all shadow-sm cursor-pointer"
-                          >
-                            Upload
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Single entry footer fallback if single entry is open */}
-                  {uploadMode === "single" && (
-                    <div className="flex justify-end gap-3 pt-6 border-t border-slate-100">
-                      <button
-                        onClick={() => setIsAddOpen(false)}
-                        className="px-6 py-2.5 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-50 transition-all cursor-pointer bg-white"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (!formLeadName || !formLeadPhone) {
-                            alert("Please fill in Lead Full Name and Phone Number.");
-                            return;
-                          }
-                          addLead({
-                            name: formLeadName,
-                            phone: formLeadPhone,
-                            email: formLeadEmail,
-                            assignedAgent: formLeadAssignedTo || "Santhosh Ray",
-                            campaign: formLeadProperty || "RH Granada Loc Vid Al",
-                            property: formLeadProperty || "Brigade Granada",
-                            leadScore: 80,
-                            createdAtStr: new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
-                          });
-                          setSuccessMsg(`Successfully uploaded single lead: ${formLeadName}`);
-                          setIsAddOpen(false);
-                          setTimeout(() => setSuccessMsg(""), 3000);
-                        }}
-                        className="bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold px-6 py-2.5 rounded-xl text-xs transition-all shadow-sm cursor-pointer"
-                      >
-                        Upload
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </>
-        )}
+        {/* NOTE: this used to also render a second, hand-rolled "Upload New
+            Lead" modal here (triggered by the same isAddOpen flag), stacked
+            on top of the real <AddLeadModal> below. It bypassed
+            handleAddManualLead entirely and called addLead() directly with
+            fake fallback values ("Santhosh Ray", "RH Granada Loc Vid Al",
+            "Brigade Granada", a hardcoded leadScore of 80) whenever a field
+            was left blank — silently corrupting real lead records. Removed;
+            <AddLeadModal> (below) is the single real Add Lead UI. */}
 
         {/* Lead details slide-out drawer (Right side) */}
         {selectedLead && (
