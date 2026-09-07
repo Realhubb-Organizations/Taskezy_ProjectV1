@@ -1,9 +1,76 @@
 import React, { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { X, Upload, FileSpreadsheet, Info, Download, Plus, Trash2 } from "lucide-react";
+import { X, Upload, FileSpreadsheet, Info, Download, Plus, Trash2, ChevronDown } from "lucide-react";
 
 const BASE_LEAD_SOURCES = ["Meta Ads", "Google Ads", "Referral Code", "Offline Event", "Direct Walkin"];
 const CUSTOM_LEAD_SOURCES_KEY = "taskezy_custom_lead_sources";
+
+// A themed dropdown matching the rest of the app's portaled menus (see
+// LeadDashboard.tsx's openPositionedMenu) — the browser's native <select>
+// popup can't be restyled, so this trigger button + a body-portaled options
+// panel replaces it wherever the form needs to look like the rest of the site.
+function CustomSelect({
+  value,
+  onChange,
+  options
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+}) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+
+  const toggleOpen = () => {
+    const rect = btnRef.current?.getBoundingClientRect();
+    if (rect) setPos({ top: rect.bottom + 6, left: rect.left, width: rect.width });
+    setOpen(o => !o);
+  };
+
+  const selectedLabel = options.find(o => o.value === value)?.label ?? value;
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        ref={btnRef}
+        onClick={toggleOpen}
+        className="w-full flex items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:outline-none focus:bg-white focus:border-[#0B1E6E] transition-all"
+      >
+        <span className="truncate">{selectedLabel}</span>
+        <ChevronDown className={`h-3.5 w-3.5 text-slate-400 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && pos && createPortal(
+        <>
+          <div className="fixed inset-0 z-[80]" onClick={() => setOpen(false)} />
+          <div
+            className="fixed z-[90] bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 max-h-56 overflow-y-auto"
+            style={{ top: pos.top, left: pos.left, width: pos.width }}
+          >
+            {options.length === 0 ? (
+              <p className="px-3.5 py-2 text-xs text-slate-400 italic font-normal">No options yet</p>
+            ) : (
+              options.map(opt => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => { onChange(opt.value); setOpen(false); }}
+                  className={`w-full text-left px-3.5 py-2 text-xs font-bold transition-colors ${
+                    opt.value === value ? "bg-[#0B1E6E] text-white" : "text-slate-700 hover:bg-slate-50"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))
+            )}
+          </div>
+        </>,
+        document.body
+      )}
+    </div>
+  );
+}
 
 interface AddLeadModalProps {
   isOpen: boolean;
@@ -263,28 +330,22 @@ export default function AddLeadModal({
                   </div>
                   <div className="space-y-1">
                     <label className="block text-[9px] font-bold text-slate-400 uppercase">Assigned Agent</label>
-                    <select
+                    <CustomSelect
                       value={agent}
-                      onChange={(e) => setAgent(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:outline-none focus:bg-white focus:border-[#0B1E6E] transition-all"
-                    >
-                      {agentsList.map(ag => (
-                        <option key={ag} value={ag}>{ag}</option>
-                      ))}
-                    </select>
+                      onChange={setAgent}
+                      options={agentsList.map(ag => ({ value: ag, label: ag }))}
+                    />
                   </div>
                   <div className="space-y-1">
                     <label className="block text-[9px] font-bold text-slate-400 uppercase">Lead Source</label>
                     <div className="flex items-center gap-1.5">
-                      <select
-                        value={source}
-                        onChange={(e) => setSource(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:outline-none focus:bg-white focus:border-[#0B1E6E] transition-all"
-                      >
-                        {sourceOptions.map(opt => (
-                          <option key={opt} value={opt}>{opt}</option>
-                        ))}
-                      </select>
+                      <div className="flex-1 min-w-0">
+                        <CustomSelect
+                          value={source}
+                          onChange={setSource}
+                          options={sourceOptions.map(opt => ({ value: opt, label: opt }))}
+                        />
+                      </div>
                       <button
                         type="button"
                         onClick={handleDeleteSource}
@@ -326,16 +387,11 @@ export default function AddLeadModal({
                   </div>
                   <div className="space-y-1">
                     <label className="block text-[9px] font-bold text-slate-400 uppercase">Property</label>
-                    <select
+                    <CustomSelect
                       value={property}
-                      onChange={(e) => setProperty(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:outline-none focus:bg-white focus:border-[#0B1E6E] transition-all"
-                    >
-                      <option value="">Unassigned Project</option>
-                      {propertiesList.map(p => (
-                        <option key={p} value={p}>{p}</option>
-                      ))}
-                    </select>
+                      onChange={setProperty}
+                      options={[{ value: "", label: "Unassigned Project" }, ...propertiesList.map(p => ({ value: p, label: p }))]}
+                    />
                   </div>
                   <div className="space-y-1 sm:col-span-3">
                     <label className="block text-[9px] font-bold text-slate-400 uppercase">Internal Telemetry Notes</label>
@@ -408,19 +464,15 @@ export default function AddLeadModal({
                     <label className="block text-[8px] font-bold text-slate-400 uppercase">
                       {bulkMode === "project" ? "Target Property Project" : "Target Sales Rep"}
                     </label>
-                    <select
+                    <CustomSelect
                       value={bulkTarget}
-                      onChange={(e) => setBulkTarget(e.target.value)}
-                      className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 focus:outline-none"
-                    >
-                      {bulkMode === "project"
-                        ? propertiesList.map(p => (
-                            <option key={p} value={p}>{p} Project Team</option>
-                          ))
-                        : agentsList.map(a => (
-                            <option key={a} value={a}>{a} (Dedicated Agent)</option>
-                          ))}
-                    </select>
+                      onChange={setBulkTarget}
+                      options={
+                        bulkMode === "project"
+                          ? propertiesList.map(p => ({ value: p, label: `${p} Project Team` }))
+                          : agentsList.map(a => ({ value: a, label: `${a} (Dedicated Agent)` }))
+                      }
+                    />
                     <p className="text-[8px] text-slate-400 italic font-medium leading-relaxed mt-1">
                       {bulkMode === "project"
                         ? "Round-robin distribution distributes imported leads evenly across active agents assigned to this property."
