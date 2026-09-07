@@ -61,11 +61,16 @@ export default function LoginPage() {
     }
 
     setIsSubmitting(true);
-    const user = await loginWithTempPassword(email, password).finally(() => setIsSubmitting(false));
-    if (!user) {
-      setError("Invalid email address or password. Please check your credentials.");
+    const result = await loginWithTempPassword(email, password).finally(() => setIsSubmitting(false));
+    if (!result.user) {
+      setError(
+        result.errorType === "network"
+          ? "We couldn't reach the server. Please check your connection and try again in a moment."
+          : "Invalid email address or password. Please check your credentials."
+      );
       return;
     }
+    const user = result.user;
 
     if (user.passwordStatus === "TEMPORARY") {
       setIsResetRequired(true);
