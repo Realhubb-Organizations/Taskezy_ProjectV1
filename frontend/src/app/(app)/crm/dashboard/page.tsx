@@ -40,8 +40,6 @@ export default function CrmDashboardPage() {
   const [dateRangeMenuOpen, setDateRangeMenuOpen] = useState(false);
   const [dateRangeMenuPos, setDateRangeMenuPos] = useState<{ top: number; left: number } | null>(null);
   const dateRangeBtnRef = useRef<HTMLButtonElement>(null);
-  const [drillSearchPos, setDrillSearchPos] = useState<{ top: number; left: number } | null>(null);
-  const drillSearchBtnRef = useRef<HTMLButtonElement>(null);
   const [drillStatusMenuPos, setDrillStatusMenuPos] = useState<{ top: number; left: number } | null>(null);
   const drillStatusBtnRef = useRef<HTMLButtonElement>(null);
   const [drillAssignedMenuPos, setDrillAssignedMenuPos] = useState<{ top: number; left: number } | null>(null);
@@ -463,31 +461,33 @@ export default function CrmDashboardPage() {
               <thead>
                 <tr className="border-b border-slate-200 text-xs font-bold text-slate-800">
                   <th className="px-4 py-2.5">
-                    <div className="relative flex items-center gap-1.5">
-                      Lead Name
-                      <button
-                        ref={drillSearchBtnRef}
-                        onClick={() => openPositionedMenu(drillSearchBtnRef, setDrillSearchPos, setDrillSearchOpen, "left", 208)}
-                        className="text-slate-400 hover:text-brand-700"
-                        title="Search"
-                      >
-                        <Search className="h-3.5 w-3.5" />
-                      </button>
-                      {drillSearchOpen && drillSearchPos && createPortal(
-                        <>
-                          <div className="fixed inset-0 z-[60]" onClick={() => { if (!drillSearch) setDrillSearchOpen(false); }} />
-                          <input
-                            autoFocus
-                            value={drillSearch}
-                            onChange={(e) => { setDrillSearch(e.target.value); setDrillPage(1); }}
-                            placeholder="Search name or phone..."
-                            className="fixed z-[70] w-52 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-normal shadow-lg focus:outline-none focus:border-brand-500"
-                            style={{ top: drillSearchPos.top, left: drillSearchPos.left }}
-                          />
-                        </>,
-                        document.body
-                      )}
-                    </div>
+                    {drillSearchOpen ? (
+                      <div className="flex items-center gap-1">
+                        <input
+                          autoFocus
+                          value={drillSearch}
+                          onChange={(e) => { setDrillSearch(e.target.value); setDrillPage(1); }}
+                          onBlur={() => { setDrillSearch(""); setDrillSearchOpen(false); }}
+                          placeholder="Search name or phone..."
+                          className="min-w-0 flex-1 bg-white border border-brand-400 rounded-md px-1.5 py-1 text-[11px] font-normal focus:outline-none"
+                        />
+                        <button
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => { setDrillSearch(""); setDrillSearchOpen(false); }}
+                          className="text-slate-400 hover:text-slate-700 shrink-0"
+                          title="Close search"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1.5">
+                        Lead Name
+                        <button onClick={() => setDrillSearchOpen(true)} className="text-slate-400 hover:text-brand-700" title="Search">
+                          <Search className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    )}
                   </th>
                   <th className="px-4 py-2.5 whitespace-nowrap">Email</th>
                   <th className="px-4 py-2.5">

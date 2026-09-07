@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import { Search, ChevronDown, ChevronLeft, ChevronRight, Copy, Check } from "lucide-react";
+import { Search, ChevronDown, ChevronLeft, ChevronRight, Copy, Check, X } from "lucide-react";
 import { WhatsAppIcon, CallIcon } from "@/components/icons/ContactIcons";
 
 export interface PendingRow {
@@ -87,22 +87,33 @@ export default function PendingLeadsTable({
             <tr className="border-b border-slate-200 text-xs font-bold text-slate-800">
               <th className="px-4 py-2.5 whitespace-nowrap">Time</th>
               <th className="px-4 py-2.5">
-                <div className="relative flex items-center gap-1.5">
-                  Lead Name
-                  <button onClick={() => setSearchOpen(o => !o)} className="text-slate-400 hover:text-brand-700" title="Search">
-                    <Search className="h-3.5 w-3.5" />
-                  </button>
-                  {searchOpen && (
+                {searchOpen ? (
+                  <div className="flex items-center gap-1">
                     <input
                       autoFocus
                       value={search}
                       onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-                      onBlur={() => { if (!search) setSearchOpen(false); }}
+                      onBlur={() => { setSearch(""); setSearchOpen(false); }}
                       placeholder="Search name or phone..."
-                      className="absolute left-0 top-8 z-20 w-52 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-normal shadow-lg focus:outline-none focus:border-brand-500"
+                      className="min-w-0 flex-1 bg-white border border-brand-400 rounded-md px-1.5 py-1 text-[11px] font-normal focus:outline-none"
                     />
-                  )}
-                </div>
+                    <button
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => { setSearch(""); setSearchOpen(false); }}
+                      className="text-slate-400 hover:text-slate-700 shrink-0"
+                      title="Close search"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5">
+                    Lead Name
+                    <button onClick={() => setSearchOpen(true)} className="text-slate-400 hover:text-brand-700" title="Search">
+                      <Search className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                )}
               </th>
               <th className="px-4 py-2.5">
                 <div className="relative">
