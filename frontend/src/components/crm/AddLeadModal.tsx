@@ -1,6 +1,9 @@
 import React, { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { X, Upload, FileSpreadsheet, Info, Download, Sparkles } from "lucide-react";
+import { X, Upload, FileSpreadsheet, Info, Download, Plus } from "lucide-react";
+
+const BASE_LEAD_SOURCES = ["Meta Ads", "Google Ads", "Referral Code", "Offline Event", "Direct Walkin"];
+const CUSTOM_LEAD_SOURCES_KEY = "taskezy_custom_lead_sources";
 
 interface AddLeadModalProps {
   isOpen: boolean;
@@ -39,6 +42,7 @@ export default function AddLeadModal({
   const [email, setEmail] = useState("");
   const [agent, setAgent] = useState(agentsList[0] || "");
   const [source, setSource] = useState("Meta Ads");
+  const [customSources, setCustomSources] = useState<string[]>([]);
   const [property, setProperty] = useState(propertiesList[0] || "");
   const [note, setNote] = useState("");
 
@@ -61,6 +65,40 @@ export default function AddLeadModal({
       document.body.style.overflow = prevOverflow;
     };
   }, [isOpen]);
+
+  // Read from localStorage only after mount — avoids an SSR/client mismatch
+  // on first render. Custom lead sources an admin adds via the "+" button
+  // below aren't backed by any server-side lead-sources table, so they're
+  // kept here, real and functional, rather than pretending to sync anywhere.
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(CUSTOM_LEAD_SOURCES_KEY);
+      if (stored) setCustomSources(JSON.parse(stored));
+    } catch {
+      // Corrupt/inaccessible storage — fall back to the base source list only.
+    }
+  }, []);
+
+  const sourceOptions = [...BASE_LEAD_SOURCES, ...customSources.filter(s => !BASE_LEAD_SOURCES.includes(s))];
+
+  const handleAddSource = () => {
+    const input = window.prompt("Enter new lead source name:");
+    const trimmed = input?.trim();
+    if (!trimmed) return;
+    const existing = sourceOptions.find(s => s.toLowerCase() === trimmed.toLowerCase());
+    if (existing) {
+      setSource(existing);
+      return;
+    }
+    const next = [...customSources, trimmed];
+    setCustomSources(next);
+    try {
+      window.localStorage.setItem(CUSTOM_LEAD_SOURCES_KEY, JSON.stringify(next));
+    } catch {
+      // Storage full/unavailable — the new source still works for this session.
+    }
+    setSource(trimmed);
+  };
 
   if (!isOpen) return null;
 
@@ -140,13 +178,9 @@ export default function AddLeadModal({
         <div className="w-full sm:max-w-3xl h-[95vh] sm:h-auto sm:max-h-[90vh] my-0 sm:my-8 bg-white border-0 sm:border border-slate-200 rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-fade-in">
           {/* Header */}
           <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 bg-slate-50/50 shrink-0">
-            <div>
-              <h3 className="text-sm font-extrabold text-slate-805 flex items-center gap-1.5">
-                <Sparkles className="h-4.5 w-4.5 text-[#0B1E6E]" />
-                Ingest CRM Leads Partition
-              </h3>
-              <p className="text-[10px] text-slate-400 mt-0.5">Register new properties buyers manually or bulk import lists.</p>
-            </div>
+            <h3 className="text-sm font-extrabold text-slate-805">
+              {activeTab === "manual" ? "Upload Single Lead" : "Upload Bulk Leads"}
+            </h3>
             <button
               onClick={onClose}
               className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors shrink-0"
@@ -163,7 +197,7 @@ export default function AddLeadModal({
                 activeTab === "manual" ? "border-[#0B1E6E] text-[#0B1E6E] font-black" : "border-transparent hover:bg-slate-50/50"
               }`}
             >
-              Manual Ingestion Entry
+              Manual Single Entry
             </button>
             <button
               onClick={() => setActiveTab("bulk")}
@@ -227,18 +261,26 @@ export default function AddLeadModal({
                     </select>
                   </div>
                   <div className="space-y-1">
-                    <label className="block text-[9px] font-bold text-slate-400 uppercase">Lead Acquisition Channel</label>
-                    <select
-                      value={source}
-                      onChange={(e) => setSource(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:outline-none focus:bg-white focus:border-[#0B1E6E] transition-all"
-                    >
-                      <option value="Meta Ads">Meta Ads</option>
-                      <option value="Google Ads">Google Ads</option>
-                      <option value="Referral Code">Referral Code</option>
-                      <option value="Offline Event">Offline Event</option>
-                      <option value="Direct Walkin">Direct Walkin</option>
-                    </select>
+                    <label className="block text-[9px] font-bold text-slate-400 uppercase">Lead Source</label>
+                    <div className="flex items-center gap-1.5">
+                      <select
+                        value={source}
+                        onChange={(e) => setSource(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:outline-none focus:bg-white focus:border-[#0B1E6E] transition-all"
+                      >
+                        {sourceOptions.map(opt => (
+                          <option key={opt} value={opt}>{opt}</option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={handleAddSource}
+                        title="Add a new lead source"
+                        className="shrink-0 h-[34px] w-[34px] flex items-center justify-center bg-slate-50 border border-slate-200 rounded-xl text-[#0B1E6E] hover:bg-[#0B1E6E]/5 hover:border-[#0B1E6E] transition-all"
+                      >
+                        <Plus className="h-4 w-4" />
+                      </button>
+                    </div>
                   </div>
                   <div className="space-y-1">
                     <label className="block text-[9px] font-bold text-slate-400 uppercase">Property</label>
