@@ -298,11 +298,11 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                             onClick={() => setActiveSystem(group.key)}
                             className={`flex items-center px-3 py-2 text-xs font-bold rounded-lg transition-all duration-200 ${
                               isActive
-                                ? "bg-brand-50 text-brand-700"
+                                ? "bg-brand-700 text-white shadow-sm"
                                 : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
                             }`}
                           >
-                            <item.icon className={`mr-2 h-3.5 w-3.5 ${isActive ? "text-brand-650" : "text-slate-400"}`} />
+                            <item.icon className={`mr-2 h-3.5 w-3.5 ${isActive ? "text-white" : "text-slate-400"}`} />
                             {item.name}
                           </Link>
                         );
@@ -324,9 +324,9 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                     title={item.name}
                     className={`flex items-center text-xs font-bold rounded-lg transition-all duration-200 ${
                       isSidebarCollapsed ? "justify-center py-2" : "px-4 py-2"
-                    } ${isActive ? "bg-brand-50 text-brand-700" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"}`}
+                    } ${isActive ? "bg-brand-700 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"}`}
                   >
-                    <item.icon className={`h-4 w-4 ${isSidebarCollapsed ? "" : "mr-2.5"} ${isActive ? "text-brand-650" : "text-slate-400"}`} />
+                    <item.icon className={`h-4 w-4 ${isSidebarCollapsed ? "" : "mr-2.5"} ${isActive ? "text-white" : "text-slate-400"}`} />
                     {!isSidebarCollapsed && item.name}
                   </Link>
                 );
@@ -487,14 +487,14 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                                 key={item.name}
                                 href={item.href}
                                 className={`flex items-center px-3 py-2 text-xs font-semibold rounded-lg ${
-                                  isActive ? "bg-brand-50 text-brand-700" : "text-slate-500 hover:bg-slate-50"
+                                  isActive ? "bg-brand-700 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50"
                                 }`}
                                 onClick={() => {
                                   setActiveSystem(group.key);
                                   setIsMobileMenuOpen(false);
                                 }}
                               >
-                                <item.icon className="mr-2 h-3.5 w-3.5 text-slate-400" />
+                                <item.icon className={`mr-2 h-3.5 w-3.5 ${isActive ? "text-white" : "text-slate-400"}`} />
                                 {item.name}
                               </Link>
                             );
@@ -516,11 +516,11 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                           key={item.name}
                           href={item.href}
                           className={`flex items-center px-4 py-1.5 text-xs font-semibold rounded-lg ${
-                            isActive ? "bg-brand-50 text-brand-700 border-l-2 border-brand-500" : "text-slate-500 hover:bg-slate-50"
+                            isActive ? "bg-brand-700 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50"
                           }`}
                           onClick={() => setIsMobileMenuOpen(false)}
                         >
-                          <item.icon className="mr-2 h-4 w-4 text-slate-400" />
+                          <item.icon className={`mr-2 h-4 w-4 ${isActive ? "text-white" : "text-slate-400"}`} />
                           {item.name}
                         </Link>
                       );
@@ -587,7 +587,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                     isActive ? "text-brand-700" : "text-slate-400"
                   }`}
                 >
-                  <item.icon className={`h-5 w-5 ${isActive ? "text-brand-650" : "text-slate-400"}`} />
+                  <item.icon className={`h-5 w-5 ${isActive ? "text-brand-700" : "text-slate-400"}`} />
                   <span className="text-[10px] font-bold truncate max-w-full px-1">{item.name}</span>
                 </Link>
               );
@@ -598,7 +598,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                 isMobileMenuOpen ? "text-brand-700" : "text-slate-400"
               }`}
             >
-              <MoreHorizontal className={`h-5 w-5 ${isMobileMenuOpen ? "text-brand-650" : "text-slate-400"}`} />
+              <MoreHorizontal className={`h-5 w-5 ${isMobileMenuOpen ? "text-brand-700" : "text-slate-400"}`} />
               <span className="text-[10px] font-bold">More</span>
             </button>
           </div>
