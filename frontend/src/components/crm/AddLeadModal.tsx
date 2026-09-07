@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { X, Upload, FileSpreadsheet, Info, Download, Plus } from "lucide-react";
+import { X, Upload, FileSpreadsheet, Info, Download, Plus, Trash2 } from "lucide-react";
 
 const BASE_LEAD_SOURCES = ["Meta Ads", "Google Ads", "Referral Code", "Offline Event", "Direct Walkin"];
 const CUSTOM_LEAD_SOURCES_KEY = "taskezy_custom_lead_sources";
@@ -43,6 +43,8 @@ export default function AddLeadModal({
   const [agent, setAgent] = useState(agentsList[0] || "");
   const [source, setSource] = useState("Meta Ads");
   const [customSources, setCustomSources] = useState<string[]>([]);
+  const [showAddSourceInput, setShowAddSourceInput] = useState(false);
+  const [newSourceInput, setNewSourceInput] = useState("");
   const [property, setProperty] = useState(propertiesList[0] || "");
   const [note, setNote] = useState("");
 
@@ -81,23 +83,34 @@ export default function AddLeadModal({
 
   const sourceOptions = [...BASE_LEAD_SOURCES, ...customSources.filter(s => !BASE_LEAD_SOURCES.includes(s))];
 
-  const handleAddSource = () => {
-    const input = window.prompt("Enter new lead source name:");
-    const trimmed = input?.trim();
+  const persistCustomSources = (next: string[]) => {
+    setCustomSources(next);
+    try {
+      window.localStorage.setItem(CUSTOM_LEAD_SOURCES_KEY, JSON.stringify(next));
+    } catch {
+      // Storage full/unavailable — the change still works for this session.
+    }
+  };
+
+  const commitAddSource = () => {
+    const trimmed = newSourceInput.trim();
+    setNewSourceInput("");
+    setShowAddSourceInput(false);
     if (!trimmed) return;
     const existing = sourceOptions.find(s => s.toLowerCase() === trimmed.toLowerCase());
     if (existing) {
       setSource(existing);
       return;
     }
-    const next = [...customSources, trimmed];
-    setCustomSources(next);
-    try {
-      window.localStorage.setItem(CUSTOM_LEAD_SOURCES_KEY, JSON.stringify(next));
-    } catch {
-      // Storage full/unavailable — the new source still works for this session.
-    }
+    persistCustomSources([...customSources, trimmed]);
     setSource(trimmed);
+  };
+
+  // Only sources an admin added are removable — the base channel list stays fixed.
+  const handleDeleteSource = () => {
+    if (!customSources.includes(source)) return;
+    persistCustomSources(customSources.filter(s => s !== source));
+    setSource(BASE_LEAD_SOURCES[0]);
   };
 
   if (!isOpen) return null;
@@ -274,13 +287,42 @@ export default function AddLeadModal({
                       </select>
                       <button
                         type="button"
-                        onClick={handleAddSource}
-                        title="Add a new lead source"
-                        className="shrink-0 h-[34px] w-[34px] flex items-center justify-center bg-slate-50 border border-slate-200 rounded-xl text-[#0B1E6E] hover:bg-[#0B1E6E]/5 hover:border-[#0B1E6E] transition-all"
+                        onClick={handleDeleteSource}
+                        disabled={!customSources.includes(source)}
+                        title={customSources.includes(source) ? "Delete this source" : "Built-in sources can't be deleted"}
+                        className="shrink-0 h-[34px] w-[34px] flex items-center justify-center bg-slate-50 border border-slate-200 rounded-xl text-red-500 hover:bg-red-50 hover:border-red-300 transition-all disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-slate-50 disabled:hover:border-slate-200"
                       >
-                        <Plus className="h-4 w-4" />
+                        <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     </div>
+
+                    {/* Add-source affordance sits under the dropdown row itself
+                        rather than beside it — a small trigger that swaps for
+                        an inline input, saved on Enter, no popup dialog. */}
+                    {showAddSourceInput ? (
+                      <input
+                        autoFocus
+                        type="text"
+                        value={newSourceInput}
+                        onChange={(e) => setNewSourceInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") { e.preventDefault(); commitAddSource(); }
+                          if (e.key === "Escape") { setNewSourceInput(""); setShowAddSourceInput(false); }
+                        }}
+                        onBlur={() => { if (!newSourceInput.trim()) setShowAddSourceInput(false); }}
+                        placeholder="New source name — press Enter to save"
+                        className="mt-1.5 w-full bg-white border border-[#0B1E6E] rounded-xl px-3 py-1.5 text-[11px] font-bold text-slate-700 focus:outline-none animate-fade-in"
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setShowAddSourceInput(true)}
+                        className="mt-1.5 flex items-center gap-1 text-[10px] font-bold text-[#0B1E6E] hover:underline"
+                      >
+                        <Plus className="h-3 w-3" />
+                        Add source
+                      </button>
+                    )}
                   </div>
                   <div className="space-y-1">
                     <label className="block text-[9px] font-bold text-slate-400 uppercase">Property</label>
