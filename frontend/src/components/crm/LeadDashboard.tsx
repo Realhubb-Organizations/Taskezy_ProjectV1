@@ -3,10 +3,10 @@
 import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
-import Link from "next/link";
 import { useApp, Lead, LeadStatus } from "@/context/AppContext";
-import { Sliders, Sparkles, Plus, Check, ChevronDown, Search, Settings, Calendar } from "lucide-react";
+import { Sliders, Sparkles, Plus, Check, ChevronDown, Search, Calendar, X, Minus } from "lucide-react";
 import { DB_CODE_TO_FRONTEND_STATUS } from "@/lib/leadStatusMapping";
+import { WhatsAppIcon, CallIcon } from "@/components/icons/ContactIcons";
 import TopMetricsCards from "./TopMetricsCards";
 import LeadFilterBar from "./LeadFilterBar";
 import LeadTable from "./LeadTable";
@@ -14,6 +14,37 @@ import AddLeadModal from "./AddLeadModal";
 import LeadDetailDrawer from "./LeadDetailDrawer";
 
 const STATUS_OPTIONS = Array.from(new Set(Object.values(DB_CODE_TO_FRONTEND_STATUS)));
+
+// The admin leads table's togglable columns (beyond the always-shown Lead
+// Name/Email/Assigned To) — driven by the Filter panel's Settings modal.
+// "Ad Set Name" and "Property Match" have no real backing field on Lead yet
+// (no ad-set-level ingestion, no property-match scoring anywhere in the app),
+// so their cells honestly render "—" for every row rather than inventing data.
+type AdminColumnKey =
+  | "date" | "property" | "reassignedTo" | "source" | "leadScore"
+  | "status" | "nextCallDate" | "actions" | "adSetName" | "campaign"
+  | "notes" | "propertyMatch";
+
+const ADMIN_COLUMNS: { key: AdminColumnKey; label: string; width: number }[] = [
+  { key: "date", label: "Date", width: 140 },
+  { key: "property", label: "Property", width: 150 },
+  { key: "reassignedTo", label: "Reassigned To", width: 140 },
+  { key: "source", label: "Source", width: 130 },
+  { key: "leadScore", label: "Lead Score", width: 100 },
+  { key: "status", label: "Status", width: 130 },
+  { key: "nextCallDate", label: "Next Call Date", width: 150 },
+  { key: "actions", label: "Actions", width: 100 },
+  { key: "adSetName", label: "Ad Set Name", width: 150 },
+  { key: "campaign", label: "Campaign", width: 150 },
+  { key: "notes", label: "Notes", width: 200 },
+  { key: "propertyMatch", label: "Property Match", width: 140 }
+];
+
+const ADMIN_DEFAULT_VISIBLE_COLUMNS: Record<AdminColumnKey, boolean> = {
+  date: true, property: false, reassignedTo: false, source: false, leadScore: false,
+  status: true, nextCallDate: true, actions: false, adSetName: false, campaign: true,
+  notes: true, propertyMatch: false
+};
 
 export default function LeadDashboard() {
   const {
@@ -268,7 +299,8 @@ export default function LeadDashboard() {
   // ===========================================================================
 
   const [adminTab, setAdminTab] = useState<"leads" | "analytics">("leads");
-  const [adminDateRange, setAdminDateRange] = useState<"today" | "yesterday" | "week" | "month" | "all">("today");
+  const [adminDateRange, setAdminDateRange] = useState<"today" | "yesterday" | "week" | "month" | "all" | "custom">("today");
+  const [adminCustomRange, setAdminCustomRange] = useState<{ start: string; end: string } | null>(null);
   const [adminMetric, setAdminMetric] = useState<string | null>(null);
   const [adminSearch, setAdminSearch] = useState("");
   const [adminSearchOpen, setAdminSearchOpen] = useState(false);
@@ -298,6 +330,32 @@ export default function LeadDashboard() {
   const adminCampaignsQuickBtnRef = useRef<HTMLButtonElement>(null);
   const [adminCampaignsMetaOpen, setAdminCampaignsMetaOpen] = useState(true);
   const [adminCampaignsGoogleOpen, setAdminCampaignsGoogleOpen] = useState(true);
+
+  // Calendar badge → a real custom date-range picker (Start/End), an
+  // alternative to the preset Today/Yesterday/Week/Month/All buckets above.
+  const [calendarPickerOpen, setCalendarPickerOpen] = useState(false);
+  const [calendarMenuPos, setCalendarMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const calendarBtnRef = useRef<HTMLButtonElement>(null);
+  const [customRangeStartDraft, setCustomRangeStartDraft] = useState("");
+  const [customRangeEndDraft, setCustomRangeEndDraft] = useState("");
+
+  // Filter button → Settings modal for which table columns are shown.
+  const [isColumnsSettingsOpen, setIsColumnsSettingsOpen] = useState(false);
+  const [adminVisibleColumns, setAdminVisibleColumns] = useState<Record<AdminColumnKey, boolean>>(ADMIN_DEFAULT_VISIBLE_COLUMNS);
+
+  const toggleAdminColumn = (key: AdminColumnKey) => {
+    setAdminVisibleColumns(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const allAdminColumnsVisible = ADMIN_COLUMNS.every(c => adminVisibleColumns[c.key]);
+  const toggleSelectAllAdminColumns = () => {
+    const next = !allAdminColumnsVisible;
+    setAdminVisibleColumns(
+      ADMIN_COLUMNS.reduce((acc, c) => ({ ...acc, [c.key]: next }), {} as Record<AdminColumnKey, boolean>)
+    );
+  };
+
+  const adminVisibleColumnList = ADMIN_COLUMNS.filter(c => adminVisibleColumns[c.key]);
 
   const DATE_RANGE_OPTIONS: { value: typeof adminDateRange; label: string }[] = [
     { value: "today", label: "Today" },
@@ -335,6 +393,13 @@ export default function LeadDashboard() {
       const weekAgo = new Date(startOfToday);
       weekAgo.setDate(weekAgo.getDate() - 6);
       return d >= weekAgo;
+    }
+    if (range === "custom") {
+      if (!adminCustomRange) return false;
+      const start = new Date(adminCustomRange.start);
+      const end = new Date(adminCustomRange.end);
+      end.setHours(23, 59, 59, 999);
+      return d >= start && d <= end;
     }
     return d.getMonth() === refNow.getMonth() && d.getFullYear() === refNow.getFullYear();
   };
@@ -626,7 +691,7 @@ export default function LeadDashboard() {
                       onClick={() => openPositionedMenu(dateRangeBtnRef, setDateRangeMenuPos, setDateRangeMenuOpen, "left", 144)}
                       className="flex items-center gap-1.5 bg-white border border-slate-300/80 rounded-md px-2 py-0.5 font-black text-slate-800 text-[11px] hover:bg-slate-50 transition-colors"
                     >
-                      {DATE_RANGE_OPTIONS.find(o => o.value === adminDateRange)?.label}
+                      {DATE_RANGE_OPTIONS.find(o => o.value === adminDateRange)?.label ?? "Custom Range"}
                       <ChevronDown className={`h-3 w-3 text-slate-400 transition-transform ${dateRangeMenuOpen ? "rotate-180" : ""}`} />
                     </button>
                     {dateRangeMenuOpen && dateRangeMenuPos && createPortal(
@@ -653,9 +718,13 @@ export default function LeadDashboard() {
                     )}
                   </div>
                 </div>
-                <Link href="/dashboard/reports" className="text-blue-600 font-extrabold hover:underline">
+                <button
+                  type="button"
+                  onClick={() => setAdminTab("analytics")}
+                  className="text-blue-600 font-extrabold hover:underline"
+                >
                   View Detailed Analytics
-                </Link>
+                </button>
               </div>
 
               <div className="flex md:grid md:grid-cols-7 bg-white divide-x divide-slate-100 overflow-x-auto min-w-full">
@@ -680,19 +749,95 @@ export default function LeadDashboard() {
               </div>
             </div>
 
-            {/* Date badge + Settings row */}
+            {/* Date badge (now a real custom date-range picker) + Filter row */}
             <div className="flex justify-end items-center gap-3">
-              <div className="flex items-center gap-2 border border-slate-200 bg-white rounded-lg px-3 py-1.5 text-xs text-slate-700 font-bold shadow-sm">
-                <Calendar className="h-4 w-4 text-blue-600" />
-                <span>{todayStr}</span>
+              <div className="relative">
+                <button
+                  ref={calendarBtnRef}
+                  type="button"
+                  onClick={() => {
+                    const rect = calendarBtnRef.current?.getBoundingClientRect();
+                    if (rect) setCalendarMenuPos({ top: rect.bottom + 6, left: rect.right - 260 });
+                    setCustomRangeStartDraft(adminCustomRange?.start || "");
+                    setCustomRangeEndDraft(adminCustomRange?.end || "");
+                    setCalendarPickerOpen(o => !o);
+                  }}
+                  className="flex items-center gap-2 border border-slate-200 bg-white rounded-lg px-3 py-1.5 text-xs text-slate-700 font-bold shadow-sm hover:bg-slate-50 transition-all"
+                >
+                  <Calendar className="h-4 w-4 text-blue-600" />
+                  <span>
+                    {adminDateRange === "custom" && adminCustomRange
+                      ? `${adminCustomRange.start} to ${adminCustomRange.end}`
+                      : todayStr}
+                  </span>
+                </button>
+                {calendarPickerOpen && calendarMenuPos && createPortal(
+                  <>
+                    <div className="fixed inset-0 z-[60]" onClick={() => setCalendarPickerOpen(false)} />
+                    <div
+                      className="fixed z-[70] w-64 bg-white border border-slate-200 rounded-xl shadow-lg p-4 space-y-3"
+                      style={{ top: calendarMenuPos.top, left: calendarMenuPos.left }}
+                    >
+                      <p className="text-[11px] font-bold text-slate-700">Filter leads by date range</p>
+                      <div className="space-y-1.5">
+                        <label className="block text-[9px] font-bold text-slate-400 uppercase">Start Date</label>
+                        <input
+                          type="date"
+                          value={customRangeStartDraft}
+                          onChange={(e) => setCustomRangeStartDraft(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-700 focus:outline-none focus:border-[#0B1E6E]"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="block text-[9px] font-bold text-slate-400 uppercase">End Date</label>
+                        <input
+                          type="date"
+                          value={customRangeEndDraft}
+                          onChange={(e) => setCustomRangeEndDraft(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-700 focus:outline-none focus:border-[#0B1E6E]"
+                        />
+                      </div>
+                      <div className="flex gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAdminCustomRange(null);
+                            setAdminDateRange("today");
+                            setCalendarPickerOpen(false);
+                            setAdminPage(1);
+                          }}
+                          className="flex-1 bg-slate-100 text-slate-600 font-bold text-[11px] py-1.5 rounded-lg hover:bg-slate-200 transition-colors"
+                        >
+                          Reset
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!customRangeStartDraft || !customRangeEndDraft) return;
+                            setAdminCustomRange({ start: customRangeStartDraft, end: customRangeEndDraft });
+                            setAdminDateRange("custom");
+                            setCalendarPickerOpen(false);
+                            setAdminPage(1);
+                          }}
+                          disabled={!customRangeStartDraft || !customRangeEndDraft}
+                          className="flex-1 bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold text-[11px] py-1.5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          Apply
+                        </button>
+                      </div>
+                    </div>
+                  </>,
+                  document.body
+                )}
               </div>
-              <Link
-                href="/dashboard/settings"
+              <button
+                type="button"
+                onClick={() => setIsColumnsSettingsOpen(true)}
                 className="flex items-center gap-2 border border-slate-200 bg-white rounded-lg px-3 py-1.5 text-xs text-slate-700 font-bold shadow-sm hover:bg-slate-50 transition-all"
               >
-                <Settings className="h-4 w-4 text-blue-600" />
-                Settings
-              </Link>
+                <Sliders className="h-4 w-4 text-blue-600" />
+                Filter
+              </button>
             </div>
 
             {/* Main Leads Table Card — the row area is height-capped with its
@@ -706,14 +851,14 @@ export default function LeadDashboard() {
               <div ref={adminScrollRef} onScroll={handleAdminTableScroll} className="overflow-auto max-h-[70vh]">
                 <table className="w-full text-left border-collapse table-fixed min-w-[1080px]">
                   <colgroup>
+                    {/* Pinned: Lead Name, Email, Assigned To */}
                     <col className="w-[150px]" />
                     <col className="w-[170px]" />
                     <col className="w-[130px]" />
-                    <col className="w-[130px]" />
-                    <col className="w-[110px]" />
-                    <col className="w-[200px]" />
-                    <col className="w-[120px]" />
-                    <col className="w-[150px]" />
+                    {/* Togglable, driven by the Filter panel */}
+                    {adminVisibleColumnList.map(c => (
+                      <col key={c.key} style={{ width: c.width }} />
+                    ))}
                   </colgroup>
                   <thead className="sticky top-0 z-10 bg-white">
                     <tr className="border-b border-slate-200 text-xs font-bold text-slate-800">
@@ -747,45 +892,7 @@ export default function LeadDashboard() {
                         )}
                       </th>
                       <th className="px-4 py-2.5 whitespace-nowrap">Email</th>
-                      <th className="px-4 py-2.5">
-                        <div className="relative">
-                          <button
-                            ref={adminStatusBtnRef}
-                            onClick={() => openPositionedMenu(adminStatusBtnRef, setAdminStatusMenuPos, setAdminStatusMenuOpen, "left", 208)}
-                            className="flex items-center gap-1.5 hover:text-brand-700 whitespace-nowrap"
-                          >
-                            Status
-                            <ChevronDown className="h-3 w-3" />
-                            {adminStatusFilter.length > 0 && (
-                              <span className="text-[9px] bg-brand-50 text-brand-700 rounded-full px-1.5 py-0.5 font-bold">{adminStatusFilter.length}</span>
-                            )}
-                          </button>
-                          {adminStatusMenuOpen && adminStatusMenuPos && createPortal(
-                            <>
-                              <div className="fixed inset-0 z-[60]" onClick={() => setAdminStatusMenuOpen(false)} />
-                              <div
-                                className="fixed z-[70] w-52 bg-white border border-slate-200 rounded-lg shadow-lg py-1.5 max-h-56 overflow-y-auto"
-                                style={{ top: adminStatusMenuPos.top, left: adminStatusMenuPos.left }}
-                              >
-                                {STATUS_OPTIONS.map(opt => (
-                                  <label key={opt} className="flex items-center gap-2 px-3 py-1.5 text-xs font-normal text-slate-700 hover:bg-slate-50 cursor-pointer">
-                                    <input
-                                      type="checkbox"
-                                      checked={adminStatusFilter.includes(opt)}
-                                      onChange={() => {
-                                        setAdminPage(1);
-                                        setAdminStatusFilter(prev => prev.includes(opt) ? prev.filter(v => v !== opt) : [...prev, opt]);
-                                      }}
-                                    />
-                                    {opt}
-                                  </label>
-                                ))}
-                              </div>
-                            </>,
-                            document.body
-                          )}
-                        </div>
-                      </th>
+                      {/* Pinned */}
                       <th className="px-4 py-2.5">
                         <div className="relative">
                           <button
@@ -829,58 +936,110 @@ export default function LeadDashboard() {
                           )}
                         </div>
                       </th>
-                      <th className="px-4 py-2.5 whitespace-nowrap">Date</th>
-                      <th className="px-4 py-2.5 whitespace-nowrap">Notes</th>
-                      <th className="px-4 py-2.5 whitespace-nowrap">Next Call Date</th>
-                      <th className="px-4 py-2.5">
-                        <div className="relative">
-                          <button
-                            ref={adminCampaignBtnRef}
-                            onClick={() => openPositionedMenu(adminCampaignBtnRef, setAdminCampaignMenuPos, setAdminCampaignMenuOpen, "right", 224)}
-                            className="flex items-center gap-1.5 hover:text-brand-700 whitespace-nowrap"
-                          >
-                            Campaign
-                            <ChevronDown className="h-3 w-3" />
-                            {adminCampaignFilter.length > 0 && (
-                              <span className="text-[9px] bg-brand-50 text-brand-700 rounded-full px-1.5 py-0.5 font-bold">{adminCampaignFilter.length}</span>
-                            )}
-                          </button>
-                          {adminCampaignMenuOpen && adminCampaignMenuPos && createPortal(
-                            <>
-                              <div className="fixed inset-0 z-[60]" onClick={() => setAdminCampaignMenuOpen(false)} />
-                              <div
-                                className="fixed z-[70] w-56 bg-white border border-slate-200 rounded-lg shadow-lg py-1.5 max-h-56 overflow-y-auto"
-                                style={{ top: adminCampaignMenuPos.top, left: adminCampaignMenuPos.left }}
-                              >
-                                {adminCampaignsList.length === 0 ? (
-                                  <p className="px-3 py-2 text-xs text-slate-400 italic font-normal">No data yet</p>
-                                ) : (
-                                  adminCampaignsList.map(opt => (
+
+                      {/* Togglable, in the same order as the Filter panel */}
+                      {adminVisibleColumns.date && <th className="px-4 py-2.5 whitespace-nowrap">Date</th>}
+                      {adminVisibleColumns.property && <th className="px-4 py-2.5 whitespace-nowrap">Property</th>}
+                      {adminVisibleColumns.reassignedTo && <th className="px-4 py-2.5 whitespace-nowrap">Reassigned To</th>}
+                      {adminVisibleColumns.source && <th className="px-4 py-2.5 whitespace-nowrap">Source</th>}
+                      {adminVisibleColumns.leadScore && <th className="px-4 py-2.5 whitespace-nowrap">Lead Score</th>}
+                      {adminVisibleColumns.status && (
+                        <th className="px-4 py-2.5">
+                          <div className="relative">
+                            <button
+                              ref={adminStatusBtnRef}
+                              onClick={() => openPositionedMenu(adminStatusBtnRef, setAdminStatusMenuPos, setAdminStatusMenuOpen, "left", 208)}
+                              className="flex items-center gap-1.5 hover:text-brand-700 whitespace-nowrap"
+                            >
+                              Status
+                              <ChevronDown className="h-3 w-3" />
+                              {adminStatusFilter.length > 0 && (
+                                <span className="text-[9px] bg-brand-50 text-brand-700 rounded-full px-1.5 py-0.5 font-bold">{adminStatusFilter.length}</span>
+                              )}
+                            </button>
+                            {adminStatusMenuOpen && adminStatusMenuPos && createPortal(
+                              <>
+                                <div className="fixed inset-0 z-[60]" onClick={() => setAdminStatusMenuOpen(false)} />
+                                <div
+                                  className="fixed z-[70] w-52 bg-white border border-slate-200 rounded-lg shadow-lg py-1.5 max-h-56 overflow-y-auto"
+                                  style={{ top: adminStatusMenuPos.top, left: adminStatusMenuPos.left }}
+                                >
+                                  {STATUS_OPTIONS.map(opt => (
                                     <label key={opt} className="flex items-center gap-2 px-3 py-1.5 text-xs font-normal text-slate-700 hover:bg-slate-50 cursor-pointer">
                                       <input
                                         type="checkbox"
-                                        checked={adminCampaignFilter.includes(opt)}
+                                        checked={adminStatusFilter.includes(opt)}
                                         onChange={() => {
                                           setAdminPage(1);
-                                          setAdminCampaignFilter(prev => prev.includes(opt) ? prev.filter(v => v !== opt) : [...prev, opt]);
+                                          setAdminStatusFilter(prev => prev.includes(opt) ? prev.filter(v => v !== opt) : [...prev, opt]);
                                         }}
                                       />
                                       {opt}
                                     </label>
-                                  ))
-                                )}
-                              </div>
-                            </>,
-                            document.body
-                          )}
-                        </div>
-                      </th>
+                                  ))}
+                                </div>
+                              </>,
+                              document.body
+                            )}
+                          </div>
+                        </th>
+                      )}
+                      {adminVisibleColumns.nextCallDate && <th className="px-4 py-2.5 whitespace-nowrap">Next Call Date</th>}
+                      {adminVisibleColumns.actions && <th className="px-4 py-2.5 text-right whitespace-nowrap">Actions</th>}
+                      {adminVisibleColumns.adSetName && <th className="px-4 py-2.5 whitespace-nowrap">Ad Set Name</th>}
+                      {adminVisibleColumns.campaign && (
+                        <th className="px-4 py-2.5">
+                          <div className="relative">
+                            <button
+                              ref={adminCampaignBtnRef}
+                              onClick={() => openPositionedMenu(adminCampaignBtnRef, setAdminCampaignMenuPos, setAdminCampaignMenuOpen, "right", 224)}
+                              className="flex items-center gap-1.5 hover:text-brand-700 whitespace-nowrap"
+                            >
+                              Campaign
+                              <ChevronDown className="h-3 w-3" />
+                              {adminCampaignFilter.length > 0 && (
+                                <span className="text-[9px] bg-brand-50 text-brand-700 rounded-full px-1.5 py-0.5 font-bold">{adminCampaignFilter.length}</span>
+                              )}
+                            </button>
+                            {adminCampaignMenuOpen && adminCampaignMenuPos && createPortal(
+                              <>
+                                <div className="fixed inset-0 z-[60]" onClick={() => setAdminCampaignMenuOpen(false)} />
+                                <div
+                                  className="fixed z-[70] w-56 bg-white border border-slate-200 rounded-lg shadow-lg py-1.5 max-h-56 overflow-y-auto"
+                                  style={{ top: adminCampaignMenuPos.top, left: adminCampaignMenuPos.left }}
+                                >
+                                  {adminCampaignsList.length === 0 ? (
+                                    <p className="px-3 py-2 text-xs text-slate-400 italic font-normal">No data yet</p>
+                                  ) : (
+                                    adminCampaignsList.map(opt => (
+                                      <label key={opt} className="flex items-center gap-2 px-3 py-1.5 text-xs font-normal text-slate-700 hover:bg-slate-50 cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          checked={adminCampaignFilter.includes(opt)}
+                                          onChange={() => {
+                                            setAdminPage(1);
+                                            setAdminCampaignFilter(prev => prev.includes(opt) ? prev.filter(v => v !== opt) : [...prev, opt]);
+                                          }}
+                                        />
+                                        {opt}
+                                      </label>
+                                    ))
+                                  )}
+                                </div>
+                              </>,
+                              document.body
+                            )}
+                          </div>
+                        </th>
+                      )}
+                      {adminVisibleColumns.notes && <th className="px-4 py-2.5 whitespace-nowrap">Notes</th>}
+                      {adminVisibleColumns.propertyMatch && <th className="px-4 py-2.5 whitespace-nowrap">Property Match</th>}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-xs">
                     {adminFilteredLeads.length === 0 ? (
                       <tr>
-                        <td colSpan={8} className="px-4 py-8 text-center text-slate-400 font-semibold italic">
+                        <td colSpan={3 + adminVisibleColumnList.length} className="px-4 py-8 text-center text-slate-400 font-semibold italic">
                           No leads match the current filters.
                         </td>
                       </tr>
@@ -901,23 +1060,72 @@ export default function LeadDashboard() {
                             <p className="text-[11px] text-slate-500 font-mono mt-0.5 truncate">{l.phone}</p>
                           </td>
                           <td className="px-4 py-3 text-slate-600 align-top truncate" title={l.email || "—"}>{l.email || "—"}</td>
-                          <td className="px-4 py-3 align-top">
-                            <select
-                              value={l.status}
-                              onChange={(e) => handleUpdateLeadStatus(l.id, e.target.value as LeadStatus)}
-                              className="w-full max-w-[110px] bg-slate-50 border border-slate-200 rounded-md px-1.5 py-0.5 text-[11px] font-bold text-slate-700 focus:outline-none cursor-pointer"
-                            >
-                              {!STATUS_OPTIONS.includes(l.status) && <option value={l.status}>{l.status}</option>}
-                              {STATUS_OPTIONS.map((opt) => (
-                                <option key={opt} value={opt}>{opt}</option>
-                              ))}
-                            </select>
-                          </td>
                           <td className="px-4 py-3 text-slate-700 font-medium align-top truncate" title={l.assignedAgent || "Unassigned"}>{l.assignedAgent || "Unassigned"}</td>
-                          <td className="px-4 py-3 text-slate-500 align-top truncate">{adminFormatDateTime(l.createdAtStr)}</td>
-                          <td className="px-4 py-3 text-slate-600 truncate align-top" title={adminLatestLogMessage(l)}>{adminLatestLogMessage(l)}</td>
-                          <td className="px-4 py-3 text-slate-500 align-top truncate">{adminNextCallDateFor(l.id)}</td>
-                          <td className="px-4 py-3 text-slate-700 font-medium align-top truncate" title={l.campaign || l.source || "—"}>{l.campaign || l.source || "—"}</td>
+
+                          {adminVisibleColumns.date && (
+                            <td className="px-4 py-3 text-slate-500 align-top truncate">{adminFormatDateTime(l.createdAtStr)}</td>
+                          )}
+                          {adminVisibleColumns.property && (
+                            <td className="px-4 py-3 text-slate-700 font-medium align-top truncate" title={l.property || "Not set"}>{l.property || "Not set"}</td>
+                          )}
+                          {adminVisibleColumns.reassignedTo && (
+                            <td className="px-4 py-3 text-slate-700 font-medium align-top truncate" title={l.previousAgent || "—"}>{l.previousAgent || "—"}</td>
+                          )}
+                          {adminVisibleColumns.source && (
+                            <td className="px-4 py-3 text-slate-700 font-medium align-top truncate" title={l.source || "—"}>{l.source || "—"}</td>
+                          )}
+                          {adminVisibleColumns.leadScore && (
+                            <td className="px-4 py-3 text-slate-700 font-medium align-top truncate">{l.leadScore != null ? l.leadScore : "—"}</td>
+                          )}
+                          {adminVisibleColumns.status && (
+                            <td className="px-4 py-3 align-top">
+                              <select
+                                value={l.status}
+                                onChange={(e) => handleUpdateLeadStatus(l.id, e.target.value as LeadStatus)}
+                                className="w-full max-w-[110px] bg-slate-50 border border-slate-200 rounded-md px-1.5 py-0.5 text-[11px] font-bold text-slate-700 focus:outline-none cursor-pointer"
+                              >
+                                {!STATUS_OPTIONS.includes(l.status) && <option value={l.status}>{l.status}</option>}
+                                {STATUS_OPTIONS.map((opt) => (
+                                  <option key={opt} value={opt}>{opt}</option>
+                                ))}
+                              </select>
+                            </td>
+                          )}
+                          {adminVisibleColumns.nextCallDate && (
+                            <td className="px-4 py-3 text-slate-500 align-top truncate">{adminNextCallDateFor(l.id)}</td>
+                          )}
+                          {adminVisibleColumns.actions && (
+                            <td className="px-4 py-3 align-top text-right">
+                              <a
+                                href={`https://wa.me/${l.phone.replace(/[^0-9]/g, "")}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center justify-center h-7 w-7 rounded-lg bg-slate-100 text-slate-700 hover:bg-emerald-50 hover:text-emerald-600 transition-colors"
+                                title="WhatsApp"
+                              >
+                                <WhatsAppIcon className="h-4 w-4" />
+                              </a>
+                              <a
+                                href={`tel:${l.phone}`}
+                                className="inline-flex items-center justify-center h-7 w-7 rounded-lg bg-slate-100 text-slate-700 hover:bg-brand-50 hover:text-brand-700 transition-colors ml-1.5"
+                                title="Call"
+                              >
+                                <CallIcon className="h-3.5 w-3.5" />
+                              </a>
+                            </td>
+                          )}
+                          {adminVisibleColumns.adSetName && (
+                            <td className="px-4 py-3 text-slate-400 align-top truncate italic" title="Not tracked yet — no ad-set-level data ingested">—</td>
+                          )}
+                          {adminVisibleColumns.campaign && (
+                            <td className="px-4 py-3 text-slate-700 font-medium align-top truncate" title={l.campaign || l.source || "—"}>{l.campaign || l.source || "—"}</td>
+                          )}
+                          {adminVisibleColumns.notes && (
+                            <td className="px-4 py-3 text-slate-600 truncate align-top" title={adminLatestLogMessage(l)}>{adminLatestLogMessage(l)}</td>
+                          )}
+                          {adminVisibleColumns.propertyMatch && (
+                            <td className="px-4 py-3 text-slate-400 align-top truncate italic" title="Not tracked yet — no property-match scoring implemented">—</td>
+                          )}
                         </tr>
                       )))
                     )}
@@ -1005,6 +1213,56 @@ export default function LeadDashboard() {
           onClose={() => setSelectedLead(null)}
           onUpdateStatus={handleUpdateLeadStatus}
         />
+
+        {/* Filter button's column-visibility Settings modal */}
+        {isColumnsSettingsOpen && createPortal(
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <div className="fixed inset-0 bg-slate-900/50" onClick={() => setIsColumnsSettingsOpen(false)} />
+            <div className="relative w-full max-w-sm bg-white rounded-2xl shadow-2xl overflow-hidden animate-fade-in">
+              <div className="flex items-center justify-between px-5 pt-5 pb-3">
+                <h3 className="text-base font-extrabold text-slate-900">Settings</h3>
+                <button
+                  onClick={() => setIsColumnsSettingsOpen(false)}
+                  className="text-slate-400 hover:text-slate-700"
+                >
+                  <X className="h-4.5 w-4.5" />
+                </button>
+              </div>
+              <div className="px-5 pb-5">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs font-extrabold text-slate-800">Columns</span>
+                  <button
+                    type="button"
+                    onClick={toggleSelectAllAdminColumns}
+                    className="flex items-center gap-1 text-[11px] font-bold text-slate-500 hover:text-[#0B1E6E]"
+                  >
+                    <Minus className="h-3 w-3" />
+                    Select All
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-2.5">
+                  {ADMIN_COLUMNS.map(c => {
+                    const isOn = adminVisibleColumns[c.key];
+                    return (
+                      <button
+                        key={c.key}
+                        type="button"
+                        onClick={() => toggleAdminColumn(c.key)}
+                        className={`relative text-left pl-3 pr-2.5 py-2 rounded-lg border text-xs font-bold transition-colors overflow-hidden ${
+                          isOn ? "border-[#0B1E6E] text-slate-800 bg-white" : "border-slate-200 text-slate-500 bg-white hover:bg-slate-50"
+                        }`}
+                      >
+                        {isOn && <span className="absolute left-0 top-0 bottom-0 w-[3px] bg-[#0B1E6E]" />}
+                        {c.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
       </div>
     );
   }
