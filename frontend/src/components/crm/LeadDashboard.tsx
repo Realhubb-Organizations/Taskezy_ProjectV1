@@ -357,16 +357,24 @@ export default function LeadDashboard() {
     return upcoming.length > 0 ? `${upcoming[0].date} ${upcoming[0].time}` : "—";
   };
 
-  const adminRangeLeads = scopedLeads.filter(l => adminDateInRange(l.createdAtStr, adminDateRange, today));
+  // The Campaigns quick-filter (declared further below, alongside the
+  // dropdown's own state) narrows these same 7 stat cards down to whichever
+  // campaign(s) are selected — declared as a var here since adminCampaignFilter
+  // itself is defined later in this file alongside its dropdown state.
+  const adminCampaignScopedLeads = adminCampaignFilter.length === 0
+    ? scopedLeads
+    : scopedLeads.filter(l => !!l.campaign && adminCampaignFilter.includes(l.campaign));
+
+  const adminRangeLeads = adminCampaignScopedLeads.filter(l => adminDateInRange(l.createdAtStr, adminDateRange, today));
 
   const adminStatCards: { key: string; label: string; value: number; color: string }[] = [
     { key: "total", label: "Total Leads", value: adminRangeLeads.length, color: "text-slate-900" },
     { key: "new", label: "New Leads", value: adminRangeLeads.filter(l => l.status === "New Lead").length, color: "text-[#0084FF]" },
-    { key: "rnr", label: "RNR", value: scopedLeads.filter(l => l.status === "RNR").length, color: "text-[#FF0000]" },
-    { key: "callbacks", label: "Call Backs", value: scopedLeads.filter(l => l.status === "Call Back").length, color: "text-[#FF8C00]" },
-    { key: "followups", label: "Follow Ups", value: scopedLeads.filter(l => l.status === "Follow-ups").length, color: "text-[#0084FF]" },
-    { key: "sitevisit_sched", label: "Site Visit Scheduled", value: scopedLeads.filter(l => l.status === "Visit Schedule").length, color: "text-[#FF0000]" },
-    { key: "sitevisit_done", label: "Site Visit Done", value: scopedLeads.filter(l => l.status === "Site Visit").length, color: "text-[#015814]" }
+    { key: "rnr", label: "RNR", value: adminCampaignScopedLeads.filter(l => l.status === "RNR").length, color: "text-[#FF0000]" },
+    { key: "callbacks", label: "Call Backs", value: adminCampaignScopedLeads.filter(l => l.status === "Call Back").length, color: "text-[#FF8C00]" },
+    { key: "followups", label: "Follow Ups", value: adminCampaignScopedLeads.filter(l => l.status === "Follow-ups").length, color: "text-[#0084FF]" },
+    { key: "sitevisit_sched", label: "Site Visit Scheduled", value: adminCampaignScopedLeads.filter(l => l.status === "Visit Schedule").length, color: "text-[#FF0000]" },
+    { key: "sitevisit_done", label: "Site Visit Done", value: adminCampaignScopedLeads.filter(l => l.status === "Site Visit").length, color: "text-[#015814]" }
   ];
 
   const adminMetricPredicate: Record<string, (l: Lead) => boolean> = {
