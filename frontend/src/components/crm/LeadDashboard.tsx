@@ -533,9 +533,15 @@ export default function LeadDashboard() {
               </Link>
             </div>
 
-            {/* Main Leads Table Card */}
+            {/* Main Leads Table Card — the row area is height-capped with its
+                own vertical scroll (independent of the page scroll), so a
+                100-rows-per-page setting doesn't stretch the whole page;
+                pagination still moves between full pages of that size. Both
+                read from the same adminFilteredLeads/adminPageLeads, so the
+                "X Rows"/"a-b of c" footer always matches what's actually
+                scrollable. */}
             <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden">
-              <div className="overflow-x-auto">
+              <div className="overflow-auto max-h-[70vh]">
                 <table className="w-full text-left border-collapse table-fixed min-w-[1080px]">
                   <colgroup>
                     <col className="w-[150px]" />
@@ -547,7 +553,7 @@ export default function LeadDashboard() {
                     <col className="w-[120px]" />
                     <col className="w-[150px]" />
                   </colgroup>
-                  <thead>
+                  <thead className="sticky top-0 z-10 bg-white">
                     <tr className="border-b border-slate-200 text-xs font-bold text-slate-800">
                       <th className="px-4 py-2.5">
                         {adminSearchOpen ? (
