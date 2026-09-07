@@ -383,7 +383,45 @@ export default function LeadDashboard() {
 
   const adminTotalPages = Math.max(1, Math.ceil(adminFilteredLeads.length / adminRowsPerPage));
   const adminCurrentPage = Math.min(adminPage, adminTotalPages);
-  const adminPageLeads = adminFilteredLeads.slice((adminCurrentPage - 1) * adminRowsPerPage, adminCurrentPage * adminRowsPerPage);
+
+  // All rows render continuously in the scroll container (not just the
+  // current page's slice) so scrolling moves smoothly across page
+  // boundaries instead of stopping dead at the end of each page. Each
+  // page's first row is ref'd; scrolling past one updates adminPage (so the
+  // "a-b of c" label and Rows-per-page selector track where you actually
+  // are), and clicking a pagination arrow scrolls that page's first row to
+  // the top of the container — the two stay synced in both directions.
+  const adminScrollRef = useRef<HTMLDivElement>(null);
+  const adminPageRowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
+  const adminProgrammaticScroll = useRef(false);
+
+  const handleAdminTableScroll = () => {
+    if (adminProgrammaticScroll.current) return;
+    const container = adminScrollRef.current;
+    if (!container) return;
+    const scrollTop = container.scrollTop;
+    let current = 1;
+    for (let i = 0; i < adminPageRowRefs.current.length; i++) {
+      const row = adminPageRowRefs.current[i];
+      if (row && row.offsetTop - container.offsetTop <= scrollTop + 4) {
+        current = i + 1;
+      }
+    }
+    setAdminPage(prev => (prev !== current ? current : prev));
+  };
+
+  const goToAdminPage = (page: number) => {
+    const clamped = Math.max(1, Math.min(adminTotalPages, page));
+    setAdminPage(clamped);
+    const row = adminPageRowRefs.current[clamped - 1];
+    const container = adminScrollRef.current;
+    if (!row || !container) return;
+    adminProgrammaticScroll.current = true;
+    container.scrollTop = clamped === 1 ? 0 : row.offsetTop - container.offsetTop;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => { adminProgrammaticScroll.current = false; });
+    });
+  };
 
   // Real per-agent lead-quality breakdown for the Leads Analytics tab —
   // same categorization the stat cards above use, just grouped per agent.
@@ -541,7 +579,7 @@ export default function LeadDashboard() {
                 "X Rows"/"a-b of c" footer always matches what's actually
                 scrollable. */}
             <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden">
-              <div className="overflow-auto max-h-[70vh]">
+              <div ref={adminScrollRef} onScroll={handleAdminTableScroll} className="overflow-auto max-h-[70vh]">
                 <table className="w-full text-left border-collapse table-fixed min-w-[1080px]">
                   <colgroup>
                     <col className="w-[150px]" />
@@ -716,15 +754,18 @@ export default function LeadDashboard() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-xs">
-                    {adminPageLeads.length === 0 ? (
+                    {adminFilteredLeads.length === 0 ? (
                       <tr>
                         <td colSpan={8} className="px-4 py-8 text-center text-slate-400 font-semibold italic">
                           No leads match the current filters.
                         </td>
                       </tr>
                     ) : (
-                      adminPageLeads.map((l) => (
-                        <tr key={l.id} className="hover:bg-slate-50/60 transition-colors">
+                      (adminPageRowRefs.current = [], adminFilteredLeads.map((l, idx) => (
+                        <tr
+                          key={l.id}
+                          ref={idx % adminRowsPerPage === 0 ? (el) => { adminPageRowRefs.current[Math.floor(idx / adminRowsPerPage)] = el; } : undefined}
+                          className="hover:bg-slate-50/60 transition-colors">
                           <td className="px-4 py-3 align-top overflow-hidden">
                             <button
                               onClick={() => setSelectedLead(l)}
@@ -754,7 +795,7 @@ export default function LeadDashboard() {
                           <td className="px-4 py-3 text-slate-500 align-top truncate">{adminNextCallDateFor(l.id)}</td>
                           <td className="px-4 py-3 text-slate-700 font-medium align-top truncate" title={l.campaign || l.source || "—"}>{l.campaign || l.source || "—"}</td>
                         </tr>
-                      ))
+                      )))
                     )}
                   </tbody>
                 </table>
@@ -767,7 +808,15 @@ export default function LeadDashboard() {
                     Rows per page
                     <select
                       value={adminRowsPerPage}
-                      onChange={(e) => { setAdminRowsPerPage(Number(e.target.value)); setAdminPage(1); }}
+                      onChange={(e) => {
+                        adminProgrammaticScroll.current = true;
+                        setAdminRowsPerPage(Number(e.target.value));
+                        setAdminPage(1);
+                        adminScrollRef.current?.scrollTo(0, 0);
+                        requestAnimationFrame(() => {
+                          requestAnimationFrame(() => { adminProgrammaticScroll.current = false; });
+                        });
+                      }}
                       className="bg-slate-50 border border-slate-200 rounded px-1.5 py-1 font-bold text-slate-700 focus:outline-none"
                     >
                       {[10, 25, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
@@ -775,8 +824,8 @@ export default function LeadDashboard() {
                   </span>
                   <span>{adminFilteredLeads.length === 0 ? 0 : (adminCurrentPage - 1) * adminRowsPerPage + 1}-{Math.min(adminCurrentPage * adminRowsPerPage, adminFilteredLeads.length)} of {adminFilteredLeads.length}</span>
                   <div className="flex items-center gap-1">
-                    <button onClick={() => setAdminPage(p => Math.max(1, p - 1))} disabled={adminCurrentPage <= 1} className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed">‹</button>
-                    <button onClick={() => setAdminPage(p => Math.min(adminTotalPages, p + 1))} disabled={adminCurrentPage >= adminTotalPages} className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed">›</button>
+                    <button onClick={() => goToAdminPage(adminCurrentPage - 1)} disabled={adminCurrentPage <= 1} className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed">‹</button>
+                    <button onClick={() => goToAdminPage(adminCurrentPage + 1)} disabled={adminCurrentPage >= adminTotalPages} className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed">›</button>
                   </div>
                 </div>
               </div>
