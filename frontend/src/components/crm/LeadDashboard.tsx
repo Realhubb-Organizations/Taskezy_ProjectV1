@@ -339,22 +339,10 @@ export default function LeadDashboard() {
   const [customRangeStartDraft, setCustomRangeStartDraft] = useState("");
   const [customRangeEndDraft, setCustomRangeEndDraft] = useState("");
 
-  // Filter button → Settings panel for which table columns are shown —
-  // a body-portaled flyout anchored to the button itself (not a centered
-  // dialog), clamped to stay inside the viewport on narrow screens.
+  // Filter button → Settings panel for which table columns are shown — a
+  // full-height right-docked drawer (same pattern as the lead quick-view
+  // drawer elsewhere in this app), not a small anchored flyout.
   const [isColumnsSettingsOpen, setIsColumnsSettingsOpen] = useState(false);
-  const [columnsPanelPos, setColumnsPanelPos] = useState<{ top: number; left: number } | null>(null);
-  const filterBtnRef = useRef<HTMLButtonElement>(null);
-  const COLUMNS_PANEL_WIDTH = 320;
-
-  const openColumnsPanel = () => {
-    const rect = filterBtnRef.current?.getBoundingClientRect();
-    if (rect) {
-      const left = Math.min(rect.right - COLUMNS_PANEL_WIDTH, window.innerWidth - COLUMNS_PANEL_WIDTH - 16);
-      setColumnsPanelPos({ top: rect.bottom + 8, left: Math.max(16, left) });
-    }
-    setIsColumnsSettingsOpen(true);
-  };
 
   const [adminVisibleColumns, setAdminVisibleColumns] = useState<Record<AdminColumnKey, boolean>>(ADMIN_DEFAULT_VISIBLE_COLUMNS);
 
@@ -846,9 +834,8 @@ export default function LeadDashboard() {
                 )}
               </div>
               <button
-                ref={filterBtnRef}
                 type="button"
-                onClick={openColumnsPanel}
+                onClick={() => setIsColumnsSettingsOpen(true)}
                 className="flex items-center gap-2 border border-slate-200 bg-white rounded-lg px-3 py-1.5 text-xs text-slate-700 font-bold shadow-sm hover:bg-slate-50 transition-all"
               >
                 <Sliders className="h-4 w-4 text-blue-600" />
@@ -1230,18 +1217,15 @@ export default function LeadDashboard() {
           onUpdateStatus={handleUpdateLeadStatus}
         />
 
-        {/* Filter button's column-visibility Settings panel — a flyout
-            anchored to the button (like every other dropdown in this file),
-            not a centered dialog: no dark backdrop, just a click-outside
-            catcher, and clamped to the viewport width for narrow screens. */}
-        {isColumnsSettingsOpen && columnsPanelPos && createPortal(
-          <>
-            <div className="fixed inset-0 z-[90]" onClick={() => setIsColumnsSettingsOpen(false)} />
-            <div
-              className="fixed z-[100] w-80 max-w-[calc(100vw-2rem)] bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden animate-fade-in"
-              style={{ top: columnsPanelPos.top, left: columnsPanelPos.left }}
-            >
-              <div className="flex items-center justify-between px-5 pt-5 pb-3">
+        {/* Filter button's column-visibility Settings panel — a full-height
+            right-docked drawer (same pattern as the lead quick-view drawer
+            elsewhere in this app): no dark backdrop, the rest of the page
+            stays visible, closes on an invisible click-outside catcher. */}
+        {isColumnsSettingsOpen && createPortal(
+          <div className="fixed inset-0 z-[100]">
+            <div className="fixed inset-0" onClick={() => setIsColumnsSettingsOpen(false)} />
+            <div className="fixed inset-y-0 right-0 w-full max-w-sm bg-white border-l border-slate-200 shadow-2xl flex flex-col animate-slide-in">
+              <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-slate-100 shrink-0">
                 <h3 className="text-base font-extrabold text-slate-900">Settings</h3>
                 <button
                   onClick={() => setIsColumnsSettingsOpen(false)}
@@ -1250,7 +1234,7 @@ export default function LeadDashboard() {
                   <X className="h-4.5 w-4.5" />
                 </button>
               </div>
-              <div className="px-5 pb-5">
+              <div className="px-5 py-5 flex-1 overflow-y-auto">
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-xs font-extrabold text-slate-800">Columns</span>
                   <button
@@ -1283,7 +1267,7 @@ export default function LeadDashboard() {
                 </div>
               </div>
             </div>
-          </>,
+          </div>,
           document.body
         )}
       </div>
