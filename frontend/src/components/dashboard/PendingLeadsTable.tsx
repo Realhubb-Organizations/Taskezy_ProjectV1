@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { Search, ChevronDown, ChevronLeft, ChevronRight, Copy, Check, X } from "lucide-react";
 import { WhatsAppIcon, CallIcon } from "@/components/icons/ContactIcons";
 
@@ -48,9 +48,44 @@ export default function PendingLeadsTable({
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / rowsPerPage));
   const currentPage = Math.min(page, totalPages);
-  const pageRows = filteredRows.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
   const rangeStart = filteredRows.length === 0 ? 0 : (currentPage - 1) * rowsPerPage + 1;
   const rangeEnd = Math.min(currentPage * rowsPerPage, filteredRows.length);
+
+  // Rows render continuously in one scrollable container instead of being
+  // sliced per page — a scroll-spy tracks each page-boundary row's real DOM
+  // position to keep the page number and pagination controls synced with
+  // wherever the user has scrolled to, in both directions.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const pageRowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
+  const programmaticScroll = useRef(false);
+
+  const handleTableScroll = () => {
+    if (programmaticScroll.current) return;
+    const container = scrollRef.current;
+    if (!container) return;
+    const scrollTop = container.scrollTop;
+    let current = 1;
+    for (let i = 0; i < pageRowRefs.current.length; i++) {
+      const row = pageRowRefs.current[i];
+      if (row && row.offsetTop - container.offsetTop <= scrollTop + 4) {
+        current = i + 1;
+      }
+    }
+    setPage(prev => (prev !== current ? current : prev));
+  };
+
+  const goToPage = (target: number) => {
+    const clamped = Math.max(1, Math.min(totalPages, target));
+    setPage(clamped);
+    const row = pageRowRefs.current[clamped - 1];
+    const container = scrollRef.current;
+    if (!row || !container) return;
+    programmaticScroll.current = true;
+    container.scrollTop = clamped === 1 ? 0 : row.offsetTop - container.offsetTop;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => { programmaticScroll.current = false; });
+    });
+  };
 
   const toggleFilterValue = (list: string[], value: string, setList: (v: string[]) => void) => {
     setPage(1);
@@ -73,7 +108,7 @@ export default function PendingLeadsTable({
         <h3 className="text-sm font-extrabold text-slate-900">{title}</h3>
       </div>
 
-      <div className="overflow-x-auto">
+      <div ref={scrollRef} onScroll={handleTableScroll} className="overflow-auto max-h-[70vh]">
         <table className="w-full text-left border-collapse table-fixed min-w-[900px]">
           <colgroup>
             <col className="w-[130px]" />
@@ -170,15 +205,19 @@ export default function PendingLeadsTable({
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {pageRows.length === 0 ? (
+            {filteredRows.length === 0 ? (
               <tr>
                 <td colSpan={6} className="px-4 py-8 text-center text-slate-400 font-semibold italic text-xs">
                   {rows.length === 0 ? "No records in this range." : "No records match the current search/filters."}
                 </td>
               </tr>
             ) : (
-              pageRows.map(row => (
-                <tr key={row.id} className="hover:bg-slate-50/60 transition-colors text-xs">
+              (pageRowRefs.current = [], filteredRows.map((row, idx) => (
+                <tr
+                  key={row.id}
+                  ref={idx % rowsPerPage === 0 ? (el) => { pageRowRefs.current[Math.floor(idx / rowsPerPage)] = el; } : undefined}
+                  className="hover:bg-slate-50/60 transition-colors text-xs"
+                >
                   <td className="px-4 py-3 font-mono text-slate-700 truncate align-top">{row.time}</td>
                   <td className="px-4 py-3 align-top overflow-hidden">
                     {row.leadId && onViewLead ? (
@@ -223,7 +262,7 @@ export default function PendingLeadsTable({
                     </div>
                   </td>
                 </tr>
-              ))
+              )))
             )}
           </tbody>
         </table>
@@ -236,7 +275,15 @@ export default function PendingLeadsTable({
             Rows per page
             <select
               value={rowsPerPage}
-              onChange={(e) => { setRowsPerPage(Number(e.target.value)); setPage(1); }}
+              onChange={(e) => {
+                programmaticScroll.current = true;
+                setRowsPerPage(Number(e.target.value));
+                setPage(1);
+                scrollRef.current?.scrollTo(0, 0);
+                requestAnimationFrame(() => {
+                  requestAnimationFrame(() => { programmaticScroll.current = false; });
+                });
+              }}
               className="bg-slate-50 border border-slate-200 rounded px-1.5 py-1 font-bold text-slate-700 focus:outline-none"
             >
               {[10, 25, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
@@ -245,14 +292,14 @@ export default function PendingLeadsTable({
           <span>{rangeStart}-{rangeEnd} of {filteredRows.length}</span>
           <div className="flex items-center gap-1">
             <button
-              onClick={() => setPage(p => Math.max(1, p - 1))}
+              onClick={() => goToPage(currentPage - 1)}
               disabled={currentPage <= 1}
               className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
             >
               <ChevronLeft className="h-3.5 w-3.5" />
             </button>
             <button
-              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+              onClick={() => goToPage(currentPage + 1)}
               disabled={currentPage >= totalPages}
               className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
             >

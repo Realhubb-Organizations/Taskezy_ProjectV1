@@ -245,7 +245,41 @@ export default function CrmDashboardPage() {
   });
   const drillTotalPages = Math.max(1, Math.ceil(drillLeads.length / drillRowsPerPage));
   const drillCurrentPage = Math.min(drillPage, drillTotalPages);
-  const drillPageLeads = drillLeads.slice((drillCurrentPage - 1) * drillRowsPerPage, drillCurrentPage * drillRowsPerPage);
+  // Rows render continuously in one scrollable container instead of being
+  // sliced per page — a scroll-spy below tracks each page-boundary row's
+  // real DOM position to keep the page number and pagination controls in
+  // sync with wherever the user has scrolled to.
+  const drillScrollRef = useRef<HTMLDivElement>(null);
+  const drillPageRowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
+  const drillProgrammaticScroll = useRef(false);
+
+  const handleDrillTableScroll = () => {
+    if (drillProgrammaticScroll.current) return;
+    const container = drillScrollRef.current;
+    if (!container) return;
+    const scrollTop = container.scrollTop;
+    let current = 1;
+    for (let i = 0; i < drillPageRowRefs.current.length; i++) {
+      const row = drillPageRowRefs.current[i];
+      if (row && row.offsetTop - container.offsetTop <= scrollTop + 4) {
+        current = i + 1;
+      }
+    }
+    setDrillPage(prev => (prev !== current ? current : prev));
+  };
+
+  const goToDrillPage = (page: number) => {
+    const clamped = Math.max(1, Math.min(drillTotalPages, page));
+    setDrillPage(clamped);
+    const row = drillPageRowRefs.current[clamped - 1];
+    const container = drillScrollRef.current;
+    if (!row || !container) return;
+    drillProgrammaticScroll.current = true;
+    container.scrollTop = clamped === 1 ? 0 : row.offsetTop - container.offsetTop;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => { drillProgrammaticScroll.current = false; });
+    });
+  };
 
   // Real next-scheduled-call date, from the actual followup_calls queue —
   // "—" when no reminder was ever set for this lead, rather than a
@@ -445,7 +479,7 @@ export default function CrmDashboardPage() {
             </button>
           </div>
 
-          <div className="overflow-x-auto">
+          <div ref={drillScrollRef} onScroll={handleDrillTableScroll} className="overflow-auto max-h-[70vh]">
             <table className="w-full text-left border-collapse table-fixed min-w-[1080px]">
               <colgroup>
                 <col className="w-[150px]" />
@@ -605,15 +639,19 @@ export default function CrmDashboardPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-xs">
-                {drillPageLeads.length === 0 ? (
+                {drillLeads.length === 0 ? (
                   <tr>
                     <td colSpan={9} className="px-4 py-8 text-center text-slate-400 font-semibold italic">
                       No leads in this category for the selected date range.
                     </td>
                   </tr>
                 ) : (
-                  drillPageLeads.map((l) => (
-                    <tr key={l.id} className="hover:bg-slate-50/60 transition-colors">
+                  (drillPageRowRefs.current = [], drillLeads.map((l, idx) => (
+                    <tr
+                      key={l.id}
+                      ref={idx % drillRowsPerPage === 0 ? (el) => { drillPageRowRefs.current[Math.floor(idx / drillRowsPerPage)] = el; } : undefined}
+                      className="hover:bg-slate-50/60 transition-colors"
+                    >
                       <td className="px-4 py-3 align-top overflow-hidden">
                         <button
                           onClick={() => setQuickViewLead(l)}
@@ -661,7 +699,7 @@ export default function CrmDashboardPage() {
                         </a>
                       </td>
                     </tr>
-                  ))
+                  )))
                 )}
               </tbody>
             </table>
@@ -674,7 +712,15 @@ export default function CrmDashboardPage() {
                 Rows per page
                 <select
                   value={drillRowsPerPage}
-                  onChange={(e) => { setDrillRowsPerPage(Number(e.target.value)); setDrillPage(1); }}
+                  onChange={(e) => {
+                    drillProgrammaticScroll.current = true;
+                    setDrillRowsPerPage(Number(e.target.value));
+                    setDrillPage(1);
+                    drillScrollRef.current?.scrollTo(0, 0);
+                    requestAnimationFrame(() => {
+                      requestAnimationFrame(() => { drillProgrammaticScroll.current = false; });
+                    });
+                  }}
                   className="bg-slate-50 border border-slate-200 rounded px-1.5 py-1 font-bold text-slate-700 focus:outline-none"
                 >
                   {[10, 25, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
@@ -683,14 +729,14 @@ export default function CrmDashboardPage() {
               <span>{drillLeads.length === 0 ? 0 : (drillCurrentPage - 1) * drillRowsPerPage + 1}-{Math.min(drillCurrentPage * drillRowsPerPage, drillLeads.length)} of {drillLeads.length}</span>
               <div className="flex items-center gap-1">
                 <button
-                  onClick={() => setDrillPage(p => Math.max(1, p - 1))}
+                  onClick={() => goToDrillPage(drillCurrentPage - 1)}
                   disabled={drillCurrentPage <= 1}
                   className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
                 >
                   ‹
                 </button>
                 <button
-                  onClick={() => setDrillPage(p => Math.min(drillTotalPages, p + 1))}
+                  onClick={() => goToDrillPage(drillCurrentPage + 1)}
                   disabled={drillCurrentPage >= drillTotalPages}
                   className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
                 >
