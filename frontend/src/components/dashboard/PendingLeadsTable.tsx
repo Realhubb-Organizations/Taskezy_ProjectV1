@@ -203,22 +203,22 @@ export default function PendingLeadsTable({
                   <td className="px-4 py-3 text-slate-600 truncate align-top" title={row.feedback}>{row.feedback}</td>
                   <td className="px-4 py-3 text-slate-700 font-medium align-top truncate" title={row.property}>{row.property}</td>
                   <td className="px-4 py-3 align-top">
-                    <div className="flex items-center justify-end gap-2.5">
+                    <div className="flex items-center justify-end gap-1.5">
                       <a
                         href={`https://wa.me/${row.phone.replace(/[^0-9]/g, "")}`}
                         target="_blank"
                         rel="noreferrer"
-                        className="inline-flex items-center justify-center text-slate-900 hover:text-emerald-600 transition-colors shrink-0"
+                        className="inline-flex items-center justify-center h-7 w-7 rounded-lg bg-slate-100 text-slate-700 hover:bg-emerald-50 hover:text-emerald-600 transition-colors shrink-0"
                         title="WhatsApp"
                       >
-                        <WhatsAppIcon className="h-6 w-6" />
+                        <WhatsAppIcon className="h-4 w-4" />
                       </a>
                       <a
                         href={`tel:${row.phone}`}
-                        className="inline-flex items-center justify-center text-slate-900 hover:text-brand-700 transition-colors shrink-0"
+                        className="inline-flex items-center justify-center h-7 w-7 rounded-lg bg-slate-100 text-slate-700 hover:bg-brand-50 hover:text-brand-700 transition-colors shrink-0"
                         title="Call"
                       >
-                        <CallIcon className="h-4 w-4" />
+                        <CallIcon className="h-3.5 w-3.5" />
                       </a>
                     </div>
                   </td>

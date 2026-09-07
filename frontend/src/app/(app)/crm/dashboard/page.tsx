@@ -647,17 +647,17 @@ export default function CrmDashboardPage() {
                           href={`https://wa.me/${l.phone.replace(/[^0-9]/g, "")}`}
                           target="_blank"
                           rel="noreferrer"
-                          className="inline-flex items-center justify-center text-slate-900 hover:text-emerald-600 transition-colors"
+                          className="inline-flex items-center justify-center h-7 w-7 rounded-lg bg-slate-100 text-slate-700 hover:bg-emerald-50 hover:text-emerald-600 transition-colors"
                           title="WhatsApp"
                         >
-                          <WhatsAppIcon className="h-6 w-6" />
+                          <WhatsAppIcon className="h-4 w-4" />
                         </a>
                         <a
                           href={`tel:${l.phone}`}
-                          className="inline-flex items-center justify-center text-slate-900 hover:text-brand-700 transition-colors ml-2.5"
+                          className="inline-flex items-center justify-center h-7 w-7 rounded-lg bg-slate-100 text-slate-700 hover:bg-brand-50 hover:text-brand-700 transition-colors ml-1.5"
                           title="Call"
                         >
-                          <CallIcon className="h-4 w-4" />
+                          <CallIcon className="h-3.5 w-3.5" />
                         </a>
                       </td>
                     </tr>
