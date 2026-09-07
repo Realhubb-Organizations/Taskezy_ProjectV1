@@ -137,12 +137,12 @@ export default function AddLeadModal({
           below) is what normally keeps the header/tabs/footer pinned while
           only the form fields scroll. */}
       <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center overflow-y-auto p-0 sm:p-4">
-        <div className="w-full sm:max-w-lg h-[95vh] sm:h-auto sm:max-h-[90vh] my-0 sm:my-8 bg-white border-0 sm:border border-slate-200 rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-fade-in">
+        <div className="w-full sm:max-w-3xl h-[95vh] sm:h-auto sm:max-h-[90vh] my-0 sm:my-8 bg-white border-0 sm:border border-slate-200 rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-fade-in">
           {/* Header */}
           <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 bg-slate-50/50 shrink-0">
             <div>
               <h3 className="text-sm font-extrabold text-slate-805 flex items-center gap-1.5">
-                <Sparkles className="h-4.5 w-4.5 text-brand-600" />
+                <Sparkles className="h-4.5 w-4.5 text-[#0B1E6E]" />
                 Ingest CRM Leads Partition
               </h3>
               <p className="text-[10px] text-slate-400 mt-0.5">Register new properties buyers manually or bulk import lists.</p>
@@ -160,7 +160,7 @@ export default function AddLeadModal({
             <button
               onClick={() => setActiveTab("manual")}
               className={`flex-1 py-3 text-center border-b-2 transition-all ${
-                activeTab === "manual" ? "border-brand-500 text-brand-700 font-black" : "border-transparent hover:bg-slate-50/50"
+                activeTab === "manual" ? "border-[#0B1E6E] text-[#0B1E6E] font-black" : "border-transparent hover:bg-slate-50/50"
               }`}
             >
               Manual Ingestion Entry
@@ -168,7 +168,7 @@ export default function AddLeadModal({
             <button
               onClick={() => setActiveTab("bulk")}
               className={`flex-1 py-3 text-center border-b-2 transition-all ${
-                activeTab === "bulk" ? "border-brand-500 text-brand-700 font-black" : "border-transparent hover:bg-slate-50/50"
+                activeTab === "bulk" ? "border-[#0B1E6E] text-[#0B1E6E] font-black" : "border-transparent hover:bg-slate-50/50"
               }`}
             >
               Bulk Spreadsheet Upload
@@ -179,7 +179,9 @@ export default function AddLeadModal({
             /* MANUAL TAB */
             <form onSubmit={handleManualSubmit} className="flex-1 min-h-0 flex flex-col">
               <div className="flex-1 overflow-y-auto p-6 space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Horizontal 3-across grid on wide/PC screens, single column
+                    (naturally vertical) on narrower/mobile viewports. */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div className="space-y-1">
                     <label className="block text-[9px] font-bold text-slate-400 uppercase">Buyer Full Name</label>
                     <input
@@ -188,7 +190,7 @@ export default function AddLeadModal({
                       value={name}
                       onChange={(e) => setName(e.target.value)}
                       placeholder="e.g. Priyanth Kumar"
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:outline-none focus:bg-white focus:border-brand-500 transition-all shadow-sm"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:outline-none focus:bg-white focus:border-[#0B1E6E] transition-all shadow-sm"
                     />
                   </div>
                   <div className="space-y-1">
@@ -199,29 +201,25 @@ export default function AddLeadModal({
                       value={phone}
                       onChange={(e) => setPhone(e.target.value)}
                       placeholder="e.g. +91 9845012345"
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:outline-none focus:bg-white focus:border-brand-500 transition-all shadow-sm"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:outline-none focus:bg-white focus:border-[#0B1E6E] transition-all shadow-sm"
                     />
                   </div>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="block text-[9px] font-bold text-slate-400 uppercase">Email Address</label>
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="e.g. buyer@example.com"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:outline-none focus:bg-white focus:border-brand-500 transition-all shadow-sm"
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="block text-[9px] font-bold text-slate-400 uppercase">Email Address</label>
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="e.g. buyer@example.com"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:outline-none focus:bg-white focus:border-[#0B1E6E] transition-all shadow-sm"
+                    />
+                  </div>
                   <div className="space-y-1">
                     <label className="block text-[9px] font-bold text-slate-400 uppercase">Assigned Agent</label>
                     <select
                       value={agent}
                       onChange={(e) => setAgent(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:outline-none focus:bg-white focus:border-brand-500 transition-all"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:outline-none focus:bg-white focus:border-[#0B1E6E] transition-all"
                     >
                       {agentsList.map(ag => (
                         <option key={ag} value={ag}>{ag}</option>
@@ -233,7 +231,7 @@ export default function AddLeadModal({
                     <select
                       value={source}
                       onChange={(e) => setSource(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:outline-none focus:bg-white focus:border-brand-500 transition-all"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:outline-none focus:bg-white focus:border-[#0B1E6E] transition-all"
                     >
                       <option value="Meta Ads">Meta Ads</option>
                       <option value="Google Ads">Google Ads</option>
@@ -242,31 +240,29 @@ export default function AddLeadModal({
                       <option value="Direct Walkin">Direct Walkin</option>
                     </select>
                   </div>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="block text-[9px] font-bold text-slate-400 uppercase">Property</label>
-                  <select
-                    value={property}
-                    onChange={(e) => setProperty(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:outline-none focus:bg-white focus:border-brand-500 transition-all"
-                  >
-                    <option value="">Unassigned Project</option>
-                    {propertiesList.map(p => (
-                      <option key={p} value={p}>{p}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="block text-[9px] font-bold text-slate-400 uppercase">Internal Telemetry Notes</label>
-                  <textarea
-                    value={note}
-                    onChange={(e) => setNote(e.target.value)}
-                    placeholder="Include potential requirements (budget, BHK configuration, preferred site visit date)..."
-                    rows={3}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-semibold text-slate-700 placeholder-slate-400 focus:outline-none focus:bg-white focus:border-brand-500 transition-all shadow-sm"
-                  />
+                  <div className="space-y-1">
+                    <label className="block text-[9px] font-bold text-slate-400 uppercase">Property</label>
+                    <select
+                      value={property}
+                      onChange={(e) => setProperty(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:outline-none focus:bg-white focus:border-[#0B1E6E] transition-all"
+                    >
+                      <option value="">Unassigned Project</option>
+                      {propertiesList.map(p => (
+                        <option key={p} value={p}>{p}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1 sm:col-span-3">
+                    <label className="block text-[9px] font-bold text-slate-400 uppercase">Internal Telemetry Notes</label>
+                    <textarea
+                      value={note}
+                      onChange={(e) => setNote(e.target.value)}
+                      placeholder="Include potential requirements (budget, BHK configuration, preferred site visit date)..."
+                      rows={3}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-semibold text-slate-700 placeholder-slate-400 focus:outline-none focus:bg-white focus:border-[#0B1E6E] transition-all shadow-sm"
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -274,13 +270,13 @@ export default function AddLeadModal({
                 <button
                   type="button"
                   onClick={onClose}
-                  className="flex-1 bg-slate-100 border border-slate-200 text-slate-750 font-bold px-4 py-2.5 rounded-xl text-xs hover:bg-slate-200 transition-colors"
+                  className="flex-1 sm:flex-none sm:px-8 bg-slate-100 border border-slate-200 text-slate-750 font-bold px-4 py-2.5 rounded-xl text-xs hover:bg-slate-200 transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 bg-brand-700 hover:bg-brand-600 text-white font-bold px-4 py-2.5 rounded-xl text-xs transition-all shadow-md shadow-brand-700/10"
+                  className="flex-1 sm:flex-none sm:px-8 sm:ml-auto bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold px-4 py-2.5 rounded-xl text-xs transition-all shadow-md shadow-[#0B1E6E]/10"
                 >
                   Save Lead Profile
                 </button>
@@ -302,7 +298,7 @@ export default function AddLeadModal({
                       }}
                       className={`py-2 text-[10px] font-extrabold border rounded-xl transition-all ${
                         bulkMode === "project"
-                          ? "bg-brand-700 border-brand-700 text-white shadow-sm"
+                          ? "bg-[#0B1E6E] border-[#0B1E6E] text-white shadow-sm"
                           : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"
                       }`}
                     >
@@ -316,7 +312,7 @@ export default function AddLeadModal({
                       }}
                       className={`py-2 text-[10px] font-extrabold border rounded-xl transition-all ${
                         bulkMode === "agent"
-                          ? "bg-brand-700 border-brand-700 text-white shadow-sm"
+                          ? "bg-[#0B1E6E] border-[#0B1E6E] text-white shadow-sm"
                           : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"
                       }`}
                     >
@@ -357,7 +353,7 @@ export default function AddLeadModal({
                   onClick={() => fileInputRef.current?.click()}
                   className={`border-2 border-dashed rounded-2xl p-6 text-center transition-all cursor-pointer flex flex-col items-center justify-center space-y-2 ${
                     dragOver
-                      ? "border-brand-500 bg-brand-50/20"
+                      ? "border-[#0B1E6E] bg-[#0B1E6E]/5"
                       : uploadedFile
                         ? "border-emerald-500 bg-emerald-50/25"
                         : "border-slate-300 hover:border-slate-400 bg-white"
@@ -396,13 +392,13 @@ export default function AddLeadModal({
                 {/* Template Download & Instructions */}
                 <div className="flex flex-wrap justify-between items-center gap-2 text-xs py-2 bg-slate-50 border border-slate-200 rounded-xl px-4">
                   <div className="flex items-center gap-1.5 text-[9px] text-slate-500 font-bold">
-                    <Info className="h-3.5 w-3.5 text-brand-650 shrink-0" />
+                    <Info className="h-3.5 w-3.5 text-[#0B1E6E] shrink-0" />
                     <span>Sheet must contain: Name, Phone, Email</span>
                   </div>
                   <button
                     type="button"
                     onClick={triggerDownloadTemplate}
-                    className="inline-flex items-center gap-1 text-[9px] font-extrabold text-brand-700 hover:underline shrink-0"
+                    className="inline-flex items-center gap-1 text-[9px] font-extrabold text-[#0B1E6E] hover:underline shrink-0"
                   >
                     <Download className="h-3 w-3" />
                     Download Template
@@ -425,13 +421,13 @@ export default function AddLeadModal({
                 <button
                   type="button"
                   onClick={onClose}
-                  className="flex-1 bg-slate-100 border border-slate-200 text-slate-750 font-bold px-4 py-2.5 rounded-xl text-xs hover:bg-slate-200 transition-colors"
+                  className="flex-1 sm:flex-none sm:px-8 bg-slate-100 border border-slate-200 text-slate-750 font-bold px-4 py-2.5 rounded-xl text-xs hover:bg-slate-200 transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 bg-brand-700 hover:bg-brand-600 text-white font-bold px-4 py-2.5 rounded-xl text-xs transition-all shadow-md shadow-brand-700/10"
+                  className="flex-1 sm:flex-none sm:px-8 sm:ml-auto bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold px-4 py-2.5 rounded-xl text-xs transition-all shadow-md shadow-[#0B1E6E]/10"
                 >
                   Import Leads Database
                 </button>
