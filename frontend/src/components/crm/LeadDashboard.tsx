@@ -290,6 +290,15 @@ export default function LeadDashboard() {
   const [adminCampaignMenuPos, setAdminCampaignMenuPos] = useState<{ top: number; left: number } | null>(null);
   const adminCampaignBtnRef = useRef<HTMLButtonElement>(null);
 
+  // Top "Campaigns" quick-filter (next to Upload Leads) — a grouped dropdown
+  // splitting real campaigns by ad platform, distinct from the table column
+  // header's flat Campaign filter dropdown above.
+  const [adminCampaignsQuickMenuOpen, setAdminCampaignsQuickMenuOpen] = useState(false);
+  const [adminCampaignsQuickMenuPos, setAdminCampaignsQuickMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const adminCampaignsQuickBtnRef = useRef<HTMLButtonElement>(null);
+  const [adminCampaignsMetaOpen, setAdminCampaignsMetaOpen] = useState(true);
+  const [adminCampaignsGoogleOpen, setAdminCampaignsGoogleOpen] = useState(true);
+
   const DATE_RANGE_OPTIONS: { value: typeof adminDateRange; label: string }[] = [
     { value: "today", label: "Today" },
     { value: "yesterday", label: "Yesterday" },
@@ -372,6 +381,25 @@ export default function LeadDashboard() {
 
   const adminCampaignsList = Array.from(new Set(scopedLeads.map(l => l.campaign).filter(Boolean))) as string[];
   const adminAssignedOptions = Array.from(new Set(scopedLeads.map(l => l.assignedAgent).filter(Boolean)));
+
+  // Same ad-source keyword classification used by the Meta/Google sub-account
+  // breakdown above (source="Meta Ads"/"Google Ads") — reused here to split
+  // the real campaign list by platform for the grouped Campaigns dropdown.
+  const classifyCampaignPlatform = (campaign: string): "Meta" | "Google" | "Other" => {
+    const lead = scopedLeads.find(l => l.campaign === campaign);
+    const haystack = `${lead?.source || ""} ${campaign}`;
+    if (/meta|facebook|instagram/i.test(haystack)) return "Meta";
+    if (/google/i.test(haystack)) return "Google";
+    return "Other";
+  };
+  const adminMetaCampaigns = adminCampaignsList.filter(c => classifyCampaignPlatform(c) === "Meta");
+  const adminGoogleCampaigns = adminCampaignsList.filter(c => classifyCampaignPlatform(c) === "Google");
+  const adminOtherCampaigns = adminCampaignsList.filter(c => classifyCampaignPlatform(c) === "Other");
+
+  const toggleAdminCampaignFilter = (value: string) => {
+    setAdminPage(1);
+    setAdminCampaignFilter(prev => prev.includes(value) ? prev.filter(v => v !== value) : [...prev, value]);
+  };
 
   const adminFilteredLeads = (adminMetric ? adminRangeLeads.filter(adminMetricPredicate[adminMetric]) : adminRangeLeads).filter(l => {
     const matchesSearch = !adminSearch || l.name.toLowerCase().includes(adminSearch.toLowerCase()) || l.phone.includes(adminSearch);
@@ -463,14 +491,102 @@ export default function LeadDashboard() {
 
           {adminTab === "leads" && (
             <div className="flex items-center gap-3">
-              <select
-                value={adminCampaignFilter.length === 1 ? adminCampaignFilter[0] : "all"}
-                onChange={(e) => setAdminCampaignFilter(e.target.value === "all" ? [] : [e.target.value])}
-                className="bg-white border border-slate-200 rounded-lg px-4 py-2.5 text-xs text-slate-700 font-bold focus:outline-none appearance-none pr-8 cursor-pointer"
-              >
-                <option value="all">Campaigns</option>
-                {adminCampaignsList.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
+              <div className="relative">
+                <button
+                  ref={adminCampaignsQuickBtnRef}
+                  onClick={() => openPositionedMenu(adminCampaignsQuickBtnRef, setAdminCampaignsQuickMenuPos, setAdminCampaignsQuickMenuOpen, "left", 260)}
+                  className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-4 py-2.5 text-xs text-slate-700 font-bold focus:outline-none cursor-pointer"
+                >
+                  {adminCampaignFilter.length === 0
+                    ? "Campaigns"
+                    : adminCampaignFilter.length === 1
+                    ? adminCampaignFilter[0]
+                    : `${adminCampaignFilter.length} Campaigns`}
+                  <ChevronDown className={`h-3.5 w-3.5 text-slate-400 transition-transform ${adminCampaignsQuickMenuOpen ? "rotate-180" : ""}`} />
+                </button>
+                {adminCampaignsQuickMenuOpen && adminCampaignsQuickMenuPos && createPortal(
+                  <>
+                    <div className="fixed inset-0 z-[60]" onClick={() => setAdminCampaignsQuickMenuOpen(false)} />
+                    <div
+                      className="fixed z-[70] w-64 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 max-h-80 overflow-y-auto"
+                      style={{ top: adminCampaignsQuickMenuPos.top, left: adminCampaignsQuickMenuPos.left }}
+                    >
+                      {adminCampaignFilter.length > 0 && (
+                        <button
+                          onClick={() => { setAdminPage(1); setAdminCampaignFilter([]); }}
+                          className="w-full text-left px-3 py-1.5 text-[11px] font-bold text-brand-700 hover:bg-slate-50"
+                        >
+                          Clear selection
+                        </button>
+                      )}
+
+                      {/* Meta group */}
+                      <button
+                        onClick={() => setAdminCampaignsMetaOpen(o => !o)}
+                        className="w-full flex items-center justify-between px-3 py-2 text-xs font-bold text-slate-800 hover:bg-slate-50"
+                      >
+                        <span className="flex items-center gap-2">
+                          <img src="https://img.icons8.com/?size=100&id=wA5rN96FVDtq&format=png&color=000000" alt="Meta" className="h-4 w-4" />
+                          Meta
+                        </span>
+                        <ChevronDown className={`h-3 w-3 text-slate-400 transition-transform ${adminCampaignsMetaOpen ? "rotate-180" : ""}`} />
+                      </button>
+                      {adminCampaignsMetaOpen && (
+                        adminMetaCampaigns.length === 0 ? (
+                          <p className="pl-9 pr-3 py-1.5 text-[11px] text-slate-400 italic font-normal">No Meta campaigns yet</p>
+                        ) : (
+                          adminMetaCampaigns.map(c => (
+                            <label key={c} className="flex items-center gap-2 pl-9 pr-3 py-1.5 text-xs font-normal text-slate-700 hover:bg-slate-50 cursor-pointer">
+                              <input type="checkbox" checked={adminCampaignFilter.includes(c)} onChange={() => toggleAdminCampaignFilter(c)} />
+                              <span className="truncate">{c}</span>
+                            </label>
+                          ))
+                        )
+                      )}
+
+                      <div className="border-t border-slate-100 my-1" />
+
+                      {/* Google group */}
+                      <button
+                        onClick={() => setAdminCampaignsGoogleOpen(o => !o)}
+                        className="w-full flex items-center justify-between px-3 py-2 text-xs font-bold text-slate-800 hover:bg-slate-50"
+                      >
+                        <span className="flex items-center gap-2">
+                          <img src="https://img.icons8.com/?size=100&id=4hR4Ih04Je2t&format=png&color=000000" alt="Google" className="h-4 w-4" />
+                          Google
+                        </span>
+                        <ChevronDown className={`h-3 w-3 text-slate-400 transition-transform ${adminCampaignsGoogleOpen ? "rotate-180" : ""}`} />
+                      </button>
+                      {adminCampaignsGoogleOpen && (
+                        adminGoogleCampaigns.length === 0 ? (
+                          <p className="pl-9 pr-3 py-1.5 text-[11px] text-slate-400 italic font-normal">No Google campaigns yet</p>
+                        ) : (
+                          adminGoogleCampaigns.map(c => (
+                            <label key={c} className="flex items-center gap-2 pl-9 pr-3 py-1.5 text-xs font-normal text-slate-700 hover:bg-slate-50 cursor-pointer">
+                              <input type="checkbox" checked={adminCampaignFilter.includes(c)} onChange={() => toggleAdminCampaignFilter(c)} />
+                              <span className="truncate">{c}</span>
+                            </label>
+                          ))
+                        )
+                      )}
+
+                      {adminOtherCampaigns.length > 0 && (
+                        <>
+                          <div className="border-t border-slate-100 my-1" />
+                          <p className="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wide">Other</p>
+                          {adminOtherCampaigns.map(c => (
+                            <label key={c} className="flex items-center gap-2 px-3 py-1.5 text-xs font-normal text-slate-700 hover:bg-slate-50 cursor-pointer">
+                              <input type="checkbox" checked={adminCampaignFilter.includes(c)} onChange={() => toggleAdminCampaignFilter(c)} />
+                              <span className="truncate">{c}</span>
+                            </label>
+                          ))}
+                        </>
+                      )}
+                    </div>
+                  </>,
+                  document.body
+                )}
+              </div>
               <button
                 onClick={() => setIsAddOpen(true)}
                 className="inline-flex items-center gap-2 bg-[#0B1E6E] hover:bg-[#081650] text-white px-4 py-2.5 rounded-lg text-xs font-bold transition-all shadow-md cursor-pointer"
