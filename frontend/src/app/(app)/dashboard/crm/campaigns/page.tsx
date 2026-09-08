@@ -19,7 +19,9 @@ import {
   Building,
   Sliders,
   Minus,
-  Download
+  Download,
+  CirclePlus,
+  CircleMinus
 } from "lucide-react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine } from "recharts";
 
@@ -1207,8 +1209,6 @@ export default function AdminCampaignsPage() {
                       ) : (
                         propertyBreakdown.map(row => {
                           const isExpanded = expandedProperties.has(row.property);
-                          const colCount = 2 + (breakdownVisibleColumns.source ? 1 : 0) + 2
-                            + (breakdownVisibleColumns.cpl ? 1 : 0) + (breakdownVisibleColumns.qcpl ? 1 : 0) + (breakdownVisibleColumns.spend ? 1 : 0);
                           return (
                             <React.Fragment key={row.property}>
                               <tr className="hover:bg-slate-50/50 transition-colors">
@@ -1219,7 +1219,7 @@ export default function AdminCampaignsPage() {
                                     className="flex items-center gap-1.5 hover:text-[#0B1E6E] transition-colors"
                                   >
                                     {row.property}
-                                    <ChevronRight className={`h-3.5 w-3.5 text-slate-400 transition-transform ${isExpanded ? "rotate-90" : ""}`} />
+                                    {isExpanded ? <CircleMinus className="h-3.5 w-3.5 text-slate-400" /> : <CirclePlus className="h-3.5 w-3.5 text-slate-400" />}
                                   </button>
                                 </td>
                                 <td className="px-5 py-3">{row.campaigns.length}</td>
@@ -1231,37 +1231,29 @@ export default function AdminCampaignsPage() {
                                 {breakdownVisibleColumns.spend && <td className="px-5 py-3 font-semibold text-slate-800">{formatCurrency(row.spend)}</td>}
                               </tr>
                               {isExpanded && (
-                                <tr>
-                                  <td colSpan={colCount} className="px-5 pb-3 bg-slate-50/60">
-                                    <table className="w-full text-left border-collapse">
-                                      <thead>
-                                        <tr className="border-b border-slate-200 text-[10px] font-bold text-slate-500 uppercase">
-                                          <th className="py-2 pr-3">Campaign</th>
-                                          <th className="py-2 pr-3">Source</th>
-                                          <th className="py-2 pr-3">Total Leads</th>
-                                          <th className="py-2 pr-3">Qualified Leads</th>
-                                          <th className="py-2 pr-3">CPL</th>
-                                          <th className="py-2 pr-3">QCPL</th>
-                                          <th className="py-2 pr-3">Spend</th>
-                                        </tr>
-                                      </thead>
-                                      <tbody className="divide-y divide-slate-100">
-                                        {row.campaigns.map(c => (
-                                          <tr key={c.id}>
-                                            <td className="py-2 pr-3 font-semibold text-slate-800">{c.name}</td>
-                                            <td className="py-2 pr-3"><PlatformIcon platform={c.platform} /></td>
-                                            <td className="py-2 pr-3">{c.totalLeads}</td>
-                                            <td className="py-2 pr-3">{c.qualifiedLeads}</td>
-                                            <td className="py-2 pr-3">{c.cpl.toFixed(2)}</td>
-                                            <td className="py-2 pr-3">{computeCPL(c.spend, c.qualifiedLeads).toFixed(2)}</td>
-                                            <td className="py-2 pr-3">{formatCurrency(c.spend)}</td>
-                                          </tr>
-                                        ))}
-                                      </tbody>
-                                    </table>
-                                  </td>
+                                <tr className="bg-slate-50/50 text-[12px] font-bold text-slate-900">
+                                  <td className="px-5 py-2"></td>
+                                  <td className="px-5 py-2">Campaign</td>
+                                  {breakdownVisibleColumns.source && <td className="px-5 py-2">Source</td>}
+                                  <td className="px-5 py-2">Total Leads</td>
+                                  <td className="px-5 py-2">Qualified Leads</td>
+                                  {breakdownVisibleColumns.cpl && <td className="px-5 py-2">CPL</td>}
+                                  {breakdownVisibleColumns.qcpl && <td className="px-5 py-2">QCPL</td>}
+                                  {breakdownVisibleColumns.spend && <td className="px-5 py-2">Spend</td>}
                                 </tr>
                               )}
+                              {isExpanded && row.campaigns.map(c => (
+                                <tr key={c.id} className="bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                                  <td className="px-5 py-2.5"></td>
+                                  <td className="px-5 py-2.5 text-slate-700">{c.name}</td>
+                                  {breakdownVisibleColumns.source && <td className="px-5 py-2.5"><PlatformIcon platform={c.platform} /></td>}
+                                  <td className="px-5 py-2.5">{c.totalLeads}</td>
+                                  <td className="px-5 py-2.5">{c.qualifiedLeads}</td>
+                                  {breakdownVisibleColumns.cpl && <td className="px-5 py-2.5">{c.cpl.toFixed(2)}</td>}
+                                  {breakdownVisibleColumns.qcpl && <td className="px-5 py-2.5">{computeCPL(c.spend, c.qualifiedLeads).toFixed(2)}</td>}
+                                  {breakdownVisibleColumns.spend && <td className="px-5 py-2.5 font-semibold text-slate-800">{formatCurrency(c.spend)}</td>}
+                                </tr>
+                              ))}
                             </React.Fragment>
                           );
                         })
