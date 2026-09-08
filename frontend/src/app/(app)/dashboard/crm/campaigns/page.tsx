@@ -658,7 +658,7 @@ export default function AdminCampaignsPage() {
           <div className="fixed inset-0" onClick={() => setIsColumnsSettingsOpen(false)} />
           <div className="fixed inset-y-0 right-0 w-full max-w-sm bg-white border-l border-slate-200 shadow-2xl flex flex-col animate-slide-in">
             <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-slate-100 shrink-0">
-              <h3 className="text-base font-extrabold text-slate-900">Settings</h3>
+              <h3 className="text-base font-extrabold text-slate-900">Filter</h3>
               <button
                 onClick={() => setIsColumnsSettingsOpen(false)}
                 className="text-slate-400 hover:text-slate-700"
