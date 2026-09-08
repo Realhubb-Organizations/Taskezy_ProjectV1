@@ -674,7 +674,7 @@ export default function LeadDashboard() {
           }))
       : [];
     return { agentName, isManager, directReports, ...stats };
-  }).filter(row => row.total > 0 || row.directReports.some(d => d.total > 0));
+  }).filter(row => row.isManager && (row.total > 0 || row.directReports.some(d => d.total > 0)));
 
   const analyticsTotalPages = Math.max(1, Math.ceil(adminAgentBreakdown.length / analyticsRowsPerPage));
   const analyticsCurrentPage = Math.min(analyticsPage, analyticsTotalPages);
