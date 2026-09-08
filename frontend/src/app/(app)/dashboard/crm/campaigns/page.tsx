@@ -99,6 +99,35 @@ const CAMPAIGN_DEFAULT_VISIBLE_COLUMNS: Record<CampaignColumnKey, boolean> = {
   unqualifiedLeads: true, qualifiedLeads: true
 };
 
+// The Property/Status breakdown table's togglable columns — driven by its
+// own Filter button/drawer, same pattern as the Campaigns tab's Filter
+// drawer. "Date" and "Q Spend" have no real backing field/definition yet
+// (no per-campaign date, and no defined "qualified spend" formula), so
+// they honestly render "—" rather than inventing a number.
+type BreakdownColumnKey =
+  | "property" | "date" | "campaigns" | "qualifiedLeads" | "source" | "unqualifiedLeads"
+  | "totalLeads" | "spend" | "cpl" | "qSpend" | "qcpl" | "qualifiedPercent";
+
+const BREAKDOWN_COLUMNS: { key: BreakdownColumnKey; label: string; statusLabel?: string; propertyOnly?: boolean }[] = [
+  { key: "property", label: "Property", statusLabel: "Status" },
+  { key: "date", label: "Date" },
+  { key: "campaigns", label: "Campaigns" },
+  { key: "qualifiedLeads", label: "Qualified Leads" },
+  { key: "source", label: "Source", propertyOnly: true },
+  { key: "unqualifiedLeads", label: "Unqualified Leads" },
+  { key: "totalLeads", label: "Total Leads" },
+  { key: "spend", label: "Spend" },
+  { key: "cpl", label: "CPL" },
+  { key: "qSpend", label: "Q Spend" },
+  { key: "qcpl", label: "QCPL" },
+  { key: "qualifiedPercent", label: "Qualified %age" }
+];
+
+const BREAKDOWN_DEFAULT_VISIBLE_COLUMNS: Record<BreakdownColumnKey, boolean> = {
+  property: true, date: false, campaigns: true, qualifiedLeads: true, source: true, unqualifiedLeads: false,
+  totalLeads: true, spend: true, cpl: true, qSpend: false, qcpl: true, qualifiedPercent: false
+};
+
 // The custom date-range calendar pill — used both by the Campaigns tab's
 // toolbar and the Analytics tab's Property/Status toolbar, so both control
 // the exact same underlying date filter instead of drifting independently.
@@ -565,10 +594,20 @@ export default function AdminCampaignsPage() {
   const [breakdownCampaignMenuOpen, setBreakdownCampaignMenuOpen] = useState(false);
   const [breakdownCampaignMenuPos, setBreakdownCampaignMenuPos] = useState<{ top: number; left: number } | null>(null);
   const breakdownCampaignBtnRef = useRef<HTMLButtonElement>(null);
-  const [breakdownColumnsMenuOpen, setBreakdownColumnsMenuOpen] = useState(false);
-  const [breakdownColumnsMenuPos, setBreakdownColumnsMenuPos] = useState<{ top: number; left: number } | null>(null);
-  const breakdownColumnsBtnRef = useRef<HTMLButtonElement>(null);
-  const [breakdownVisibleColumns, setBreakdownVisibleColumns] = useState({ source: true, cpl: true, qcpl: true, spend: true });
+
+  // Filter button → full-height right-docked column drawer, same pattern as
+  // the Campaigns tab's own Filter drawer.
+  const [isBreakdownFilterOpen, setIsBreakdownFilterOpen] = useState(false);
+  const [breakdownVisibleColumns, setBreakdownVisibleColumns] = useState<Record<BreakdownColumnKey, boolean>>(BREAKDOWN_DEFAULT_VISIBLE_COLUMNS);
+  const toggleBreakdownColumn = (key: BreakdownColumnKey) => {
+    setBreakdownVisibleColumns(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+  const toggleSelectAllBreakdownColumns = () => {
+    const allOn = BREAKDOWN_COLUMNS.every(c => breakdownVisibleColumns[c.key]);
+    const next: Record<BreakdownColumnKey, boolean> = { ...breakdownVisibleColumns };
+    BREAKDOWN_COLUMNS.forEach(c => { next[c.key] = !allOn; });
+    setBreakdownVisibleColumns(next);
+  };
 
   // Campaign Deep Dive — every individual campaign, searchable by name and
   // filterable by Source (whatever platforms actually exist in the data).
@@ -585,7 +624,7 @@ export default function AdminCampaignsPage() {
   // closing on scroll is simpler and safer than re-measuring position live.
   useEffect(() => {
     const anyOpen = summaryDateMenuOpen || statusColumnMenuOpen || chartMetricMenuOpen
-      || typeGroupByMenuOpen || breakdownCampaignMenuOpen || breakdownColumnsMenuOpen || deepDiveSourceMenuOpen;
+      || typeGroupByMenuOpen || breakdownCampaignMenuOpen || deepDiveSourceMenuOpen;
     if (!anyOpen) return;
     const closeAll = () => {
       setSummaryDateMenuOpen(false);
@@ -593,12 +632,11 @@ export default function AdminCampaignsPage() {
       setChartMetricMenuOpen(false);
       setTypeGroupByMenuOpen(false);
       setBreakdownCampaignMenuOpen(false);
-      setBreakdownColumnsMenuOpen(false);
       setDeepDiveSourceMenuOpen(false);
     };
     window.addEventListener("scroll", closeAll, true);
     return () => window.removeEventListener("scroll", closeAll, true);
-  }, [summaryDateMenuOpen, statusColumnMenuOpen, chartMetricMenuOpen, typeGroupByMenuOpen, breakdownCampaignMenuOpen, breakdownColumnsMenuOpen, deepDiveSourceMenuOpen]);
+  }, [summaryDateMenuOpen, statusColumnMenuOpen, chartMetricMenuOpen, typeGroupByMenuOpen, breakdownCampaignMenuOpen, deepDiveSourceMenuOpen]);
 
   const deepDiveSourceOptions = useMemo(() => Array.from(new Set(campaignsList.map(c => c.platform))), [campaignsList]);
 
@@ -635,6 +673,7 @@ export default function AdminCampaignsPage() {
     return Object.entries(map).map(([property, campaigns]) => {
       const totalLeads = campaigns.reduce((acc, c) => acc + c.totalLeads, 0);
       const qualifiedLeads = campaigns.reduce((acc, c) => acc + c.qualifiedLeads, 0);
+      const unqualifiedLeads = campaigns.reduce((acc, c) => acc + c.unqualifiedLeads, 0);
       const spend = campaigns.reduce((acc, c) => acc + c.spend, 0);
       return {
         property,
@@ -642,6 +681,8 @@ export default function AdminCampaignsPage() {
         platforms: Array.from(new Set(campaigns.map(c => c.platform))),
         totalLeads,
         qualifiedLeads,
+        unqualifiedLeads,
+        qualifiedPercent: totalLeads > 0 ? (qualifiedLeads / totalLeads) * 100 : 0,
         cpl: computeCPL(spend, totalLeads),
         qcpl: computeCPL(spend, qualifiedLeads),
         spend
@@ -650,14 +691,15 @@ export default function AdminCampaignsPage() {
   }, [campaignsList, breakdownCampaignFilters]);
 
   const statusBreakdown = useMemo(() => {
-    const map: Record<string, { campaigns: number; totalLeads: number; qualifiedLeads: number; spend: number }> = {};
+    const map: Record<string, { campaigns: number; totalLeads: number; qualifiedLeads: number; unqualifiedLeads: number; spend: number }> = {};
     campaignsList
       .filter(c => breakdownCampaignFilters.length === 0 || breakdownCampaignFilters.includes(c.name))
       .forEach(c => {
-        if (!map[c.status]) map[c.status] = { campaigns: 0, totalLeads: 0, qualifiedLeads: 0, spend: 0 };
+        if (!map[c.status]) map[c.status] = { campaigns: 0, totalLeads: 0, qualifiedLeads: 0, unqualifiedLeads: 0, spend: 0 };
         map[c.status].campaigns += 1;
         map[c.status].totalLeads += c.totalLeads;
         map[c.status].qualifiedLeads += c.qualifiedLeads;
+        map[c.status].unqualifiedLeads += c.unqualifiedLeads;
         map[c.status].spend += c.spend;
       });
     return Object.entries(map).map(([status, d]) => ({
@@ -665,6 +707,8 @@ export default function AdminCampaignsPage() {
       campaigns: d.campaigns,
       totalLeads: d.totalLeads,
       qualifiedLeads: d.qualifiedLeads,
+      unqualifiedLeads: d.unqualifiedLeads,
+      qualifiedPercent: d.totalLeads > 0 ? (d.qualifiedLeads / d.totalLeads) * 100 : 0,
       cpl: computeCPL(d.spend, d.totalLeads),
       qcpl: computeCPL(d.spend, d.qualifiedLeads),
       spend: d.spend
@@ -1144,44 +1188,14 @@ export default function AdminCampaignsPage() {
                     document.body
                   )}
                 </div>
-                <div className="relative">
-                  <button
-                    type="button"
-                    ref={breakdownColumnsBtnRef}
-                    onClick={() => openPositionedMenu(breakdownColumnsBtnRef, setBreakdownColumnsMenuPos, setBreakdownColumnsMenuOpen, "right", 180)}
-                    className="flex items-center gap-1.5 bg-white border border-slate-300/80 rounded-xl px-3.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
-                  >
-                    <Sliders className="h-3.5 w-3.5 text-slate-500" />
-                    <span>Settings</span>
-                  </button>
-                  {breakdownColumnsMenuOpen && breakdownColumnsMenuPos && createPortal(
-                    <>
-                      <div className="fixed inset-0 z-[60]" onClick={() => setBreakdownColumnsMenuOpen(false)} />
-                      <div
-                        className="fixed z-[70] w-44 bg-white border border-slate-200 rounded-xl shadow-lg py-2 px-3 space-y-1.5 text-xs font-semibold"
-                        style={{ top: breakdownColumnsMenuPos.top, left: breakdownColumnsMenuPos.left }}
-                      >
-                        {([
-                          { key: "source" as const, label: "Source", hideForStatus: true },
-                          { key: "cpl" as const, label: "CPL" },
-                          { key: "qcpl" as const, label: "QCPL" },
-                          { key: "spend" as const, label: "Spend" }
-                        ]).filter(c => !(c.hideForStatus && breakdownTab === "Status")).map(c => (
-                          <label key={c.key} className="flex items-center gap-2 py-1 cursor-pointer text-slate-700">
-                            <input
-                              type="checkbox"
-                              checked={breakdownVisibleColumns[c.key]}
-                              onChange={() => setBreakdownVisibleColumns(prev => ({ ...prev, [c.key]: !prev[c.key] }))}
-                              className="h-3.5 w-3.5 rounded border-slate-300 text-[#0B1E6E] focus:ring-0 focus:ring-offset-0"
-                            />
-                            {c.label}
-                          </label>
-                        ))}
-                      </div>
-                    </>,
-                    document.body
-                  )}
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsBreakdownFilterOpen(true)}
+                  className="flex items-center gap-2 border border-slate-300/80 bg-white rounded-xl px-3.5 py-1.5 text-xs text-slate-700 font-semibold hover:bg-slate-50 shadow-2xs transition-colors"
+                >
+                  <Sliders className="h-3.5 w-3.5 text-blue-600" />
+                  Filter
+                </button>
               </div>
             </div>
 
@@ -1191,20 +1205,24 @@ export default function AdminCampaignsPage() {
                   <>
                     <thead className="sticky top-0 z-10 bg-white">
                       <tr className="border-b border-slate-200/80 text-[12px] font-bold text-slate-900">
-                        <th className="px-5 py-3">Property</th>
-                        <th className="px-5 py-3 whitespace-nowrap">Campaigns</th>
+                        {breakdownVisibleColumns.property && <th className="px-5 py-3">Property</th>}
+                        {breakdownVisibleColumns.date && <th className="px-5 py-3 whitespace-nowrap">Date</th>}
+                        {breakdownVisibleColumns.campaigns && <th className="px-5 py-3 whitespace-nowrap">Campaigns</th>}
                         {breakdownVisibleColumns.source && <th className="px-5 py-3 whitespace-nowrap">Source</th>}
-                        <th className="px-5 py-3 whitespace-nowrap">Total Leads</th>
-                        <th className="px-5 py-3 whitespace-nowrap">Qualified Leads</th>
+                        {breakdownVisibleColumns.totalLeads && <th className="px-5 py-3 whitespace-nowrap">Total Leads</th>}
+                        {breakdownVisibleColumns.qualifiedLeads && <th className="px-5 py-3 whitespace-nowrap">Qualified Leads</th>}
+                        {breakdownVisibleColumns.unqualifiedLeads && <th className="px-5 py-3 whitespace-nowrap">Unqualified Leads</th>}
+                        {breakdownVisibleColumns.qualifiedPercent && <th className="px-5 py-3 whitespace-nowrap">Qualified %age</th>}
                         {breakdownVisibleColumns.cpl && <th className="px-5 py-3 whitespace-nowrap">CPL</th>}
                         {breakdownVisibleColumns.qcpl && <th className="px-5 py-3 whitespace-nowrap">QCPL</th>}
                         {breakdownVisibleColumns.spend && <th className="px-5 py-3 whitespace-nowrap">Spend</th>}
+                        {breakdownVisibleColumns.qSpend && <th className="px-5 py-3 whitespace-nowrap">Q Spend</th>}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-[12px] font-medium text-slate-700">
                       {propertyBreakdown.length === 0 ? (
                         <tr>
-                          <td colSpan={8} className="px-5 py-8 text-center text-slate-400 italic">No campaign/ad-spend data yet.</td>
+                          <td colSpan={BREAKDOWN_COLUMNS.filter(c => breakdownVisibleColumns[c.key]).length || 1} className="px-5 py-8 text-center text-slate-400 italic">No campaign/ad-spend data yet.</td>
                         </tr>
                       ) : (
                         propertyBreakdown.map(row => {
@@ -1212,48 +1230,65 @@ export default function AdminCampaignsPage() {
                           return (
                             <React.Fragment key={row.property}>
                               <tr className="hover:bg-slate-50/50 transition-colors">
-                                <td className="px-5 py-3 text-slate-900 font-semibold">
-                                  <button
-                                    type="button"
-                                    onClick={() => togglePropertyExpanded(row.property)}
-                                    className="flex items-center gap-1.5 hover:text-[#0B1E6E] transition-colors"
-                                  >
-                                    {row.property}
-                                    {isExpanded ? <CircleMinus className="h-3.5 w-3.5 text-slate-400" /> : <CirclePlus className="h-3.5 w-3.5 text-slate-400" />}
-                                  </button>
-                                </td>
-                                <td className="px-5 py-3">{row.campaigns.length}</td>
+                                {breakdownVisibleColumns.property && (
+                                  <td className="px-5 py-3 text-slate-900 font-semibold">
+                                    <button
+                                      type="button"
+                                      onClick={() => togglePropertyExpanded(row.property)}
+                                      className="flex items-center gap-1.5 hover:text-[#0B1E6E] transition-colors"
+                                    >
+                                      {row.property}
+                                      {isExpanded ? <CircleMinus className="h-3.5 w-3.5 text-slate-400" /> : <CirclePlus className="h-3.5 w-3.5 text-slate-400" />}
+                                    </button>
+                                  </td>
+                                )}
+                                {breakdownVisibleColumns.date && <td className="px-5 py-3 text-slate-300" title="Not tracked yet — no per-campaign date field ingested">—</td>}
+                                {breakdownVisibleColumns.campaigns && <td className="px-5 py-3">{row.campaigns.length}</td>}
                                 {breakdownVisibleColumns.source && <td className="px-5 py-3"><PlatformIcons platforms={row.platforms} /></td>}
-                                <td className="px-5 py-3">{row.totalLeads}</td>
-                                <td className="px-5 py-3">{row.qualifiedLeads}</td>
+                                {breakdownVisibleColumns.totalLeads && <td className="px-5 py-3">{row.totalLeads}</td>}
+                                {breakdownVisibleColumns.qualifiedLeads && <td className="px-5 py-3">{row.qualifiedLeads}</td>}
+                                {breakdownVisibleColumns.unqualifiedLeads && <td className="px-5 py-3">{row.unqualifiedLeads}</td>}
+                                {breakdownVisibleColumns.qualifiedPercent && <td className="px-5 py-3">{row.qualifiedPercent.toFixed(1)}%</td>}
                                 {breakdownVisibleColumns.cpl && <td className="px-5 py-3">{row.cpl.toFixed(2)}</td>}
                                 {breakdownVisibleColumns.qcpl && <td className="px-5 py-3">{row.qcpl.toFixed(2)}</td>}
                                 {breakdownVisibleColumns.spend && <td className="px-5 py-3 font-semibold text-slate-800">{formatCurrency(row.spend)}</td>}
+                                {breakdownVisibleColumns.qSpend && <td className="px-5 py-3 text-slate-300" title="Not tracked yet — no qualified-spend field defined">—</td>}
                               </tr>
                               {isExpanded && (
                                 <tr className="bg-slate-50/50 text-[12px] font-bold text-slate-900">
-                                  <td className="px-5 py-2"></td>
-                                  <td className="px-5 py-2">Campaign</td>
+                                  {breakdownVisibleColumns.property && <td className="px-5 py-2">Campaign</td>}
+                                  {breakdownVisibleColumns.date && <td className="px-5 py-2"></td>}
+                                  {breakdownVisibleColumns.campaigns && <td className="px-5 py-2"></td>}
                                   {breakdownVisibleColumns.source && <td className="px-5 py-2">Source</td>}
-                                  <td className="px-5 py-2">Total Leads</td>
-                                  <td className="px-5 py-2">Qualified Leads</td>
+                                  {breakdownVisibleColumns.totalLeads && <td className="px-5 py-2">Total Leads</td>}
+                                  {breakdownVisibleColumns.qualifiedLeads && <td className="px-5 py-2">Qualified Leads</td>}
+                                  {breakdownVisibleColumns.unqualifiedLeads && <td className="px-5 py-2">Unqualified Leads</td>}
+                                  {breakdownVisibleColumns.qualifiedPercent && <td className="px-5 py-2">Qualified %age</td>}
                                   {breakdownVisibleColumns.cpl && <td className="px-5 py-2">CPL</td>}
                                   {breakdownVisibleColumns.qcpl && <td className="px-5 py-2">QCPL</td>}
                                   {breakdownVisibleColumns.spend && <td className="px-5 py-2">Spend</td>}
+                                  {breakdownVisibleColumns.qSpend && <td className="px-5 py-2"></td>}
                                 </tr>
                               )}
-                              {isExpanded && row.campaigns.map(c => (
-                                <tr key={c.id} className="bg-slate-50/50 hover:bg-slate-50 transition-colors">
-                                  <td className="px-5 py-2.5"></td>
-                                  <td className="px-5 py-2.5 text-slate-700">{c.name}</td>
-                                  {breakdownVisibleColumns.source && <td className="px-5 py-2.5"><PlatformIcon platform={c.platform} /></td>}
-                                  <td className="px-5 py-2.5">{c.totalLeads}</td>
-                                  <td className="px-5 py-2.5">{c.qualifiedLeads}</td>
-                                  {breakdownVisibleColumns.cpl && <td className="px-5 py-2.5">{c.cpl.toFixed(2)}</td>}
-                                  {breakdownVisibleColumns.qcpl && <td className="px-5 py-2.5">{computeCPL(c.spend, c.qualifiedLeads).toFixed(2)}</td>}
-                                  {breakdownVisibleColumns.spend && <td className="px-5 py-2.5 font-semibold text-slate-800">{formatCurrency(c.spend)}</td>}
-                                </tr>
-                              ))}
+                              {isExpanded && row.campaigns.map(c => {
+                                const cQualifiedPercent = c.totalLeads > 0 ? (c.qualifiedLeads / c.totalLeads) * 100 : 0;
+                                return (
+                                  <tr key={c.id} className="bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                                    {breakdownVisibleColumns.property && <td className="px-5 py-2.5 text-slate-700">{c.name}</td>}
+                                    {breakdownVisibleColumns.date && <td className="px-5 py-2.5 text-slate-300">—</td>}
+                                    {breakdownVisibleColumns.campaigns && <td className="px-5 py-2.5"></td>}
+                                    {breakdownVisibleColumns.source && <td className="px-5 py-2.5"><PlatformIcon platform={c.platform} /></td>}
+                                    {breakdownVisibleColumns.totalLeads && <td className="px-5 py-2.5">{c.totalLeads}</td>}
+                                    {breakdownVisibleColumns.qualifiedLeads && <td className="px-5 py-2.5">{c.qualifiedLeads}</td>}
+                                    {breakdownVisibleColumns.unqualifiedLeads && <td className="px-5 py-2.5">{c.unqualifiedLeads}</td>}
+                                    {breakdownVisibleColumns.qualifiedPercent && <td className="px-5 py-2.5">{cQualifiedPercent.toFixed(1)}%</td>}
+                                    {breakdownVisibleColumns.cpl && <td className="px-5 py-2.5">{c.cpl.toFixed(2)}</td>}
+                                    {breakdownVisibleColumns.qcpl && <td className="px-5 py-2.5">{computeCPL(c.spend, c.qualifiedLeads).toFixed(2)}</td>}
+                                    {breakdownVisibleColumns.spend && <td className="px-5 py-2.5 font-semibold text-slate-800">{formatCurrency(c.spend)}</td>}
+                                    {breakdownVisibleColumns.qSpend && <td className="px-5 py-2.5 text-slate-300">—</td>}
+                                  </tr>
+                                );
+                              })}
                             </React.Fragment>
                           );
                         })
@@ -1264,30 +1299,38 @@ export default function AdminCampaignsPage() {
                   <>
                     <thead className="sticky top-0 z-10 bg-white">
                       <tr className="border-b border-slate-200/80 text-[12px] font-bold text-slate-900">
-                        <th className="px-5 py-3">Status</th>
-                        <th className="px-5 py-3 whitespace-nowrap">Campaigns</th>
-                        <th className="px-5 py-3 whitespace-nowrap">Total Leads</th>
-                        <th className="px-5 py-3 whitespace-nowrap">Qualified Leads</th>
+                        {breakdownVisibleColumns.property && <th className="px-5 py-3">Status</th>}
+                        {breakdownVisibleColumns.date && <th className="px-5 py-3 whitespace-nowrap">Date</th>}
+                        {breakdownVisibleColumns.campaigns && <th className="px-5 py-3 whitespace-nowrap">Campaigns</th>}
+                        {breakdownVisibleColumns.totalLeads && <th className="px-5 py-3 whitespace-nowrap">Total Leads</th>}
+                        {breakdownVisibleColumns.qualifiedLeads && <th className="px-5 py-3 whitespace-nowrap">Qualified Leads</th>}
+                        {breakdownVisibleColumns.unqualifiedLeads && <th className="px-5 py-3 whitespace-nowrap">Unqualified Leads</th>}
+                        {breakdownVisibleColumns.qualifiedPercent && <th className="px-5 py-3 whitespace-nowrap">Qualified %age</th>}
                         {breakdownVisibleColumns.cpl && <th className="px-5 py-3 whitespace-nowrap">CPL</th>}
                         {breakdownVisibleColumns.qcpl && <th className="px-5 py-3 whitespace-nowrap">QCPL</th>}
                         {breakdownVisibleColumns.spend && <th className="px-5 py-3 whitespace-nowrap">Spend</th>}
+                        {breakdownVisibleColumns.qSpend && <th className="px-5 py-3 whitespace-nowrap">Q Spend</th>}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-[12px] font-medium text-slate-700">
                       {statusBreakdown.length === 0 ? (
                         <tr>
-                          <td colSpan={7} className="px-5 py-8 text-center text-slate-400 italic">No campaign data yet.</td>
+                          <td colSpan={BREAKDOWN_COLUMNS.filter(c => !c.propertyOnly && breakdownVisibleColumns[c.key]).length || 1} className="px-5 py-8 text-center text-slate-400 italic">No campaign data yet.</td>
                         </tr>
                       ) : (
                         statusBreakdown.map(row => (
                           <tr key={row.status} className="hover:bg-slate-50/50 transition-colors">
-                            <td className="px-5 py-3 text-slate-900 font-semibold">{row.status}</td>
-                            <td className="px-5 py-3">{row.campaigns}</td>
-                            <td className="px-5 py-3">{row.totalLeads}</td>
-                            <td className="px-5 py-3">{row.qualifiedLeads}</td>
+                            {breakdownVisibleColumns.property && <td className="px-5 py-3 text-slate-900 font-semibold">{row.status}</td>}
+                            {breakdownVisibleColumns.date && <td className="px-5 py-3 text-slate-300" title="Not tracked yet — no per-campaign date field ingested">—</td>}
+                            {breakdownVisibleColumns.campaigns && <td className="px-5 py-3">{row.campaigns}</td>}
+                            {breakdownVisibleColumns.totalLeads && <td className="px-5 py-3">{row.totalLeads}</td>}
+                            {breakdownVisibleColumns.qualifiedLeads && <td className="px-5 py-3">{row.qualifiedLeads}</td>}
+                            {breakdownVisibleColumns.unqualifiedLeads && <td className="px-5 py-3">{row.unqualifiedLeads}</td>}
+                            {breakdownVisibleColumns.qualifiedPercent && <td className="px-5 py-3">{row.qualifiedPercent.toFixed(1)}%</td>}
                             {breakdownVisibleColumns.cpl && <td className="px-5 py-3">{row.cpl.toFixed(2)}</td>}
                             {breakdownVisibleColumns.qcpl && <td className="px-5 py-3">{row.qcpl.toFixed(2)}</td>}
                             {breakdownVisibleColumns.spend && <td className="px-5 py-3 font-semibold text-slate-800">{formatCurrency(row.spend)}</td>}
+                            {breakdownVisibleColumns.qSpend && <td className="px-5 py-3 text-slate-300" title="Not tracked yet — no qualified-spend field defined">—</td>}
                           </tr>
                         ))
                       )}
@@ -1297,6 +1340,57 @@ export default function AdminCampaignsPage() {
               </table>
             </div>
           </div>
+
+          {/* Filter button's column-visibility drawer for the Property/Status
+              breakdown table — a full-height right-docked drawer, same
+              pattern as the Campaigns tab's own Filter drawer. */}
+          {isBreakdownFilterOpen && createPortal(
+            <div className="fixed inset-0 z-[100]">
+              <div className="fixed inset-0" onClick={() => setIsBreakdownFilterOpen(false)} />
+              <div className="fixed inset-y-0 right-0 w-full max-w-sm bg-white border-l border-slate-200 shadow-2xl flex flex-col animate-slide-in">
+                <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-slate-100 shrink-0">
+                  <h3 className="text-base font-extrabold text-slate-900">Filter</h3>
+                  <button onClick={() => setIsBreakdownFilterOpen(false)} className="text-slate-400 hover:text-slate-700">
+                    <X className="h-4.5 w-4.5" />
+                  </button>
+                </div>
+                <div className="px-5 py-5 flex-1 overflow-y-auto">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-xs font-extrabold text-slate-800">Columns</span>
+                    <button
+                      type="button"
+                      onClick={toggleSelectAllBreakdownColumns}
+                      className="flex items-center gap-1 text-[11px] font-bold text-slate-500 hover:text-[#0B1E6E]"
+                    >
+                      <Minus className="h-3 w-3" />
+                      Select All
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    {BREAKDOWN_COLUMNS.filter(c => !(c.propertyOnly && breakdownTab === "Status")).map(c => {
+                      const isOn = breakdownVisibleColumns[c.key];
+                      const label = c.key === "property" && breakdownTab === "Status" ? (c.statusLabel || c.label) : c.label;
+                      return (
+                        <button
+                          key={c.key}
+                          type="button"
+                          onClick={() => toggleBreakdownColumn(c.key)}
+                          className={`text-left pl-3 pr-2.5 py-2.5 text-xs rounded-lg border transition-colors truncate ${
+                            isOn
+                              ? "border-slate-200 border-l-[3px] border-l-[#0B1E6E] font-extrabold text-slate-900"
+                              : "border-slate-200 font-semibold text-slate-400 hover:text-slate-600 hover:bg-slate-50"
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
 
           {/* Campaign Deep Dive — every individual campaign, not aggregated
               by property/status like the table above. "Ad Set Name" and
