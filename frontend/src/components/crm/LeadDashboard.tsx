@@ -1322,23 +1322,23 @@ export default function LeadDashboard() {
         ) : (
           /* Leads Analytics tab — real per-agent lead-quality breakdown */
           <div className="space-y-4">
-            <div className="bg-slate-100/70 border border-slate-200/60 rounded-2xl p-4">
-              <div className="flex flex-wrap items-center justify-center gap-2">
+            <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden">
+              <div className="flex flex-wrap items-center justify-end gap-2.5 p-4 border-b border-slate-100">
                 <button
                   type="button"
                   onClick={handleExportAnalytics}
                   title="Export as CSV"
-                  className="h-9 w-9 shrink-0 flex items-center justify-center bg-white border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 shadow-sm transition-colors"
+                  className="h-10 w-10 shrink-0 flex items-center justify-center bg-white border border-slate-200 rounded-xl text-[#0B1E6E] hover:bg-slate-50 shadow-sm transition-colors"
                 >
-                  <Download className="h-4 w-4" />
+                  <Download className="h-4.5 w-4.5" />
                 </button>
                 <button
                   type="button"
                   onClick={handleResetAnalyticsFilters}
                   title="Reset filters"
-                  className="h-9 w-9 shrink-0 flex items-center justify-center bg-white border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 shadow-sm transition-colors"
+                  className="h-10 w-10 shrink-0 flex items-center justify-center bg-white border border-slate-200 rounded-xl text-[#0B1E6E] hover:bg-slate-50 shadow-sm transition-colors"
                 >
-                  <Sliders className="h-4 w-4" />
+                  <Sliders className="h-4.5 w-4.5" />
                 </button>
 
                 {/* Date range — same custom Start/End picker pattern as the Leads tab, fully independent state */}
@@ -1361,13 +1361,12 @@ export default function LeadDashboard() {
                       setAnalyticsRangeEndDraft(analyticsCustomRange?.end || "");
                       setAnalyticsCalendarOpen(o => !o);
                     }}
-                    className="h-9 flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 text-xs text-slate-700 font-bold shadow-sm hover:bg-slate-50 transition-all"
+                    className="h-10 flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-4 text-xs text-slate-700 font-bold shadow-sm hover:bg-slate-50 transition-all whitespace-nowrap"
                   >
-                    <Calendar className="h-4 w-4 text-blue-600" />
+                    <Calendar className="h-4 w-4 text-blue-600 shrink-0" />
                     {analyticsDateRange === "custom" && analyticsCustomRange
                       ? `${analyticsCustomRange.start} - ${analyticsCustomRange.end}`
                       : DATE_RANGE_OPTIONS.find(o => o.value === analyticsDateRange)?.label ?? "Custom Range"}
-                    <ChevronDown className={`h-3.5 w-3.5 text-slate-400 transition-transform ${analyticsCalendarOpen ? "rotate-180" : ""}`} />
                   </button>
                   {analyticsCalendarOpen && analyticsCalendarPos && createPortal(
                     <>
@@ -1449,7 +1448,7 @@ export default function LeadDashboard() {
                     ref={analyticsMemberBtnRef}
                     type="button"
                     onClick={() => openPositionedMenu(analyticsMemberBtnRef, setAnalyticsMemberMenuPos, setAnalyticsMemberMenuOpen, "left", 200)}
-                    className="h-9 flex items-center gap-1.5 bg-white border border-slate-200 rounded-lg px-3 text-xs text-slate-700 font-bold shadow-sm hover:bg-slate-50 transition-all"
+                    className="h-10 flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-4 text-xs text-slate-700 font-bold shadow-sm hover:bg-slate-50 transition-all whitespace-nowrap"
                   >
                     {analyticsMemberFilter.length === 0 ? "Member" : analyticsMemberFilter.length === 1 ? analyticsMemberFilter[0] : `${analyticsMemberFilter.length} Members`}
                     <ChevronDown className={`h-3.5 w-3.5 text-slate-400 transition-transform ${analyticsMemberMenuOpen ? "rotate-180" : ""}`} />
@@ -1490,7 +1489,7 @@ export default function LeadDashboard() {
                     ref={analyticsPropertyBtnRef}
                     type="button"
                     onClick={() => openPositionedMenu(analyticsPropertyBtnRef, setAnalyticsPropertyMenuPos, setAnalyticsPropertyMenuOpen, "left", 200)}
-                    className="h-9 flex items-center gap-1.5 bg-white border border-slate-200 rounded-lg px-3 text-xs text-slate-700 font-bold shadow-sm hover:bg-slate-50 transition-all"
+                    className="h-10 flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-4 text-xs text-slate-700 font-bold shadow-sm hover:bg-slate-50 transition-all whitespace-nowrap"
                   >
                     {analyticsPropertyFilter.length === 0 ? "Property" : analyticsPropertyFilter.length === 1 ? analyticsPropertyFilter[0] : `${analyticsPropertyFilter.length} Properties`}
                     <ChevronDown className={`h-3.5 w-3.5 text-slate-400 transition-transform ${analyticsPropertyMenuOpen ? "rotate-180" : ""}`} />
@@ -1531,7 +1530,7 @@ export default function LeadDashboard() {
                     ref={analyticsCampaignBtnRef}
                     type="button"
                     onClick={() => openPositionedMenu(analyticsCampaignBtnRef, setAnalyticsCampaignMenuPos, setAnalyticsCampaignMenuOpen, "right", 224)}
-                    className="h-9 flex items-center gap-1.5 bg-white border border-slate-200 rounded-lg px-3 text-xs text-slate-700 font-bold shadow-sm hover:bg-slate-50 transition-all"
+                    className="h-10 flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-4 text-xs text-slate-700 font-bold shadow-sm hover:bg-slate-50 transition-all whitespace-nowrap"
                   >
                     {analyticsCampaignFilter.length === 0 ? "Campaigns" : analyticsCampaignFilter.length === 1 ? analyticsCampaignFilter[0] : `${analyticsCampaignFilter.length} Campaigns`}
                     <ChevronDown className={`h-3.5 w-3.5 text-slate-400 transition-transform ${analyticsCampaignMenuOpen ? "rotate-180" : ""}`} />
@@ -1566,9 +1565,7 @@ export default function LeadDashboard() {
                   )}
                 </div>
               </div>
-            </div>
 
-            <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden">
               {adminAgentBreakdown.length === 0 ? (
                 <p className="text-xs text-slate-400 italic p-6">No leads assigned to any agent in this range.</p>
               ) : (
