@@ -156,7 +156,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     // role-scoping still applies (a sales Member following the Campaigns
     // link lands on their own Agent Reports instead, exactly like
     // navigating there any other way).
-    { name: "Campaigns", href: "/dashboard/reports?tab=marketing", activeCheck: (p: string, t?: string | null) => p === "/dashboard/reports" && t === "marketing", icon: Megaphone },
+    { name: "Campaigns", href: "/dashboard/crm/campaigns", activeCheck: (p: string) => p.startsWith("/dashboard/crm/campaigns"), icon: Megaphone },
     { name: "Data Calling", href: "/dashboard/reports?tab=agent", activeCheck: (p: string, t?: string | null) => p === "/dashboard/reports" && t === "agent", icon: Phone },
     { name: "Calendar", href: "/dashboard/crm/calendar", activeCheck: (p: string, t?: string | null) => p === "/dashboard/crm/calendar", icon: Calendar },
     { name: "Settings", href: "/dashboard/settings", activeCheck: (p: string, t?: string | null) => p === "/dashboard/settings", icon: Settings },
