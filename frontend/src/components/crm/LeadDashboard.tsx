@@ -438,7 +438,16 @@ export default function LeadDashboard() {
   const [drilldownSearch, setDrilldownSearch] = useState("");
   const [drilldownSearchOpen, setDrilldownSearchOpen] = useState(false);
   const [drilldownPage, setDrilldownPage] = useState(1);
-  const [drilldownRowsPerPage, setDrilldownRowsPerPage] = useState(10);
+  const [drilldownRowsPerPage, setDrilldownRowsPerPage] = useState(8);
+
+  // Same scroll-spy + synced-pagination pattern as the admin Leads table:
+  // rows render continuously in a capped-height scroll container, scrolling
+  // past a page boundary advances drilldownPage, and the pagination arrows
+  // scroll that page's first row back to the top — the two stay in sync in
+  // both directions.
+  const drilldownScrollRef = useRef<HTMLDivElement>(null);
+  const drilldownPageRowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
+  const drilldownProgrammaticScroll = useRef(false);
 
   const openAnalyticsDrilldown = (assignedNames: string[], statusScope: LeadStatus[] | null, title: string) => {
     const matched = analyticsScopedLeads.filter(l =>
@@ -448,6 +457,42 @@ export default function LeadDashboard() {
     setDrilldownSearch("");
     setDrilldownSearchOpen(false);
     setDrilldownPage(1);
+  };
+
+  const analyticsDrilldownFilteredLeads = analyticsDrilldown
+    ? analyticsDrilldown.leads.filter(l =>
+        !drilldownSearch || l.name.toLowerCase().includes(drilldownSearch.toLowerCase()) || l.phone.includes(drilldownSearch)
+      )
+    : [];
+  const drilldownTotalPages = Math.max(1, Math.ceil(analyticsDrilldownFilteredLeads.length / drilldownRowsPerPage));
+  const drilldownCurrentPage = Math.min(drilldownPage, drilldownTotalPages);
+
+  const handleDrilldownTableScroll = () => {
+    if (drilldownProgrammaticScroll.current) return;
+    const container = drilldownScrollRef.current;
+    if (!container) return;
+    const scrollTop = container.scrollTop;
+    let current = 1;
+    for (let i = 0; i < drilldownPageRowRefs.current.length; i++) {
+      const row = drilldownPageRowRefs.current[i];
+      if (row && row.offsetTop - container.offsetTop <= scrollTop + 4) {
+        current = i + 1;
+      }
+    }
+    setDrilldownPage(prev => (prev !== current ? current : prev));
+  };
+
+  const goToDrilldownPage = (page: number) => {
+    const clamped = Math.max(1, Math.min(drilldownTotalPages, page));
+    setDrilldownPage(clamped);
+    const row = drilldownPageRowRefs.current[clamped - 1];
+    const container = drilldownScrollRef.current;
+    if (!row || !container) return;
+    drilldownProgrammaticScroll.current = true;
+    container.scrollTop = clamped === 1 ? 0 : row.offsetTop - container.offsetTop;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => { drilldownProgrammaticScroll.current = false; });
+    });
   };
 
   const QUALIFIED_STATUS_OPTIONS = STATUS_OPTIONS.filter(s => !UNQUALIFIED_STATUSES.includes(s));
@@ -1907,16 +1952,7 @@ export default function LeadDashboard() {
                 Leads tab's own table: Lead Name (search), Email, Status
                 (live-editable), Assigned To, Date, Notes, Next Call Date,
                 Campaign. */}
-            {analyticsDrilldown && (() => {
-              const filtered = analyticsDrilldown.leads.filter(l =>
-                !drilldownSearch || l.name.toLowerCase().includes(drilldownSearch.toLowerCase()) || l.phone.includes(drilldownSearch)
-              );
-              const totalPages = Math.max(1, Math.ceil(filtered.length / drilldownRowsPerPage));
-              const currentPage = Math.min(drilldownPage, totalPages);
-              const pageLeads = filtered.slice((currentPage - 1) * drilldownRowsPerPage, currentPage * drilldownRowsPerPage);
-              const rangeStart = filtered.length === 0 ? 0 : (currentPage - 1) * drilldownRowsPerPage + 1;
-              const rangeEnd = Math.min(currentPage * drilldownRowsPerPage, filtered.length);
-              return (
+            {analyticsDrilldown && (
                 <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden animate-fade-in">
                   <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
                     <h3 className="text-sm font-extrabold text-slate-900">{analyticsDrilldown.title}</h3>
@@ -1929,11 +1965,11 @@ export default function LeadDashboard() {
                       <X className="h-4 w-4" />
                     </button>
                   </div>
-                  {filtered.length === 0 ? (
+                  {analyticsDrilldownFilteredLeads.length === 0 ? (
                     <p className="text-xs text-slate-400 italic p-6">No leads match this view.</p>
                   ) : (
                     <>
-                      <div className="overflow-x-auto">
+                      <div ref={drilldownScrollRef} onScroll={handleDrilldownTableScroll} className="overflow-auto max-h-[70vh]">
                         <table className="w-full text-left text-xs border-collapse table-fixed min-w-[900px]">
                           <colgroup>
                             <col className="w-[150px]" />
@@ -1945,7 +1981,7 @@ export default function LeadDashboard() {
                             <col className="w-[130px]" />
                             <col className="w-[130px]" />
                           </colgroup>
-                          <thead>
+                          <thead className="sticky top-0 z-10 bg-white">
                             <tr className="border-b border-slate-200 font-bold text-slate-800">
                               <th className="px-4 py-2.5">
                                 {drilldownSearchOpen ? (
@@ -1986,8 +2022,12 @@ export default function LeadDashboard() {
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
-                            {pageLeads.map(l => (
-                              <tr key={l.id} className="hover:bg-slate-50/60 transition-colors">
+                            {(drilldownPageRowRefs.current = [], analyticsDrilldownFilteredLeads.map((l, idx) => (
+                              <tr
+                                key={l.id}
+                                ref={idx % drilldownRowsPerPage === 0 ? (el) => { drilldownPageRowRefs.current[Math.floor(idx / drilldownRowsPerPage)] = el; } : undefined}
+                                className="hover:bg-slate-50/60 transition-colors"
+                              >
                                 <td className="px-4 py-3 align-top overflow-hidden">
                                   <button
                                     onClick={() => setSelectedLead(l)}
@@ -2017,36 +2057,47 @@ export default function LeadDashboard() {
                                 <td className="px-4 py-3 text-slate-500 align-top truncate">{adminNextCallDateFor(l.id)}</td>
                                 <td className="px-4 py-3 text-slate-700 font-medium align-top truncate" title={l.campaign || l.source || "—"}>{l.campaign || l.source || "—"}</td>
                               </tr>
-                            ))}
+                            )))}
                           </tbody>
                         </table>
                       </div>
 
                       <div className="px-4 py-3 flex flex-wrap justify-between items-center gap-3 border-t border-slate-100 text-[11px] text-slate-500 font-semibold">
-                        <span>{filtered.length} Row{filtered.length === 1 ? "" : "s"}</span>
+                        <span>{analyticsDrilldownFilteredLeads.length} Row{analyticsDrilldownFilteredLeads.length === 1 ? "" : "s"}</span>
                         <div className="flex items-center gap-4">
                           <span className="flex items-center gap-1.5">
                             Rows per page
                             <select
                               value={drilldownRowsPerPage}
-                              onChange={(e) => { setDrilldownRowsPerPage(Number(e.target.value)); setDrilldownPage(1); }}
+                              onChange={(e) => {
+                                drilldownProgrammaticScroll.current = true;
+                                setDrilldownRowsPerPage(Number(e.target.value));
+                                setDrilldownPage(1);
+                                drilldownScrollRef.current?.scrollTo(0, 0);
+                                requestAnimationFrame(() => {
+                                  requestAnimationFrame(() => { drilldownProgrammaticScroll.current = false; });
+                                });
+                              }}
                               className="bg-slate-50 border border-slate-200 rounded px-1.5 py-1 font-bold text-slate-700 focus:outline-none"
                             >
-                              {[10, 25, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
+                              {[8, 25, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
                             </select>
                           </span>
-                          <span>{rangeStart}-{rangeEnd} of {filtered.length}</span>
+                          <span>
+                            {analyticsDrilldownFilteredLeads.length === 0 ? 0 : (drilldownCurrentPage - 1) * drilldownRowsPerPage + 1}-
+                            {Math.min(drilldownCurrentPage * drilldownRowsPerPage, analyticsDrilldownFilteredLeads.length)} of {analyticsDrilldownFilteredLeads.length}
+                          </span>
                           <div className="flex items-center gap-1">
                             <button
-                              onClick={() => setDrilldownPage(p => Math.max(1, p - 1))}
-                              disabled={currentPage <= 1}
+                              onClick={() => goToDrilldownPage(drilldownCurrentPage - 1)}
+                              disabled={drilldownCurrentPage <= 1}
                               className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
                             >
                               ‹
                             </button>
                             <button
-                              onClick={() => setDrilldownPage(p => Math.min(totalPages, p + 1))}
-                              disabled={currentPage >= totalPages}
+                              onClick={() => goToDrilldownPage(drilldownCurrentPage + 1)}
+                              disabled={drilldownCurrentPage >= drilldownTotalPages}
                               className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
                             >
                               ›
@@ -2057,8 +2108,7 @@ export default function LeadDashboard() {
                     </>
                   )}
                 </div>
-              );
-            })()}
+            )}
 
             {/* RNR Analysis — Total Leads and Date are real; the two call-attempt
                 averages and AI Notes have no data source anywhere in this app
