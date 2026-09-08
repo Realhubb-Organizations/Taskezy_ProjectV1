@@ -35,6 +35,10 @@ interface CampaignItem {
 }
 
 const CAMPAIGN_STATUSES: CampaignItem["status"][] = ["Active", "Pause", "Stopped"];
+const QUALIFIED_LEAD_STATUSES = ["Interested", "Connected", "Visit Schedule", "Site Visit", "Booking Done", "Booked"];
+const UNQUALIFIED_LEAD_STATUSES = ["Dead", "Invalid", "RNR"];
+const SITE_VISIT_LEAD_STATUSES = ["Visit Schedule", "Site Visit"];
+const FOLLOW_UP_LEAD_STATUSES = ["Follow-ups", "Call Back"];
 
 // The campaigns table's togglable columns (beyond the always-shown Campaign
 // Name + Total Leads) — driven by the Filter button's panel, mirroring the
@@ -75,11 +79,19 @@ export default function AdminCampaignsPage() {
   // Navigation tab inside Campaigns page ("Campaigns" | "Campaigns Analytics")
   const [activeTab, setActiveTab] = useState<"Campaigns" | "Analytics">("Campaigns");
 
-  // Summary Card Filters
-  const [dateRange, setDateRange] = useState<"Today" | "Yesterday" | "This Week" | "This Month" | "All Time">("Today");
+  // Summary Card Filters — "Custom" is set behind the scenes by the
+  // toolbar's calendar picker (below), not offered as its own menu option
+  // here, same split as the admin leads page.
+  const [dateRange, setDateRange] = useState<"Today" | "Yesterday" | "This Week" | "This Month" | "All Time" | "Custom">("Today");
   const [summaryDateMenuOpen, setSummaryDateMenuOpen] = useState(false);
   const [summaryDateMenuPos, setSummaryDateMenuPos] = useState<{ top: number; left: number } | null>(null);
   const summaryDateBtnRef = useRef<HTMLButtonElement>(null);
+
+  // Stat card drill-down — clicking a summary card shows the underlying
+  // leads it counted, same "open the respective card" pattern as the CRM
+  // Dashboard page.
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const toggleCategory = (label: string) => setSelectedCategory(prev => (prev === label ? null : label));
 
   // Table Filters & Search
   const today = new Date();
@@ -152,6 +164,53 @@ export default function AdminCampaignsPage() {
     setOpen(o => !o);
   };
 
+  // Maps the "Date Range" pill's labels onto the bucket keys dateInRange
+  // understands. "Custom" is handled separately via appliedCustomRange.
+  const mapDateRangeToKey = (dr: typeof dateRange): "today" | "yesterday" | "week" | "month" | "all" => {
+    switch (dr) {
+      case "Today": return "today";
+      case "Yesterday": return "yesterday";
+      case "This Week": return "week";
+      case "This Month": return "month";
+      default: return "all";
+    }
+  };
+
+  const dateInRange = (dateStr: string | undefined, range: "today" | "yesterday" | "week" | "month" | "all", refNow: Date): boolean => {
+    if (!dateStr) return false;
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return false;
+    if (range === "all") return true;
+    const startOfToday = new Date(refNow.getFullYear(), refNow.getMonth(), refNow.getDate());
+    if (range === "today") return d.toDateString() === refNow.toDateString();
+    if (range === "yesterday") {
+      const y = new Date(startOfToday);
+      y.setDate(y.getDate() - 1);
+      return d.toDateString() === y.toDateString();
+    }
+    if (range === "week") {
+      const weekAgo = new Date(startOfToday);
+      weekAgo.setDate(weekAgo.getDate() - 6);
+      return d >= weekAgo;
+    }
+    return d.getMonth() === refNow.getMonth() && d.getFullYear() === refNow.getFullYear();
+  };
+
+  // A lead is "in range" if it falls within the applied custom start/end
+  // (when Custom is active) or within the selected preset bucket otherwise.
+  const leadInSelectedRange = (l: Lead): boolean => {
+    if (dateRange === "Custom" && appliedCustomRange) {
+      if (!l.createdAtStr) return false;
+      const d = new Date(l.createdAtStr);
+      if (isNaN(d.getTime())) return false;
+      const start = new Date(appliedCustomRange.start);
+      const end = new Date(appliedCustomRange.end);
+      end.setHours(23, 59, 59, 999);
+      return d >= start && d <= end;
+    }
+    return dateInRange(l.createdAtStr, mapDateRangeToKey(dateRange), today);
+  };
+
   // Derive campaigns data from context adSpend + leads
   const campaignsList: CampaignItem[] = useMemo(() => {
     // Collect all campaign names from ad spend records and lead sources
@@ -192,21 +251,13 @@ export default function AdminCampaignsPage() {
     Object.keys(spendCampaignMap).forEach((cName, idx) => {
       if (!result.some(r => r.name.toLowerCase() === cName.toLowerCase())) {
         const item = spendCampaignMap[cName];
-        const matchedLeads = leads.filter(l => {
-          if ((l.campaign || l.source)?.toLowerCase() !== cName.toLowerCase()) return false;
-          if (!appliedCustomRange) return true;
-          if (!l.createdAtStr) return false;
-          const d = new Date(l.createdAtStr);
-          if (isNaN(d.getTime())) return false;
-          const start = new Date(appliedCustomRange.start);
-          const end = new Date(appliedCustomRange.end);
-          end.setHours(23, 59, 59, 999);
-          return d >= start && d <= end;
-        });
+        const matchedLeads = leads.filter(l =>
+          (l.campaign || l.source)?.toLowerCase() === cName.toLowerCase() && leadInSelectedRange(l)
+        );
         const total = Math.max(item.platformLeads, matchedLeads.length);
-        const qualified = matchedLeads.filter(l => ["Interested", "Connected", "Visit Schedule", "Site Visit", "Booking Done", "Booked"].includes(l.status)).length;
-        const unqualified = matchedLeads.filter(l => ["Dead", "Invalid", "RNR"].includes(l.status)).length;
-        const siteVisits = matchedLeads.filter(l => ["Visit Schedule", "Site Visit"].includes(l.status)).length;
+        const qualified = matchedLeads.filter(l => QUALIFIED_LEAD_STATUSES.includes(l.status)).length;
+        const unqualified = matchedLeads.filter(l => UNQUALIFIED_LEAD_STATUSES.includes(l.status)).length;
+        const siteVisits = matchedLeads.filter(l => SITE_VISIT_LEAD_STATUSES.includes(l.status)).length;
         const cplVal = total > 0 ? Number((item.spend / total).toFixed(2)) : 0;
 
         result.push({
@@ -224,7 +275,7 @@ export default function AdminCampaignsPage() {
     });
 
     return result;
-  }, [adSpendRecords, leads, appliedCustomRange]);
+  }, [adSpendRecords, leads, appliedCustomRange, dateRange, today]);
 
   // Aggregate Metrics for Top Summary Card
   const summaryMetrics = useMemo(() => {
@@ -232,7 +283,7 @@ export default function AdminCampaignsPage() {
     const totalLeadsSum = campaignsList.reduce((acc, c) => acc + c.totalLeads, 0);
     const qualifiedLeadsSum = campaignsList.reduce((acc, c) => acc + c.qualifiedLeads, 0);
     const siteVisitsSum = campaignsList.reduce((acc, c) => acc + c.siteVisit, 0);
-    const followUpsCount = leads.filter(l => l.status === "Follow-ups" || l.status === "Call Back").length || 57;
+    const followUpsCount = leads.filter(l => FOLLOW_UP_LEAD_STATUSES.includes(l.status)).length || 57;
 
     return {
       activeCampaigns: activeCount || 9,
@@ -242,6 +293,21 @@ export default function AdminCampaignsPage() {
       followUps: followUpsCount
     };
   }, [campaignsList, leads]);
+
+  // Each stat card's real underlying lead list — same predicates as the
+  // counts above — so clicking a card can drill into exactly what it
+  // counted, mirroring the CRM Dashboard's stat-card drill-down.
+  const categoryLeads: Record<string, Lead[]> = useMemo(() => {
+    const activeCampaignNames = new Set(campaignsList.filter(c => c.status === "Active").map(c => c.name.toLowerCase()));
+    const rangeLeads = leads.filter(leadInSelectedRange);
+    return {
+      "Active Campaigns": leads.filter(l => activeCampaignNames.has((l.campaign || l.source || "").toLowerCase())),
+      "Total Leads": rangeLeads,
+      "Qualified Leads": rangeLeads.filter(l => QUALIFIED_LEAD_STATUSES.includes(l.status)),
+      "Site Visits": rangeLeads.filter(l => SITE_VISIT_LEAD_STATUSES.includes(l.status)),
+      "Follow Ups": leads.filter(l => FOLLOW_UP_LEAD_STATUSES.includes(l.status))
+    };
+  }, [campaignsList, leads, dateRange, appliedCustomRange, today]);
 
   // Filtered table rows
   const filteredCampaigns = useMemo(() => {
@@ -355,7 +421,7 @@ export default function AdminCampaignsPage() {
                         {(["Today", "Yesterday", "This Week", "This Month", "All Time"] as const).map(opt => (
                           <button
                             key={opt}
-                            onClick={() => { setDateRange(opt); setSummaryDateMenuOpen(false); }}
+                            onClick={() => { setDateRange(opt); setAppliedCustomRange(null); setSummaryDateMenuOpen(false); setCurrentPage(1); }}
                             className={`w-full text-left px-3 py-1.5 text-xs font-bold transition-colors ${
                               dateRange === opt ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"
                             }`}
@@ -371,54 +437,81 @@ export default function AdminCampaignsPage() {
               </div>
             </div>
 
-            {/* Stat columns */}
+            {/* Stat columns — click one to drill into the leads it counted,
+                same "open the respective card" pattern as the CRM Dashboard. */}
             <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 bg-white divide-y sm:divide-y-0 sm:divide-x divide-slate-100">
-              {/* Card 1: Active Campaigns */}
-              <div className="p-3 flex items-center justify-between hover:bg-slate-50/50 transition-colors group cursor-pointer">
-                <div>
-                  <span className="text-[11px] font-medium text-slate-500 block">Active Campaigns</span>
-                  <span className="text-lg font-extrabold text-slate-900 mt-1.5 block">{summaryMetrics.activeCampaigns}</span>
-                </div>
-                <ChevronRight className="h-3.5 w-3.5 text-slate-300 group-hover:translate-x-0.5 transition-transform" />
-              </div>
-
-              {/* Card 2: Total Leads */}
-              <div className="p-3 flex items-center justify-between hover:bg-slate-50/50 transition-colors group cursor-pointer">
-                <div>
-                  <span className="text-[11px] font-medium text-slate-500 block">Total Leads</span>
-                  <span className="text-lg font-extrabold text-slate-900 mt-1.5 block">{summaryMetrics.totalLeads}</span>
-                </div>
-                <ChevronRight className="h-3.5 w-3.5 text-slate-300 group-hover:translate-x-0.5 transition-transform" />
-              </div>
-
-              {/* Card 3: Qualified Leads */}
-              <div className="p-3 flex items-center justify-between hover:bg-slate-50/50 transition-colors group cursor-pointer">
-                <div>
-                  <span className="text-[11px] font-medium text-slate-500 block">Qualified Leads</span>
-                  <span className="text-lg font-extrabold text-rose-600 mt-1.5 block">{summaryMetrics.qualifiedLeads}</span>
-                </div>
-                <ChevronRight className="h-3.5 w-3.5 text-slate-300 group-hover:translate-x-0.5 transition-transform" />
-              </div>
-
-              {/* Card 4: Site Visits */}
-              <div className="p-3 flex items-center justify-between hover:bg-slate-50/50 transition-colors group cursor-pointer">
-                <div>
-                  <span className="text-[11px] font-medium text-slate-500 block">Site Visits</span>
-                  <span className="text-lg font-extrabold text-amber-500 mt-1.5 block">{summaryMetrics.siteVisits}</span>
-                </div>
-                <ChevronRight className="h-3.5 w-3.5 text-slate-300 group-hover:translate-x-0.5 transition-transform" />
-              </div>
-
-              {/* Card 5: Follow Ups */}
-              <div className="p-3 flex items-center justify-between hover:bg-slate-50/50 transition-colors group cursor-pointer">
-                <div>
-                  <span className="text-[11px] font-medium text-slate-500 block">Follow Ups</span>
-                  <span className="text-lg font-extrabold text-blue-500 mt-1.5 block">{summaryMetrics.followUps}</span>
-                </div>
-                <ChevronRight className="h-3.5 w-3.5 text-slate-300 group-hover:translate-x-0.5 transition-transform" />
-              </div>
+              {([
+                { label: "Active Campaigns", value: summaryMetrics.activeCampaigns, color: "text-slate-900" },
+                { label: "Total Leads", value: summaryMetrics.totalLeads, color: "text-slate-900" },
+                { label: "Qualified Leads", value: summaryMetrics.qualifiedLeads, color: "text-rose-600" },
+                { label: "Site Visits", value: summaryMetrics.siteVisits, color: "text-amber-500" },
+                { label: "Follow Ups", value: summaryMetrics.followUps, color: "text-blue-500" }
+              ] as const).map(s => {
+                const isActive = selectedCategory === s.label;
+                return (
+                  <button
+                    key={s.label}
+                    type="button"
+                    onClick={() => toggleCategory(s.label)}
+                    className={`p-3 flex items-center justify-between text-left group transition-colors ${
+                      isActive ? "bg-blue-50/70" : "hover:bg-slate-50/50"
+                    }`}
+                  >
+                    <div>
+                      <span className="text-[11px] font-medium text-slate-500 block">{s.label}</span>
+                      <span className={`text-lg font-extrabold mt-1.5 block ${s.color}`}>{s.value}</span>
+                    </div>
+                    <ChevronRight className={`h-3.5 w-3.5 text-slate-300 transition-transform ${isActive ? "rotate-90 text-blue-500" : "group-hover:translate-x-0.5"}`} />
+                  </button>
+                );
+              })}
             </div>
           </div>
+
+          {/* Stat-card drill-down — the real leads behind whichever card is selected. */}
+          {selectedCategory && (
+            <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden animate-fade-in">
+              <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-200/80">
+                <h3 className="text-sm font-bold text-slate-900">
+                  {selectedCategory}
+                  <span className="text-slate-400 font-medium ml-1.5">({categoryLeads[selectedCategory]?.length || 0})</span>
+                </h3>
+                <button type="button" onClick={() => setSelectedCategory(null)} className="text-slate-400 hover:text-slate-700">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="max-h-80 overflow-y-auto">
+                <table className="w-full text-left border-collapse min-w-[600px]">
+                  <thead className="sticky top-0 bg-white">
+                    <tr className="border-b border-slate-100 text-[11px] font-bold text-slate-500">
+                      <th className="px-5 py-2.5">Name</th>
+                      <th className="px-5 py-2.5">Phone</th>
+                      <th className="px-5 py-2.5">Status</th>
+                      <th className="px-5 py-2.5">Campaign</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-[12px] text-slate-700">
+                    {(categoryLeads[selectedCategory] || []).length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="px-5 py-6 text-center text-slate-400 italic">
+                          No leads found for this category.
+                        </td>
+                      </tr>
+                    ) : (
+                      (categoryLeads[selectedCategory] || []).map(l => (
+                        <tr key={l.id} className="hover:bg-slate-50/50 transition-colors">
+                          <td className="px-5 py-2.5 font-semibold text-slate-900">{l.name}</td>
+                          <td className="px-5 py-2.5 font-mono">{l.phone}</td>
+                          <td className="px-5 py-2.5">{l.status}</td>
+                          <td className="px-5 py-2.5">{l.campaign || l.source || "—"}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {/* Action Toolbar (Date Picker Pill, Campaigns Dropdown, Filter Button) */}
           <div className="flex flex-wrap items-center justify-end gap-2.5 pt-1">
@@ -497,6 +590,7 @@ export default function AdminCampaignsPage() {
                         type="button"
                         onClick={() => {
                           setAppliedCustomRange(null);
+                          setDateRange("Today");
                           setCustomRangeStartDraft("");
                           setCustomRangeEndDraft("");
                           setCalendarPickerOpen(false);
@@ -512,6 +606,7 @@ export default function AdminCampaignsPage() {
                           if (!customRangeStartDraft || !customRangeEndDraft) return;
                           if (customRangeEndDraft < customRangeStartDraft) return;
                           setAppliedCustomRange({ start: customRangeStartDraft, end: customRangeEndDraft });
+                          setDateRange("Custom");
                           setCalendarPickerOpen(false);
                           setCurrentPage(1);
                         }}
