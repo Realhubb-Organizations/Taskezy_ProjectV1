@@ -4,6 +4,7 @@ import React, { useState, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useApp, Lead } from "@/context/AppContext";
+import { computeCPL } from "@/lib/reportMetrics";
 import { WhatsAppIcon, CallIcon } from "@/components/icons/ContactIcons";
 import {
   ChevronDown,
@@ -242,15 +243,7 @@ export default function AdminCampaignsPage() {
       spendCampaignMap[name].platformLeads += rec.leadsGenerated;
     });
 
-    // Ensure mock campaigns from screenshot exist seamlessly if not already in context
-    const mockSeed: CampaignItem[] = [
-      { id: "c1", name: "Granada Loc Ai", status: "Active", totalLeads: 76, qualifiedLeads: 21, unqualifiedLeads: 55, siteVisit: 11, cpl: 243.12, platform: "Meta" },
-      { id: "c2", name: "Brigade Eternia", status: "Pause", totalLeads: 76, qualifiedLeads: 21, unqualifiedLeads: 55, siteVisit: 11, cpl: 243.12, platform: "Google" },
-      { id: "c3", name: "Granada Loc Ai 1", status: "Stopped", totalLeads: 76, qualifiedLeads: 21, unqualifiedLeads: 55, siteVisit: 11, cpl: 243.12, platform: "Meta" },
-      { id: "c4", name: "Granada Loc Ai 2", status: "Active", totalLeads: 76, qualifiedLeads: 21, unqualifiedLeads: 55, siteVisit: 11, cpl: 243.12, platform: "Meta" }
-    ];
-
-    const result: CampaignItem[] = [...mockSeed];
+    const result: CampaignItem[] = [];
 
     Object.keys(spendCampaignMap).forEach((cName, idx) => {
       if (!result.some(r => r.name.toLowerCase() === cName.toLowerCase())) {
@@ -272,11 +265,11 @@ export default function AdminCampaignsPage() {
           id: `dyn-${idx}`,
           name: cName,
           status: item.status,
-          totalLeads: total || 12,
-          qualifiedLeads: qualified || 3,
-          unqualifiedLeads: unqualified || 9,
-          siteVisit: siteVisits || 2,
-          cpl: cplVal || 185.50,
+          totalLeads: total,
+          qualifiedLeads: qualified,
+          unqualifiedLeads: unqualified,
+          siteVisit: siteVisits,
+          cpl: cplVal,
           platform: item.platform
         });
       }
@@ -291,13 +284,13 @@ export default function AdminCampaignsPage() {
     const totalLeadsSum = campaignsList.reduce((acc, c) => acc + c.totalLeads, 0);
     const qualifiedLeadsSum = campaignsList.reduce((acc, c) => acc + c.qualifiedLeads, 0);
     const siteVisitsSum = campaignsList.reduce((acc, c) => acc + c.siteVisit, 0);
-    const followUpsCount = leads.filter(l => FOLLOW_UP_LEAD_STATUSES.includes(l.status)).length || 57;
+    const followUpsCount = leads.filter(l => FOLLOW_UP_LEAD_STATUSES.includes(l.status)).length;
 
     return {
-      activeCampaigns: activeCount || 9,
-      totalLeads: totalLeadsSum || 3,
-      qualifiedLeads: qualifiedLeadsSum || 3,
-      siteVisits: siteVisitsSum || 112,
+      activeCampaigns: activeCount,
+      totalLeads: totalLeadsSum,
+      qualifiedLeads: qualifiedLeadsSum,
+      siteVisits: siteVisitsSum,
       followUps: followUpsCount
     };
   }, [campaignsList, leads]);
@@ -320,6 +313,17 @@ export default function AdminCampaignsPage() {
   // "Active Campaigns" drills into campaigns, not leads — it's a count of
   // campaigns (matching the summary card's own unit), not a leads list.
   const activeCampaignsDrill = useMemo(() => campaignsList.filter(c => c.status === "Active"), [campaignsList]);
+
+  // Campaigns Analytics tab — real ad-spend totals, no hardcoded figures.
+  const analyticsSummary = useMemo(() => {
+    const metaSpend = adSpendRecords.filter(r => r.platform === "Meta").reduce((acc, r) => acc + r.spend, 0);
+    const googleSpend = adSpendRecords.filter(r => r.platform === "Google").reduce((acc, r) => acc + r.spend, 0);
+    const totalSpend = metaSpend + googleSpend;
+    const totalLeadsGenerated = adSpendRecords.reduce((acc, r) => acc + r.leadsGenerated, 0);
+    return { metaSpend, googleSpend, avgCPL: computeCPL(totalSpend, totalLeadsGenerated) };
+  }, [adSpendRecords]);
+
+  const formatCurrency = (n: number) => `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   // Filtered table rows
   const filteredCampaigns = useMemo(() => {
@@ -391,15 +395,15 @@ export default function AdminCampaignsPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
               <span className="text-xs text-slate-400 font-medium">Meta Ad Spend</span>
-              <p className="text-xl font-bold text-slate-800 mt-1">₹45,200.00</p>
+              <p className="text-xl font-bold text-slate-800 mt-1">{formatCurrency(analyticsSummary.metaSpend)}</p>
             </div>
             <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
               <span className="text-xs text-slate-400 font-medium">Google Ads Spend</span>
-              <p className="text-xl font-bold text-slate-800 mt-1">₹28,450.00</p>
+              <p className="text-xl font-bold text-slate-800 mt-1">{formatCurrency(analyticsSummary.googleSpend)}</p>
             </div>
             <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
               <span className="text-xs text-slate-400 font-medium">Average CPL</span>
-              <p className="text-xl font-bold text-emerald-600 mt-1">₹243.12</p>
+              <p className="text-xl font-bold text-emerald-600 mt-1">{formatCurrency(analyticsSummary.avgCPL)}</p>
             </div>
           </div>
         </div>
