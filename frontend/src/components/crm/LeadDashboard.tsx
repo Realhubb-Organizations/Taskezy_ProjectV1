@@ -405,8 +405,13 @@ export default function LeadDashboard() {
     }
     if (range === "custom") {
       if (!adminCustomRange) return false;
-      const start = new Date(adminCustomRange.start);
-      const end = new Date(adminCustomRange.end);
+      let start = new Date(adminCustomRange.start);
+      let end = new Date(adminCustomRange.end);
+      // The picker UI already blocks picking an End Date before Start, but
+      // swap defensively in case an older/invalid range is still stored —
+      // an inverted pair should still show "the selected date range's
+      // leads", not silently go empty.
+      if (start > end) [start, end] = [end, start];
       end.setHours(23, 59, 59, 999);
       return d >= start && d <= end;
     }
@@ -822,7 +827,17 @@ export default function LeadDashboard() {
                           type="date"
                           value={customRangeEndDraft}
                           min={customRangeStartDraft || undefined}
-                          onChange={(e) => setCustomRangeEndDraft(e.target.value)}
+                          onChange={(e) => {
+                            const newEnd = e.target.value;
+                            // The `min` attribute only blocks the native
+                            // picker's own calendar UI — typing digits
+                            // directly into the field still fires onChange
+                            // with an out-of-range value, so this is the
+                            // real guard: silently refuse an End Date
+                            // earlier than the chosen Start Date.
+                            if (customRangeStartDraft && newEnd && newEnd < customRangeStartDraft) return;
+                            setCustomRangeEndDraft(newEnd);
+                          }}
                           className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-700 focus:outline-none focus:border-[#0B1E6E]"
                         />
                         {customRangeStartDraft && customRangeEndDraft && customRangeEndDraft < customRangeStartDraft && (
