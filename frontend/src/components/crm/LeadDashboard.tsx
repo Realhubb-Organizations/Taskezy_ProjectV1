@@ -376,7 +376,13 @@ export default function LeadDashboard() {
     panelWidth = 208
   ) => {
     const rect = ref.current?.getBoundingClientRect();
-    if (rect) setPos({ top: rect.bottom + 6, left: align === "left" ? rect.left : rect.right - panelWidth });
+    if (rect) {
+      const rawLeft = align === "left" ? rect.left : rect.right - panelWidth;
+      // Clamped to the viewport so these panels stay fully on-screen on
+      // narrow phones instead of overflowing past the right or left edge.
+      const left = Math.max(8, Math.min(rawLeft, window.innerWidth - panelWidth - 8));
+      setPos({ top: rect.bottom + 6, left });
+    }
     setOpen(o => !o);
   };
 
@@ -566,7 +572,7 @@ export default function LeadDashboard() {
           </div>
 
           {adminTab === "leads" && (
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <div className="relative">
                 <button
                   ref={adminCampaignsQuickBtnRef}
@@ -685,7 +691,7 @@ export default function LeadDashboard() {
           <>
             {/* Date Filter & Metrics — one unified card */}
             <div className="bg-slate-100/70 border border-slate-200/60 rounded-2xl overflow-hidden shadow-sm">
-              <div className="flex justify-between items-center px-4 py-2.5 text-[11px] border-b border-slate-200/60">
+              <div className="flex flex-wrap justify-between items-center gap-2 px-4 py-2.5 text-[11px] border-b border-slate-200/60">
                 <div className="flex items-center gap-1.5 font-bold text-slate-700">
                   <span className="font-normal text-slate-500">Date Range</span>
                   <div className="relative">
@@ -753,14 +759,18 @@ export default function LeadDashboard() {
             </div>
 
             {/* Date badge (now a real custom date-range picker) + Filter row */}
-            <div className="flex justify-end items-center gap-3">
+            <div className="flex flex-wrap justify-end items-center gap-3">
               <div className="relative">
                 <button
                   ref={calendarBtnRef}
                   type="button"
                   onClick={() => {
                     const rect = calendarBtnRef.current?.getBoundingClientRect();
-                    if (rect) setCalendarMenuPos({ top: rect.bottom + 6, left: rect.right - 260 });
+                    if (rect) {
+                      const panelWidth = 260;
+                      const left = Math.max(8, Math.min(rect.right - panelWidth, window.innerWidth - panelWidth - 8));
+                      setCalendarMenuPos({ top: rect.bottom + 6, left });
+                    }
                     setCustomRangeStartDraft(adminCustomRange?.start || "");
                     setCustomRangeEndDraft(adminCustomRange?.end || "");
                     setCalendarPickerOpen(o => !o);
@@ -778,7 +788,7 @@ export default function LeadDashboard() {
                   <>
                     <div className="fixed inset-0 z-[60]" onClick={() => setCalendarPickerOpen(false)} />
                     <div
-                      className="fixed z-[70] w-64 bg-white border border-slate-200 rounded-xl shadow-lg p-4 space-y-3"
+                      className="fixed z-[70] w-64 max-w-[calc(100vw-1rem)] bg-white border border-slate-200 rounded-xl shadow-lg p-4 space-y-3"
                       style={{ top: calendarMenuPos.top, left: calendarMenuPos.left }}
                     >
                       <p className="text-[11px] font-bold text-slate-700">Filter leads by date range</p>
