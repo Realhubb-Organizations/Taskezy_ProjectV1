@@ -28,3 +28,41 @@ export function CallIcon({ className }: { className?: string }) {
     </svg>
   );
 }
+
+// Same Meta/Google brand icons already used for the CRM Campaigns dropdown's
+// group headers — pulled out here so every place that shows a lead's ad
+// source/platform (Source column, Campaign column fallback, quick-view
+// drawer, Add Lead's source picker) can share one icon + one classification
+// rule instead of each re-implementing it slightly differently.
+export function MetaIcon({ className }: { className?: string }) {
+  return <img src="https://img.icons8.com/?size=100&id=wA5rN96FVDtq&format=png&color=000000" alt="Meta" className={className} />;
+}
+
+export function GoogleIcon({ className }: { className?: string }) {
+  return <img src="https://img.icons8.com/?size=100&id=4hR4Ih04Je2t&format=png&color=000000" alt="Google" className={className} />;
+}
+
+// Classifies a lead's source/campaign text into which ad platform icon to
+// show — null means "no icon, just show the text" (Referral Code, Offline
+// Event, a custom-added source, etc.).
+export function platformFromText(text: string | undefined | null): "Meta" | "Google" | null {
+  if (!text) return null;
+  if (/meta|facebook|instagram/i.test(text)) return "Meta";
+  if (/google/i.test(text)) return "Google";
+  return null;
+}
+
+// Icon + text for any cell/field showing a lead's source or campaign — the
+// visible label (text) and what decides the icon (classifyBy) are separate
+// because a Campaign cell shows the campaign name but should classify off
+// the lead's more reliable source field when one exists.
+export function PlatformLabel({ text, classifyBy, className }: { text: string; classifyBy?: string; className?: string }) {
+  const platform = platformFromText(classifyBy ?? text);
+  return (
+    <span className={`inline-flex items-center gap-1.5 min-w-0 ${className || ""}`}>
+      {platform === "Meta" && <MetaIcon className="h-3.5 w-3.5 shrink-0" />}
+      {platform === "Google" && <GoogleIcon className="h-3.5 w-3.5 shrink-0" />}
+      <span className="truncate">{text}</span>
+    </span>
+  );
+}

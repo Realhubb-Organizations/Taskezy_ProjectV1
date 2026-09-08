@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useApp, Lead, LeadStatus } from "@/context/AppContext";
 import { Sliders, Sparkles, Plus, Check, ChevronDown, Search, Calendar, X, Minus, Download, RotateCcw } from "lucide-react";
 import { DB_CODE_TO_FRONTEND_STATUS } from "@/lib/leadStatusMapping";
-import { WhatsAppIcon, CallIcon } from "@/components/icons/ContactIcons";
+import { WhatsAppIcon, CallIcon, PlatformLabel } from "@/components/icons/ContactIcons";
 import TopMetricsCards from "./TopMetricsCards";
 import LeadFilterBar from "./LeadFilterBar";
 import LeadTable from "./LeadTable";
@@ -1414,7 +1414,9 @@ export default function LeadDashboard() {
                             <td className="px-4 py-3 text-slate-700 font-medium align-top truncate" title={l.previousAgent || "—"}>{l.previousAgent || "—"}</td>
                           )}
                           {adminVisibleColumns.source && (
-                            <td className="px-4 py-3 text-slate-700 font-medium align-top truncate" title={l.source || "—"}>{l.source || "—"}</td>
+                            <td className="px-4 py-3 text-slate-700 font-medium align-top truncate" title={l.source || "—"}>
+                              <PlatformLabel text={l.source || "—"} />
+                            </td>
                           )}
                           {adminVisibleColumns.leadScore && (
                             <td className="px-4 py-3 text-slate-700 font-medium align-top truncate">{l.leadScore != null ? l.leadScore : "—"}</td>
@@ -1460,7 +1462,9 @@ export default function LeadDashboard() {
                             <td className="px-4 py-3 text-slate-400 align-top truncate italic" title="Not tracked yet — no ad-set-level data ingested">—</td>
                           )}
                           {adminVisibleColumns.campaign && (
-                            <td className="px-4 py-3 text-slate-700 font-medium align-top truncate" title={l.campaign || l.source || "—"}>{l.campaign || l.source || "—"}</td>
+                            <td className="px-4 py-3 text-slate-700 font-medium align-top truncate" title={l.campaign || l.source || "—"}>
+                              <PlatformLabel text={l.campaign || l.source || "—"} classifyBy={l.source || l.campaign} />
+                            </td>
                           )}
                           {adminVisibleColumns.notes && (
                             <td className="px-4 py-3 text-slate-600 truncate align-top" title={adminLatestLogMessage(l)}>{adminLatestLogMessage(l)}</td>
@@ -2154,7 +2158,9 @@ export default function LeadDashboard() {
                                 <td className="px-4 py-3 text-slate-500 align-top truncate">{adminFormatDateTime(l.createdAtStr)}</td>
                                 <td className="px-4 py-3 text-slate-600 truncate align-top" title={adminLatestLogMessage(l)}>{adminLatestLogMessage(l)}</td>
                                 <td className="px-4 py-3 text-slate-500 align-top truncate">{adminNextCallDateFor(l.id)}</td>
-                                <td className="px-4 py-3 text-slate-700 font-medium align-top truncate" title={l.campaign || l.source || "—"}>{l.campaign || l.source || "—"}</td>
+                                <td className="px-4 py-3 text-slate-700 font-medium align-top truncate" title={l.campaign || l.source || "—"}>
+                              <PlatformLabel text={l.campaign || l.source || "—"} classifyBy={l.source || l.campaign} />
+                            </td>
                               </tr>
                             )))}
                           </tbody>

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { X, Upload, FileSpreadsheet, Info, Download, Plus, Trash2, ChevronDown } from "lucide-react";
+import { PlatformLabel } from "@/components/icons/ContactIcons";
 
 const BASE_LEAD_SOURCES = ["Meta Ads", "Google Ads", "Referral Code", "Offline Event", "Direct Walkin"];
 const CUSTOM_LEAD_SOURCES_KEY = "taskezy_custom_lead_sources";
@@ -38,7 +39,7 @@ function CustomSelect({
         onClick={toggleOpen}
         className="w-full flex items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:outline-none focus:bg-white focus:border-[#0B1E6E] transition-all"
       >
-        <span className="truncate">{selectedLabel}</span>
+        <PlatformLabel text={selectedLabel} className="truncate" />
         <ChevronDown className={`h-3.5 w-3.5 text-slate-400 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
       {open && pos && createPortal(
@@ -60,7 +61,7 @@ function CustomSelect({
                     opt.value === value ? "bg-[#0B1E6E] text-white" : "text-slate-700 hover:bg-slate-50"
                   }`}
                 >
-                  {opt.label}
+                  <PlatformLabel text={opt.label} />
                 </button>
               ))
             )}

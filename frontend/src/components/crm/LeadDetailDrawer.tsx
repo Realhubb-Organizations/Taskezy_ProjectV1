@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { X, Phone, MessageSquare, Mail, Share2, Award, Calendar, Clock, ArrowRight, Activity, Bell, Repeat } from "lucide-react";
 import { useApp, Lead, LeadStatus } from "@/context/AppContext";
+import { PlatformLabel } from "@/components/icons/ContactIcons";
 
 interface LeadDetailDrawerProps {
   lead: Lead | null;
@@ -234,7 +235,9 @@ export default function LeadDetailDrawer({
             <div className="text-xs font-semibold text-slate-700 bg-slate-50 p-4 rounded-2xl border border-slate-200/60 space-y-2">
               <div className="flex justify-between items-center">
                 <span className="text-[9px] font-bold text-slate-400 uppercase">Source</span>
-                <span className="text-slate-800 bg-white border border-slate-200 px-2 py-0.5 rounded-lg font-bold">{lead.source || "Manual Entry"}</span>
+                <span className="text-slate-800 bg-white border border-slate-200 px-2 py-0.5 rounded-lg font-bold">
+                  <PlatformLabel text={lead.source || "Manual Entry"} />
+                </span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-[9px] font-bold text-slate-400 uppercase">Campaign</span>
