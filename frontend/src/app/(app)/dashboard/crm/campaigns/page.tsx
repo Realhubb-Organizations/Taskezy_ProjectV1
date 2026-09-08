@@ -708,11 +708,14 @@ export default function AdminCampaignsPage() {
             </button>
           </div>
 
-          {/* Main Campaigns Data Table (Clones image layout) */}
+          {/* Main Campaigns Data Table — row area is height-capped with its
+              own scroll (independent of the page scroll), so a long/paged
+              list doesn't stretch the whole page; header stays pinned and
+              the pagination footer below stays out of the scroll area. */}
           <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden">
-            <div className="overflow-x-auto">
+            <div className="overflow-auto max-h-[45vh]">
               <table className="w-full text-left border-collapse table-auto min-w-[850px]">
-                <thead>
+                <thead className="sticky top-0 z-10">
                   <tr className="border-b border-slate-200/80 text-[12px] font-bold text-slate-900 bg-white">
                     <th className="px-5 py-3.5">
                       {searchOpen ? (
