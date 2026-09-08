@@ -91,7 +91,11 @@ export default function AdminCampaignsPage() {
   // leads it counted, same "open the respective card" pattern as the CRM
   // Dashboard page.
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const toggleCategory = (label: string) => setSelectedCategory(prev => (prev === label ? null : label));
+  const [drillSearchQuery, setDrillSearchQuery] = useState("");
+  const toggleCategory = (label: string) => {
+    setSelectedCategory(prev => (prev === label ? null : label));
+    setDrillSearchQuery("");
+  };
 
   // Table Filters & Search
   const today = new Date();
@@ -251,13 +255,17 @@ export default function AdminCampaignsPage() {
     Object.keys(spendCampaignMap).forEach((cName, idx) => {
       if (!result.some(r => r.name.toLowerCase() === cName.toLowerCase())) {
         const item = spendCampaignMap[cName];
-        const matchedLeads = leads.filter(l =>
-          (l.campaign || l.source)?.toLowerCase() === cName.toLowerCase() && leadInSelectedRange(l)
-        );
-        const total = Math.max(item.platformLeads, matchedLeads.length);
-        const qualified = matchedLeads.filter(l => QUALIFIED_LEAD_STATUSES.includes(l.status)).length;
-        const unqualified = matchedLeads.filter(l => UNQUALIFIED_LEAD_STATUSES.includes(l.status)).length;
-        const siteVisits = matchedLeads.filter(l => SITE_VISIT_LEAD_STATUSES.includes(l.status)).length;
+        // "Total Leads" is about intake volume, so it respects the selected
+        // Date Range. Qualified/Unqualified/Site Visit are current pipeline
+        // status snapshots (like the CRM Dashboard's own cards) — a lead
+        // qualified today should still count even if it came in last week,
+        // so those read off every matched lead regardless of creation date.
+        const campaignLeads = leads.filter(l => (l.campaign || l.source)?.toLowerCase() === cName.toLowerCase());
+        const campaignLeadsInRange = campaignLeads.filter(leadInSelectedRange);
+        const total = Math.max(item.platformLeads, campaignLeadsInRange.length);
+        const qualified = campaignLeads.filter(l => QUALIFIED_LEAD_STATUSES.includes(l.status)).length;
+        const unqualified = campaignLeads.filter(l => UNQUALIFIED_LEAD_STATUSES.includes(l.status)).length;
+        const siteVisits = campaignLeads.filter(l => SITE_VISIT_LEAD_STATUSES.includes(l.status)).length;
         const cplVal = total > 0 ? Number((item.spend / total).toFixed(2)) : 0;
 
         result.push({
@@ -294,20 +302,24 @@ export default function AdminCampaignsPage() {
     };
   }, [campaignsList, leads]);
 
-  // Each stat card's real underlying lead list — same predicates as the
-  // counts above — so clicking a card can drill into exactly what it
-  // counted, mirroring the CRM Dashboard's stat-card drill-down.
+  // Each lead-based stat card's real underlying lead list — same
+  // predicates as the counts above — so clicking a card can drill into
+  // exactly what it counted, mirroring the CRM Dashboard's drill-down.
+  // Only "Total Leads" is intake-volume (respects Date Range); Qualified
+  // Leads/Site Visits/Follow Ups are current pipeline-status snapshots,
+  // same convention as summaryMetrics above, so they aren't date-filtered.
   const categoryLeads: Record<string, Lead[]> = useMemo(() => {
-    const activeCampaignNames = new Set(campaignsList.filter(c => c.status === "Active").map(c => c.name.toLowerCase()));
-    const rangeLeads = leads.filter(leadInSelectedRange);
     return {
-      "Active Campaigns": leads.filter(l => activeCampaignNames.has((l.campaign || l.source || "").toLowerCase())),
-      "Total Leads": rangeLeads,
-      "Qualified Leads": rangeLeads.filter(l => QUALIFIED_LEAD_STATUSES.includes(l.status)),
-      "Site Visits": rangeLeads.filter(l => SITE_VISIT_LEAD_STATUSES.includes(l.status)),
+      "Total Leads": leads.filter(leadInSelectedRange),
+      "Qualified Leads": leads.filter(l => QUALIFIED_LEAD_STATUSES.includes(l.status)),
+      "Site Visits": leads.filter(l => SITE_VISIT_LEAD_STATUSES.includes(l.status)),
       "Follow Ups": leads.filter(l => FOLLOW_UP_LEAD_STATUSES.includes(l.status))
     };
-  }, [campaignsList, leads, dateRange, appliedCustomRange, today]);
+  }, [leads, dateRange, appliedCustomRange, today]);
+
+  // "Active Campaigns" drills into campaigns, not leads — it's a count of
+  // campaigns (matching the summary card's own unit), not a leads list.
+  const activeCampaignsDrill = useMemo(() => campaignsList.filter(c => c.status === "Active"), [campaignsList]);
 
   // Filtered table rows
   const filteredCampaigns = useMemo(() => {
@@ -468,50 +480,109 @@ export default function AdminCampaignsPage() {
             </div>
           </div>
 
-          {/* Stat-card drill-down — the real leads behind whichever card is selected. */}
-          {selectedCategory && (
-            <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden animate-fade-in">
-              <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-200/80">
-                <h3 className="text-sm font-bold text-slate-900">
-                  {selectedCategory}
-                  <span className="text-slate-400 font-medium ml-1.5">({categoryLeads[selectedCategory]?.length || 0})</span>
-                </h3>
-                <button type="button" onClick={() => setSelectedCategory(null)} className="text-slate-400 hover:text-slate-700">
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-              <div className="max-h-80 overflow-y-auto">
-                <table className="w-full text-left border-collapse min-w-[600px]">
-                  <thead className="sticky top-0 bg-white">
-                    <tr className="border-b border-slate-100 text-[11px] font-bold text-slate-500">
-                      <th className="px-5 py-2.5">Name</th>
-                      <th className="px-5 py-2.5">Phone</th>
-                      <th className="px-5 py-2.5">Status</th>
-                      <th className="px-5 py-2.5">Campaign</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 text-[12px] text-slate-700">
-                    {(categoryLeads[selectedCategory] || []).length === 0 ? (
-                      <tr>
-                        <td colSpan={4} className="px-5 py-6 text-center text-slate-400 italic">
-                          No leads found for this category.
-                        </td>
-                      </tr>
-                    ) : (
-                      (categoryLeads[selectedCategory] || []).map(l => (
-                        <tr key={l.id} className="hover:bg-slate-50/50 transition-colors">
-                          <td className="px-5 py-2.5 font-semibold text-slate-900">{l.name}</td>
-                          <td className="px-5 py-2.5 font-mono">{l.phone}</td>
-                          <td className="px-5 py-2.5">{l.status}</td>
-                          <td className="px-5 py-2.5">{l.campaign || l.source || "—"}</td>
+          {/* Stat-card drill-down — "Active Campaigns" opens the matching
+              campaigns (it's a campaigns count, not a leads count); the
+              other four open the actual leads behind that number. Either
+              way a search box lets the user narrow down a long list. */}
+          {selectedCategory && (() => {
+            const isCampaignsDrill = selectedCategory === "Active Campaigns";
+            const q = drillSearchQuery.trim().toLowerCase();
+            const shownCampaigns = isCampaignsDrill
+              ? activeCampaignsDrill.filter(c => !q || c.name.toLowerCase().includes(q))
+              : [];
+            const shownLeads = !isCampaignsDrill
+              ? (categoryLeads[selectedCategory] || []).filter(l =>
+                  !q || l.name.toLowerCase().includes(q) || l.phone.includes(q) || (l.campaign || l.source || "").toLowerCase().includes(q)
+                )
+              : [];
+            const shownCount = isCampaignsDrill ? shownCampaigns.length : shownLeads.length;
+
+            return (
+              <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden animate-fade-in">
+                <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-200/80 gap-3">
+                  <h3 className="text-sm font-bold text-slate-900 whitespace-nowrap">
+                    {selectedCategory}
+                    <span className="text-slate-400 font-medium ml-1.5">({shownCount})</span>
+                  </h3>
+                  <div className="flex items-center gap-3 flex-1 justify-end">
+                    <div className="relative w-full max-w-[220px]">
+                      <Search className="h-3.5 w-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        value={drillSearchQuery}
+                        onChange={(e) => setDrillSearchQuery(e.target.value)}
+                        placeholder={isCampaignsDrill ? "Search campaign..." : "Search name, phone, campaign..."}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-8 pr-2.5 py-1.5 text-xs focus:outline-none focus:border-[#0B1E6E]"
+                      />
+                    </div>
+                    <button type="button" onClick={() => setSelectedCategory(null)} className="text-slate-400 hover:text-slate-700 shrink-0">
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+                <div className="max-h-80 overflow-y-auto">
+                  {isCampaignsDrill ? (
+                    <table className="w-full text-left border-collapse min-w-[500px]">
+                      <thead className="sticky top-0 bg-white">
+                        <tr className="border-b border-slate-100 text-[11px] font-bold text-slate-500">
+                          <th className="px-5 py-2.5">Campaign Name</th>
+                          <th className="px-5 py-2.5">Total Leads</th>
+                          <th className="px-5 py-2.5">Qualified Leads</th>
+                          <th className="px-5 py-2.5">Site Visit</th>
                         </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 text-[12px] text-slate-700">
+                        {shownCampaigns.length === 0 ? (
+                          <tr>
+                            <td colSpan={4} className="px-5 py-6 text-center text-slate-400 italic">
+                              No active campaigns found.
+                            </td>
+                          </tr>
+                        ) : (
+                          shownCampaigns.map(c => (
+                            <tr key={c.id} className="hover:bg-slate-50/50 transition-colors">
+                              <td className="px-5 py-2.5 font-semibold text-slate-900">{c.name}</td>
+                              <td className="px-5 py-2.5">{c.totalLeads}</td>
+                              <td className="px-5 py-2.5">{c.qualifiedLeads}</td>
+                              <td className="px-5 py-2.5">{c.siteVisit}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <table className="w-full text-left border-collapse min-w-[600px]">
+                      <thead className="sticky top-0 bg-white">
+                        <tr className="border-b border-slate-100 text-[11px] font-bold text-slate-500">
+                          <th className="px-5 py-2.5">Name</th>
+                          <th className="px-5 py-2.5">Phone</th>
+                          <th className="px-5 py-2.5">Status</th>
+                          <th className="px-5 py-2.5">Campaign</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 text-[12px] text-slate-700">
+                        {shownLeads.length === 0 ? (
+                          <tr>
+                            <td colSpan={4} className="px-5 py-6 text-center text-slate-400 italic">
+                              No leads found for this category.
+                            </td>
+                          </tr>
+                        ) : (
+                          shownLeads.map(l => (
+                            <tr key={l.id} className="hover:bg-slate-50/50 transition-colors">
+                              <td className="px-5 py-2.5 font-semibold text-slate-900">{l.name}</td>
+                              <td className="px-5 py-2.5 font-mono">{l.phone}</td>
+                              <td className="px-5 py-2.5">{l.status}</td>
+                              <td className="px-5 py-2.5">{l.campaign || l.source || "—"}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* Action Toolbar (Date Picker Pill, Campaigns Dropdown, Filter Button) */}
           <div className="flex flex-wrap items-center justify-end gap-2.5 pt-1">
