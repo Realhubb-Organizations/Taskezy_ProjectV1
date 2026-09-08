@@ -188,7 +188,7 @@ export default function AdminCampaignsPage() {
   };
 
   return (
-    <div className="space-y-4 pb-12 animate-fade-in text-slate-800">
+    <div className="space-y-4 pb-8 animate-fade-in text-slate-800">
       {/* Top Toggle Switcher: Campaigns vs Campaigns Analytics */}
       <div className="flex items-center gap-1.5">
         <div className="bg-slate-200/70 p-1 rounded-xl flex items-center gap-1">
@@ -240,90 +240,95 @@ export default function AdminCampaignsPage() {
         </div>
       ) : (
         <>
-          {/* Summary Card with Outer Grey Border Container (Matches Screenshot exact design) */}
-          <div className="bg-slate-100/80 border border-slate-200/80 rounded-2xl p-3.5 space-y-3 shadow-xs">
-            {/* Date Range Dropdown Bar */}
-            <div className="flex items-center gap-1.5 text-xs">
-              <span className="text-slate-600 font-medium">Date Range</span>
-              <div className="relative">
-                <button
-                  ref={summaryDateBtnRef}
-                  onClick={() => openPositionedMenu(summaryDateBtnRef, setSummaryDateMenuPos, setSummaryDateMenuOpen, "left", 140)}
-                  className="flex items-center gap-1 font-bold text-slate-900 bg-transparent hover:bg-slate-200/50 px-1.5 py-0.5 rounded transition-colors"
-                >
-                  {dateRange}
-                  <ChevronDown className={`h-3.5 w-3.5 text-slate-500 transition-transform ${summaryDateMenuOpen ? "rotate-180" : ""}`} />
-                </button>
-                {summaryDateMenuOpen && summaryDateMenuPos && createPortal(
-                  <>
-                    <div className="fixed inset-0 z-[60]" onClick={() => setSummaryDateMenuOpen(false)} />
-                    <div
-                      className="fixed z-[70] w-36 bg-white border border-slate-200 rounded-xl shadow-lg py-1 text-xs font-semibold overflow-hidden"
-                      style={{ top: summaryDateMenuPos.top, left: summaryDateMenuPos.left }}
-                    >
-                      {(["Today", "Yesterday", "This Week", "This Month", "All Time"] as const).map(opt => (
-                        <button
-                          key={opt}
-                          onClick={() => { setDateRange(opt); setSummaryDateMenuOpen(false); }}
-                          className={`w-full text-left px-3 py-1.5 transition-colors ${
-                            dateRange === opt ? "bg-blue-600 text-white font-bold" : "text-slate-700 hover:bg-slate-50"
-                          }`}
-                        >
-                          {opt}
-                        </button>
-                      ))}
-                    </div>
-                  </>,
-                  document.body
-                )}
+          {/* Date Filter & Metrics — one unified card matching the CRM dashboard's
+              layout: a header bar (date range) sitting directly on top of the
+              stat columns, separated by a divider instead of floating as a
+              separate padded/shadowed card. */}
+          <div className="bg-slate-100/70 border border-slate-200/60 rounded-2xl overflow-hidden shadow-sm">
+            {/* Header bar */}
+            <div className="flex items-center px-4 py-2.5 text-[11px] border-b border-slate-200/60">
+              <div className="flex items-center gap-1.5 font-bold text-slate-700">
+                <span className="font-normal text-slate-500">Date Range</span>
+                <div className="relative">
+                  <button
+                    ref={summaryDateBtnRef}
+                    onClick={() => openPositionedMenu(summaryDateBtnRef, setSummaryDateMenuPos, setSummaryDateMenuOpen, "left", 140)}
+                    className="flex items-center gap-1.5 bg-white border border-slate-300/80 rounded-md px-2 py-0.5 font-black text-slate-800 text-[11px] hover:bg-slate-50 transition-colors"
+                  >
+                    {dateRange}
+                    <ChevronDown className={`h-3 w-3 text-slate-400 transition-transform ${summaryDateMenuOpen ? "rotate-180" : ""}`} />
+                  </button>
+                  {summaryDateMenuOpen && summaryDateMenuPos && createPortal(
+                    <>
+                      <div className="fixed inset-0 z-[60]" onClick={() => setSummaryDateMenuOpen(false)} />
+                      <div
+                        className="fixed z-[70] w-36 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 overflow-hidden"
+                        style={{ top: summaryDateMenuPos.top, left: summaryDateMenuPos.left }}
+                      >
+                        {(["Today", "Yesterday", "This Week", "This Month", "All Time"] as const).map(opt => (
+                          <button
+                            key={opt}
+                            onClick={() => { setDateRange(opt); setSummaryDateMenuOpen(false); }}
+                            className={`w-full text-left px-3 py-1.5 text-xs font-bold transition-colors ${
+                              dateRange === opt ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"
+                            }`}
+                          >
+                            {opt}
+                          </button>
+                        ))}
+                      </div>
+                    </>,
+                    document.body
+                  )}
+                </div>
               </div>
             </div>
 
-            {/* 5 Column Metric Grid (Exact pixel layout & card divider lines) */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-0 bg-white rounded-xl border border-slate-200/70 overflow-hidden divide-y sm:divide-y-0 sm:divide-x divide-slate-100 shadow-2xs">
+            {/* Stat columns */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 bg-white divide-y sm:divide-y-0 sm:divide-x divide-slate-100">
               {/* Card 1: Active Campaigns */}
-              <div className="p-4 flex items-center justify-between hover:bg-slate-50/40 transition-colors group cursor-pointer">
+              <div className="p-3 flex items-center justify-between hover:bg-slate-50/50 transition-colors group cursor-pointer">
                 <div>
-                  <span className="text-[12px] font-medium text-slate-500 block">Active Campaigns</span>
-                  <span className="text-2xl font-bold text-slate-900 mt-1 block">{summaryMetrics.activeCampaigns}</span>
+                  <span className="text-[11px] font-medium text-slate-500 block">Active Campaigns</span>
+                  <span className="text-lg font-extrabold text-slate-900 mt-1.5 block">{summaryMetrics.activeCampaigns}</span>
                 </div>
-                <ChevronRight className="h-4 w-4 text-slate-400 group-hover:translate-x-0.5 transition-transform" />
+                <ChevronRight className="h-3.5 w-3.5 text-slate-300 group-hover:translate-x-0.5 transition-transform" />
               </div>
 
               {/* Card 2: Total Leads */}
-              <div className="p-4 flex items-center justify-between hover:bg-slate-50/40 transition-colors group cursor-pointer">
+              <div className="p-3 flex items-center justify-between hover:bg-slate-50/50 transition-colors group cursor-pointer">
                 <div>
-                  <span className="text-[12px] font-medium text-slate-500 block">Total Leads</span>
-                  <span className="text-2xl font-bold text-slate-900 mt-1 block">{summaryMetrics.totalLeads}</span>
+                  <span className="text-[11px] font-medium text-slate-500 block">Total Leads</span>
+                  <span className="text-lg font-extrabold text-slate-900 mt-1.5 block">{summaryMetrics.totalLeads}</span>
                 </div>
-                <ChevronRight className="h-4 w-4 text-slate-400 group-hover:translate-x-0.5 transition-transform" />
+                <ChevronRight className="h-3.5 w-3.5 text-slate-300 group-hover:translate-x-0.5 transition-transform" />
               </div>
 
               {/* Card 3: Qualified Leads */}
-              <div className="p-4 flex items-center justify-between hover:bg-slate-50/40 transition-colors group cursor-pointer">
+              <div className="p-3 flex items-center justify-between hover:bg-slate-50/50 transition-colors group cursor-pointer">
                 <div>
-                  <span className="text-[12px] font-medium text-slate-500 block">Qualified Leads</span>
-                  <span className="text-2xl font-bold text-rose-600 mt-1 block">{summaryMetrics.qualifiedLeads}</span>
+                  <span className="text-[11px] font-medium text-slate-500 block">Qualified Leads</span>
+                  <span className="text-lg font-extrabold text-rose-600 mt-1.5 block">{summaryMetrics.qualifiedLeads}</span>
                 </div>
-                <ChevronRight className="h-4 w-4 text-slate-400 group-hover:translate-x-0.5 transition-transform" />
+                <ChevronRight className="h-3.5 w-3.5 text-slate-300 group-hover:translate-x-0.5 transition-transform" />
               </div>
 
               {/* Card 4: Site Visits */}
-              <div className="p-4 flex items-center justify-between hover:bg-slate-50/40 transition-colors group cursor-pointer">
+              <div className="p-3 flex items-center justify-between hover:bg-slate-50/50 transition-colors group cursor-pointer">
                 <div>
-                  <span className="text-[12px] font-medium text-slate-500 block">Site Visits</span>
-                  <span className="text-2xl font-bold text-amber-500 mt-1 block">{summaryMetrics.siteVisits}</span>
+                  <span className="text-[11px] font-medium text-slate-500 block">Site Visits</span>
+                  <span className="text-lg font-extrabold text-amber-500 mt-1.5 block">{summaryMetrics.siteVisits}</span>
                 </div>
-                <ChevronRight className="h-4 w-4 text-slate-400 group-hover:translate-x-0.5 transition-transform" />
+                <ChevronRight className="h-3.5 w-3.5 text-slate-300 group-hover:translate-x-0.5 transition-transform" />
               </div>
 
               {/* Card 5: Follow Ups */}
-              <div className="p-4 flex items-center justify-between hover:bg-slate-50/40 transition-colors group cursor-pointer">
+              <div className="p-3 flex items-center justify-between hover:bg-slate-50/50 transition-colors group cursor-pointer">
                 <div>
-                  <span className="text-[12px] font-medium text-slate-500 block">Follow Ups</span>
-                  <span className="text-2xl font-bold text-blue-500 mt-1 block">{summaryMetrics.followUps}</span>
+                  <span className="text-[11px] font-medium text-slate-500 block">Follow Ups</span>
+                  <span className="text-lg font-extrabold text-blue-500 mt-1.5 block">{summaryMetrics.followUps}</span>
                 </div>
-                <ChevronRight className="h-4 w-4 text-slate-400 group-hover:translate-x-0.5 transition-transform" />
+                <ChevronRight className="h-3.5 w-3.5 text-slate-300 group-hover:translate-x-0.5 transition-transform" />
               </div>
             </div>
           </div>
