@@ -1415,7 +1415,7 @@ export default function LeadDashboard() {
                           )}
                           {adminVisibleColumns.source && (
                             <td className="px-4 py-3 text-slate-700 font-medium align-top truncate" title={l.source || "—"}>
-                              <PlatformLabel text={l.source || "—"} />
+                              <PlatformLabel text={l.source || "—"} iconOnly />
                             </td>
                           )}
                           {adminVisibleColumns.leadScore && (

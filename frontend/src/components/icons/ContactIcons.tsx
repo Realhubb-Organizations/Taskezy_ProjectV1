@@ -55,9 +55,30 @@ export function platformFromText(text: string | undefined | null): "Meta" | "Goo
 // Icon + text for any cell/field showing a lead's source or campaign — the
 // visible label (text) and what decides the icon (classifyBy) are separate
 // because a Campaign cell shows the campaign name but should classify off
-// the lead's more reliable source field when one exists.
-export function PlatformLabel({ text, classifyBy, className }: { text: string; classifyBy?: string; className?: string }) {
+// the lead's more reliable source field when one exists. With iconOnly, a
+// recognized platform renders as just the icon (the text moves to a title
+// tooltip instead) — values with no icon match still fall back to text,
+// since there's nothing to show otherwise.
+export function PlatformLabel({
+  text,
+  classifyBy,
+  className,
+  iconOnly = false
+}: {
+  text: string;
+  classifyBy?: string;
+  className?: string;
+  iconOnly?: boolean;
+}) {
   const platform = platformFromText(classifyBy ?? text);
+  if (iconOnly && platform) {
+    return (
+      <span className={`inline-flex items-center ${className || ""}`} title={text}>
+        {platform === "Meta" && <MetaIcon className="h-4 w-4 shrink-0" />}
+        {platform === "Google" && <GoogleIcon className="h-4 w-4 shrink-0" />}
+      </span>
+    );
+  }
   return (
     <span className={`inline-flex items-center gap-1.5 min-w-0 ${className || ""}`}>
       {platform === "Meta" && <MetaIcon className="h-3.5 w-3.5 shrink-0" />}
