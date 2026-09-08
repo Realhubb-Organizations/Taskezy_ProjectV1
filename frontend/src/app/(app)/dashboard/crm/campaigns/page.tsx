@@ -386,7 +386,16 @@ export default function AdminCampaignsPage() {
                       <input
                         type="date"
                         value={customRangeStartDraft}
-                        onChange={(e) => setCustomRangeStartDraft(e.target.value)}
+                        onChange={(e) => {
+                          const newStart = e.target.value;
+                          setCustomRangeStartDraft(newStart);
+                          // A previously-picked End Date can now be earlier
+                          // than the new Start Date — clear it rather than
+                          // silently keep an invalid range around.
+                          if (customRangeEndDraft && newStart && customRangeEndDraft < newStart) {
+                            setCustomRangeEndDraft("");
+                          }
+                        }}
                         className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-700 focus:outline-none focus:border-[#0B1E6E]"
                       />
                     </div>
@@ -395,9 +404,23 @@ export default function AdminCampaignsPage() {
                       <input
                         type="date"
                         value={customRangeEndDraft}
-                        onChange={(e) => setCustomRangeEndDraft(e.target.value)}
+                        min={customRangeStartDraft || undefined}
+                        onChange={(e) => {
+                          const newEnd = e.target.value;
+                          // The `min` attribute only blocks the native
+                          // picker's own calendar UI — typing digits
+                          // directly into the field still fires onChange
+                          // with an out-of-range value, so this is the
+                          // real guard: silently refuse an End Date
+                          // earlier than the chosen Start Date.
+                          if (customRangeStartDraft && newEnd && newEnd < customRangeStartDraft) return;
+                          setCustomRangeEndDraft(newEnd);
+                        }}
                         className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-700 focus:outline-none focus:border-[#0B1E6E]"
                       />
+                      {customRangeStartDraft && customRangeEndDraft && customRangeEndDraft < customRangeStartDraft && (
+                        <p className="text-[10px] font-semibold text-red-500">End date can&apos;t be before the start date.</p>
+                      )}
                     </div>
                     <div className="flex gap-2 pt-1">
                       <button
@@ -417,11 +440,12 @@ export default function AdminCampaignsPage() {
                         type="button"
                         onClick={() => {
                           if (!customRangeStartDraft || !customRangeEndDraft) return;
+                          if (customRangeEndDraft < customRangeStartDraft) return;
                           setAppliedCustomRange({ start: customRangeStartDraft, end: customRangeEndDraft });
                           setCalendarPickerOpen(false);
                           setCurrentPage(1);
                         }}
-                        disabled={!customRangeStartDraft || !customRangeEndDraft}
+                        disabled={!customRangeStartDraft || !customRangeEndDraft || customRangeEndDraft < customRangeStartDraft}
                         className="flex-1 bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold text-[11px] py-1.5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         Apply
