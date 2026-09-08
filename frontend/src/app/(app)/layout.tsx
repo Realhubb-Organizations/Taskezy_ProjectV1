@@ -150,14 +150,8 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     { name: "Dashboard", href: "/crm/dashboard", activeCheck: (p: string, t?: string | null) => p === "/crm/dashboard", icon: LayoutGrid },
     { name: "Properties", href: "/dashboard/properties", activeCheck: (p: string, t?: string | null) => p === "/dashboard/properties", icon: Building },
     { name: "Leads", href: "/dashboard/crm", activeCheck: (p: string, t?: string | null) => p === "/dashboard/crm", icon: Users },
-    // Campaigns/Data Calling don't have dedicated pages of their own yet —
-    // routed to the closest existing real, data-backed views (Marketing/
-    // Agent Reports) rather than a dead link or fake page. Reports' own
-    // role-scoping still applies (a sales Member following the Campaigns
-    // link lands on their own Agent Reports instead, exactly like
-    // navigating there any other way).
     { name: "Campaigns", href: "/dashboard/crm/campaigns", activeCheck: (p: string) => p.startsWith("/dashboard/crm/campaigns"), icon: Megaphone },
-    { name: "Data Calling", href: "/dashboard/reports?tab=agent", activeCheck: (p: string, t?: string | null) => p === "/dashboard/reports" && t === "agent", icon: Phone },
+    { name: "Data Calling", href: "/dashboard/crm/data-calling", activeCheck: (p: string) => p.startsWith("/dashboard/crm/data-calling"), icon: Phone },
     { name: "Calendar", href: "/dashboard/crm/calendar", activeCheck: (p: string, t?: string | null) => p === "/dashboard/crm/calendar", icon: Calendar },
     { name: "Settings", href: "/dashboard/settings", activeCheck: (p: string, t?: string | null) => p === "/dashboard/settings", icon: Settings },
     { name: "Reports", href: "/dashboard/reports", activeCheck: (p: string, t?: string | null) => p === "/dashboard/reports", icon: BarChart }
