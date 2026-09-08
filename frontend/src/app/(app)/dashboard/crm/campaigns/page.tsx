@@ -46,7 +46,14 @@ export default function AdminCampaignsPage() {
   const summaryDateBtnRef = useRef<HTMLButtonElement>(null);
 
   // Table Filters & Search
-  const [dateFilterText] = useState<string>("2026-07-16 - 2026-07");
+  const today = new Date();
+  const todayStr = today.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  const [calendarPickerOpen, setCalendarPickerOpen] = useState(false);
+  const [calendarMenuPos, setCalendarMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const calendarBtnRef = useRef<HTMLButtonElement>(null);
+  const [customRangeStartDraft, setCustomRangeStartDraft] = useState("");
+  const [customRangeEndDraft, setCustomRangeEndDraft] = useState("");
+  const [appliedCustomRange, setAppliedCustomRange] = useState<{ start: string; end: string } | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("All");
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [statusMenuPos, setStatusMenuPos] = useState<{ top: number; left: number } | null>(null);
@@ -115,7 +122,17 @@ export default function AdminCampaignsPage() {
     Object.keys(spendCampaignMap).forEach((cName, idx) => {
       if (!result.some(r => r.name.toLowerCase() === cName.toLowerCase())) {
         const item = spendCampaignMap[cName];
-        const matchedLeads = leads.filter(l => (l.campaign || l.source)?.toLowerCase() === cName.toLowerCase());
+        const matchedLeads = leads.filter(l => {
+          if ((l.campaign || l.source)?.toLowerCase() !== cName.toLowerCase()) return false;
+          if (!appliedCustomRange) return true;
+          if (!l.createdAtStr) return false;
+          const d = new Date(l.createdAtStr);
+          if (isNaN(d.getTime())) return false;
+          const start = new Date(appliedCustomRange.start);
+          const end = new Date(appliedCustomRange.end);
+          end.setHours(23, 59, 59, 999);
+          return d >= start && d <= end;
+        });
         const total = Math.max(item.platformLeads, matchedLeads.length);
         const qualified = matchedLeads.filter(l => ["Interested", "Connected", "Visit Schedule", "Site Visit", "Booking Done", "Booked"].includes(l.status)).length;
         const unqualified = matchedLeads.filter(l => ["Dead", "Invalid", "RNR"].includes(l.status)).length;
@@ -137,7 +154,7 @@ export default function AdminCampaignsPage() {
     });
 
     return result;
-  }, [adSpendRecords, leads]);
+  }, [adSpendRecords, leads, appliedCustomRange]);
 
   // Aggregate Metrics for Top Summary Card
   const summaryMetrics = useMemo(() => {
@@ -336,9 +353,84 @@ export default function AdminCampaignsPage() {
           {/* Action Toolbar (Date Picker Pill, Campaigns Dropdown, Settings Button) */}
           <div className="flex flex-wrap items-center justify-end gap-2.5 pt-1">
             {/* Date Range Picker Pill */}
-            <div className="flex items-center gap-2 bg-white border border-slate-300/80 rounded-xl px-3 py-1.5 text-xs text-slate-700 font-medium shadow-2xs">
-              <Calendar className="h-3.5 w-3.5 text-blue-600" />
-              <span>{dateFilterText}</span>
+            <div className="relative">
+              <button
+                ref={calendarBtnRef}
+                type="button"
+                onClick={() => {
+                  const rect = calendarBtnRef.current?.getBoundingClientRect();
+                  if (rect) {
+                    const panelWidth = 260;
+                    const left = Math.max(8, Math.min(rect.right - panelWidth, window.innerWidth - panelWidth - 8));
+                    setCalendarMenuPos({ top: rect.bottom + 6, left });
+                  }
+                  setCustomRangeStartDraft(appliedCustomRange?.start || "");
+                  setCustomRangeEndDraft(appliedCustomRange?.end || "");
+                  setCalendarPickerOpen(o => !o);
+                }}
+                className="flex items-center gap-2 bg-white border border-slate-300/80 rounded-xl px-3 py-1.5 text-xs text-slate-700 font-medium shadow-2xs hover:bg-slate-50 transition-colors"
+              >
+                <Calendar className="h-3.5 w-3.5 text-blue-600" />
+                <span>{appliedCustomRange ? `${appliedCustomRange.start} to ${appliedCustomRange.end}` : todayStr}</span>
+              </button>
+              {calendarPickerOpen && calendarMenuPos && createPortal(
+                <>
+                  <div className="fixed inset-0 z-[60]" onClick={() => setCalendarPickerOpen(false)} />
+                  <div
+                    className="fixed z-[70] w-64 max-w-[calc(100vw-1rem)] bg-white border border-slate-200 rounded-xl shadow-lg p-4 space-y-3"
+                    style={{ top: calendarMenuPos.top, left: calendarMenuPos.left }}
+                  >
+                    <p className="text-[11px] font-bold text-slate-700">Filter campaigns by date range</p>
+                    <div className="space-y-1.5">
+                      <label className="block text-[9px] font-bold text-slate-400 uppercase">Start Date</label>
+                      <input
+                        type="date"
+                        value={customRangeStartDraft}
+                        onChange={(e) => setCustomRangeStartDraft(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-700 focus:outline-none focus:border-[#0B1E6E]"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="block text-[9px] font-bold text-slate-400 uppercase">End Date</label>
+                      <input
+                        type="date"
+                        value={customRangeEndDraft}
+                        onChange={(e) => setCustomRangeEndDraft(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-700 focus:outline-none focus:border-[#0B1E6E]"
+                      />
+                    </div>
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAppliedCustomRange(null);
+                          setCustomRangeStartDraft("");
+                          setCustomRangeEndDraft("");
+                          setCalendarPickerOpen(false);
+                          setCurrentPage(1);
+                        }}
+                        className="flex-1 bg-slate-100 text-slate-600 font-bold text-[11px] py-1.5 rounded-lg hover:bg-slate-200 transition-colors"
+                      >
+                        Reset
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!customRangeStartDraft || !customRangeEndDraft) return;
+                          setAppliedCustomRange({ start: customRangeStartDraft, end: customRangeEndDraft });
+                          setCalendarPickerOpen(false);
+                          setCurrentPage(1);
+                        }}
+                        disabled={!customRangeStartDraft || !customRangeEndDraft}
+                        className="flex-1 bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold text-[11px] py-1.5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        Apply
+                      </button>
+                    </div>
+                  </div>
+                </>,
+                document.body
+              )}
             </div>
 
             {/* Campaigns Filter Dropdown */}
