@@ -35,21 +35,36 @@ interface CampaignItem {
 }
 
 // The campaigns table's togglable columns (beyond the always-shown Campaign
-// Name) — driven by the Filter button's Settings panel, mirroring the same
-// pattern on the admin leads page.
-type CampaignColumnKey = "status" | "totalLeads" | "qualifiedLeads" | "unqualifiedLeads" | "siteVisit" | "cpl";
+// Name + Total Leads) — driven by the Filter button's panel, mirroring the
+// same drawer pattern on the admin leads page. "Date", "CTR", "Clicks",
+// "Impressions", "Ad set name", "Source" and "QCPL" have no real backing
+// field yet (no ad-set/click/impression-level ingestion in AdSpendRecord),
+// so their cells honestly render "—" for every row rather than inventing
+// numbers — same convention the leads page uses for its own untracked
+// columns.
+type CampaignColumnKey =
+  | "cpl" | "date" | "status" | "ctr" | "siteVisit" | "clicks"
+  | "adSetName" | "impressions" | "source" | "qcpl" | "unqualifiedLeads" | "qualifiedLeads";
 
 const CAMPAIGN_COLUMNS: { key: CampaignColumnKey; label: string }[] = [
-  { key: "status", label: "Campaign Status" },
-  { key: "totalLeads", label: "Total Leads" },
-  { key: "qualifiedLeads", label: "Qualified Leads" },
+  { key: "cpl", label: "CPL" },
+  { key: "date", label: "Date" },
+  { key: "status", label: "Status" },
+  { key: "ctr", label: "CTR" },
+  { key: "siteVisit", label: "Site Visits" },
+  { key: "clicks", label: "Clicks" },
+  { key: "adSetName", label: "Ad set name" },
+  { key: "impressions", label: "Impressions" },
+  { key: "source", label: "Source" },
+  { key: "qcpl", label: "QCPL" },
   { key: "unqualifiedLeads", label: "Unqualified Leads" },
-  { key: "siteVisit", label: "Site Visit" },
-  { key: "cpl", label: "CPL" }
+  { key: "qualifiedLeads", label: "Qualified Leads" }
 ];
 
 const CAMPAIGN_DEFAULT_VISIBLE_COLUMNS: Record<CampaignColumnKey, boolean> = {
-  status: true, totalLeads: true, qualifiedLeads: true, unqualifiedLeads: true, siteVisit: true, cpl: true
+  cpl: true, date: false, status: true, ctr: false, siteVisit: true, clicks: false,
+  adSetName: false, impressions: false, source: false, qcpl: false,
+  unqualifiedLeads: true, qualifiedLeads: true
 };
 
 export default function AdminCampaignsPage() {
@@ -566,6 +581,7 @@ export default function AdminCampaignsPage() {
                         </div>
                       )}
                     </th>
+                    <th className="px-5 py-3.5 whitespace-nowrap">Total Leads</th>
                     {campaignVisibleColumns.status && (
                       <th className="px-5 py-3.5 whitespace-nowrap">
                         <div className="flex items-center gap-1">
@@ -574,17 +590,23 @@ export default function AdminCampaignsPage() {
                         </div>
                       </th>
                     )}
-                    {campaignVisibleColumns.totalLeads && <th className="px-5 py-3.5 whitespace-nowrap">Total Leads</th>}
                     {campaignVisibleColumns.qualifiedLeads && <th className="px-5 py-3.5 whitespace-nowrap">Qualified Leads</th>}
                     {campaignVisibleColumns.unqualifiedLeads && <th className="px-5 py-3.5 whitespace-nowrap">Unqualified Leads</th>}
                     {campaignVisibleColumns.siteVisit && <th className="px-5 py-3.5 whitespace-nowrap">Site Visit</th>}
                     {campaignVisibleColumns.cpl && <th className="px-5 py-3.5 whitespace-nowrap">CPL</th>}
+                    {campaignVisibleColumns.date && <th className="px-5 py-3.5 whitespace-nowrap">Date</th>}
+                    {campaignVisibleColumns.ctr && <th className="px-5 py-3.5 whitespace-nowrap">CTR</th>}
+                    {campaignVisibleColumns.clicks && <th className="px-5 py-3.5 whitespace-nowrap">Clicks</th>}
+                    {campaignVisibleColumns.adSetName && <th className="px-5 py-3.5 whitespace-nowrap">Ad Set Name</th>}
+                    {campaignVisibleColumns.impressions && <th className="px-5 py-3.5 whitespace-nowrap">Impressions</th>}
+                    {campaignVisibleColumns.source && <th className="px-5 py-3.5 whitespace-nowrap">Source</th>}
+                    {campaignVisibleColumns.qcpl && <th className="px-5 py-3.5 whitespace-nowrap">QCPL</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-[12px] font-medium text-slate-700">
                   {paginatedCampaigns.length === 0 ? (
                     <tr>
-                      <td colSpan={1 + CAMPAIGN_COLUMNS.filter(c => campaignVisibleColumns[c.key]).length} className="px-5 py-8 text-center text-slate-400 italic">
+                      <td colSpan={2 + CAMPAIGN_COLUMNS.filter(c => campaignVisibleColumns[c.key]).length} className="px-5 py-8 text-center text-slate-400 italic">
                         No campaigns found matching filter.
                       </td>
                     </tr>
@@ -592,12 +614,19 @@ export default function AdminCampaignsPage() {
                     paginatedCampaigns.map((row) => (
                       <tr key={row.id} className="hover:bg-slate-50/50 transition-colors">
                         <td className="px-5 py-3.5 text-slate-900 font-semibold">{row.name}</td>
+                        <td className="px-5 py-3.5">{row.totalLeads}</td>
                         {campaignVisibleColumns.status && <td className="px-5 py-3.5 whitespace-nowrap">{getStatusBadge(row.status)}</td>}
-                        {campaignVisibleColumns.totalLeads && <td className="px-5 py-3.5">{row.totalLeads}</td>}
                         {campaignVisibleColumns.qualifiedLeads && <td className="px-5 py-3.5">{row.qualifiedLeads}</td>}
                         {campaignVisibleColumns.unqualifiedLeads && <td className="px-5 py-3.5">{row.unqualifiedLeads}</td>}
                         {campaignVisibleColumns.siteVisit && <td className="px-5 py-3.5">{row.siteVisit}</td>}
                         {campaignVisibleColumns.cpl && <td className="px-5 py-3.5 font-semibold text-slate-800">{row.cpl.toFixed(2)}</td>}
+                        {campaignVisibleColumns.date && <td className="px-5 py-3.5 text-slate-300" title="Not tracked yet — no per-campaign date field ingested">—</td>}
+                        {campaignVisibleColumns.ctr && <td className="px-5 py-3.5 text-slate-300" title="Not tracked yet — no click/impression-level data ingested">—</td>}
+                        {campaignVisibleColumns.clicks && <td className="px-5 py-3.5 text-slate-300" title="Not tracked yet — no click-level data ingested">—</td>}
+                        {campaignVisibleColumns.adSetName && <td className="px-5 py-3.5 text-slate-300" title="Not tracked yet — no ad-set-level data ingested">—</td>}
+                        {campaignVisibleColumns.impressions && <td className="px-5 py-3.5 text-slate-300" title="Not tracked yet — no impression-level data ingested">—</td>}
+                        {campaignVisibleColumns.source && <td className="px-5 py-3.5 text-slate-300" title="Not tracked yet — no ad-source field ingested">—</td>}
+                        {campaignVisibleColumns.qcpl && <td className="px-5 py-3.5 text-slate-300" title="Not tracked yet — no qualified-lead cost field ingested">—</td>}
                       </tr>
                     ))
                   )}
