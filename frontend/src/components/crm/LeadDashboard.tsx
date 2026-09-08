@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useApp, Lead, LeadStatus } from "@/context/AppContext";
-import { Sliders, Sparkles, Plus, Check, ChevronDown, Search, Calendar, X, Minus } from "lucide-react";
+import { Sliders, Sparkles, Plus, Check, ChevronDown, Search, Calendar, X, Minus, Download, RotateCcw } from "lucide-react";
 import { DB_CODE_TO_FRONTEND_STATUS } from "@/lib/leadStatusMapping";
 import { WhatsAppIcon, CallIcon } from "@/components/icons/ContactIcons";
 import TopMetricsCards from "./TopMetricsCards";
@@ -344,6 +344,36 @@ export default function LeadDashboard() {
   // drawer elsewhere in this app), not a small anchored flyout.
   const [isColumnsSettingsOpen, setIsColumnsSettingsOpen] = useState(false);
 
+  // Leads Analytics tab's own toolbar — a fully independent set of filters
+  // (date range, member, property, campaign) from the Leads tab's, so
+  // switching tabs never silently changes what the other tab is scoped to.
+  const [analyticsDateRange, setAnalyticsDateRange] = useState<"today" | "yesterday" | "week" | "month" | "all" | "custom">("month");
+  const [analyticsCustomRange, setAnalyticsCustomRange] = useState<{ start: string; end: string } | null>(null);
+  const [analyticsCalendarOpen, setAnalyticsCalendarOpen] = useState(false);
+  const [analyticsCalendarPos, setAnalyticsCalendarPos] = useState<{ top: number; left: number } | null>(null);
+  const analyticsCalendarBtnRef = useRef<HTMLButtonElement>(null);
+  const [analyticsRangeStartDraft, setAnalyticsRangeStartDraft] = useState("");
+  const [analyticsRangeEndDraft, setAnalyticsRangeEndDraft] = useState("");
+
+  const [analyticsMemberFilter, setAnalyticsMemberFilter] = useState<string[]>([]);
+  const [analyticsMemberMenuOpen, setAnalyticsMemberMenuOpen] = useState(false);
+  const [analyticsMemberMenuPos, setAnalyticsMemberMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const analyticsMemberBtnRef = useRef<HTMLButtonElement>(null);
+
+  const [analyticsPropertyFilter, setAnalyticsPropertyFilter] = useState<string[]>([]);
+  const [analyticsPropertyMenuOpen, setAnalyticsPropertyMenuOpen] = useState(false);
+  const [analyticsPropertyMenuPos, setAnalyticsPropertyMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const analyticsPropertyBtnRef = useRef<HTMLButtonElement>(null);
+
+  const [analyticsCampaignFilter, setAnalyticsCampaignFilter] = useState<string[]>([]);
+  const [analyticsCampaignMenuOpen, setAnalyticsCampaignMenuOpen] = useState(false);
+  const [analyticsCampaignMenuPos, setAnalyticsCampaignMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const analyticsCampaignBtnRef = useRef<HTMLButtonElement>(null);
+
+  const [analyticsPage, setAnalyticsPage] = useState(1);
+  const [analyticsRowsPerPage, setAnalyticsRowsPerPage] = useState(100);
+  const [rnrSearch, setRnrSearch] = useState("");
+
   const [adminVisibleColumns, setAdminVisibleColumns] = useState<Record<AdminColumnKey, boolean>>(ADMIN_DEFAULT_VISIBLE_COLUMNS);
 
   const toggleAdminColumn = (key: AdminColumnKey) => {
@@ -386,7 +416,15 @@ export default function LeadDashboard() {
     setOpen(o => !o);
   };
 
-  const adminDateInRange = (dateStr: string | undefined, range: typeof adminDateRange, refNow: Date): boolean => {
+  // Shared by both the Leads tab's date filter and the Leads Analytics tab's
+  // own independent date filter — each passes its own customRange so the two
+  // tabs' date pickers stay fully decoupled while sharing one implementation.
+  const dateInRange = (
+    dateStr: string | undefined,
+    range: "today" | "yesterday" | "week" | "month" | "all" | "custom",
+    refNow: Date,
+    customRange: { start: string; end: string } | null
+  ): boolean => {
     if (!dateStr) return false;
     const d = new Date(dateStr);
     if (isNaN(d.getTime())) return false;
@@ -404,9 +442,9 @@ export default function LeadDashboard() {
       return d >= weekAgo;
     }
     if (range === "custom") {
-      if (!adminCustomRange) return false;
-      let start = new Date(adminCustomRange.start);
-      let end = new Date(adminCustomRange.end);
+      if (!customRange) return false;
+      let start = new Date(customRange.start);
+      let end = new Date(customRange.end);
       // The picker UI already blocks picking an End Date before Start, but
       // swap defensively in case an older/invalid range is still stored —
       // an inverted pair should still show "the selected date range's
@@ -417,6 +455,9 @@ export default function LeadDashboard() {
     }
     return d.getMonth() === refNow.getMonth() && d.getFullYear() === refNow.getFullYear();
   };
+
+  const adminDateInRange = (dateStr: string | undefined, range: typeof adminDateRange, refNow: Date): boolean =>
+    dateInRange(dateStr, range, refNow, adminCustomRange);
 
   const adminSortedLogs = (l: Lead) => [...(l.logs || [])].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
   const adminLatestLogMessage = (l: Lead): string => {
@@ -538,20 +579,88 @@ export default function LeadDashboard() {
     });
   };
 
-  // Real per-agent lead-quality breakdown for the Leads Analytics tab —
-  // same categorization the stat cards above use, just grouped per agent.
+  // Leads Analytics tab's own filtered lead set — independent of the Leads
+  // tab's filters, driven by its own toolbar (date range, Member, Property,
+  // Campaigns).
+  const analyticsScopedLeads = scopedLeads.filter(l => {
+    const matchesMember = analyticsMemberFilter.length === 0 || analyticsMemberFilter.includes(l.assignedAgent);
+    const matchesProperty = analyticsPropertyFilter.length === 0 || (!!l.property && analyticsPropertyFilter.includes(l.property));
+    const matchesCampaign = analyticsCampaignFilter.length === 0 || (!!l.campaign && analyticsCampaignFilter.includes(l.campaign));
+    const matchesDate = dateInRange(l.createdAtStr, analyticsDateRange, today, analyticsCustomRange);
+    return matchesMember && matchesProperty && matchesCampaign && matchesDate;
+  });
+
+  const analyticsPropertiesList = Array.from(new Set(scopedLeads.map(l => l.property).filter(Boolean))) as string[];
+  const analyticsCampaignsList = Array.from(new Set(scopedLeads.map(l => l.campaign).filter(Boolean))) as string[];
+
+  // Real per-agent lead-quality breakdown for the Leads Analytics tab — same
+  // categorization the stat cards above use, just grouped per agent, plus
+  // two real conversion rates derived from those same counts (no new data
+  // needed): QL's %age = qualified/total, QL2SV %age = of the qualified
+  // leads, what share also reached a site-visit status.
   const adminAgentBreakdown = agentsList.map(agentName => {
-    const agentLeads = scopedLeads.filter(l => l.assignedAgent === agentName);
+    const agentLeads = analyticsScopedLeads.filter(l => l.assignedAgent === agentName);
     const qualified = agentLeads.filter(l => !["Unassigned", "RNR", "Switch off", "Not Interested", "Invalid", "Low Budget", "Dead"].includes(l.status)).length;
     const siteVisits = agentLeads.filter(l => ["Site Visit", "Meeting Done", "Visit Schedule"].includes(l.status)).length;
+    const total = agentLeads.length;
     return {
       agentName,
-      total: agentLeads.length,
+      total,
       qualified,
-      unqualified: agentLeads.length - qualified,
-      siteVisits
+      unqualified: total - qualified,
+      siteVisits,
+      qlPct: total > 0 ? (qualified / total) * 100 : 0,
+      ql2svPct: qualified > 0 ? (siteVisits / qualified) * 100 : 0
     };
   }).filter(row => row.total > 0);
+
+  const analyticsTotalPages = Math.max(1, Math.ceil(adminAgentBreakdown.length / analyticsRowsPerPage));
+  const analyticsCurrentPage = Math.min(analyticsPage, analyticsTotalPages);
+  const analyticsPageRows = adminAgentBreakdown.slice(
+    (analyticsCurrentPage - 1) * analyticsRowsPerPage,
+    analyticsCurrentPage * analyticsRowsPerPage
+  );
+
+  const handleExportAnalytics = () => {
+    const header = ["Member Name", "Total Leads Assigned", "Qualified Leads", "Unqualified Leads", "Site Visit Leads", "QL's %age", "QL2SV %age"];
+    const rows = adminAgentBreakdown.map(r => [
+      r.agentName, r.total, r.qualified, r.unqualified, r.siteVisits, `${r.qlPct.toFixed(2)}%`, `${r.ql2svPct.toFixed(2)}%`
+    ]);
+    const csv = [header, ...rows].map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `leads-analytics-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleResetAnalyticsFilters = () => {
+    setAnalyticsDateRange("month");
+    setAnalyticsCustomRange(null);
+    setAnalyticsMemberFilter([]);
+    setAnalyticsPropertyFilter([]);
+    setAnalyticsCampaignFilter([]);
+    setAnalyticsPage(1);
+  };
+
+  // RNR Analysis — only "Total Leads" and "Date" are backed by real data
+  // (leads currently in RNR status, most recent activity among them). The
+  // per-day call-attempt average, average-calls-before-dead, and AI Notes
+  // have no source anywhere in this app yet: there's no call-attempt log
+  // (followupCalls only tracks scheduled callbacks, not attempts made) and
+  // no AI-analysis pipeline, so those three cells stay honest "—" rather
+  // than invented numbers/text.
+  const rnrLeads = scopedLeads.filter(l =>
+    l.status === "RNR" && (!rnrSearch || l.name.toLowerCase().includes(rnrSearch.toLowerCase()))
+  );
+  const rnrMostRecentActivity = rnrLeads
+    .map(l => adminSortedLogs(l)[0]?.timestamp || l.createdAtStr)
+    .filter((d): d is string => !!d)
+    .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
 
   if (isAdmin) {
     return (
@@ -1212,36 +1321,379 @@ export default function LeadDashboard() {
           </>
         ) : (
           /* Leads Analytics tab — real per-agent lead-quality breakdown */
-          <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden p-6">
-            <h3 className="text-sm font-extrabold text-slate-900 mb-4">Per-Agent Lead Quality</h3>
-            {adminAgentBreakdown.length === 0 ? (
-              <p className="text-xs text-slate-400 italic">No leads assigned to any agent yet.</p>
-            ) : (
+          <div className="space-y-4">
+            <div className="bg-slate-100/70 border border-slate-200/60 rounded-2xl p-4">
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleExportAnalytics}
+                  title="Export as CSV"
+                  className="h-9 w-9 shrink-0 flex items-center justify-center bg-white border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 shadow-sm transition-colors"
+                >
+                  <Download className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={handleResetAnalyticsFilters}
+                  title="Reset filters"
+                  className="h-9 w-9 shrink-0 flex items-center justify-center bg-white border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 shadow-sm transition-colors"
+                >
+                  <Sliders className="h-4 w-4" />
+                </button>
+
+                {/* Date range — same custom Start/End picker pattern as the Leads tab, fully independent state */}
+                <div className="relative">
+                  <button
+                    ref={analyticsCalendarBtnRef}
+                    type="button"
+                    onClick={() => {
+                      const rect = analyticsCalendarBtnRef.current?.getBoundingClientRect();
+                      if (rect) {
+                        const panelWidth = 260;
+                        const estimatedPanelHeight = 300;
+                        const left = Math.max(8, Math.min(rect.left, window.innerWidth - panelWidth - 8));
+                        const top = rect.bottom + 6 + estimatedPanelHeight > window.innerHeight
+                          ? Math.max(8, rect.top - estimatedPanelHeight - 6)
+                          : rect.bottom + 6;
+                        setAnalyticsCalendarPos({ top, left });
+                      }
+                      setAnalyticsRangeStartDraft(analyticsCustomRange?.start || "");
+                      setAnalyticsRangeEndDraft(analyticsCustomRange?.end || "");
+                      setAnalyticsCalendarOpen(o => !o);
+                    }}
+                    className="h-9 flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 text-xs text-slate-700 font-bold shadow-sm hover:bg-slate-50 transition-all"
+                  >
+                    <Calendar className="h-4 w-4 text-blue-600" />
+                    {analyticsDateRange === "custom" && analyticsCustomRange
+                      ? `${analyticsCustomRange.start} - ${analyticsCustomRange.end}`
+                      : DATE_RANGE_OPTIONS.find(o => o.value === analyticsDateRange)?.label ?? "Custom Range"}
+                    <ChevronDown className={`h-3.5 w-3.5 text-slate-400 transition-transform ${analyticsCalendarOpen ? "rotate-180" : ""}`} />
+                  </button>
+                  {analyticsCalendarOpen && analyticsCalendarPos && createPortal(
+                    <>
+                      <div className="fixed inset-0 z-[60]" onClick={() => setAnalyticsCalendarOpen(false)} />
+                      <div
+                        className="fixed z-[70] w-64 max-w-[calc(100vw-1rem)] bg-white border border-slate-200 rounded-xl shadow-lg p-4 space-y-3"
+                        style={{ top: analyticsCalendarPos.top, left: analyticsCalendarPos.left }}
+                      >
+                        <p className="text-[11px] font-bold text-slate-700">Filter analytics by date range</p>
+                        <div className="space-y-1.5">
+                          <label className="block text-[9px] font-bold text-slate-400 uppercase">Start Date</label>
+                          <input
+                            type="date"
+                            value={analyticsRangeStartDraft}
+                            onChange={(e) => {
+                              const newStart = e.target.value;
+                              setAnalyticsRangeStartDraft(newStart);
+                              if (analyticsRangeEndDraft && newStart && analyticsRangeEndDraft < newStart) {
+                                setAnalyticsRangeEndDraft("");
+                              }
+                            }}
+                            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-700 focus:outline-none focus:border-[#0B1E6E]"
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className="block text-[9px] font-bold text-slate-400 uppercase">End Date</label>
+                          <input
+                            type="date"
+                            value={analyticsRangeEndDraft}
+                            min={analyticsRangeStartDraft || undefined}
+                            onChange={(e) => {
+                              const newEnd = e.target.value;
+                              if (analyticsRangeStartDraft && newEnd && newEnd < analyticsRangeStartDraft) return;
+                              setAnalyticsRangeEndDraft(newEnd);
+                            }}
+                            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-700 focus:outline-none focus:border-[#0B1E6E]"
+                          />
+                          {analyticsRangeStartDraft && analyticsRangeEndDraft && analyticsRangeEndDraft < analyticsRangeStartDraft && (
+                            <p className="text-[10px] font-semibold text-red-500">End date can&apos;t be before the start date.</p>
+                          )}
+                        </div>
+                        <div className="flex gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAnalyticsCustomRange(null);
+                              setAnalyticsDateRange("month");
+                              setAnalyticsCalendarOpen(false);
+                              setAnalyticsPage(1);
+                            }}
+                            className="flex-1 bg-slate-100 text-slate-600 font-bold text-[11px] py-1.5 rounded-lg hover:bg-slate-200 transition-colors"
+                          >
+                            Reset
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!analyticsRangeStartDraft || !analyticsRangeEndDraft || analyticsRangeEndDraft < analyticsRangeStartDraft) return;
+                              setAnalyticsCustomRange({ start: analyticsRangeStartDraft, end: analyticsRangeEndDraft });
+                              setAnalyticsDateRange("custom");
+                              setAnalyticsCalendarOpen(false);
+                              setAnalyticsPage(1);
+                            }}
+                            disabled={!analyticsRangeStartDraft || !analyticsRangeEndDraft || analyticsRangeEndDraft < analyticsRangeStartDraft}
+                            className="flex-1 bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold text-[11px] py-1.5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            Apply
+                          </button>
+                        </div>
+                      </div>
+                    </>,
+                    document.body
+                  )}
+                </div>
+
+                {/* Member */}
+                <div className="relative">
+                  <button
+                    ref={analyticsMemberBtnRef}
+                    type="button"
+                    onClick={() => openPositionedMenu(analyticsMemberBtnRef, setAnalyticsMemberMenuPos, setAnalyticsMemberMenuOpen, "left", 200)}
+                    className="h-9 flex items-center gap-1.5 bg-white border border-slate-200 rounded-lg px-3 text-xs text-slate-700 font-bold shadow-sm hover:bg-slate-50 transition-all"
+                  >
+                    {analyticsMemberFilter.length === 0 ? "Member" : analyticsMemberFilter.length === 1 ? analyticsMemberFilter[0] : `${analyticsMemberFilter.length} Members`}
+                    <ChevronDown className={`h-3.5 w-3.5 text-slate-400 transition-transform ${analyticsMemberMenuOpen ? "rotate-180" : ""}`} />
+                  </button>
+                  {analyticsMemberMenuOpen && analyticsMemberMenuPos && createPortal(
+                    <>
+                      <div className="fixed inset-0 z-[60]" onClick={() => setAnalyticsMemberMenuOpen(false)} />
+                      <div
+                        className="fixed z-[70] w-52 bg-white border border-slate-200 rounded-lg shadow-lg py-1.5 max-h-56 overflow-y-auto"
+                        style={{ top: analyticsMemberMenuPos.top, left: analyticsMemberMenuPos.left }}
+                      >
+                        {agentsList.length === 0 ? (
+                          <p className="px-3 py-2 text-xs text-slate-400 italic font-normal">No data yet</p>
+                        ) : (
+                          agentsList.map(opt => (
+                            <label key={opt} className="flex items-center gap-2 px-3 py-1.5 text-xs font-normal text-slate-700 hover:bg-slate-50 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={analyticsMemberFilter.includes(opt)}
+                                onChange={() => {
+                                  setAnalyticsPage(1);
+                                  setAnalyticsMemberFilter(prev => prev.includes(opt) ? prev.filter(v => v !== opt) : [...prev, opt]);
+                                }}
+                              />
+                              {opt}
+                            </label>
+                          ))
+                        )}
+                      </div>
+                    </>,
+                    document.body
+                  )}
+                </div>
+
+                {/* Property */}
+                <div className="relative">
+                  <button
+                    ref={analyticsPropertyBtnRef}
+                    type="button"
+                    onClick={() => openPositionedMenu(analyticsPropertyBtnRef, setAnalyticsPropertyMenuPos, setAnalyticsPropertyMenuOpen, "left", 200)}
+                    className="h-9 flex items-center gap-1.5 bg-white border border-slate-200 rounded-lg px-3 text-xs text-slate-700 font-bold shadow-sm hover:bg-slate-50 transition-all"
+                  >
+                    {analyticsPropertyFilter.length === 0 ? "Property" : analyticsPropertyFilter.length === 1 ? analyticsPropertyFilter[0] : `${analyticsPropertyFilter.length} Properties`}
+                    <ChevronDown className={`h-3.5 w-3.5 text-slate-400 transition-transform ${analyticsPropertyMenuOpen ? "rotate-180" : ""}`} />
+                  </button>
+                  {analyticsPropertyMenuOpen && analyticsPropertyMenuPos && createPortal(
+                    <>
+                      <div className="fixed inset-0 z-[60]" onClick={() => setAnalyticsPropertyMenuOpen(false)} />
+                      <div
+                        className="fixed z-[70] w-52 bg-white border border-slate-200 rounded-lg shadow-lg py-1.5 max-h-56 overflow-y-auto"
+                        style={{ top: analyticsPropertyMenuPos.top, left: analyticsPropertyMenuPos.left }}
+                      >
+                        {analyticsPropertiesList.length === 0 ? (
+                          <p className="px-3 py-2 text-xs text-slate-400 italic font-normal">No data yet</p>
+                        ) : (
+                          analyticsPropertiesList.map(opt => (
+                            <label key={opt} className="flex items-center gap-2 px-3 py-1.5 text-xs font-normal text-slate-700 hover:bg-slate-50 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={analyticsPropertyFilter.includes(opt)}
+                                onChange={() => {
+                                  setAnalyticsPage(1);
+                                  setAnalyticsPropertyFilter(prev => prev.includes(opt) ? prev.filter(v => v !== opt) : [...prev, opt]);
+                                }}
+                              />
+                              {opt}
+                            </label>
+                          ))
+                        )}
+                      </div>
+                    </>,
+                    document.body
+                  )}
+                </div>
+
+                {/* Campaigns */}
+                <div className="relative">
+                  <button
+                    ref={analyticsCampaignBtnRef}
+                    type="button"
+                    onClick={() => openPositionedMenu(analyticsCampaignBtnRef, setAnalyticsCampaignMenuPos, setAnalyticsCampaignMenuOpen, "right", 224)}
+                    className="h-9 flex items-center gap-1.5 bg-white border border-slate-200 rounded-lg px-3 text-xs text-slate-700 font-bold shadow-sm hover:bg-slate-50 transition-all"
+                  >
+                    {analyticsCampaignFilter.length === 0 ? "Campaigns" : analyticsCampaignFilter.length === 1 ? analyticsCampaignFilter[0] : `${analyticsCampaignFilter.length} Campaigns`}
+                    <ChevronDown className={`h-3.5 w-3.5 text-slate-400 transition-transform ${analyticsCampaignMenuOpen ? "rotate-180" : ""}`} />
+                  </button>
+                  {analyticsCampaignMenuOpen && analyticsCampaignMenuPos && createPortal(
+                    <>
+                      <div className="fixed inset-0 z-[60]" onClick={() => setAnalyticsCampaignMenuOpen(false)} />
+                      <div
+                        className="fixed z-[70] w-56 bg-white border border-slate-200 rounded-lg shadow-lg py-1.5 max-h-56 overflow-y-auto"
+                        style={{ top: analyticsCampaignMenuPos.top, left: analyticsCampaignMenuPos.left }}
+                      >
+                        {analyticsCampaignsList.length === 0 ? (
+                          <p className="px-3 py-2 text-xs text-slate-400 italic font-normal">No data yet</p>
+                        ) : (
+                          analyticsCampaignsList.map(opt => (
+                            <label key={opt} className="flex items-center gap-2 px-3 py-1.5 text-xs font-normal text-slate-700 hover:bg-slate-50 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={analyticsCampaignFilter.includes(opt)}
+                                onChange={() => {
+                                  setAnalyticsPage(1);
+                                  setAnalyticsCampaignFilter(prev => prev.includes(opt) ? prev.filter(v => v !== opt) : [...prev, opt]);
+                                }}
+                              />
+                              {opt}
+                            </label>
+                          ))
+                        )}
+                      </div>
+                    </>,
+                    document.body
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden">
+              {adminAgentBreakdown.length === 0 ? (
+                <p className="text-xs text-slate-400 italic p-6">No leads assigned to any agent in this range.</p>
+              ) : (
+                <>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs border-collapse min-w-[820px]">
+                      <thead>
+                        <tr className="border-b border-slate-200 text-[11px] font-bold text-slate-800">
+                          <th className="px-4 py-3">
+                            <div className="flex items-center gap-1.5">Member Name <Search className="h-3 w-3 text-slate-400" /></div>
+                          </th>
+                          <th className="px-4 py-3 whitespace-nowrap">Total Leads Assigned</th>
+                          <th className="px-4 py-3 whitespace-nowrap">Qualified Leads</th>
+                          <th className="px-4 py-3 whitespace-nowrap">Unqualified Leads</th>
+                          <th className="px-4 py-3 whitespace-nowrap">Site Visit Leads</th>
+                          <th className="px-4 py-3 whitespace-nowrap">QL&apos;s %age</th>
+                          <th className="px-4 py-3 whitespace-nowrap">QL2SV %age</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 text-slate-700">
+                        {analyticsPageRows.map(row => (
+                          <tr key={row.agentName} className="hover:bg-slate-50/60 transition-colors">
+                            <td className="px-4 py-3 font-bold">
+                              <button
+                                onClick={() => {
+                                  setAdminAssignedFilter([row.agentName]);
+                                  setAdminTab("leads");
+                                  setAdminPage(1);
+                                }}
+                                className="text-[#0B1E6E] hover:underline text-left"
+                                title={`View ${row.agentName}'s leads`}
+                              >
+                                {row.agentName}
+                              </button>
+                            </td>
+                            <td className="px-4 py-3 font-semibold">{row.total}</td>
+                            <td className="px-4 py-3 font-semibold">{row.qualified}</td>
+                            <td className="px-4 py-3 font-semibold">{row.unqualified}</td>
+                            <td className="px-4 py-3 font-semibold">{row.siteVisits}</td>
+                            <td className="px-4 py-3 font-semibold">{row.qlPct.toFixed(2)}%</td>
+                            <td className="px-4 py-3 font-semibold">{row.ql2svPct.toFixed(2)}%</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="px-4 py-3 flex flex-wrap justify-between items-center gap-3 border-t border-slate-100 text-[11px] text-slate-500 font-semibold">
+                    <span>{adminAgentBreakdown.length} Row{adminAgentBreakdown.length === 1 ? "" : "s"}</span>
+                    <div className="flex items-center gap-4">
+                      <span className="flex items-center gap-1.5">
+                        Rows per page
+                        <select
+                          value={analyticsRowsPerPage}
+                          onChange={(e) => { setAnalyticsRowsPerPage(Number(e.target.value)); setAnalyticsPage(1); }}
+                          className="bg-slate-50 border border-slate-200 rounded px-1.5 py-1 font-bold text-slate-700 focus:outline-none"
+                        >
+                          {[10, 25, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
+                        </select>
+                      </span>
+                      <span>
+                        {adminAgentBreakdown.length === 0 ? 0 : (analyticsCurrentPage - 1) * analyticsRowsPerPage + 1}-
+                        {Math.min(analyticsCurrentPage * analyticsRowsPerPage, adminAgentBreakdown.length)} of {adminAgentBreakdown.length}
+                      </span>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => setAnalyticsPage(p => Math.max(1, p - 1))}
+                          disabled={analyticsCurrentPage <= 1}
+                          className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                        >
+                          ‹
+                        </button>
+                        <button
+                          onClick={() => setAnalyticsPage(p => Math.min(analyticsTotalPages, p + 1))}
+                          disabled={analyticsCurrentPage >= analyticsTotalPages}
+                          className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                        >
+                          ›
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* RNR Analysis — Total Leads and Date are real; the two call-attempt
+                averages and AI Notes have no data source anywhere in this app
+                yet (see comment on rnrLeads above), so they honestly show "—". */}
+            <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden p-6">
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                <h3 className="text-sm font-extrabold text-slate-900">RNR Analysis</h3>
+                <div className="relative">
+                  <Search className="h-3.5 w-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    value={rnrSearch}
+                    onChange={(e) => setRnrSearch(e.target.value)}
+                    placeholder="Lead Name"
+                    className="pl-8 pr-3 py-1.5 text-xs font-semibold bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-[#0B1E6E] w-40"
+                  />
+                </div>
+              </div>
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs border-collapse">
+                <table className="w-full text-left text-xs border-collapse min-w-[700px]">
                   <thead>
-                    <tr className="border-b border-slate-200 text-[11px] uppercase font-bold text-slate-500">
-                      <th className="py-2.5 pr-4">Agent</th>
-                      <th className="py-2.5 pr-4">Total</th>
-                      <th className="py-2.5 pr-4">Qualified</th>
-                      <th className="py-2.5 pr-4">Unqualified</th>
-                      <th className="py-2.5 pr-4">Site Visits</th>
+                    <tr className="border-b border-slate-200 text-[11px] font-bold text-slate-800">
+                      <th className="px-4 py-2.5 whitespace-nowrap">Total Leads</th>
+                      <th className="px-4 py-2.5 whitespace-nowrap">Avg Call Back Initiation<br />Per Lead / Day</th>
+                      <th className="px-4 py-2.5 whitespace-nowrap">Avg Calling Per Lead<br />before dead</th>
+                      <th className="px-4 py-2.5 whitespace-nowrap">Date</th>
+                      <th className="px-4 py-2.5 whitespace-nowrap">AI Notes</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
-                    {adminAgentBreakdown.map(row => (
-                      <tr key={row.agentName} className="hover:bg-slate-50/50">
-                        <td className="py-2.5 pr-4 font-bold text-slate-900">{row.agentName}</td>
-                        <td className="py-2.5 pr-4">{row.total}</td>
-                        <td className="py-2.5 pr-4 text-emerald-600">{row.qualified}</td>
-                        <td className="py-2.5 pr-4 text-red-500">{row.unqualified}</td>
-                        <td className="py-2.5 pr-4">{row.siteVisits}</td>
-                      </tr>
-                    ))}
+                  <tbody className="divide-y divide-slate-100 text-slate-700">
+                    <tr>
+                      <td className="px-4 py-3 font-bold">{rnrLeads.length}</td>
+                      <td className="px-4 py-3 text-slate-400 italic" title="Needs a per-call attempt log (timestamped per call, per lead) — not tracked yet">—</td>
+                      <td className="px-4 py-3 text-slate-400 italic" title="Needs a per-call attempt log tied to when a lead is marked Dead — not tracked yet">—</td>
+                      <td className="px-4 py-3">{rnrMostRecentActivity ? adminFormatDateTime(rnrMostRecentActivity) : "—"}</td>
+                      <td className="px-4 py-3 text-slate-400 italic" title="Needs an AI-analysis pipeline — not built yet">—</td>
+                    </tr>
                   </tbody>
                 </table>
               </div>
-            )}
+            </div>
           </div>
         )}
 
