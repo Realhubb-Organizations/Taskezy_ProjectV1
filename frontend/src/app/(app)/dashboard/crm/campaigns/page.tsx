@@ -665,6 +665,18 @@ export default function AdminCampaignsPage() {
   const [deepDiveSourceMenuPos, setDeepDiveSourceMenuPos] = useState<{ top: number; left: number } | null>(null);
   const deepDiveSourceBtnRef = useRef<HTMLButtonElement>(null);
 
+  // Ad Set Name's expand chevron — there's no real ad-set/ad-creative-level
+  // data behind it yet, so the expanded row honestly says so rather than
+  // showing fabricated names/numbers.
+  const [expandedDeepDiveCampaigns, setExpandedDeepDiveCampaigns] = useState<Set<string>>(new Set());
+  const toggleDeepDiveExpanded = (id: string) => {
+    setExpandedDeepDiveCampaigns(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
   // Every openPositionedMenu-driven dropdown snapshots its position once on
   // click rather than tracking the button continuously, so it goes stale (and
   // visually detaches from its button) if the page scrolls while open —
@@ -1575,17 +1587,56 @@ export default function AdminCampaignsPage() {
                       <td colSpan={7} className="px-5 py-8 text-center text-slate-400 italic">No campaigns found matching filter.</td>
                     </tr>
                   ) : (
-                    deepDiveCampaigns.map(c => (
-                      <tr key={c.id} className="hover:bg-slate-50/50 transition-colors">
-                        <td className="px-5 py-3 text-slate-900 font-semibold">{c.name}</td>
-                        <td className="px-5 py-3"><PlatformIcon platform={c.platform} /></td>
-                        <td className="px-5 py-3 text-slate-300" title="Not tracked yet — no ad-set-level data ingested">—</td>
-                        <td className="px-5 py-3 text-slate-300" title="Not tracked yet — no ad-creative-level data ingested">—</td>
-                        <td className="px-5 py-3">{c.qualifiedLeads}</td>
-                        <td className="px-5 py-3">{c.cpl.toFixed(2)}</td>
-                        <td className="px-5 py-3 font-semibold text-slate-800">{formatCurrency(c.spend)}</td>
-                      </tr>
-                    ))
+                    deepDiveCampaigns.map(c => {
+                      const isExpanded = expandedDeepDiveCampaigns.has(c.id);
+                      return (
+                        <React.Fragment key={c.id}>
+                          <tr className="hover:bg-slate-50/50 transition-colors">
+                            <td className="px-5 py-3 text-slate-900 font-semibold">{c.name}</td>
+                            <td className="px-5 py-3"><PlatformIcon platform={c.platform} /></td>
+                            <td className="px-5 py-3">
+                              <button
+                                type="button"
+                                onClick={() => toggleDeepDiveExpanded(c.id)}
+                                className="flex items-center gap-1 text-slate-400 hover:text-[#0B1E6E] transition-colors"
+                                title="No ad-set-level data ingested yet"
+                              >
+                                <span>—</span>
+                                <ChevronDown className={`h-3.5 w-3.5 transition-transform ${isExpanded ? "rotate-180" : ""}`} />
+                              </button>
+                            </td>
+                            <td className="px-5 py-3 text-slate-300" title="Not tracked yet — no ad-creative-level data ingested">—</td>
+                            <td className="px-5 py-3">{c.qualifiedLeads}</td>
+                            <td className="px-5 py-3">{c.cpl.toFixed(2)}</td>
+                            <td className="px-5 py-3 font-semibold text-slate-800">{formatCurrency(c.spend)}</td>
+                          </tr>
+                          {isExpanded && (
+                            <tr className="bg-slate-50/50">
+                              <td colSpan={7} className="px-5 py-3">
+                                <table className="w-full text-left border-collapse">
+                                  <thead>
+                                    <tr className="border-b border-slate-200 text-[11px] font-bold text-slate-500">
+                                      <th className="py-1.5 pr-3">Ad Set Name</th>
+                                      <th className="py-1.5 pr-3">Ad creative Name</th>
+                                      <th className="py-1.5 pr-3">Qualified Leads</th>
+                                      <th className="py-1.5 pr-3">CPL</th>
+                                      <th className="py-1.5 pr-3">Spend</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    <tr>
+                                      <td colSpan={5} className="py-3 text-center text-slate-400 italic text-[11px]">
+                                        No ad-set-level data available for this campaign yet — Meta/Google ad-set and creative reporting is not ingested.
+                                      </td>
+                                    </tr>
+                                  </tbody>
+                                </table>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
