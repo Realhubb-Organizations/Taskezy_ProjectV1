@@ -638,15 +638,6 @@ export default function LeadDashboard() {
     URL.revokeObjectURL(url);
   };
 
-  const handleResetAnalyticsFilters = () => {
-    setAnalyticsDateRange("month");
-    setAnalyticsCustomRange(null);
-    setAnalyticsMemberFilter([]);
-    setAnalyticsPropertyFilter([]);
-    setAnalyticsCampaignFilter([]);
-    setAnalyticsPage(1);
-  };
-
   // RNR Analysis — only "Total Leads" and "Date" are backed by real data
   // (leads currently in RNR status, most recent activity among them). The
   // per-day call-attempt average, average-calls-before-dead, and AI Notes
@@ -1334,8 +1325,8 @@ export default function LeadDashboard() {
                 </button>
                 <button
                   type="button"
-                  onClick={handleResetAnalyticsFilters}
-                  title="Reset filters"
+                  onClick={() => setIsColumnsSettingsOpen(true)}
+                  title="Filter"
                   className="h-10 w-10 shrink-0 flex items-center justify-center bg-white border border-slate-200 rounded-xl text-[#0B1E6E] hover:bg-slate-50 shadow-sm transition-colors"
                 >
                   <Sliders className="h-4.5 w-4.5" />
@@ -1710,16 +1701,19 @@ export default function LeadDashboard() {
           onUpdateStatus={handleUpdateLeadStatus}
         />
 
-        {/* Filter button's column-visibility Settings panel — a full-height
-            right-docked drawer (same pattern as the lead quick-view drawer
-            elsewhere in this app): no dark backdrop, the rest of the page
-            stays visible, closes on an invisible click-outside catcher. */}
+        {/* Filter panel (column visibility) — opened from both the Leads
+            tab's own Filter button and the Leads Analytics tab's sliders
+            icon, since it's the same underlying table-column state. A
+            full-height right-docked drawer (same pattern as the lead
+            quick-view drawer elsewhere in this app): no dark backdrop, the
+            rest of the page stays visible, closes on an invisible
+            click-outside catcher. */}
         {isColumnsSettingsOpen && createPortal(
           <div className="fixed inset-0 z-[100]">
             <div className="fixed inset-0" onClick={() => setIsColumnsSettingsOpen(false)} />
             <div className="fixed inset-y-0 right-0 w-full max-w-sm bg-white border-l border-slate-200 shadow-2xl flex flex-col animate-slide-in">
               <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-slate-100 shrink-0">
-                <h3 className="text-base font-extrabold text-slate-900">Settings</h3>
+                <h3 className="text-base font-extrabold text-slate-900">Filter</h3>
                 <button
                   onClick={() => setIsColumnsSettingsOpen(false)}
                   className="text-slate-400 hover:text-slate-700"
