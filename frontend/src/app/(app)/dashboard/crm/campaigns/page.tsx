@@ -75,6 +75,111 @@ const CAMPAIGN_DEFAULT_VISIBLE_COLUMNS: Record<CampaignColumnKey, boolean> = {
   unqualifiedLeads: true, qualifiedLeads: true
 };
 
+// The custom date-range calendar pill — used both by the Campaigns tab's
+// toolbar and the Analytics tab's Property/Status toolbar, so both control
+// the exact same underlying date filter instead of drifting independently.
+// A top-level component (not nested inside AdminCampaignsPage) so each
+// rendered instance keeps its own open/position state across re-renders.
+function CampaignDateRangePicker({
+  label,
+  customRangeStartDraft,
+  customRangeEndDraft,
+  onStartDraftChange,
+  onEndDraftChange,
+  onOpen,
+  onReset,
+  onApply,
+  canApply
+}: {
+  label: string;
+  customRangeStartDraft: string;
+  customRangeEndDraft: string;
+  onStartDraftChange: (v: string) => void;
+  onEndDraftChange: (v: string) => void;
+  onOpen: () => void;
+  onReset: () => void;
+  onApply: () => void;
+  canApply: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+
+  return (
+    <div className="relative">
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={() => {
+          const rect = btnRef.current?.getBoundingClientRect();
+          if (rect) {
+            const panelWidth = 260;
+            const left = Math.max(8, Math.min(rect.right - panelWidth, window.innerWidth - panelWidth - 8));
+            setPos({ top: rect.bottom + 6, left });
+          }
+          onOpen();
+          setOpen(o => !o);
+        }}
+        className="flex items-center gap-2 bg-white border border-slate-300/80 rounded-xl px-3 py-1.5 text-xs text-slate-700 font-medium shadow-2xs hover:bg-slate-50 transition-colors"
+      >
+        <Calendar className="h-3.5 w-3.5 text-blue-600" />
+        <span>{label}</span>
+      </button>
+      {open && pos && createPortal(
+        <>
+          <div className="fixed inset-0 z-[60]" onClick={() => setOpen(false)} />
+          <div
+            className="fixed z-[70] w-64 max-w-[calc(100vw-1rem)] bg-white border border-slate-200 rounded-xl shadow-lg p-4 space-y-3"
+            style={{ top: pos.top, left: pos.left }}
+          >
+            <p className="text-[11px] font-bold text-slate-700">Filter campaigns by date range</p>
+            <div className="space-y-1.5">
+              <label className="block text-[9px] font-bold text-slate-400 uppercase">Start Date</label>
+              <input
+                type="date"
+                value={customRangeStartDraft}
+                onChange={(e) => onStartDraftChange(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-700 focus:outline-none focus:border-[#0B1E6E]"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="block text-[9px] font-bold text-slate-400 uppercase">End Date</label>
+              <input
+                type="date"
+                value={customRangeEndDraft}
+                min={customRangeStartDraft || undefined}
+                onChange={(e) => onEndDraftChange(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-700 focus:outline-none focus:border-[#0B1E6E]"
+              />
+              {customRangeStartDraft && customRangeEndDraft && customRangeEndDraft < customRangeStartDraft && (
+                <p className="text-[10px] font-semibold text-red-500">End date can&apos;t be before the start date.</p>
+              )}
+            </div>
+            <div className="flex gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => { onReset(); setOpen(false); }}
+                className="flex-1 bg-slate-100 text-slate-600 font-bold text-[11px] py-1.5 rounded-lg hover:bg-slate-200 transition-colors"
+              >
+                Reset
+              </button>
+              <button
+                type="button"
+                onClick={() => { if (!canApply) return; onApply(); setOpen(false); }}
+                disabled={!canApply}
+                className="flex-1 bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold text-[11px] py-1.5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Apply
+              </button>
+            </div>
+          </div>
+        </>,
+        document.body
+      )}
+    </div>
+  );
+}
+
 export default function AdminCampaignsPage() {
   const { leads, adSpendRecords } = useApp();
 
@@ -102,12 +207,39 @@ export default function AdminCampaignsPage() {
   // Table Filters & Search
   const today = new Date();
   const todayStr = today.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-  const [calendarPickerOpen, setCalendarPickerOpen] = useState(false);
-  const [calendarMenuPos, setCalendarMenuPos] = useState<{ top: number; left: number } | null>(null);
-  const calendarBtnRef = useRef<HTMLButtonElement>(null);
   const [customRangeStartDraft, setCustomRangeStartDraft] = useState("");
   const [customRangeEndDraft, setCustomRangeEndDraft] = useState("");
   const [appliedCustomRange, setAppliedCustomRange] = useState<{ start: string; end: string } | null>(null);
+
+  // Shared handlers for every <CampaignDateRangePicker/> instance on this
+  // page (Campaigns tab toolbar + Analytics tab toolbar) — both control the
+  // same appliedCustomRange/dateRange state so they can never disagree.
+  const dateRangePickerLabel = appliedCustomRange ? `${appliedCustomRange.start} to ${appliedCustomRange.end}` : todayStr;
+  const handleDateRangeOpen = () => {
+    setCustomRangeStartDraft(appliedCustomRange?.start || "");
+    setCustomRangeEndDraft(appliedCustomRange?.end || "");
+  };
+  const handleDateRangeStartChange = (v: string) => {
+    setCustomRangeStartDraft(v);
+    if (customRangeEndDraft && v && customRangeEndDraft < v) setCustomRangeEndDraft("");
+  };
+  const handleDateRangeEndChange = (v: string) => {
+    if (customRangeStartDraft && v && v < customRangeStartDraft) return;
+    setCustomRangeEndDraft(v);
+  };
+  const handleDateRangeReset = () => {
+    setAppliedCustomRange(null);
+    setDateRange("Today");
+    setCustomRangeStartDraft("");
+    setCustomRangeEndDraft("");
+    setCurrentPage(1);
+  };
+  const handleDateRangeApply = () => {
+    setAppliedCustomRange({ start: customRangeStartDraft, end: customRangeEndDraft });
+    setDateRange("Custom");
+    setCurrentPage(1);
+  };
+  const dateRangeCanApply = !!customRangeStartDraft && !!customRangeEndDraft && customRangeEndDraft >= customRangeStartDraft;
 
   // Campaign Status column-header filter — a checkbox dropdown opened from
   // the table's "Campaign Status" header, rather than a single-select pill.
@@ -386,7 +518,11 @@ export default function AdminCampaignsPage() {
 
   // Property / Status breakdown table below the chart.
   const [breakdownTab, setBreakdownTab] = useState<"Property" | "Status">("Property");
-  const [breakdownCampaignFilter, setBreakdownCampaignFilter] = useState<string>("All");
+  // Multi-select: an empty array means "All Campaigns" (no filter applied).
+  const [breakdownCampaignFilters, setBreakdownCampaignFilters] = useState<string[]>([]);
+  const toggleBreakdownCampaignFilter = (name: string) => {
+    setBreakdownCampaignFilters(prev => prev.includes(name) ? prev.filter(n => n !== name) : [...prev, name]);
+  };
   const [breakdownCampaignMenuOpen, setBreakdownCampaignMenuOpen] = useState(false);
   const [breakdownCampaignMenuPos, setBreakdownCampaignMenuPos] = useState<{ top: number; left: number } | null>(null);
   const breakdownCampaignBtnRef = useRef<HTMLButtonElement>(null);
@@ -394,6 +530,26 @@ export default function AdminCampaignsPage() {
   const [breakdownColumnsMenuPos, setBreakdownColumnsMenuPos] = useState<{ top: number; left: number } | null>(null);
   const breakdownColumnsBtnRef = useRef<HTMLButtonElement>(null);
   const [breakdownVisibleColumns, setBreakdownVisibleColumns] = useState({ source: true, cpl: true, qcpl: true, spend: true });
+
+  // Campaign Deep Dive — every individual campaign, searchable by name and
+  // filterable by Source (whatever platforms actually exist in the data).
+  const [deepDiveSearchQuery, setDeepDiveSearchQuery] = useState("");
+  const [deepDiveSearchOpen, setDeepDiveSearchOpen] = useState(false);
+  const [deepDiveSourceFilters, setDeepDiveSourceFilters] = useState<string[]>([]);
+  const [deepDiveSourceMenuOpen, setDeepDiveSourceMenuOpen] = useState(false);
+  const [deepDiveSourceMenuPos, setDeepDiveSourceMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const deepDiveSourceBtnRef = useRef<HTMLButtonElement>(null);
+
+  const deepDiveSourceOptions = useMemo(() => Array.from(new Set(campaignsList.map(c => c.platform))), [campaignsList]);
+
+  const deepDiveCampaigns = useMemo(() => {
+    const q = deepDiveSearchQuery.trim().toLowerCase();
+    return campaignsList.filter(c => {
+      const matchesSearch = !q || c.name.toLowerCase().includes(q);
+      const matchesSource = deepDiveSourceFilters.length === 0 || deepDiveSourceFilters.includes(c.platform);
+      return matchesSearch && matchesSource;
+    });
+  }, [campaignsList, deepDiveSearchQuery, deepDiveSourceFilters]);
 
   const propertyBreakdown = useMemo(() => {
     type Bucket = { campaigns: Set<string>; platforms: Set<string>; spend: number; leads: Lead[] };
@@ -403,14 +559,14 @@ export default function AdminCampaignsPage() {
       return map[property];
     };
     adSpendRecords.forEach(r => {
-      if (breakdownCampaignFilter !== "All" && r.accountName !== breakdownCampaignFilter) return;
+      if (breakdownCampaignFilters.length > 0 && !breakdownCampaignFilters.includes(r.accountName)) return;
       const b = getBucket(r.property || "Unspecified");
       b.campaigns.add(r.accountName);
       b.platforms.add(r.platform);
       b.spend += r.spend;
     });
     leads.forEach(l => {
-      if (breakdownCampaignFilter !== "All" && (l.campaign || l.source) !== breakdownCampaignFilter) return;
+      if (breakdownCampaignFilters.length > 0 && !breakdownCampaignFilters.includes(l.campaign || l.source || "")) return;
       getBucket(l.property || "Unspecified").leads.push(l);
     });
     return Object.entries(map).map(([property, b]) => {
@@ -427,12 +583,12 @@ export default function AdminCampaignsPage() {
         spend: b.spend
       };
     }).sort((a, b) => b.spend - a.spend);
-  }, [adSpendRecords, leads, breakdownCampaignFilter]);
+  }, [adSpendRecords, leads, breakdownCampaignFilters]);
 
   const statusBreakdown = useMemo(() => {
     const map: Record<string, { campaigns: number; totalLeads: number; qualifiedLeads: number; spend: number }> = {};
     campaignsList
-      .filter(c => breakdownCampaignFilter === "All" || c.name === breakdownCampaignFilter)
+      .filter(c => breakdownCampaignFilters.length === 0 || breakdownCampaignFilters.includes(c.name))
       .forEach(c => {
         if (!map[c.status]) map[c.status] = { campaigns: 0, totalLeads: 0, qualifiedLeads: 0, spend: 0 };
         map[c.status].campaigns += 1;
@@ -449,7 +605,7 @@ export default function AdminCampaignsPage() {
       qcpl: computeCPL(d.spend, d.qualifiedLeads),
       spend: d.spend
     }));
-  }, [campaignsList, breakdownCampaignFilter]);
+  }, [campaignsList, breakdownCampaignFilters]);
 
   const exportBreakdownCsv = () => {
     const rows = breakdownTab === "Property"
@@ -863,10 +1019,17 @@ export default function AdminCampaignsPage() {
                 >
                   <Download className="h-3.5 w-3.5 text-blue-600" />
                 </button>
-                <div className="flex items-center gap-1.5 bg-white border border-slate-300/80 rounded-xl px-3 py-1.5 text-xs text-slate-600 font-medium">
-                  <Calendar className="h-3.5 w-3.5 text-blue-600" />
-                  {dateRange === "Custom" && appliedCustomRange ? `${appliedCustomRange.start} to ${appliedCustomRange.end}` : dateRange}
-                </div>
+                <CampaignDateRangePicker
+                  label={dateRangePickerLabel}
+                  customRangeStartDraft={customRangeStartDraft}
+                  customRangeEndDraft={customRangeEndDraft}
+                  onStartDraftChange={handleDateRangeStartChange}
+                  onEndDraftChange={handleDateRangeEndChange}
+                  onOpen={handleDateRangeOpen}
+                  onReset={handleDateRangeReset}
+                  onApply={handleDateRangeApply}
+                  canApply={dateRangeCanApply}
+                />
                 <div className="relative">
                   <button
                     type="button"
@@ -874,30 +1037,43 @@ export default function AdminCampaignsPage() {
                     onClick={() => openPositionedMenu(breakdownCampaignBtnRef, setBreakdownCampaignMenuPos, setBreakdownCampaignMenuOpen, "right", 200)}
                     className="flex items-center gap-2 bg-white border border-slate-300/80 rounded-xl px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
                   >
-                    <span>{breakdownCampaignFilter === "All" ? "Campaigns" : breakdownCampaignFilter}</span>
+                    <span>
+                      {breakdownCampaignFilters.length === 0
+                        ? "Campaigns"
+                        : breakdownCampaignFilters.length === 1
+                          ? breakdownCampaignFilters[0]
+                          : `${breakdownCampaignFilters.length} campaigns`}
+                    </span>
                     <ChevronDown className={`h-3.5 w-3.5 text-slate-400 transition-transform ${breakdownCampaignMenuOpen ? "rotate-180" : ""}`} />
                   </button>
                   {breakdownCampaignMenuOpen && breakdownCampaignMenuPos && createPortal(
                     <>
                       <div className="fixed inset-0 z-[60]" onClick={() => setBreakdownCampaignMenuOpen(false)} />
                       <div
-                        className="fixed z-[70] w-52 max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 text-xs font-medium"
+                        className="fixed z-[70] w-56 max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 text-xs font-medium"
                         style={{ top: breakdownCampaignMenuPos.top, left: breakdownCampaignMenuPos.left }}
                       >
                         <button
-                          onClick={() => { setBreakdownCampaignFilter("All"); setBreakdownCampaignMenuOpen(false); }}
-                          className={`w-full text-left px-3 py-1.5 transition-colors ${breakdownCampaignFilter === "All" ? "bg-blue-600 text-white font-bold" : "text-slate-700 hover:bg-slate-50"}`}
+                          type="button"
+                          onClick={() => setBreakdownCampaignFilters([])}
+                          className="w-full flex items-center gap-1.5 text-left px-3 py-1.5 text-slate-500 font-bold hover:bg-slate-50 border-b border-slate-100 transition-colors"
                         >
+                          <Minus className="h-3 w-3" />
                           All Campaigns
                         </button>
                         {campaignsList.map(c => (
-                          <button
+                          <label
                             key={c.id}
-                            onClick={() => { setBreakdownCampaignFilter(c.name); setBreakdownCampaignMenuOpen(false); }}
-                            className={`w-full text-left px-3 py-1.5 truncate transition-colors ${breakdownCampaignFilter === c.name ? "bg-blue-600 text-white font-bold" : "text-slate-700 hover:bg-slate-50"}`}
+                            className="flex items-center gap-2 px-3 py-1.5 text-slate-700 font-semibold hover:bg-slate-50 cursor-pointer transition-colors truncate"
                           >
-                            {c.name}
-                          </button>
+                            <input
+                              type="checkbox"
+                              checked={breakdownCampaignFilters.includes(c.name)}
+                              onChange={() => toggleBreakdownCampaignFilter(c.name)}
+                              className="h-3.5 w-3.5 rounded border-slate-300 text-[#0B1E6E] focus:ring-0 focus:ring-offset-0 shrink-0"
+                            />
+                            <span className="truncate">{c.name}</span>
+                          </label>
                         ))}
                       </div>
                     </>,
@@ -1019,117 +1195,132 @@ export default function AdminCampaignsPage() {
               </table>
             </div>
           </div>
+
+          {/* Campaign Deep Dive — every individual campaign, not aggregated
+              by property/status like the table above. "Ad Set Name" and
+              "Ad creative Name" have no backing field yet (no ad-set/ad-
+              creative-level ingestion), so they honestly render "—" rather
+              than inventing numbers, same convention used elsewhere. */}
+          <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden">
+            <div className="px-5 py-3.5 border-b border-slate-200/80">
+              <h3 className="text-sm font-bold text-slate-900">Campaign Deep Dive</h3>
+            </div>
+            <div className="overflow-auto max-h-[45vh]">
+              <table className="w-full text-left border-collapse min-w-[760px]">
+                <thead className="sticky top-0 z-10 bg-white">
+                  <tr className="border-b border-slate-200/80 text-[12px] font-bold text-slate-900">
+                    <th className="px-5 py-3">
+                      {deepDiveSearchOpen ? (
+                        <div className="flex items-center gap-1">
+                          <input
+                            autoFocus
+                            value={deepDiveSearchQuery}
+                            onChange={(e) => setDeepDiveSearchQuery(e.target.value)}
+                            placeholder="Filter campaign..."
+                            className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs font-normal focus:outline-none w-36"
+                          />
+                          <button onClick={() => { setDeepDiveSearchQuery(""); setDeepDiveSearchOpen(false); }} className="text-slate-400 hover:text-slate-600">
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5">
+                          <span>Campaign Name</span>
+                          <button onClick={() => setDeepDiveSearchOpen(true)} className="text-slate-400 hover:text-slate-700" title="Search campaign">
+                            <Search className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      )}
+                    </th>
+                    <th className="px-5 py-3 whitespace-nowrap">
+                      <div className="relative inline-block">
+                        <button
+                          type="button"
+                          ref={deepDiveSourceBtnRef}
+                          onClick={() => openPositionedMenu(deepDiveSourceBtnRef, setDeepDiveSourceMenuPos, setDeepDiveSourceMenuOpen, "left", 160)}
+                          className="flex items-center gap-1 hover:text-blue-600 transition-colors"
+                        >
+                          <span>Source</span>
+                          <ChevronDown className={`h-3 w-3 text-slate-800 transition-transform ${deepDiveSourceMenuOpen ? "rotate-180" : ""}`} />
+                        </button>
+                        {deepDiveSourceMenuOpen && deepDiveSourceMenuPos && createPortal(
+                          <>
+                            <div className="fixed inset-0 z-[60]" onClick={() => setDeepDiveSourceMenuOpen(false)} />
+                            <div
+                              className="fixed z-[70] w-40 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 text-xs font-medium overflow-hidden"
+                              style={{ top: deepDiveSourceMenuPos.top, left: deepDiveSourceMenuPos.left }}
+                            >
+                              <button
+                                type="button"
+                                onClick={() => setDeepDiveSourceFilters([])}
+                                className="w-full flex items-center gap-1.5 text-left px-3 py-1.5 text-slate-500 font-bold hover:bg-slate-50 border-b border-slate-100 transition-colors"
+                              >
+                                <Minus className="h-3 w-3" />
+                                All Sources
+                              </button>
+                              {deepDiveSourceOptions.map(src => (
+                                <label key={src} className="flex items-center gap-2 px-3 py-1.5 text-slate-700 font-semibold hover:bg-slate-50 cursor-pointer transition-colors">
+                                  <input
+                                    type="checkbox"
+                                    checked={deepDiveSourceFilters.includes(src)}
+                                    onChange={() => setDeepDiveSourceFilters(prev => prev.includes(src) ? prev.filter(s => s !== src) : [...prev, src])}
+                                    className="h-3.5 w-3.5 rounded border-slate-300 text-[#0B1E6E] focus:ring-0 focus:ring-offset-0"
+                                  />
+                                  {src}
+                                </label>
+                              ))}
+                            </div>
+                          </>,
+                          document.body
+                        )}
+                      </div>
+                    </th>
+                    <th className="px-5 py-3 whitespace-nowrap">Ad Set Name</th>
+                    <th className="px-5 py-3 whitespace-nowrap">Ad creative Name</th>
+                    <th className="px-5 py-3 whitespace-nowrap">Qualified Leads</th>
+                    <th className="px-5 py-3 whitespace-nowrap">CPL</th>
+                    <th className="px-5 py-3 whitespace-nowrap">Spend</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-[12px] font-medium text-slate-700">
+                  {deepDiveCampaigns.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="px-5 py-8 text-center text-slate-400 italic">No campaigns found matching filter.</td>
+                    </tr>
+                  ) : (
+                    deepDiveCampaigns.map(c => (
+                      <tr key={c.id} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="px-5 py-3 text-slate-900 font-semibold">{c.name}</td>
+                        <td className="px-5 py-3">{c.platform}</td>
+                        <td className="px-5 py-3 text-slate-300" title="Not tracked yet — no ad-set-level data ingested">—</td>
+                        <td className="px-5 py-3 text-slate-300" title="Not tracked yet — no ad-creative-level data ingested">—</td>
+                        <td className="px-5 py-3">{c.qualifiedLeads}</td>
+                        <td className="px-5 py-3">{c.cpl.toFixed(2)}</td>
+                        <td className="px-5 py-3 font-semibold text-slate-800">{formatCurrency(c.spend)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       ) : (
         <>
           {/* Action Toolbar (Date Picker Pill, Campaigns Dropdown, Filter Button) */}
           <div className="flex flex-wrap items-center justify-end gap-2.5 pt-1">
             {/* Date Range Picker Pill */}
-            <div className="relative">
-              <button
-                ref={calendarBtnRef}
-                type="button"
-                onClick={() => {
-                  const rect = calendarBtnRef.current?.getBoundingClientRect();
-                  if (rect) {
-                    const panelWidth = 260;
-                    const left = Math.max(8, Math.min(rect.right - panelWidth, window.innerWidth - panelWidth - 8));
-                    setCalendarMenuPos({ top: rect.bottom + 6, left });
-                  }
-                  setCustomRangeStartDraft(appliedCustomRange?.start || "");
-                  setCustomRangeEndDraft(appliedCustomRange?.end || "");
-                  setCalendarPickerOpen(o => !o);
-                }}
-                className="flex items-center gap-2 bg-white border border-slate-300/80 rounded-xl px-3 py-1.5 text-xs text-slate-700 font-medium shadow-2xs hover:bg-slate-50 transition-colors"
-              >
-                <Calendar className="h-3.5 w-3.5 text-blue-600" />
-                <span>{appliedCustomRange ? `${appliedCustomRange.start} to ${appliedCustomRange.end}` : todayStr}</span>
-              </button>
-              {calendarPickerOpen && calendarMenuPos && createPortal(
-                <>
-                  <div className="fixed inset-0 z-[60]" onClick={() => setCalendarPickerOpen(false)} />
-                  <div
-                    className="fixed z-[70] w-64 max-w-[calc(100vw-1rem)] bg-white border border-slate-200 rounded-xl shadow-lg p-4 space-y-3"
-                    style={{ top: calendarMenuPos.top, left: calendarMenuPos.left }}
-                  >
-                    <p className="text-[11px] font-bold text-slate-700">Filter campaigns by date range</p>
-                    <div className="space-y-1.5">
-                      <label className="block text-[9px] font-bold text-slate-400 uppercase">Start Date</label>
-                      <input
-                        type="date"
-                        value={customRangeStartDraft}
-                        onChange={(e) => {
-                          const newStart = e.target.value;
-                          setCustomRangeStartDraft(newStart);
-                          // A previously-picked End Date can now be earlier
-                          // than the new Start Date — clear it rather than
-                          // silently keep an invalid range around.
-                          if (customRangeEndDraft && newStart && customRangeEndDraft < newStart) {
-                            setCustomRangeEndDraft("");
-                          }
-                        }}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-700 focus:outline-none focus:border-[#0B1E6E]"
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="block text-[9px] font-bold text-slate-400 uppercase">End Date</label>
-                      <input
-                        type="date"
-                        value={customRangeEndDraft}
-                        min={customRangeStartDraft || undefined}
-                        onChange={(e) => {
-                          const newEnd = e.target.value;
-                          // The `min` attribute only blocks the native
-                          // picker's own calendar UI — typing digits
-                          // directly into the field still fires onChange
-                          // with an out-of-range value, so this is the
-                          // real guard: silently refuse an End Date
-                          // earlier than the chosen Start Date.
-                          if (customRangeStartDraft && newEnd && newEnd < customRangeStartDraft) return;
-                          setCustomRangeEndDraft(newEnd);
-                        }}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-700 focus:outline-none focus:border-[#0B1E6E]"
-                      />
-                      {customRangeStartDraft && customRangeEndDraft && customRangeEndDraft < customRangeStartDraft && (
-                        <p className="text-[10px] font-semibold text-red-500">End date can&apos;t be before the start date.</p>
-                      )}
-                    </div>
-                    <div className="flex gap-2 pt-1">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setAppliedCustomRange(null);
-                          setDateRange("Today");
-                          setCustomRangeStartDraft("");
-                          setCustomRangeEndDraft("");
-                          setCalendarPickerOpen(false);
-                          setCurrentPage(1);
-                        }}
-                        className="flex-1 bg-slate-100 text-slate-600 font-bold text-[11px] py-1.5 rounded-lg hover:bg-slate-200 transition-colors"
-                      >
-                        Reset
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (!customRangeStartDraft || !customRangeEndDraft) return;
-                          if (customRangeEndDraft < customRangeStartDraft) return;
-                          setAppliedCustomRange({ start: customRangeStartDraft, end: customRangeEndDraft });
-                          setDateRange("Custom");
-                          setCalendarPickerOpen(false);
-                          setCurrentPage(1);
-                        }}
-                        disabled={!customRangeStartDraft || !customRangeEndDraft || customRangeEndDraft < customRangeStartDraft}
-                        className="flex-1 bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold text-[11px] py-1.5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                      >
-                        Apply
-                      </button>
-                    </div>
-                  </div>
-                </>,
-                document.body
-              )}
-            </div>
+            <CampaignDateRangePicker
+              label={dateRangePickerLabel}
+              customRangeStartDraft={customRangeStartDraft}
+              customRangeEndDraft={customRangeEndDraft}
+              onStartDraftChange={handleDateRangeStartChange}
+              onEndDraftChange={handleDateRangeEndChange}
+              onOpen={handleDateRangeOpen}
+              onReset={handleDateRangeReset}
+              onApply={handleDateRangeApply}
+              canApply={dateRangeCanApply}
+            />
 
             {/* Filter Button → column-visibility Settings drawer */}
             <button
