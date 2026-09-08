@@ -768,8 +768,14 @@ export default function LeadDashboard() {
                     const rect = calendarBtnRef.current?.getBoundingClientRect();
                     if (rect) {
                       const panelWidth = 260;
+                      const estimatedPanelHeight = 300;
                       const left = Math.max(8, Math.min(rect.right - panelWidth, window.innerWidth - panelWidth - 8));
-                      setCalendarMenuPos({ top: rect.bottom + 6, left });
+                      // Flip above the button when there isn't room below —
+                      // keeps the panel fully on-screen on short/landscape viewports.
+                      const top = rect.bottom + 6 + estimatedPanelHeight > window.innerHeight
+                        ? Math.max(8, rect.top - estimatedPanelHeight - 6)
+                        : rect.bottom + 6;
+                      setCalendarMenuPos({ top, left });
                     }
                     setCustomRangeStartDraft(adminCustomRange?.start || "");
                     setCustomRangeEndDraft(adminCustomRange?.end || "");
@@ -797,7 +803,16 @@ export default function LeadDashboard() {
                         <input
                           type="date"
                           value={customRangeStartDraft}
-                          onChange={(e) => setCustomRangeStartDraft(e.target.value)}
+                          onChange={(e) => {
+                            const newStart = e.target.value;
+                            setCustomRangeStartDraft(newStart);
+                            // A previously-picked End Date can now be earlier
+                            // than the new Start Date — clear it rather than
+                            // silently keep an invalid range around.
+                            if (customRangeEndDraft && newStart && customRangeEndDraft < newStart) {
+                              setCustomRangeEndDraft("");
+                            }
+                          }}
                           className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-700 focus:outline-none focus:border-[#0B1E6E]"
                         />
                       </div>
@@ -806,9 +821,13 @@ export default function LeadDashboard() {
                         <input
                           type="date"
                           value={customRangeEndDraft}
+                          min={customRangeStartDraft || undefined}
                           onChange={(e) => setCustomRangeEndDraft(e.target.value)}
                           className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-700 focus:outline-none focus:border-[#0B1E6E]"
                         />
+                        {customRangeStartDraft && customRangeEndDraft && customRangeEndDraft < customRangeStartDraft && (
+                          <p className="text-[10px] font-semibold text-red-500">End date can&apos;t be before the start date.</p>
+                        )}
                       </div>
                       <div className="flex gap-2 pt-1">
                         <button
@@ -826,13 +845,13 @@ export default function LeadDashboard() {
                         <button
                           type="button"
                           onClick={() => {
-                            if (!customRangeStartDraft || !customRangeEndDraft) return;
+                            if (!customRangeStartDraft || !customRangeEndDraft || customRangeEndDraft < customRangeStartDraft) return;
                             setAdminCustomRange({ start: customRangeStartDraft, end: customRangeEndDraft });
                             setAdminDateRange("custom");
                             setCalendarPickerOpen(false);
                             setAdminPage(1);
                           }}
-                          disabled={!customRangeStartDraft || !customRangeEndDraft}
+                          disabled={!customRangeStartDraft || !customRangeEndDraft || customRangeEndDraft < customRangeStartDraft}
                           className="flex-1 bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold text-[11px] py-1.5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                           Apply
