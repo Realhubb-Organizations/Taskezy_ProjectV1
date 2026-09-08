@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useMemo } from "react";
+import React, { useState, useRef, useMemo, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useApp, Lead } from "@/context/AppContext";
 import { computeCPL } from "@/lib/reportMetrics";
@@ -34,6 +34,7 @@ interface CampaignItem {
   cpl: number;
   spend: number;
   platform: "Meta" | "Google" | "Other";
+  property: string;
 }
 
 const CAMPAIGN_STATUSES: CampaignItem["status"][] = ["Active", "Pause", "Stopped"];
@@ -41,6 +42,27 @@ const QUALIFIED_LEAD_STATUSES = ["Interested", "Connected", "Visit Schedule", "S
 const UNQUALIFIED_LEAD_STATUSES = ["Dead", "Invalid", "RNR"];
 const SITE_VISIT_LEAD_STATUSES = ["Visit Schedule", "Site Visit"];
 const FOLLOW_UP_LEAD_STATUSES = ["Follow-ups", "Call Back"];
+
+// Same icon URLs the admin leads page uses for these platforms (LeadDashboard.tsx).
+const PLATFORM_ICON_URL: Partial<Record<CampaignItem["platform"], string>> = {
+  Meta: "https://img.icons8.com/?size=100&id=wA5rN96FVDtq&format=png&color=000000",
+  Google: "https://img.icons8.com/?size=100&id=4hR4Ih04Je2t&format=png&color=000000"
+};
+
+function PlatformIcon({ platform }: { platform: CampaignItem["platform"] }) {
+  const src = PLATFORM_ICON_URL[platform];
+  if (!src) return <span className="text-[11px] text-slate-500">{platform}</span>;
+  return <img src={src} alt={platform} className="h-4 w-4 inline-block" />;
+}
+
+function PlatformIcons({ platforms }: { platforms: CampaignItem["platform"][] }) {
+  if (platforms.length === 0) return <span className="text-slate-400">—</span>;
+  return (
+    <span className="flex items-center gap-1.5">
+      {platforms.map(p => <PlatformIcon key={p} platform={p} />)}
+    </span>
+  );
+}
 
 // The campaigns table's togglable columns (beyond the always-shown Campaign
 // Name + Total Leads) — driven by the Filter button's panel, mirroring the
@@ -104,6 +126,18 @@ function CampaignDateRangePicker({
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
+
+  // The popover's position is a snapshot taken once on click, not re-measured
+  // continuously — so if the page scrolls while it's open, the button moves
+  // but the fixed-position popover doesn't, leaving it stranded. Closing on
+  // any scroll (capture: true catches scroll on nested containers too, since
+  // scroll events don't bubble) is simpler and safer than re-tracking position.
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    window.addEventListener("scroll", close, true);
+    return () => window.removeEventListener("scroll", close, true);
+  }, [open]);
 
   return (
     <div className="relative">
@@ -352,15 +386,15 @@ export default function AdminCampaignsPage() {
   // Derive campaigns data from context adSpend + leads
   const campaignsList: CampaignItem[] = useMemo(() => {
     // Collect all campaign names from ad spend records and lead sources
-    const spendCampaignMap: Record<string, { spend: number; platformLeads: number; status: "Active" | "Pause" | "Stopped"; platform: "Meta" | "Google" | "Other" }> = {};
-    
+    const spendCampaignMap: Record<string, { spend: number; platformLeads: number; status: "Active" | "Pause" | "Stopped"; platform: "Meta" | "Google" | "Other"; property?: string }> = {};
+
     adSpendRecords.forEach(rec => {
       const name = rec.accountName;
       if (!spendCampaignMap[name]) {
         let st: "Active" | "Pause" | "Stopped" = "Active";
         if (rec.campaignStatus === "INACTIVE") st = "Stopped";
         if ((rec.campaignStatus as string) === "PAUSED") st = "Pause";
-        
+
         let plat: "Meta" | "Google" | "Other" = "Meta";
         if (rec.platform.toLowerCase().includes("google")) plat = "Google";
         else if (!rec.platform.toLowerCase().includes("meta") && !rec.platform.toLowerCase().includes("facebook")) plat = "Other";
@@ -369,9 +403,11 @@ export default function AdminCampaignsPage() {
           spend: 0,
           platformLeads: 0,
           status: st,
-          platform: plat
+          platform: plat,
+          property: rec.property
         };
       }
+      if (!spendCampaignMap[name].property && rec.property) spendCampaignMap[name].property = rec.property;
       spendCampaignMap[name].spend += rec.spend;
       spendCampaignMap[name].platformLeads += rec.leadsGenerated;
     });
@@ -404,7 +440,8 @@ export default function AdminCampaignsPage() {
           siteVisit: siteVisits,
           cpl: cplVal,
           spend: item.spend,
-          platform: item.platform
+          platform: item.platform,
+          property: item.property || "Unspecified"
         });
       }
     });
@@ -540,6 +577,27 @@ export default function AdminCampaignsPage() {
   const [deepDiveSourceMenuPos, setDeepDiveSourceMenuPos] = useState<{ top: number; left: number } | null>(null);
   const deepDiveSourceBtnRef = useRef<HTMLButtonElement>(null);
 
+  // Every openPositionedMenu-driven dropdown snapshots its position once on
+  // click rather than tracking the button continuously, so it goes stale (and
+  // visually detaches from its button) if the page scrolls while open —
+  // closing on scroll is simpler and safer than re-measuring position live.
+  useEffect(() => {
+    const anyOpen = summaryDateMenuOpen || statusColumnMenuOpen || chartMetricMenuOpen
+      || typeGroupByMenuOpen || breakdownCampaignMenuOpen || breakdownColumnsMenuOpen || deepDiveSourceMenuOpen;
+    if (!anyOpen) return;
+    const closeAll = () => {
+      setSummaryDateMenuOpen(false);
+      setStatusColumnMenuOpen(false);
+      setChartMetricMenuOpen(false);
+      setTypeGroupByMenuOpen(false);
+      setBreakdownCampaignMenuOpen(false);
+      setBreakdownColumnsMenuOpen(false);
+      setDeepDiveSourceMenuOpen(false);
+    };
+    window.addEventListener("scroll", closeAll, true);
+    return () => window.removeEventListener("scroll", closeAll, true);
+  }, [summaryDateMenuOpen, statusColumnMenuOpen, chartMetricMenuOpen, typeGroupByMenuOpen, breakdownCampaignMenuOpen, breakdownColumnsMenuOpen, deepDiveSourceMenuOpen]);
+
   const deepDiveSourceOptions = useMemo(() => Array.from(new Set(campaignsList.map(c => c.platform))), [campaignsList]);
 
   const deepDiveCampaigns = useMemo(() => {
@@ -551,39 +609,43 @@ export default function AdminCampaignsPage() {
     });
   }, [campaignsList, deepDiveSearchQuery, deepDiveSourceFilters]);
 
+  const [expandedProperties, setExpandedProperties] = useState<Set<string>>(new Set());
+  const togglePropertyExpanded = (property: string) => {
+    setExpandedProperties(prev => {
+      const next = new Set(prev);
+      if (next.has(property)) next.delete(property); else next.add(property);
+      return next;
+    });
+  };
+
+  // Built directly from campaignsList (not re-derived from raw leads) so the
+  // numbers here always agree with the main Campaigns table and Campaign
+  // Deep Dive below — and so each property row carries its own campaign
+  // rows for the expand/collapse "⊕" view.
   const propertyBreakdown = useMemo(() => {
-    type Bucket = { campaigns: Set<string>; platforms: Set<string>; spend: number; leads: Lead[] };
-    const map: Record<string, Bucket> = {};
-    const getBucket = (property: string): Bucket => {
-      if (!map[property]) map[property] = { campaigns: new Set(), platforms: new Set(), spend: 0, leads: [] };
-      return map[property];
-    };
-    adSpendRecords.forEach(r => {
-      if (breakdownCampaignFilters.length > 0 && !breakdownCampaignFilters.includes(r.accountName)) return;
-      const b = getBucket(r.property || "Unspecified");
-      b.campaigns.add(r.accountName);
-      b.platforms.add(r.platform);
-      b.spend += r.spend;
+    const filtered = campaignsList.filter(c => breakdownCampaignFilters.length === 0 || breakdownCampaignFilters.includes(c.name));
+    const map: Record<string, CampaignItem[]> = {};
+    filtered.forEach(c => {
+      const prop = c.property || "Unspecified";
+      if (!map[prop]) map[prop] = [];
+      map[prop].push(c);
     });
-    leads.forEach(l => {
-      if (breakdownCampaignFilters.length > 0 && !breakdownCampaignFilters.includes(l.campaign || l.source || "")) return;
-      getBucket(l.property || "Unspecified").leads.push(l);
-    });
-    return Object.entries(map).map(([property, b]) => {
-      const totalLeads = b.leads.length;
-      const qualifiedLeads = b.leads.filter(l => QUALIFIED_LEAD_STATUSES.includes(l.status)).length;
+    return Object.entries(map).map(([property, campaigns]) => {
+      const totalLeads = campaigns.reduce((acc, c) => acc + c.totalLeads, 0);
+      const qualifiedLeads = campaigns.reduce((acc, c) => acc + c.qualifiedLeads, 0);
+      const spend = campaigns.reduce((acc, c) => acc + c.spend, 0);
       return {
         property,
-        campaigns: b.campaigns.size,
-        platforms: Array.from(b.platforms),
+        campaigns,
+        platforms: Array.from(new Set(campaigns.map(c => c.platform))),
         totalLeads,
         qualifiedLeads,
-        cpl: computeCPL(b.spend, totalLeads),
-        qcpl: computeCPL(b.spend, qualifiedLeads),
-        spend: b.spend
+        cpl: computeCPL(spend, totalLeads),
+        qcpl: computeCPL(spend, qualifiedLeads),
+        spend
       };
     }).sort((a, b) => b.spend - a.spend);
-  }, [adSpendRecords, leads, breakdownCampaignFilters]);
+  }, [campaignsList, breakdownCampaignFilters]);
 
   const statusBreakdown = useMemo(() => {
     const map: Record<string, { campaigns: number; totalLeads: number; qualifiedLeads: number; spend: number }> = {};
@@ -1143,18 +1205,66 @@ export default function AdminCampaignsPage() {
                           <td colSpan={8} className="px-5 py-8 text-center text-slate-400 italic">No campaign/ad-spend data yet.</td>
                         </tr>
                       ) : (
-                        propertyBreakdown.map(row => (
-                          <tr key={row.property} className="hover:bg-slate-50/50 transition-colors">
-                            <td className="px-5 py-3 text-slate-900 font-semibold">{row.property}</td>
-                            <td className="px-5 py-3">{row.campaigns}</td>
-                            {breakdownVisibleColumns.source && <td className="px-5 py-3">{row.platforms.length ? row.platforms.join(", ") : "—"}</td>}
-                            <td className="px-5 py-3">{row.totalLeads}</td>
-                            <td className="px-5 py-3">{row.qualifiedLeads}</td>
-                            {breakdownVisibleColumns.cpl && <td className="px-5 py-3">{row.cpl.toFixed(2)}</td>}
-                            {breakdownVisibleColumns.qcpl && <td className="px-5 py-3">{row.qcpl.toFixed(2)}</td>}
-                            {breakdownVisibleColumns.spend && <td className="px-5 py-3 font-semibold text-slate-800">{formatCurrency(row.spend)}</td>}
-                          </tr>
-                        ))
+                        propertyBreakdown.map(row => {
+                          const isExpanded = expandedProperties.has(row.property);
+                          const colCount = 2 + (breakdownVisibleColumns.source ? 1 : 0) + 2
+                            + (breakdownVisibleColumns.cpl ? 1 : 0) + (breakdownVisibleColumns.qcpl ? 1 : 0) + (breakdownVisibleColumns.spend ? 1 : 0);
+                          return (
+                            <React.Fragment key={row.property}>
+                              <tr className="hover:bg-slate-50/50 transition-colors">
+                                <td className="px-5 py-3 text-slate-900 font-semibold">
+                                  <button
+                                    type="button"
+                                    onClick={() => togglePropertyExpanded(row.property)}
+                                    className="flex items-center gap-1.5 hover:text-[#0B1E6E] transition-colors"
+                                  >
+                                    {row.property}
+                                    <ChevronRight className={`h-3.5 w-3.5 text-slate-400 transition-transform ${isExpanded ? "rotate-90" : ""}`} />
+                                  </button>
+                                </td>
+                                <td className="px-5 py-3">{row.campaigns.length}</td>
+                                {breakdownVisibleColumns.source && <td className="px-5 py-3"><PlatformIcons platforms={row.platforms} /></td>}
+                                <td className="px-5 py-3">{row.totalLeads}</td>
+                                <td className="px-5 py-3">{row.qualifiedLeads}</td>
+                                {breakdownVisibleColumns.cpl && <td className="px-5 py-3">{row.cpl.toFixed(2)}</td>}
+                                {breakdownVisibleColumns.qcpl && <td className="px-5 py-3">{row.qcpl.toFixed(2)}</td>}
+                                {breakdownVisibleColumns.spend && <td className="px-5 py-3 font-semibold text-slate-800">{formatCurrency(row.spend)}</td>}
+                              </tr>
+                              {isExpanded && (
+                                <tr>
+                                  <td colSpan={colCount} className="px-5 pb-3 bg-slate-50/60">
+                                    <table className="w-full text-left border-collapse">
+                                      <thead>
+                                        <tr className="border-b border-slate-200 text-[10px] font-bold text-slate-500 uppercase">
+                                          <th className="py-2 pr-3">Campaign</th>
+                                          <th className="py-2 pr-3">Source</th>
+                                          <th className="py-2 pr-3">Total Leads</th>
+                                          <th className="py-2 pr-3">Qualified Leads</th>
+                                          <th className="py-2 pr-3">CPL</th>
+                                          <th className="py-2 pr-3">QCPL</th>
+                                          <th className="py-2 pr-3">Spend</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-slate-100">
+                                        {row.campaigns.map(c => (
+                                          <tr key={c.id}>
+                                            <td className="py-2 pr-3 font-semibold text-slate-800">{c.name}</td>
+                                            <td className="py-2 pr-3"><PlatformIcon platform={c.platform} /></td>
+                                            <td className="py-2 pr-3">{c.totalLeads}</td>
+                                            <td className="py-2 pr-3">{c.qualifiedLeads}</td>
+                                            <td className="py-2 pr-3">{c.cpl.toFixed(2)}</td>
+                                            <td className="py-2 pr-3">{computeCPL(c.spend, c.qualifiedLeads).toFixed(2)}</td>
+                                            <td className="py-2 pr-3">{formatCurrency(c.spend)}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </td>
+                                </tr>
+                              )}
+                            </React.Fragment>
+                          );
+                        })
                       )}
                     </tbody>
                   </>
@@ -1291,7 +1401,7 @@ export default function AdminCampaignsPage() {
                     deepDiveCampaigns.map(c => (
                       <tr key={c.id} className="hover:bg-slate-50/50 transition-colors">
                         <td className="px-5 py-3 text-slate-900 font-semibold">{c.name}</td>
-                        <td className="px-5 py-3">{c.platform}</td>
+                        <td className="px-5 py-3"><PlatformIcon platform={c.platform} /></td>
                         <td className="px-5 py-3 text-slate-300" title="Not tracked yet — no ad-set-level data ingested">—</td>
                         <td className="px-5 py-3 text-slate-300" title="Not tracked yet — no ad-creative-level data ingested">—</td>
                         <td className="px-5 py-3">{c.qualifiedLeads}</td>
