@@ -282,7 +282,7 @@ function CampaignDateRangePicker({
 }
 
 export default function AdminCampaignsPage() {
-  const { leads, adSpendRecords } = useApp();
+  const { leads, adSpendRecords, followupCalls } = useApp();
 
   // Navigation tab inside Campaigns page ("Campaigns" | "Campaigns Analytics")
   const [activeTab, setActiveTab] = useState<"Campaigns" | "Analytics">("Campaigns");
@@ -554,6 +554,21 @@ export default function AdminCampaignsPage() {
 
   const formatCurrency = (n: number) => `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+  // Same logic as the admin leads table (LeadDashboard.tsx) — reused here so
+  // the Qualified Leads drill-down page's Notes/Next Call Date columns show
+  // real data, not placeholders.
+  const latestLogMessage = (l: Lead): string => {
+    if (!l.logs || l.logs.length === 0) return "No feedback yet";
+    const sorted = [...l.logs].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    return sorted[0].message;
+  };
+  const nextCallDateFor = (leadId: string): string => {
+    const upcoming = followupCalls
+      .filter(f => f.leadId === leadId && f.status === "Upcoming")
+      .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
+    return upcoming.length > 0 ? `${upcoming[0].date} ${upcoming[0].time}` : "—";
+  };
+
   // ---- Campaigns Analytics tab ----------------------------------------
 
   // Chart: spend/leads over time, split by whichever real platforms exist
@@ -665,17 +680,15 @@ export default function AdminCampaignsPage() {
   const [deepDiveSourceMenuPos, setDeepDiveSourceMenuPos] = useState<{ top: number; left: number } | null>(null);
   const deepDiveSourceBtnRef = useRef<HTMLButtonElement>(null);
 
-  // Ad Set Name's expand chevron — there's no real ad-set/ad-creative-level
-  // data behind it yet, so the expanded row honestly says so rather than
-  // showing fabricated names/numbers.
-  const [expandedDeepDiveCampaigns, setExpandedDeepDiveCampaigns] = useState<Set<string>>(new Set());
-  const toggleDeepDiveExpanded = (id: string) => {
-    setExpandedDeepDiveCampaigns(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  };
+  // Page-level drill-downs from the Deep Dive table (breadcrumb-navigated,
+  // replacing the Analytics tab's content, matching the reference) — Ad Set
+  // Name's chevron opens a per-campaign ad-set breakdown page (no real
+  // ad-set/ad-creative data exists, so it honestly says so rather than
+  // fabricating names/numbers); a Qualified Leads count opens the real
+  // list of qualified leads behind that number.
+  const [analyticsDrillView, setAnalyticsDrillView] = useState<
+    { type: "adSetBreakdown"; campaign: CampaignItem } | { type: "qualifiedLeads"; campaign: CampaignItem } | null
+  >(null);
 
   // Every openPositionedMenu-driven dropdown snapshots its position once on
   // click rather than tracking the button continuously, so it goes stale (and
@@ -707,6 +720,38 @@ export default function AdminCampaignsPage() {
       return matchesSearch && matchesSource;
     });
   }, [campaignsList, deepDiveSearchQuery, deepDiveSourceFilters]);
+
+  // Qualified Leads drill-down page — the real leads behind a Deep Dive
+  // row's Qualified Leads count.
+  const [qualifiedLeadsSearchQuery, setQualifiedLeadsSearchQuery] = useState("");
+  const qualifiedLeadsDrillList = useMemo(() => {
+    if (!analyticsDrillView || analyticsDrillView.type !== "qualifiedLeads") return [];
+    const campaignName = analyticsDrillView.campaign.name.toLowerCase();
+    const q = qualifiedLeadsSearchQuery.trim().toLowerCase();
+    return leads.filter(l =>
+      (l.campaign || l.source)?.toLowerCase() === campaignName
+      && QUALIFIED_LEAD_STATUSES.includes(l.status)
+      && (!q || l.name.toLowerCase().includes(q))
+    );
+  }, [analyticsDrillView, leads, qualifiedLeadsSearchQuery]);
+
+  const exportQualifiedLeadsCsv = () => {
+    const rows = [
+      ["Lead Name", "Phone", "Email", "Status", "Assigned To", "Date", "Notes", "Next Call Date", "Campaign"],
+      ...qualifiedLeadsDrillList.map(l => [
+        l.name, l.phone, l.email, l.status, l.assignedAgent,
+        l.createdAtStr || "—", latestLogMessage(l), nextCallDateFor(l.id), l.campaign || l.source || "—"
+      ])
+    ];
+    const csv = rows.map(r => r.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "qualified-leads.csv";
+    link.click();
+    URL.revokeObjectURL(url);
+  };
 
   const [expandedProperties, setExpandedProperties] = useState<Set<string>>(new Set());
   const togglePropertyExpanded = (property: string) => {
@@ -1042,6 +1087,121 @@ export default function AdminCampaignsPage() {
           })()}
 
       {activeTab === "Analytics" ? (
+        analyticsDrillView ? (
+          <div className="space-y-4">
+            {/* Breadcrumb — clicking "Campaigns Analytics" returns to the main view. */}
+            <div className="flex items-center gap-1.5 text-xs text-slate-400">
+              <button type="button" onClick={() => setAnalyticsDrillView(null)} className="hover:text-slate-700 hover:underline">
+                Campaigns Analytics
+              </button>
+              <span>&gt;</span>
+              <span className="text-slate-700 font-semibold">
+                {analyticsDrillView.type === "adSetBreakdown" ? "Campaign Deep Dive" : "Qualified Leads"}
+              </span>
+            </div>
+
+            {analyticsDrillView.type === "adSetBreakdown" ? (
+              <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden">
+                <div className="px-5 py-3.5 border-b border-slate-200/80">
+                  <h3 className="text-sm font-bold text-slate-900">Campaign Deep Dive</h3>
+                </div>
+                <div className="overflow-auto">
+                  <table className="w-full text-left border-collapse min-w-[760px]">
+                    <thead>
+                      <tr className="border-b border-slate-200/80 text-[12px] font-bold text-slate-900">
+                        <th className="px-5 py-3">Campaign Name</th>
+                        <th className="px-5 py-3 whitespace-nowrap">Source</th>
+                        <th className="px-5 py-3 whitespace-nowrap">Ad Set Name</th>
+                        <th className="px-5 py-3 whitespace-nowrap">Ad creative Name</th>
+                        <th className="px-5 py-3 whitespace-nowrap">Qualified Leads</th>
+                        <th className="px-5 py-3 whitespace-nowrap">CPL</th>
+                        <th className="px-5 py-3 whitespace-nowrap">Spend</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-[12px] font-medium text-slate-700">
+                      <tr>
+                        <td className="px-5 py-3 text-slate-900 font-semibold">{analyticsDrillView.campaign.name}</td>
+                        <td className="px-5 py-3"><PlatformIcon platform={analyticsDrillView.campaign.platform} /></td>
+                        <td className="px-5 py-3 text-slate-300" title="Not tracked yet — no ad-set-level data ingested">—</td>
+                        <td className="px-5 py-3 text-slate-300" title="Not tracked yet — no ad-creative-level data ingested">—</td>
+                        <td className="px-5 py-3">{analyticsDrillView.campaign.qualifiedLeads}</td>
+                        <td className="px-5 py-3">{analyticsDrillView.campaign.cpl.toFixed(2)}</td>
+                        <td className="px-5 py-3 font-semibold text-slate-800">{formatCurrency(analyticsDrillView.campaign.spend)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <p className="px-5 py-3 text-[11px] text-slate-400 italic border-t border-slate-100">
+                  Ad-set and ad-creative level breakdown is not tracked yet — Meta/Google ad-set and creative reporting is not ingested. The Qualified Leads/CPL/Spend above are this campaign&apos;s real totals.
+                </p>
+              </div>
+            ) : (
+              <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden">
+                <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5 border-b border-slate-200/80">
+                  <h3 className="text-sm font-bold text-slate-900">
+                    Qualified Leads
+                    <span className="text-slate-400 font-medium ml-1.5">({qualifiedLeadsDrillList.length}) — {analyticsDrillView.campaign.name}</span>
+                  </h3>
+                  <div className="flex items-center gap-2.5">
+                    <div className="relative w-full max-w-[200px]">
+                      <Search className="h-3.5 w-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        value={qualifiedLeadsSearchQuery}
+                        onChange={(e) => setQualifiedLeadsSearchQuery(e.target.value)}
+                        placeholder="Search lead name..."
+                        className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-8 pr-2.5 py-1.5 text-xs focus:outline-none focus:border-[#0B1E6E]"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={exportQualifiedLeadsCsv}
+                      title="Download CSV"
+                      className="p-2 border border-slate-300/80 rounded-lg hover:bg-slate-50 transition-colors"
+                    >
+                      <Download className="h-3.5 w-3.5 text-blue-600" />
+                    </button>
+                  </div>
+                </div>
+                <div className="overflow-auto max-h-[55vh]">
+                  <table className="w-full text-left border-collapse min-w-[900px]">
+                    <thead className="sticky top-0 z-10 bg-white">
+                      <tr className="border-b border-slate-200/80 text-[12px] font-bold text-slate-900">
+                        <th className="px-5 py-3">Lead Name</th>
+                        <th className="px-5 py-3 whitespace-nowrap">Email</th>
+                        <th className="px-5 py-3 whitespace-nowrap">Status</th>
+                        <th className="px-5 py-3 whitespace-nowrap">Assigned To</th>
+                        <th className="px-5 py-3 whitespace-nowrap">Date</th>
+                        <th className="px-5 py-3 whitespace-nowrap">Notes</th>
+                        <th className="px-5 py-3 whitespace-nowrap">Next Call Date</th>
+                        <th className="px-5 py-3 whitespace-nowrap">Campaign</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-[12px] font-medium text-slate-700">
+                      {qualifiedLeadsDrillList.length === 0 ? (
+                        <tr>
+                          <td colSpan={8} className="px-5 py-8 text-center text-slate-400 italic">No qualified leads found for this campaign.</td>
+                        </tr>
+                      ) : (
+                        qualifiedLeadsDrillList.map(l => (
+                          <tr key={l.id} className="hover:bg-slate-50/50 transition-colors">
+                            <td className="px-5 py-3 text-slate-900 font-semibold">{l.name}</td>
+                            <td className="px-5 py-3 truncate max-w-[160px]" title={l.email}>{l.email || "—"}</td>
+                            <td className="px-5 py-3 whitespace-nowrap">{l.status}</td>
+                            <td className="px-5 py-3">{l.assignedAgent || "—"}</td>
+                            <td className="px-5 py-3 whitespace-nowrap">{l.createdAtStr || "—"}</td>
+                            <td className="px-5 py-3 truncate max-w-[200px]" title={latestLogMessage(l)}>{latestLogMessage(l)}</td>
+                            <td className="px-5 py-3 whitespace-nowrap">{nextCallDateFor(l.id)}</td>
+                            <td className="px-5 py-3">{l.campaign || l.source || "—"}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
         <div className="space-y-4">
           {/* Spend/Leads-over-time chart + Campaign Type/Status breakdown */}
           <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-4">
@@ -1587,62 +1747,42 @@ export default function AdminCampaignsPage() {
                       <td colSpan={7} className="px-5 py-8 text-center text-slate-400 italic">No campaigns found matching filter.</td>
                     </tr>
                   ) : (
-                    deepDiveCampaigns.map(c => {
-                      const isExpanded = expandedDeepDiveCampaigns.has(c.id);
-                      return (
-                        <React.Fragment key={c.id}>
-                          <tr className="hover:bg-slate-50/50 transition-colors">
-                            <td className="px-5 py-3 text-slate-900 font-semibold">{c.name}</td>
-                            <td className="px-5 py-3"><PlatformIcon platform={c.platform} /></td>
-                            <td className="px-5 py-3">
-                              <button
-                                type="button"
-                                onClick={() => toggleDeepDiveExpanded(c.id)}
-                                className="flex items-center gap-1 text-slate-400 hover:text-[#0B1E6E] transition-colors"
-                                title="No ad-set-level data ingested yet"
-                              >
-                                <span>—</span>
-                                <ChevronDown className={`h-3.5 w-3.5 transition-transform ${isExpanded ? "rotate-180" : ""}`} />
-                              </button>
-                            </td>
-                            <td className="px-5 py-3 text-slate-300" title="Not tracked yet — no ad-creative-level data ingested">—</td>
-                            <td className="px-5 py-3">{c.qualifiedLeads}</td>
-                            <td className="px-5 py-3">{c.cpl.toFixed(2)}</td>
-                            <td className="px-5 py-3 font-semibold text-slate-800">{formatCurrency(c.spend)}</td>
-                          </tr>
-                          {isExpanded && (
-                            <tr className="bg-slate-50/50">
-                              <td colSpan={7} className="px-5 py-3">
-                                <table className="w-full text-left border-collapse">
-                                  <thead>
-                                    <tr className="border-b border-slate-200 text-[11px] font-bold text-slate-500">
-                                      <th className="py-1.5 pr-3">Ad Set Name</th>
-                                      <th className="py-1.5 pr-3">Ad creative Name</th>
-                                      <th className="py-1.5 pr-3">Qualified Leads</th>
-                                      <th className="py-1.5 pr-3">CPL</th>
-                                      <th className="py-1.5 pr-3">Spend</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    <tr>
-                                      <td colSpan={5} className="py-3 text-center text-slate-400 italic text-[11px]">
-                                        No ad-set-level data available for this campaign yet — Meta/Google ad-set and creative reporting is not ingested.
-                                      </td>
-                                    </tr>
-                                  </tbody>
-                                </table>
-                              </td>
-                            </tr>
-                          )}
-                        </React.Fragment>
-                      );
-                    })
+                    deepDiveCampaigns.map(c => (
+                      <tr key={c.id} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="px-5 py-3 text-slate-900 font-semibold">{c.name}</td>
+                        <td className="px-5 py-3"><PlatformIcon platform={c.platform} /></td>
+                        <td className="px-5 py-3">
+                          <button
+                            type="button"
+                            onClick={() => setAnalyticsDrillView({ type: "adSetBreakdown", campaign: c })}
+                            className="flex items-center gap-1 text-slate-400 hover:text-[#0B1E6E] transition-colors"
+                            title="Open ad-set breakdown"
+                          >
+                            <span>—</span>
+                            <ChevronDown className="h-3.5 w-3.5" />
+                          </button>
+                        </td>
+                        <td className="px-5 py-3 text-slate-300" title="Not tracked yet — no ad-creative-level data ingested">—</td>
+                        <td className="px-5 py-3">
+                          <button
+                            type="button"
+                            onClick={() => setAnalyticsDrillView({ type: "qualifiedLeads", campaign: c })}
+                            className="font-semibold text-[#0B1E6E] hover:underline"
+                          >
+                            {c.qualifiedLeads}
+                          </button>
+                        </td>
+                        <td className="px-5 py-3">{c.cpl.toFixed(2)}</td>
+                        <td className="px-5 py-3 font-semibold text-slate-800">{formatCurrency(c.spend)}</td>
+                      </tr>
+                    ))
                   )}
                 </tbody>
               </table>
             </div>
           </div>
         </div>
+        )
       ) : (
         <>
           {/* Action Toolbar (Date Picker Pill, Campaigns Dropdown, Filter Button) */}
