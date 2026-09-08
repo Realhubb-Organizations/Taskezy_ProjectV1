@@ -8,7 +8,6 @@ import { WhatsAppIcon, CallIcon } from "@/components/icons/ContactIcons";
 import {
   ChevronDown,
   Calendar,
-  Settings,
   Search,
   ChevronRight,
   Filter,
@@ -18,7 +17,9 @@ import {
   Mail,
   Copy,
   Check,
-  Building
+  Building,
+  Sliders,
+  Minus
 } from "lucide-react";
 
 interface CampaignItem {
@@ -32,6 +33,24 @@ interface CampaignItem {
   cpl: number;
   platform: "Meta" | "Google" | "Other";
 }
+
+// The campaigns table's togglable columns (beyond the always-shown Campaign
+// Name) — driven by the Filter button's Settings panel, mirroring the same
+// pattern on the admin leads page.
+type CampaignColumnKey = "status" | "totalLeads" | "qualifiedLeads" | "unqualifiedLeads" | "siteVisit" | "cpl";
+
+const CAMPAIGN_COLUMNS: { key: CampaignColumnKey; label: string }[] = [
+  { key: "status", label: "Campaign Status" },
+  { key: "totalLeads", label: "Total Leads" },
+  { key: "qualifiedLeads", label: "Qualified Leads" },
+  { key: "unqualifiedLeads", label: "Unqualified Leads" },
+  { key: "siteVisit", label: "Site Visit" },
+  { key: "cpl", label: "CPL" }
+];
+
+const CAMPAIGN_DEFAULT_VISIBLE_COLUMNS: Record<CampaignColumnKey, boolean> = {
+  status: true, totalLeads: true, qualifiedLeads: true, unqualifiedLeads: true, siteVisit: true, cpl: true
+};
 
 export default function AdminCampaignsPage() {
   const { leads, adSpendRecords } = useApp();
@@ -64,6 +83,22 @@ export default function AdminCampaignsPage() {
 
   const [quickViewLead, setQuickViewLead] = useState<Lead | null>(null);
   const [copiedField, setCopiedField] = useState<string | null>(null);
+
+  // Filter button → Settings panel for which table columns are shown — a
+  // full-height right-docked drawer, same pattern as the admin leads page.
+  const [isColumnsSettingsOpen, setIsColumnsSettingsOpen] = useState(false);
+  const [campaignVisibleColumns, setCampaignVisibleColumns] = useState<Record<CampaignColumnKey, boolean>>(CAMPAIGN_DEFAULT_VISIBLE_COLUMNS);
+
+  const toggleCampaignColumn = (key: CampaignColumnKey) => {
+    setCampaignVisibleColumns(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const toggleSelectAllCampaignColumns = () => {
+    const allOn = CAMPAIGN_COLUMNS.every(c => campaignVisibleColumns[c.key]);
+    const next: Record<CampaignColumnKey, boolean> = { ...campaignVisibleColumns };
+    CAMPAIGN_COLUMNS.forEach(c => { next[c.key] = !allOn; });
+    setCampaignVisibleColumns(next);
+  };
 
   // Pagination state
   const [rowsPerPage, setRowsPerPage] = useState(100);
@@ -350,7 +385,7 @@ export default function AdminCampaignsPage() {
             </div>
           </div>
 
-          {/* Action Toolbar (Date Picker Pill, Campaigns Dropdown, Settings Button) */}
+          {/* Action Toolbar (Date Picker Pill, Campaigns Dropdown, Filter Button) */}
           <div className="flex flex-wrap items-center justify-end gap-2.5 pt-1">
             {/* Date Range Picker Pill */}
             <div className="relative">
@@ -491,10 +526,14 @@ export default function AdminCampaignsPage() {
               )}
             </div>
 
-            {/* Settings Button */}
-            <button className="flex items-center gap-1.5 bg-white border border-slate-300/80 rounded-xl px-3.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 shadow-2xs transition-colors">
-              <Settings className="h-3.5 w-3.5 text-slate-500" />
-              <span>Settings</span>
+            {/* Filter Button → column-visibility Settings drawer */}
+            <button
+              type="button"
+              onClick={() => setIsColumnsSettingsOpen(true)}
+              className="flex items-center gap-2 border border-slate-300/80 bg-white rounded-xl px-3.5 py-1.5 text-xs text-slate-700 font-semibold hover:bg-slate-50 shadow-2xs transition-colors"
+            >
+              <Sliders className="h-3.5 w-3.5 text-blue-600" />
+              Filter
             </button>
           </div>
 
@@ -527,23 +566,25 @@ export default function AdminCampaignsPage() {
                         </div>
                       )}
                     </th>
-                    <th className="px-5 py-3.5 whitespace-nowrap">
-                      <div className="flex items-center gap-1">
-                        <span>Campaign Status</span>
-                        <ChevronDown className="h-3 w-3 text-slate-800" />
-                      </div>
-                    </th>
-                    <th className="px-5 py-3.5 whitespace-nowrap">Total Leads</th>
-                    <th className="px-5 py-3.5 whitespace-nowrap">Qualified Leads</th>
-                    <th className="px-5 py-3.5 whitespace-nowrap">Unqualified Leads</th>
-                    <th className="px-5 py-3.5 whitespace-nowrap">Site Visit</th>
-                    <th className="px-5 py-3.5 whitespace-nowrap">CPL</th>
+                    {campaignVisibleColumns.status && (
+                      <th className="px-5 py-3.5 whitespace-nowrap">
+                        <div className="flex items-center gap-1">
+                          <span>Campaign Status</span>
+                          <ChevronDown className="h-3 w-3 text-slate-800" />
+                        </div>
+                      </th>
+                    )}
+                    {campaignVisibleColumns.totalLeads && <th className="px-5 py-3.5 whitespace-nowrap">Total Leads</th>}
+                    {campaignVisibleColumns.qualifiedLeads && <th className="px-5 py-3.5 whitespace-nowrap">Qualified Leads</th>}
+                    {campaignVisibleColumns.unqualifiedLeads && <th className="px-5 py-3.5 whitespace-nowrap">Unqualified Leads</th>}
+                    {campaignVisibleColumns.siteVisit && <th className="px-5 py-3.5 whitespace-nowrap">Site Visit</th>}
+                    {campaignVisibleColumns.cpl && <th className="px-5 py-3.5 whitespace-nowrap">CPL</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-[12px] font-medium text-slate-700">
                   {paginatedCampaigns.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-5 py-8 text-center text-slate-400 italic">
+                      <td colSpan={1 + CAMPAIGN_COLUMNS.filter(c => campaignVisibleColumns[c.key]).length} className="px-5 py-8 text-center text-slate-400 italic">
                         No campaigns found matching filter.
                       </td>
                     </tr>
@@ -551,12 +592,12 @@ export default function AdminCampaignsPage() {
                     paginatedCampaigns.map((row) => (
                       <tr key={row.id} className="hover:bg-slate-50/50 transition-colors">
                         <td className="px-5 py-3.5 text-slate-900 font-semibold">{row.name}</td>
-                        <td className="px-5 py-3.5 whitespace-nowrap">{getStatusBadge(row.status)}</td>
-                        <td className="px-5 py-3.5">{row.totalLeads}</td>
-                        <td className="px-5 py-3.5">{row.qualifiedLeads}</td>
-                        <td className="px-5 py-3.5">{row.unqualifiedLeads}</td>
-                        <td className="px-5 py-3.5">{row.siteVisit}</td>
-                        <td className="px-5 py-3.5 font-semibold text-slate-800">{row.cpl.toFixed(2)}</td>
+                        {campaignVisibleColumns.status && <td className="px-5 py-3.5 whitespace-nowrap">{getStatusBadge(row.status)}</td>}
+                        {campaignVisibleColumns.totalLeads && <td className="px-5 py-3.5">{row.totalLeads}</td>}
+                        {campaignVisibleColumns.qualifiedLeads && <td className="px-5 py-3.5">{row.qualifiedLeads}</td>}
+                        {campaignVisibleColumns.unqualifiedLeads && <td className="px-5 py-3.5">{row.unqualifiedLeads}</td>}
+                        {campaignVisibleColumns.siteVisit && <td className="px-5 py-3.5">{row.siteVisit}</td>}
+                        {campaignVisibleColumns.cpl && <td className="px-5 py-3.5 font-semibold text-slate-800">{row.cpl.toFixed(2)}</td>}
                       </tr>
                     ))
                   )}
@@ -606,6 +647,60 @@ export default function AdminCampaignsPage() {
             </div>
           </div>
         </>
+      )}
+
+      {/* Filter button's column-visibility Settings panel — a full-height
+          right-docked drawer (same pattern as the admin leads page): no dark
+          backdrop, the rest of the page stays visible, closes on an
+          invisible click-outside catcher. */}
+      {isColumnsSettingsOpen && createPortal(
+        <div className="fixed inset-0 z-[100]">
+          <div className="fixed inset-0" onClick={() => setIsColumnsSettingsOpen(false)} />
+          <div className="fixed inset-y-0 right-0 w-full max-w-sm bg-white border-l border-slate-200 shadow-2xl flex flex-col animate-slide-in">
+            <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-slate-100 shrink-0">
+              <h3 className="text-base font-extrabold text-slate-900">Settings</h3>
+              <button
+                onClick={() => setIsColumnsSettingsOpen(false)}
+                className="text-slate-400 hover:text-slate-700"
+              >
+                <X className="h-4.5 w-4.5" />
+              </button>
+            </div>
+            <div className="px-5 py-5 flex-1 overflow-y-auto">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-extrabold text-slate-800">Columns</span>
+                <button
+                  type="button"
+                  onClick={toggleSelectAllCampaignColumns}
+                  className="flex items-center gap-1 text-[11px] font-bold text-slate-500 hover:text-[#0B1E6E]"
+                >
+                  <Minus className="h-3 w-3" />
+                  Select All
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+                {CAMPAIGN_COLUMNS.map(c => {
+                  const isOn = campaignVisibleColumns[c.key];
+                  return (
+                    <button
+                      key={c.key}
+                      type="button"
+                      onClick={() => toggleCampaignColumn(c.key)}
+                      className={`text-left pl-2.5 py-2 text-xs transition-colors truncate ${
+                        isOn
+                          ? "border-l-[3px] border-[#0B1E6E] font-extrabold text-slate-900"
+                          : "border-l-[3px] border-transparent font-semibold text-slate-400 hover:text-slate-600"
+                      }`}
+                    >
+                      {c.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
 
       {/* Quick View Drawer if needed */}
