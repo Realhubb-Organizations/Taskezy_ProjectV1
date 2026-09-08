@@ -107,6 +107,14 @@ export default function LeadDetailDrawer({
     onClose();
   };
 
+  // "21 Jun 2026, 08:21 pm" — real timestamp formatting for the activity
+  // timeline, replacing the previous raw ISO string.
+  const formatLogTimestamp = (iso: string): string => {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    return d.toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true });
+  };
+
   const shareLeadProfile = () => {
     // API Integration Point: Trigger Native Share API or Copy Link to Clipboard
     navigator.clipboard.writeText(`TaskEzy Lead Profile:\nName: ${lead.name}\nPhone: ${lead.phone}\nStatus: ${lead.status}`);
@@ -370,29 +378,31 @@ export default function LeadDetailDrawer({
             </div>
           </div>
 
-          {/* Section D: Activity Logs */}
+          {/* Section D: Activity Logs — a real vertical timeline (connecting
+              line + node per entry, newest first) inside its own bordered,
+              independently-scrollable card. */}
           <div className="space-y-3">
             <h4 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider border-b border-slate-100 pb-1.5 flex items-center gap-1.5">
               <Activity className="h-3.5 w-3.5 text-slate-500" />
               Section D: Audit logs timeline
             </h4>
-            <div className="space-y-4 relative border-l border-slate-150 pl-4 ml-2 max-h-60 overflow-y-auto pr-1">
+            <div className="bg-white border border-slate-200 rounded-2xl shadow-sm max-h-60 overflow-y-auto p-4">
               {lead.logs.length === 0 ? (
                 <p className="text-[10px] text-slate-400 font-semibold italic">No activity registered for this profile.</p>
               ) : (
-                lead.logs.map((log, idx) => (
-                  <div key={idx} className="relative text-xs">
-                    {/* Log Dot */}
-                    <span className="absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full bg-slate-300 border border-white" />
-                    <div className="bg-slate-50 border border-slate-150 rounded-xl p-3 space-y-1">
-                      <div className="flex justify-between items-center text-[9px] font-bold text-slate-400">
-                        <span>{log.user}</span>
-                        <span className="font-mono">{log.timestamp}</span>
+                <div className="relative pl-5">
+                  <div className="absolute left-[5px] top-1.5 bottom-1.5 w-px bg-slate-200" />
+                  {[...lead.logs]
+                    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+                    .map((log, idx) => (
+                      <div key={idx} className="relative pb-5 last:pb-0">
+                        <span className="absolute -left-5 top-1 h-2.5 w-2.5 rounded-full bg-white border-2 border-[#0B1E6E]" />
+                        <p className="text-[10px] font-bold text-slate-800">{formatLogTimestamp(log.timestamp)}</p>
+                        <p className="text-[10px] text-slate-600 leading-relaxed mt-1">{log.message}</p>
+                        <p className="text-[9px] text-slate-400 font-semibold mt-1 text-right">by {log.user}</p>
                       </div>
-                      <p className="text-[10px] text-slate-650 font-bold leading-relaxed">{log.message}</p>
-                    </div>
-                  </div>
-                ))
+                    ))}
+                </div>
               )}
             </div>
           </div>

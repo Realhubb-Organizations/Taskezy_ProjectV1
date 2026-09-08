@@ -851,22 +851,28 @@ export default function CrmDashboardPage() {
               </div>
             </div>
 
-            {/* Activity History */}
+            {/* Activity History — a real vertical timeline (connecting line +
+                node per entry, newest first) inside its own bordered,
+                independently-scrollable card. */}
             <div className="px-5 py-3 flex-1 min-h-0 flex flex-col">
               <span className="text-[11px] font-bold text-slate-500 block mb-2 shrink-0">Activity History :</span>
-              <div className="space-y-2.5 overflow-y-auto pr-1 flex-1">
+              <div className="bg-white border border-slate-200 rounded-2xl shadow-sm flex-1 min-h-0 overflow-y-auto p-4">
                 {quickViewLead.logs.length === 0 ? (
                   <p className="text-[11px] text-slate-400 italic">No activity recorded yet.</p>
                 ) : (
-                  [...quickViewLead.logs]
-                    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
-                    .map((log, idx) => (
-                      <div key={idx} className="bg-[#EEF2FF] border border-[#DCE3FA] rounded-xl px-3 py-2">
-                        <p className="text-[10px] font-bold text-slate-500">{formatDateTime(log.timestamp)}</p>
-                        <p className="text-[11px] text-slate-700 leading-snug mt-1">{log.message}</p>
-                        <p className="text-[9px] text-slate-400 font-semibold mt-1 text-right">by {log.user}</p>
-                      </div>
-                    ))
+                  <div className="relative pl-5">
+                    <div className="absolute left-[5px] top-1.5 bottom-1.5 w-px bg-slate-200" />
+                    {[...quickViewLead.logs]
+                      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+                      .map((log, idx) => (
+                        <div key={idx} className="relative pb-5 last:pb-0">
+                          <span className="absolute -left-5 top-1 h-2.5 w-2.5 rounded-full bg-white border-2 border-[#0B1E6E]" />
+                          <p className="text-[10px] font-bold text-slate-800">{formatDateTime(log.timestamp)}</p>
+                          <p className="text-[11px] text-slate-600 leading-snug mt-1">{log.message}</p>
+                          <p className="text-[9px] text-slate-400 font-semibold mt-1 text-right">by {log.user}</p>
+                        </div>
+                      ))}
+                  </div>
                 )}
               </div>
             </div>
