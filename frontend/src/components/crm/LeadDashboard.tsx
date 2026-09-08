@@ -392,6 +392,15 @@ export default function LeadDashboard() {
   const [analyticsPage, setAnalyticsPage] = useState(1);
   const [analyticsRowsPerPage, setAnalyticsRowsPerPage] = useState(100);
   const [rnrSearch, setRnrSearch] = useState("");
+  const [expandedManagers, setExpandedManagers] = useState<Set<string>>(new Set());
+
+  const toggleManagerExpand = (agentName: string) => {
+    setExpandedManagers(prev => {
+      const next = new Set(prev);
+      if (next.has(agentName)) next.delete(agentName); else next.add(agentName);
+      return next;
+    });
+  };
 
   const [adminVisibleColumns, setAdminVisibleColumns] = useState<Record<AdminColumnKey, boolean>>(ADMIN_DEFAULT_VISIBLE_COLUMNS);
 
@@ -626,18 +635,11 @@ export default function LeadDashboard() {
   const analyticsPropertiesList = Array.from(new Set(scopedLeads.map(l => l.property).filter(Boolean))) as string[];
   const analyticsCampaignsList = Array.from(new Set(scopedLeads.map(l => l.campaign).filter(Boolean))) as string[];
 
-  // Real per-agent lead-quality breakdown for the Leads Analytics tab — same
-  // categorization the stat cards above use, just grouped per agent, plus
-  // two real conversion rates derived from those same counts (no new data
-  // needed): QL's %age = qualified/total, QL2SV %age = of the qualified
-  // leads, what share also reached a site-visit status.
-  const adminAgentBreakdown = agentsList.map(agentName => {
-    const agentLeads = analyticsScopedLeads.filter(l => l.assignedAgent === agentName);
-    const qualified = agentLeads.filter(l => !["Unassigned", "RNR", "Switch off", "Not Interested", "Invalid", "Low Budget", "Dead"].includes(l.status)).length;
-    const siteVisits = agentLeads.filter(l => ["Site Visit", "Meeting Done", "Visit Schedule"].includes(l.status)).length;
-    const total = agentLeads.length;
+  const computeLeadStats = (leadsForPerson: Lead[]) => {
+    const qualified = leadsForPerson.filter(l => !["Unassigned", "RNR", "Switch off", "Not Interested", "Invalid", "Low Budget", "Dead"].includes(l.status)).length;
+    const siteVisits = leadsForPerson.filter(l => ["Site Visit", "Meeting Done", "Visit Schedule"].includes(l.status)).length;
+    const total = leadsForPerson.length;
     return {
-      agentName,
       total,
       qualified,
       unqualified: total - qualified,
@@ -645,7 +647,34 @@ export default function LeadDashboard() {
       qlPct: total > 0 ? (qualified / total) * 100 : 0,
       ql2svPct: qualified > 0 ? (siteVisits / qualified) * 100 : 0
     };
-  }).filter(row => row.total > 0);
+  };
+
+  // Real reporting-line data (User.role_type/managerId) — not a fabricated
+  // hierarchy. Members who report to a Manager are matched to them by id,
+  // then their own leads (matched by name, same as everywhere else in this
+  // file) are aggregated the same way as the top-level rows.
+  const salesTeamUsers = users.filter(u => u.department === "SALES" && u.status !== "INACTIVE");
+
+  // Real per-agent lead-quality breakdown for the Leads Analytics tab — same
+  // categorization the stat cards above use, just grouped per agent, plus
+  // two real conversion rates derived from those same counts (no new data
+  // needed): QL's %age = qualified/total, QL2SV %age = of the qualified
+  // leads, what share also reached a site-visit status.
+  const adminAgentBreakdown = agentsList.map(agentName => {
+    const agentLeads = analyticsScopedLeads.filter(l => l.assignedAgent === agentName);
+    const stats = computeLeadStats(agentLeads);
+    const salesUser = salesTeamUsers.find(u => u.name === agentName);
+    const isManager = salesUser?.role_type === "Manager";
+    const directReports = isManager && salesUser
+      ? salesTeamUsers
+          .filter(u => u.managerId === salesUser.id)
+          .map(member => ({
+            name: member.name,
+            ...computeLeadStats(analyticsScopedLeads.filter(l => l.assignedAgent === member.name))
+          }))
+      : [];
+    return { agentName, isManager, directReports, ...stats };
+  }).filter(row => row.total > 0 || row.directReports.some(d => d.total > 0));
 
   const analyticsTotalPages = Math.max(1, Math.ceil(adminAgentBreakdown.length / analyticsRowsPerPage));
   const analyticsCurrentPage = Math.min(analyticsPage, analyticsTotalPages);
@@ -657,7 +686,7 @@ export default function LeadDashboard() {
   const handleExportAnalytics = () => {
     // Mirrors whichever columns are currently toggled on in the Filter panel.
     const visibleCols = ANALYTICS_COLUMNS.filter(c => analyticsVisibleColumns[c.key]);
-    const header = ["Member Name", ...visibleCols.map(c => c.label)];
+    const header = ["Manager Name", ...visibleCols.map(c => c.label)];
     const cellValue: Record<AnalyticsColumnKey, (r: typeof adminAgentBreakdown[number]) => string | number> = {
       total: r => r.total,
       qualified: r => r.qualified,
@@ -1607,7 +1636,7 @@ export default function LeadDashboard() {
                       <thead>
                         <tr className="border-b border-slate-200 text-[11px] font-bold text-slate-800">
                           <th className="px-4 py-3">
-                            <div className="flex items-center gap-1.5">Member Name <Search className="h-3 w-3 text-slate-400" /></div>
+                            <div className="flex items-center gap-1.5">Manager Name <Search className="h-3 w-3 text-slate-400" /></div>
                           </th>
                           {analyticsVisibleColumns.total && <th className="px-4 py-3 whitespace-nowrap">Total Leads Assigned</th>}
                           {analyticsVisibleColumns.qualified && <th className="px-4 py-3 whitespace-nowrap">Qualified Leads</th>}
@@ -1618,29 +1647,85 @@ export default function LeadDashboard() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 text-slate-700">
-                        {analyticsPageRows.map(row => (
-                          <tr key={row.agentName} className="hover:bg-slate-50/60 transition-colors">
-                            <td className="px-4 py-3 font-bold">
-                              <button
-                                onClick={() => {
-                                  setAdminAssignedFilter([row.agentName]);
-                                  setAdminTab("leads");
-                                  setAdminPage(1);
-                                }}
-                                className="text-[#0B1E6E] hover:underline text-left"
-                                title={`View ${row.agentName}'s leads`}
-                              >
-                                {row.agentName}
-                              </button>
-                            </td>
-                            {analyticsVisibleColumns.total && <td className="px-4 py-3 font-semibold">{row.total}</td>}
-                            {analyticsVisibleColumns.qualified && <td className="px-4 py-3 font-semibold">{row.qualified}</td>}
-                            {analyticsVisibleColumns.unqualified && <td className="px-4 py-3 font-semibold">{row.unqualified}</td>}
-                            {analyticsVisibleColumns.siteVisits && <td className="px-4 py-3 font-semibold">{row.siteVisits}</td>}
-                            {analyticsVisibleColumns.qlPct && <td className="px-4 py-3 font-semibold">{row.qlPct.toFixed(2)}%</td>}
-                            {analyticsVisibleColumns.ql2svPct && <td className="px-4 py-3 font-semibold">{row.ql2svPct.toFixed(2)}%</td>}
-                          </tr>
-                        ))}
+                        {analyticsPageRows.map(row => {
+                          const isExpanded = expandedManagers.has(row.agentName);
+                          const visibleColCount = ANALYTICS_COLUMNS.filter(c => analyticsVisibleColumns[c.key]).length;
+                          return (
+                            <React.Fragment key={row.agentName}>
+                              <tr className={`transition-colors ${isExpanded ? "bg-slate-50" : "hover:bg-slate-50/60"}`}>
+                                <td className="px-4 py-3 font-bold">
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      onClick={() => {
+                                        setAdminAssignedFilter([row.agentName]);
+                                        setAdminTab("leads");
+                                        setAdminPage(1);
+                                      }}
+                                      className="text-[#0B1E6E] hover:underline text-left"
+                                      title={`View ${row.agentName}'s leads`}
+                                    >
+                                      {row.agentName}
+                                    </button>
+                                    {row.isManager && (
+                                      <button
+                                        type="button"
+                                        onClick={() => toggleManagerExpand(row.agentName)}
+                                        title={isExpanded ? "Collapse team" : "Expand team"}
+                                        className="h-4 w-4 shrink-0 flex items-center justify-center rounded-full border border-[#0B1E6E] text-[#0B1E6E] hover:bg-[#0B1E6E]/10 transition-colors"
+                                      >
+                                        {isExpanded ? <Minus className="h-2.5 w-2.5" /> : <Plus className="h-2.5 w-2.5" />}
+                                      </button>
+                                    )}
+                                  </div>
+                                </td>
+                                {analyticsVisibleColumns.total && <td className="px-4 py-3 font-semibold">{row.total}</td>}
+                                {analyticsVisibleColumns.qualified && <td className="px-4 py-3 font-semibold">{row.qualified}</td>}
+                                {analyticsVisibleColumns.unqualified && <td className="px-4 py-3 font-semibold">{row.unqualified}</td>}
+                                {analyticsVisibleColumns.siteVisits && <td className="px-4 py-3 font-semibold">{row.siteVisits}</td>}
+                                {analyticsVisibleColumns.qlPct && <td className="px-4 py-3 font-semibold">{row.qlPct.toFixed(2)}%</td>}
+                                {analyticsVisibleColumns.ql2svPct && <td className="px-4 py-3 font-semibold">{row.ql2svPct.toFixed(2)}%</td>}
+                              </tr>
+                              {row.isManager && isExpanded && (
+                                <tr>
+                                  <td colSpan={1 + visibleColCount} className="p-0 bg-slate-50/60">
+                                    <div className="px-4 py-3">
+                                      {row.directReports.length === 0 ? (
+                                        <p className="text-[11px] text-slate-400 italic py-1">No team members reporting to {row.agentName} yet.</p>
+                                      ) : (
+                                        <table className="w-full text-left text-[11px] border-collapse">
+                                          <thead>
+                                            <tr className="border-b border-slate-200 font-bold text-slate-600">
+                                              <th className="py-2 pr-4">Team Member</th>
+                                              {analyticsVisibleColumns.total && <th className="py-2 pr-4">Total Leads Assigned</th>}
+                                              {analyticsVisibleColumns.qualified && <th className="py-2 pr-4">Qualified Leads</th>}
+                                              {analyticsVisibleColumns.unqualified && <th className="py-2 pr-4">Unqualified Leads</th>}
+                                              {analyticsVisibleColumns.siteVisits && <th className="py-2 pr-4">Site Visit Leads</th>}
+                                              {analyticsVisibleColumns.qlPct && <th className="py-2 pr-4">QL&apos;s %age</th>}
+                                              {analyticsVisibleColumns.ql2svPct && <th className="py-2 pr-4">QL2SV %age</th>}
+                                            </tr>
+                                          </thead>
+                                          <tbody className="divide-y divide-slate-100 text-slate-700">
+                                            {row.directReports.map(member => (
+                                              <tr key={member.name}>
+                                                <td className="py-2 pr-4 font-semibold">{member.name}</td>
+                                                {analyticsVisibleColumns.total && <td className="py-2 pr-4">{member.total}</td>}
+                                                {analyticsVisibleColumns.qualified && <td className="py-2 pr-4">{member.qualified}</td>}
+                                                {analyticsVisibleColumns.unqualified && <td className="py-2 pr-4">{member.unqualified}</td>}
+                                                {analyticsVisibleColumns.siteVisits && <td className="py-2 pr-4">{member.siteVisits}</td>}
+                                                {analyticsVisibleColumns.qlPct && <td className="py-2 pr-4">{member.qlPct.toFixed(2)}%</td>}
+                                                {analyticsVisibleColumns.ql2svPct && <td className="py-2 pr-4">{member.ql2svPct.toFixed(2)}%</td>}
+                                              </tr>
+                                            ))}
+                                          </tbody>
+                                        </table>
+                                      )}
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </React.Fragment>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
