@@ -46,6 +46,25 @@ const ADMIN_DEFAULT_VISIBLE_COLUMNS: Record<AdminColumnKey, boolean> = {
   notes: true, propertyMatch: false
 };
 
+// The Leads Analytics per-agent table's togglable columns — Member Name
+// itself stays pinned (same role as Lead Name in the Leads table), the rest
+// are driven by the same Filter panel, switched to this set while that tab
+// is active.
+type AnalyticsColumnKey = "total" | "qualified" | "unqualified" | "siteVisits" | "qlPct" | "ql2svPct";
+
+const ANALYTICS_COLUMNS: { key: AnalyticsColumnKey; label: string }[] = [
+  { key: "total", label: "Total Leads Assigned" },
+  { key: "qualified", label: "Qualified Leads" },
+  { key: "unqualified", label: "Unqualified Leads" },
+  { key: "siteVisits", label: "Site Visit Leads" },
+  { key: "qlPct", label: "QL's %age" },
+  { key: "ql2svPct", label: "QL2SV %age" }
+];
+
+const ANALYTICS_DEFAULT_VISIBLE_COLUMNS: Record<AnalyticsColumnKey, boolean> = {
+  total: true, qualified: true, unqualified: true, siteVisits: true, qlPct: true, ql2svPct: true
+};
+
 export default function LeadDashboard() {
   const {
     leads,
@@ -390,6 +409,20 @@ export default function LeadDashboard() {
 
   const adminVisibleColumnList = ADMIN_COLUMNS.filter(c => adminVisibleColumns[c.key]);
 
+  const [analyticsVisibleColumns, setAnalyticsVisibleColumns] = useState<Record<AnalyticsColumnKey, boolean>>(ANALYTICS_DEFAULT_VISIBLE_COLUMNS);
+
+  const toggleAnalyticsColumn = (key: AnalyticsColumnKey) => {
+    setAnalyticsVisibleColumns(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const allAnalyticsColumnsVisible = ANALYTICS_COLUMNS.every(c => analyticsVisibleColumns[c.key]);
+  const toggleSelectAllAnalyticsColumns = () => {
+    const next = !allAnalyticsColumnsVisible;
+    setAnalyticsVisibleColumns(
+      ANALYTICS_COLUMNS.reduce((acc, c) => ({ ...acc, [c.key]: next }), {} as Record<AnalyticsColumnKey, boolean>)
+    );
+  };
+
   const DATE_RANGE_OPTIONS: { value: typeof adminDateRange; label: string }[] = [
     { value: "today", label: "Today" },
     { value: "yesterday", label: "Yesterday" },
@@ -622,10 +655,18 @@ export default function LeadDashboard() {
   );
 
   const handleExportAnalytics = () => {
-    const header = ["Member Name", "Total Leads Assigned", "Qualified Leads", "Unqualified Leads", "Site Visit Leads", "QL's %age", "QL2SV %age"];
-    const rows = adminAgentBreakdown.map(r => [
-      r.agentName, r.total, r.qualified, r.unqualified, r.siteVisits, `${r.qlPct.toFixed(2)}%`, `${r.ql2svPct.toFixed(2)}%`
-    ]);
+    // Mirrors whichever columns are currently toggled on in the Filter panel.
+    const visibleCols = ANALYTICS_COLUMNS.filter(c => analyticsVisibleColumns[c.key]);
+    const header = ["Member Name", ...visibleCols.map(c => c.label)];
+    const cellValue: Record<AnalyticsColumnKey, (r: typeof adminAgentBreakdown[number]) => string | number> = {
+      total: r => r.total,
+      qualified: r => r.qualified,
+      unqualified: r => r.unqualified,
+      siteVisits: r => r.siteVisits,
+      qlPct: r => `${r.qlPct.toFixed(2)}%`,
+      ql2svPct: r => `${r.ql2svPct.toFixed(2)}%`
+    };
+    const rows = adminAgentBreakdown.map(r => [r.agentName, ...visibleCols.map(c => cellValue[c.key](r))]);
     const csv = [header, ...rows].map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
@@ -1568,12 +1609,12 @@ export default function LeadDashboard() {
                           <th className="px-4 py-3">
                             <div className="flex items-center gap-1.5">Member Name <Search className="h-3 w-3 text-slate-400" /></div>
                           </th>
-                          <th className="px-4 py-3 whitespace-nowrap">Total Leads Assigned</th>
-                          <th className="px-4 py-3 whitespace-nowrap">Qualified Leads</th>
-                          <th className="px-4 py-3 whitespace-nowrap">Unqualified Leads</th>
-                          <th className="px-4 py-3 whitespace-nowrap">Site Visit Leads</th>
-                          <th className="px-4 py-3 whitespace-nowrap">QL&apos;s %age</th>
-                          <th className="px-4 py-3 whitespace-nowrap">QL2SV %age</th>
+                          {analyticsVisibleColumns.total && <th className="px-4 py-3 whitespace-nowrap">Total Leads Assigned</th>}
+                          {analyticsVisibleColumns.qualified && <th className="px-4 py-3 whitespace-nowrap">Qualified Leads</th>}
+                          {analyticsVisibleColumns.unqualified && <th className="px-4 py-3 whitespace-nowrap">Unqualified Leads</th>}
+                          {analyticsVisibleColumns.siteVisits && <th className="px-4 py-3 whitespace-nowrap">Site Visit Leads</th>}
+                          {analyticsVisibleColumns.qlPct && <th className="px-4 py-3 whitespace-nowrap">QL&apos;s %age</th>}
+                          {analyticsVisibleColumns.ql2svPct && <th className="px-4 py-3 whitespace-nowrap">QL2SV %age</th>}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 text-slate-700">
@@ -1592,12 +1633,12 @@ export default function LeadDashboard() {
                                 {row.agentName}
                               </button>
                             </td>
-                            <td className="px-4 py-3 font-semibold">{row.total}</td>
-                            <td className="px-4 py-3 font-semibold">{row.qualified}</td>
-                            <td className="px-4 py-3 font-semibold">{row.unqualified}</td>
-                            <td className="px-4 py-3 font-semibold">{row.siteVisits}</td>
-                            <td className="px-4 py-3 font-semibold">{row.qlPct.toFixed(2)}%</td>
-                            <td className="px-4 py-3 font-semibold">{row.ql2svPct.toFixed(2)}%</td>
+                            {analyticsVisibleColumns.total && <td className="px-4 py-3 font-semibold">{row.total}</td>}
+                            {analyticsVisibleColumns.qualified && <td className="px-4 py-3 font-semibold">{row.qualified}</td>}
+                            {analyticsVisibleColumns.unqualified && <td className="px-4 py-3 font-semibold">{row.unqualified}</td>}
+                            {analyticsVisibleColumns.siteVisits && <td className="px-4 py-3 font-semibold">{row.siteVisits}</td>}
+                            {analyticsVisibleColumns.qlPct && <td className="px-4 py-3 font-semibold">{row.qlPct.toFixed(2)}%</td>}
+                            {analyticsVisibleColumns.ql2svPct && <td className="px-4 py-3 font-semibold">{row.ql2svPct.toFixed(2)}%</td>}
                           </tr>
                         ))}
                       </tbody>
@@ -1726,7 +1767,7 @@ export default function LeadDashboard() {
                   <span className="text-xs font-extrabold text-slate-800">Columns</span>
                   <button
                     type="button"
-                    onClick={toggleSelectAllAdminColumns}
+                    onClick={adminTab === "analytics" ? toggleSelectAllAnalyticsColumns : toggleSelectAllAdminColumns}
                     className="flex items-center gap-1 text-[11px] font-bold text-slate-500 hover:text-[#0B1E6E]"
                   >
                     <Minus className="h-3 w-3" />
@@ -1734,23 +1775,41 @@ export default function LeadDashboard() {
                   </button>
                 </div>
                 <div className="grid grid-cols-2 gap-x-3 gap-y-1">
-                  {ADMIN_COLUMNS.map(c => {
-                    const isOn = adminVisibleColumns[c.key];
-                    return (
-                      <button
-                        key={c.key}
-                        type="button"
-                        onClick={() => toggleAdminColumn(c.key)}
-                        className={`text-left pl-2.5 py-2 text-xs transition-colors truncate ${
-                          isOn
-                            ? "border-l-[3px] border-[#0B1E6E] font-extrabold text-slate-900"
-                            : "border-l-[3px] border-transparent font-semibold text-slate-400 hover:text-slate-600"
-                        }`}
-                      >
-                        {c.label}
-                      </button>
-                    );
-                  })}
+                  {adminTab === "analytics"
+                    ? ANALYTICS_COLUMNS.map(c => {
+                        const isOn = analyticsVisibleColumns[c.key];
+                        return (
+                          <button
+                            key={c.key}
+                            type="button"
+                            onClick={() => toggleAnalyticsColumn(c.key)}
+                            className={`text-left pl-2.5 py-2 text-xs transition-colors truncate ${
+                              isOn
+                                ? "border-l-[3px] border-[#0B1E6E] font-extrabold text-slate-900"
+                                : "border-l-[3px] border-transparent font-semibold text-slate-400 hover:text-slate-600"
+                            }`}
+                          >
+                            {c.label}
+                          </button>
+                        );
+                      })
+                    : ADMIN_COLUMNS.map(c => {
+                        const isOn = adminVisibleColumns[c.key];
+                        return (
+                          <button
+                            key={c.key}
+                            type="button"
+                            onClick={() => toggleAdminColumn(c.key)}
+                            className={`text-left pl-2.5 py-2 text-xs transition-colors truncate ${
+                              isOn
+                                ? "border-l-[3px] border-[#0B1E6E] font-extrabold text-slate-900"
+                                : "border-l-[3px] border-transparent font-semibold text-slate-400 hover:text-slate-600"
+                            }`}
+                          >
+                            {c.label}
+                          </button>
+                        );
+                      })}
                 </div>
               </div>
             </div>
