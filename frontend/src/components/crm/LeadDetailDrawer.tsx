@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { X, Phone, MessageSquare, Mail, Share2, Award, Calendar, Clock, ArrowRight, Activity, Bell, Repeat } from "lucide-react";
 import { useApp, Lead, LeadStatus } from "@/context/AppContext";
 import { PlatformLabel } from "@/components/icons/ContactIcons";
+import { deriveActivityTimeline } from "@/lib/leadStatusMapping";
 
 interface LeadDetailDrawerProps {
   lead: Lead | null;
@@ -380,28 +381,47 @@ export default function LeadDetailDrawer({
 
           {/* Section D: Activity Logs — a real vertical timeline (connecting
               line + node per entry, newest first) inside its own bordered,
-              independently-scrollable card. */}
+              independently-scrollable card. Transition labels (e.g.
+              "Call Back → Follow Up") are parsed from the lead's real log
+              messages via deriveActivityTimeline — never invented; see that
+              function's comment for exactly which formats it reads and how
+              it falls back when a message doesn't match one. */}
           <div className="space-y-3">
             <h4 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider border-b border-slate-100 pb-1.5 flex items-center gap-1.5">
               <Activity className="h-3.5 w-3.5 text-slate-500" />
               Section D: Audit logs timeline
             </h4>
-            <div className="bg-white border border-slate-200 rounded-2xl shadow-sm max-h-60 overflow-y-auto p-4">
+            <div className="bg-[#F5F9FF] border border-slate-200 rounded-2xl shadow-sm max-h-60 overflow-y-auto p-4">
               {lead.logs.length === 0 ? (
                 <p className="text-[10px] text-slate-400 font-semibold italic">No activity registered for this profile.</p>
               ) : (
                 <div className="relative pl-5">
-                  <div className="absolute left-[5px] top-1.5 bottom-1.5 w-px bg-slate-200" />
-                  {[...lead.logs]
-                    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-                    .map((log, idx) => (
-                      <div key={idx} className="relative pb-5 last:pb-0">
-                        <span className="absolute -left-5 top-1 h-2.5 w-2.5 rounded-full bg-white border-2 border-[#0B1E6E]" />
-                        <p className="text-[10px] font-bold text-slate-800">{formatLogTimestamp(log.timestamp)}</p>
-                        <p className="text-[10px] text-slate-600 leading-relaxed mt-1">{log.message}</p>
-                        <p className="text-[9px] text-slate-400 font-semibold mt-1 text-right">by {log.user}</p>
+                  <div className="absolute left-[5px] top-2 bottom-2 w-0.5 bg-blue-400" />
+                  {deriveActivityTimeline(lead.logs).map((entry, idx) => (
+                    <div key={idx} className="relative pb-4 last:pb-0">
+                      <span className="absolute -left-5 top-1.5 h-3 w-3 rounded-full bg-blue-100 border-2 border-blue-500 z-10" />
+                      <div className="inline-block bg-[#0B1E6E] text-white text-[10px] font-bold px-2.5 py-1 rounded-lg mb-1.5">
+                        {formatLogTimestamp(entry.log.timestamp)}
                       </div>
-                    ))}
+                      <div className="bg-[#EAF3FF] rounded-xl px-3 py-2.5">
+                        <p className="text-[10px] text-slate-700 leading-relaxed">{entry.log.message}</p>
+                        {entry.toLabel || entry.fromLabel ? (
+                          <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-blue-100 text-[9px]">
+                            <span className="text-slate-500 font-bold flex items-center gap-1">
+                              {entry.fromLabel && entry.toLabel && entry.fromLabel !== entry.toLabel ? (
+                                <>{entry.fromLabel} <ArrowRight className="h-2.5 w-2.5 shrink-0" /> {entry.toLabel}</>
+                              ) : (
+                                entry.toLabel || entry.fromLabel
+                              )}
+                            </span>
+                            <span className="text-slate-400 font-semibold shrink-0">{entry.log.user}</span>
+                          </div>
+                        ) : (
+                          <p className="text-[9px] text-slate-400 font-semibold mt-1.5 pt-1.5 border-t border-blue-100 text-right">by {entry.log.user}</p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

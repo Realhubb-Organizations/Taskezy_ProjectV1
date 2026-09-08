@@ -1,4 +1,4 @@
-import { LeadStatus } from "@/context/AppContext";
+import { LeadStatus, LeadLog } from "@/context/AppContext";
 
 // The frontend's LeadStatus union has real duplication (e.g. "New Lead" vs
 // "New", "Booked" vs "Booking Done") that accumulated as different screens
@@ -70,3 +70,45 @@ export function isRealLeadId(id: string): boolean {
 // Same check, generic name — every domain (properties, users, claims, etc.)
 // uses the identical "real UUID from Postgres vs local mock id" distinction.
 export const isRealId = isRealLeadId;
+
+// --- Lead activity timeline: real state transitions parsed from real log
+// messages, never fabricated ---
+//
+// LeadLog only stores {timestamp, message, user} — there's no structured
+// "previous status / new status" pair anywhere in the schema. Rather than
+// invent one, this parses the exact message formats this codebase actually
+// writes (see AppContext.tsx's addLead/updateLeadStatus/reassignLead):
+//   - the lead's very first log entry is always creation, whatever its
+//     exact wording — "Lead Captured" is true by definition, not a guess
+//   - `Status changed to "X"` → the real status value, taken verbatim
+//   - `Reassigned from A to B` → "Reassigned"
+// A message that doesn't match a known format gets no derived label at
+// all — the UI falls back to showing the raw message with no transition
+// arrow, rather than guessing. Each entry's "from" state is simply the
+// previous entry's real derived "to" state (logs are already chronological
+// per-lead), so the arrow is a real sequence, not an invented pairing.
+export interface ActivityTimelineEntry {
+  log: LeadLog;
+  toLabel: string | null;
+  fromLabel: string | null;
+}
+
+function deriveLogStateLabel(message: string, isFirstEntry: boolean): string | null {
+  if (isFirstEntry) return "Lead Captured";
+  const statusMatch = message.match(/^Status changed to "(.+)"$/i);
+  if (statusMatch) return statusMatch[1].replace(/-/g, " ");
+  if (/^Reassigned from .+ to .+$/i.test(message)) return "Reassigned";
+  return null;
+}
+
+export function deriveActivityTimeline(logs: LeadLog[]): ActivityTimelineEntry[] {
+  const chronological = [...logs].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+  let previousLabel: string | null = null;
+  const withLabels = chronological.map((log, idx) => {
+    const toLabel = deriveLogStateLabel(log.message, idx === 0);
+    const entry: ActivityTimelineEntry = { log, toLabel, fromLabel: previousLabel };
+    previousLabel = toLabel ?? previousLabel;
+    return entry;
+  });
+  return withLabels.reverse();
+}

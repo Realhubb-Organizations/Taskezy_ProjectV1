@@ -6,9 +6,9 @@ import Link from "next/link";
 import { useApp, Lead, LeadStatus } from "@/context/AppContext";
 import AddLeadModal from "@/components/crm/AddLeadModal";
 import PendingLeadsTable, { PendingRow } from "@/components/dashboard/PendingLeadsTable";
-import { DB_CODE_TO_FRONTEND_STATUS } from "@/lib/leadStatusMapping";
+import { DB_CODE_TO_FRONTEND_STATUS, deriveActivityTimeline } from "@/lib/leadStatusMapping";
 import { WhatsAppIcon, CallIcon } from "@/components/icons/ContactIcons";
-import { ChevronDown, Plus, CheckCircle, Phone, Mail, X, Copy, Check, User, Search } from "lucide-react";
+import { ChevronDown, Plus, CheckCircle, Phone, Mail, X, Copy, Check, User, Search, ArrowRight } from "lucide-react";
 
 const STATUS_OPTIONS = Array.from(new Set(Object.values(DB_CODE_TO_FRONTEND_STATUS)));
 
@@ -853,25 +853,44 @@ export default function CrmDashboardPage() {
 
             {/* Activity History — a real vertical timeline (connecting line +
                 node per entry, newest first) inside its own bordered,
-                independently-scrollable card. */}
+                independently-scrollable card. Transition labels (e.g.
+                "Call Back → Follow Up") are parsed from the lead's real log
+                messages via deriveActivityTimeline — never invented; see
+                that function's comment for exactly which formats it reads
+                and how it falls back when a message doesn't match one. */}
             <div className="px-5 py-3 flex-1 min-h-0 flex flex-col">
               <span className="text-[11px] font-bold text-slate-500 block mb-2 shrink-0">Activity History :</span>
-              <div className="bg-white border border-slate-200 rounded-2xl shadow-sm flex-1 min-h-0 overflow-y-auto p-4">
+              <div className="bg-[#F5F9FF] border border-slate-200 rounded-2xl shadow-sm flex-1 min-h-0 overflow-y-auto p-4">
                 {quickViewLead.logs.length === 0 ? (
                   <p className="text-[11px] text-slate-400 italic">No activity recorded yet.</p>
                 ) : (
                   <div className="relative pl-5">
-                    <div className="absolute left-[5px] top-1.5 bottom-1.5 w-px bg-slate-200" />
-                    {[...quickViewLead.logs]
-                      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-                      .map((log, idx) => (
-                        <div key={idx} className="relative pb-5 last:pb-0">
-                          <span className="absolute -left-5 top-1 h-2.5 w-2.5 rounded-full bg-white border-2 border-[#0B1E6E]" />
-                          <p className="text-[10px] font-bold text-slate-800">{formatDateTime(log.timestamp)}</p>
-                          <p className="text-[11px] text-slate-600 leading-snug mt-1">{log.message}</p>
-                          <p className="text-[9px] text-slate-400 font-semibold mt-1 text-right">by {log.user}</p>
+                    <div className="absolute left-[5px] top-2 bottom-2 w-0.5 bg-blue-400" />
+                    {deriveActivityTimeline(quickViewLead.logs).map((entry, idx) => (
+                      <div key={idx} className="relative pb-4 last:pb-0">
+                        <span className="absolute -left-5 top-1.5 h-3 w-3 rounded-full bg-blue-100 border-2 border-blue-500 z-10" />
+                        <div className="inline-block bg-[#0B1E6E] text-white text-[10px] font-bold px-2.5 py-1 rounded-lg mb-1.5">
+                          {formatDateTime(entry.log.timestamp)}
                         </div>
-                      ))}
+                        <div className="bg-[#EAF3FF] rounded-xl px-3 py-2.5">
+                          <p className="text-[11px] text-slate-700 leading-snug">{entry.log.message}</p>
+                          {entry.toLabel || entry.fromLabel ? (
+                            <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-blue-100 text-[9px]">
+                              <span className="text-slate-500 font-bold flex items-center gap-1">
+                                {entry.fromLabel && entry.toLabel && entry.fromLabel !== entry.toLabel ? (
+                                  <>{entry.fromLabel} <ArrowRight className="h-2.5 w-2.5 shrink-0" /> {entry.toLabel}</>
+                                ) : (
+                                  entry.toLabel || entry.fromLabel
+                                )}
+                              </span>
+                              <span className="text-slate-400 font-semibold shrink-0">{entry.log.user}</span>
+                            </div>
+                          ) : (
+                            <p className="text-[9px] text-slate-400 font-semibold mt-1.5 pt-1.5 border-t border-blue-100 text-right">by {entry.log.user}</p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
