@@ -34,6 +34,8 @@ interface CampaignItem {
   platform: "Meta" | "Google" | "Other";
 }
 
+const CAMPAIGN_STATUSES: CampaignItem["status"][] = ["Active", "Pause", "Stopped"];
+
 // The campaigns table's togglable columns (beyond the always-shown Campaign
 // Name + Total Leads) — driven by the Filter button's panel, mirroring the
 // same drawer pattern on the admin leads page. "Date", "CTR", "Clicks",
@@ -88,10 +90,28 @@ export default function AdminCampaignsPage() {
   const [customRangeStartDraft, setCustomRangeStartDraft] = useState("");
   const [customRangeEndDraft, setCustomRangeEndDraft] = useState("");
   const [appliedCustomRange, setAppliedCustomRange] = useState<{ start: string; end: string } | null>(null);
-  const [statusFilter, setStatusFilter] = useState<string>("All");
-  const [statusMenuOpen, setStatusMenuOpen] = useState(false);
-  const [statusMenuPos, setStatusMenuPos] = useState<{ top: number; left: number } | null>(null);
-  const statusBtnRef = useRef<HTMLButtonElement>(null);
+
+  // Campaign Status column-header filter — a checkbox dropdown opened from
+  // the table's "Campaign Status" header, rather than a single-select pill.
+  const [selectedStatuses, setSelectedStatuses] = useState<Record<CampaignItem["status"], boolean>>({
+    Active: true, Pause: true, Stopped: true
+  });
+  const [statusColumnMenuOpen, setStatusColumnMenuOpen] = useState(false);
+  const [statusColumnMenuPos, setStatusColumnMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const statusColumnBtnRef = useRef<HTMLButtonElement>(null);
+
+  const toggleStatusFilter = (s: CampaignItem["status"]) => {
+    setSelectedStatuses(prev => ({ ...prev, [s]: !prev[s] }));
+    setCurrentPage(1);
+  };
+
+  const toggleSelectAllStatuses = () => {
+    const allOn = CAMPAIGN_STATUSES.every(s => selectedStatuses[s]);
+    const next: Record<CampaignItem["status"], boolean> = { ...selectedStatuses };
+    CAMPAIGN_STATUSES.forEach(s => { next[s] = !allOn; });
+    setSelectedStatuses(next);
+    setCurrentPage(1);
+  };
 
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -227,10 +247,10 @@ export default function AdminCampaignsPage() {
   const filteredCampaigns = useMemo(() => {
     return campaignsList.filter(c => {
       const matchesSearch = !searchQuery || c.name.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesStatus = statusFilter === "All" || c.status.toLowerCase() === statusFilter.toLowerCase();
+      const matchesStatus = selectedStatuses[c.status];
       return matchesSearch && matchesStatus;
     });
-  }, [campaignsList, searchQuery, statusFilter]);
+  }, [campaignsList, searchQuery, selectedStatuses]);
 
   const totalPages = Math.max(1, Math.ceil(filteredCampaigns.length / rowsPerPage));
   const currentPageClamped = Math.min(currentPage, totalPages);
@@ -507,40 +527,6 @@ export default function AdminCampaignsPage() {
               )}
             </div>
 
-            {/* Campaigns Filter Dropdown */}
-            <div className="relative">
-              <button
-                ref={statusBtnRef}
-                onClick={() => openPositionedMenu(statusBtnRef, setStatusMenuPos, setStatusMenuOpen, "left", 160)}
-                className="flex items-center gap-2 bg-white border border-slate-300/80 rounded-xl px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 shadow-2xs transition-colors"
-              >
-                <span>{statusFilter === "All" ? "Campaigns" : `Status: ${statusFilter}`}</span>
-                <ChevronDown className={`h-3.5 w-3.5 text-slate-400 transition-transform ${statusMenuOpen ? "rotate-180" : ""}`} />
-              </button>
-              {statusMenuOpen && statusMenuPos && createPortal(
-                <>
-                  <div className="fixed inset-0 z-[60]" onClick={() => setStatusMenuOpen(false)} />
-                  <div
-                    className="fixed z-[70] w-40 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 text-xs font-medium overflow-hidden"
-                    style={{ top: statusMenuPos.top, left: statusMenuPos.left }}
-                  >
-                    {(["All", "Active", "Pause", "Stopped"] as const).map(st => (
-                      <button
-                        key={st}
-                        onClick={() => { setStatusFilter(st); setStatusMenuOpen(false); }}
-                        className={`w-full text-left px-3 py-1.5 transition-colors ${
-                          statusFilter === st ? "bg-blue-600 text-white font-bold" : "text-slate-700 hover:bg-slate-50"
-                        }`}
-                      >
-                        {st === "All" ? "All Campaigns" : `${st} Only`}
-                      </button>
-                    ))}
-                  </div>
-                </>,
-                document.body
-              )}
-            </div>
-
             {/* Filter Button → column-visibility Settings drawer */}
             <button
               type="button"
@@ -584,9 +570,49 @@ export default function AdminCampaignsPage() {
                     <th className="px-5 py-3.5 whitespace-nowrap">Total Leads</th>
                     {campaignVisibleColumns.status && (
                       <th className="px-5 py-3.5 whitespace-nowrap">
-                        <div className="flex items-center gap-1">
-                          <span>Campaign Status</span>
-                          <ChevronDown className="h-3 w-3 text-slate-800" />
+                        <div className="relative inline-block">
+                          <button
+                            type="button"
+                            ref={statusColumnBtnRef}
+                            onClick={() => openPositionedMenu(statusColumnBtnRef, setStatusColumnMenuPos, setStatusColumnMenuOpen, "left", 180)}
+                            className="flex items-center gap-1 hover:text-blue-600 transition-colors"
+                          >
+                            <span>Campaign Status</span>
+                            <ChevronDown className={`h-3 w-3 text-slate-800 transition-transform ${statusColumnMenuOpen ? "rotate-180" : ""}`} />
+                          </button>
+                          {statusColumnMenuOpen && statusColumnMenuPos && createPortal(
+                            <>
+                              <div className="fixed inset-0 z-[60]" onClick={() => setStatusColumnMenuOpen(false)} />
+                              <div
+                                className="fixed z-[70] w-44 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 text-xs font-medium overflow-hidden"
+                                style={{ top: statusColumnMenuPos.top, left: statusColumnMenuPos.left }}
+                              >
+                                <button
+                                  type="button"
+                                  onClick={toggleSelectAllStatuses}
+                                  className="w-full flex items-center gap-1.5 text-left px-3 py-1.5 text-slate-500 font-bold hover:bg-slate-50 border-b border-slate-100 transition-colors"
+                                >
+                                  <Minus className="h-3 w-3" />
+                                  Select All
+                                </button>
+                                {CAMPAIGN_STATUSES.map(st => (
+                                  <label
+                                    key={st}
+                                    className="flex items-center gap-2 px-3 py-1.5 text-slate-700 font-semibold hover:bg-slate-50 cursor-pointer transition-colors"
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedStatuses[st]}
+                                      onChange={() => toggleStatusFilter(st)}
+                                      className="h-3.5 w-3.5 rounded border-slate-300 text-[#0B1E6E] focus:ring-0 focus:ring-offset-0"
+                                    />
+                                    {st}
+                                  </label>
+                                ))}
+                              </div>
+                            </>,
+                            document.body
+                          )}
                         </div>
                       </th>
                     )}
