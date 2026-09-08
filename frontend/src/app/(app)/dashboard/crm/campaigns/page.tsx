@@ -108,12 +108,12 @@ type BreakdownColumnKey =
   | "property" | "date" | "campaigns" | "qualifiedLeads" | "source" | "unqualifiedLeads"
   | "totalLeads" | "spend" | "cpl" | "qSpend" | "qcpl" | "qualifiedPercent";
 
-const BREAKDOWN_COLUMNS: { key: BreakdownColumnKey; label: string; statusLabel?: string; propertyOnly?: boolean }[] = [
-  { key: "property", label: "Property", statusLabel: "Status" },
+const BREAKDOWN_COLUMNS: { key: BreakdownColumnKey; label: string }[] = [
+  { key: "property", label: "Property" },
   { key: "date", label: "Date" },
   { key: "campaigns", label: "Campaigns" },
   { key: "qualifiedLeads", label: "Qualified Leads" },
-  { key: "source", label: "Source", propertyOnly: true },
+  { key: "source", label: "Source" },
   { key: "unqualifiedLeads", label: "Unqualified Leads" },
   { key: "totalLeads", label: "Total Leads" },
   { key: "spend", label: "Spend" },
@@ -126,6 +126,29 @@ const BREAKDOWN_COLUMNS: { key: BreakdownColumnKey; label: string; statusLabel?:
 const BREAKDOWN_DEFAULT_VISIBLE_COLUMNS: Record<BreakdownColumnKey, boolean> = {
   property: true, date: false, campaigns: true, qualifiedLeads: true, source: true, unqualifiedLeads: false,
   totalLeads: true, spend: true, cpl: true, qSpend: false, qcpl: true, qualifiedPercent: false
+};
+
+// The "Status" tab is a per-date, per-campaign breakdown by real lead
+// pipeline status (not campaign Active/Pause/Stopped) — one row per real
+// AdSpendRecord (its own date + accountName), with each status column
+// counting real Lead records for that campaign created on that date.
+type StatusColumnKey = "date" | "campaign" | "totalLeads" | "callBack" | "followUps" | "siteVisits" | "dead" | "rnr" | "lowBudget";
+
+const STATUS_COLUMNS: { key: StatusColumnKey; label: string }[] = [
+  { key: "date", label: "Date" },
+  { key: "campaign", label: "Campaign" },
+  { key: "totalLeads", label: "Total Leads" },
+  { key: "callBack", label: "Call Back" },
+  { key: "followUps", label: "Follow ups" },
+  { key: "siteVisits", label: "Site Visits" },
+  { key: "dead", label: "Dead" },
+  { key: "rnr", label: "RNR" },
+  { key: "lowBudget", label: "Low Budget" }
+];
+
+const STATUS_DEFAULT_VISIBLE_COLUMNS: Record<StatusColumnKey, boolean> = {
+  date: true, campaign: true, totalLeads: true, callBack: true, followUps: true,
+  siteVisits: true, dead: true, rnr: true, lowBudget: true
 };
 
 // The custom date-range calendar pill — used both by the Campaigns tab's
@@ -609,6 +632,17 @@ export default function AdminCampaignsPage() {
     setBreakdownVisibleColumns(next);
   };
 
+  const [statusVisibleColumns, setStatusVisibleColumns] = useState<Record<StatusColumnKey, boolean>>(STATUS_DEFAULT_VISIBLE_COLUMNS);
+  const toggleStatusColumn = (key: StatusColumnKey) => {
+    setStatusVisibleColumns(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+  const toggleSelectAllStatusColumns = () => {
+    const allOn = STATUS_COLUMNS.every(c => statusVisibleColumns[c.key]);
+    const next: Record<StatusColumnKey, boolean> = { ...statusVisibleColumns };
+    STATUS_COLUMNS.forEach(c => { next[c.key] = !allOn; });
+    setStatusVisibleColumns(next);
+  };
+
   // Campaign Deep Dive — every individual campaign, searchable by name and
   // filterable by Source (whatever platforms actually exist in the data).
   const [deepDiveSearchQuery, setDeepDiveSearchQuery] = useState("");
@@ -690,37 +724,47 @@ export default function AdminCampaignsPage() {
     }).sort((a, b) => b.spend - a.spend);
   }, [campaignsList, breakdownCampaignFilters]);
 
-  const statusBreakdown = useMemo(() => {
-    const map: Record<string, { campaigns: number; totalLeads: number; qualifiedLeads: number; unqualifiedLeads: number; spend: number }> = {};
-    campaignsList
-      .filter(c => breakdownCampaignFilters.length === 0 || breakdownCampaignFilters.includes(c.name))
-      .forEach(c => {
-        if (!map[c.status]) map[c.status] = { campaigns: 0, totalLeads: 0, qualifiedLeads: 0, unqualifiedLeads: 0, spend: 0 };
-        map[c.status].campaigns += 1;
-        map[c.status].totalLeads += c.totalLeads;
-        map[c.status].qualifiedLeads += c.qualifiedLeads;
-        map[c.status].unqualifiedLeads += c.unqualifiedLeads;
-        map[c.status].spend += c.spend;
-      });
-    return Object.entries(map).map(([status, d]) => ({
-      status,
-      campaigns: d.campaigns,
-      totalLeads: d.totalLeads,
-      qualifiedLeads: d.qualifiedLeads,
-      unqualifiedLeads: d.unqualifiedLeads,
-      qualifiedPercent: d.totalLeads > 0 ? (d.qualifiedLeads / d.totalLeads) * 100 : 0,
-      cpl: computeCPL(d.spend, d.totalLeads),
-      qcpl: computeCPL(d.spend, d.qualifiedLeads),
-      spend: d.spend
-    }));
-  }, [campaignsList, breakdownCampaignFilters]);
+  // "Status" tab: one row per real (campaign, date) pair — i.e. per real
+  // AdSpendRecord — broken down by real Lead pipeline status, not campaign
+  // Active/Pause/Stopped status. Total Leads is the platform-reported
+  // leadsGenerated for that day; the status columns count actual matching
+  // Lead records, so they needn't sum to Total Leads (a lead's current
+  // status can differ from what the platform originally reported, and some
+  // leads land in statuses not broken out here).
+  const statusDateBreakdown = useMemo(() => {
+    const filteredRecords = breakdownCampaignFilters.length === 0
+      ? adSpendRecords
+      : adSpendRecords.filter(r => breakdownCampaignFilters.includes(r.accountName));
+
+    return filteredRecords.map(rec => {
+      const dayLeads = leads.filter(l =>
+        (l.campaign || l.source)?.toLowerCase() === rec.accountName.toLowerCase()
+        && l.createdAtStr && l.createdAtStr.slice(0, 10) === rec.date
+      );
+      const countStatus = (statuses: string[]) => dayLeads.filter(l => statuses.includes(l.status)).length;
+      const [year, month, day] = rec.date.split("-");
+      return {
+        id: rec.id,
+        date: rec.date,
+        dateLabel: year && month && day ? `${day}-${month}-${year}` : rec.date,
+        campaign: rec.accountName,
+        totalLeads: rec.leadsGenerated,
+        callBack: countStatus(["Call Back"]),
+        followUps: countStatus(["Follow-ups"]),
+        siteVisits: countStatus(SITE_VISIT_LEAD_STATUSES),
+        dead: countStatus(["Dead"]),
+        rnr: countStatus(["RNR"]),
+        lowBudget: countStatus(["Low Budget"])
+      };
+    }).sort((a, b) => b.date.localeCompare(a.date));
+  }, [adSpendRecords, leads, breakdownCampaignFilters]);
 
   const exportBreakdownCsv = () => {
     const rows = breakdownTab === "Property"
       ? [["Property", "Campaigns", "Source", "Total Leads", "Qualified Leads", "CPL", "QCPL", "Spend"],
-          ...propertyBreakdown.map(r => [r.property, r.campaigns, r.platforms.join("/"), r.totalLeads, r.qualifiedLeads, r.cpl.toFixed(2), r.qcpl.toFixed(2), r.spend.toFixed(2)])]
-      : [["Status", "Campaigns", "Total Leads", "Qualified Leads", "CPL", "QCPL", "Spend"],
-          ...statusBreakdown.map(r => [r.status, r.campaigns, r.totalLeads, r.qualifiedLeads, r.cpl.toFixed(2), r.qcpl.toFixed(2), r.spend.toFixed(2)])];
+          ...propertyBreakdown.map(r => [r.property, r.campaigns.length, r.platforms.join("/"), r.totalLeads, r.qualifiedLeads, r.cpl.toFixed(2), r.qcpl.toFixed(2), r.spend.toFixed(2)])]
+      : [["Date", "Campaign", "Total Leads", "Call Back", "Follow ups", "Site Visits", "Dead", "RNR", "Low Budget"],
+          ...statusDateBreakdown.map(r => [r.dateLabel, r.campaign, r.totalLeads, r.callBack, r.followUps, r.siteVisits, r.dead, r.rnr, r.lowBudget])];
     const csv = rows.map(r => r.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
@@ -1299,38 +1343,34 @@ export default function AdminCampaignsPage() {
                   <>
                     <thead className="sticky top-0 z-10 bg-white">
                       <tr className="border-b border-slate-200/80 text-[12px] font-bold text-slate-900">
-                        {breakdownVisibleColumns.property && <th className="px-5 py-3">Status</th>}
-                        {breakdownVisibleColumns.date && <th className="px-5 py-3 whitespace-nowrap">Date</th>}
-                        {breakdownVisibleColumns.campaigns && <th className="px-5 py-3 whitespace-nowrap">Campaigns</th>}
-                        {breakdownVisibleColumns.totalLeads && <th className="px-5 py-3 whitespace-nowrap">Total Leads</th>}
-                        {breakdownVisibleColumns.qualifiedLeads && <th className="px-5 py-3 whitespace-nowrap">Qualified Leads</th>}
-                        {breakdownVisibleColumns.unqualifiedLeads && <th className="px-5 py-3 whitespace-nowrap">Unqualified Leads</th>}
-                        {breakdownVisibleColumns.qualifiedPercent && <th className="px-5 py-3 whitespace-nowrap">Qualified %age</th>}
-                        {breakdownVisibleColumns.cpl && <th className="px-5 py-3 whitespace-nowrap">CPL</th>}
-                        {breakdownVisibleColumns.qcpl && <th className="px-5 py-3 whitespace-nowrap">QCPL</th>}
-                        {breakdownVisibleColumns.spend && <th className="px-5 py-3 whitespace-nowrap">Spend</th>}
-                        {breakdownVisibleColumns.qSpend && <th className="px-5 py-3 whitespace-nowrap">Q Spend</th>}
+                        {statusVisibleColumns.date && <th className="px-5 py-3 whitespace-nowrap">Date</th>}
+                        {statusVisibleColumns.campaign && <th className="px-5 py-3 whitespace-nowrap">Campaign</th>}
+                        {statusVisibleColumns.totalLeads && <th className="px-5 py-3 whitespace-nowrap">Total Leads</th>}
+                        {statusVisibleColumns.callBack && <th className="px-5 py-3 whitespace-nowrap">Call Back</th>}
+                        {statusVisibleColumns.followUps && <th className="px-5 py-3 whitespace-nowrap">Follow ups</th>}
+                        {statusVisibleColumns.siteVisits && <th className="px-5 py-3 whitespace-nowrap">Site Visits</th>}
+                        {statusVisibleColumns.dead && <th className="px-5 py-3 whitespace-nowrap">Dead</th>}
+                        {statusVisibleColumns.rnr && <th className="px-5 py-3 whitespace-nowrap">RNR</th>}
+                        {statusVisibleColumns.lowBudget && <th className="px-5 py-3 whitespace-nowrap">Low Budget</th>}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-[12px] font-medium text-slate-700">
-                      {statusBreakdown.length === 0 ? (
+                      {statusDateBreakdown.length === 0 ? (
                         <tr>
-                          <td colSpan={BREAKDOWN_COLUMNS.filter(c => !c.propertyOnly && breakdownVisibleColumns[c.key]).length || 1} className="px-5 py-8 text-center text-slate-400 italic">No campaign data yet.</td>
+                          <td colSpan={STATUS_COLUMNS.filter(c => statusVisibleColumns[c.key]).length || 1} className="px-5 py-8 text-center text-slate-400 italic">No ad-spend data yet.</td>
                         </tr>
                       ) : (
-                        statusBreakdown.map(row => (
-                          <tr key={row.status} className="hover:bg-slate-50/50 transition-colors">
-                            {breakdownVisibleColumns.property && <td className="px-5 py-3 text-slate-900 font-semibold">{row.status}</td>}
-                            {breakdownVisibleColumns.date && <td className="px-5 py-3 text-slate-300" title="Not tracked yet — no per-campaign date field ingested">—</td>}
-                            {breakdownVisibleColumns.campaigns && <td className="px-5 py-3">{row.campaigns}</td>}
-                            {breakdownVisibleColumns.totalLeads && <td className="px-5 py-3">{row.totalLeads}</td>}
-                            {breakdownVisibleColumns.qualifiedLeads && <td className="px-5 py-3">{row.qualifiedLeads}</td>}
-                            {breakdownVisibleColumns.unqualifiedLeads && <td className="px-5 py-3">{row.unqualifiedLeads}</td>}
-                            {breakdownVisibleColumns.qualifiedPercent && <td className="px-5 py-3">{row.qualifiedPercent.toFixed(1)}%</td>}
-                            {breakdownVisibleColumns.cpl && <td className="px-5 py-3">{row.cpl.toFixed(2)}</td>}
-                            {breakdownVisibleColumns.qcpl && <td className="px-5 py-3">{row.qcpl.toFixed(2)}</td>}
-                            {breakdownVisibleColumns.spend && <td className="px-5 py-3 font-semibold text-slate-800">{formatCurrency(row.spend)}</td>}
-                            {breakdownVisibleColumns.qSpend && <td className="px-5 py-3 text-slate-300" title="Not tracked yet — no qualified-spend field defined">—</td>}
+                        statusDateBreakdown.map(row => (
+                          <tr key={row.id} className="hover:bg-slate-50/50 transition-colors">
+                            {statusVisibleColumns.date && <td className="px-5 py-3 text-slate-700">{row.dateLabel}</td>}
+                            {statusVisibleColumns.campaign && <td className="px-5 py-3 text-slate-900 font-semibold">{row.campaign}</td>}
+                            {statusVisibleColumns.totalLeads && <td className="px-5 py-3">{row.totalLeads}</td>}
+                            {statusVisibleColumns.callBack && <td className="px-5 py-3">{row.callBack}</td>}
+                            {statusVisibleColumns.followUps && <td className="px-5 py-3">{row.followUps}</td>}
+                            {statusVisibleColumns.siteVisits && <td className="px-5 py-3">{row.siteVisits}</td>}
+                            {statusVisibleColumns.dead && <td className="px-5 py-3">{row.dead}</td>}
+                            {statusVisibleColumns.rnr && <td className="px-5 py-3">{row.rnr}</td>}
+                            {statusVisibleColumns.lowBudget && <td className="px-5 py-3">{row.lowBudget}</td>}
                           </tr>
                         ))
                       )}
@@ -1359,7 +1399,7 @@ export default function AdminCampaignsPage() {
                     <span className="text-xs font-extrabold text-slate-800">Columns</span>
                     <button
                       type="button"
-                      onClick={toggleSelectAllBreakdownColumns}
+                      onClick={breakdownTab === "Property" ? toggleSelectAllBreakdownColumns : toggleSelectAllStatusColumns}
                       className="flex items-center gap-1 text-[11px] font-bold text-slate-500 hover:text-[#0B1E6E]"
                     >
                       <Minus className="h-3 w-3" />
@@ -1367,24 +1407,43 @@ export default function AdminCampaignsPage() {
                     </button>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
-                    {BREAKDOWN_COLUMNS.filter(c => !(c.propertyOnly && breakdownTab === "Status")).map(c => {
-                      const isOn = breakdownVisibleColumns[c.key];
-                      const label = c.key === "property" && breakdownTab === "Status" ? (c.statusLabel || c.label) : c.label;
-                      return (
-                        <button
-                          key={c.key}
-                          type="button"
-                          onClick={() => toggleBreakdownColumn(c.key)}
-                          className={`text-left pl-3 pr-2.5 py-2.5 text-xs rounded-lg border transition-colors truncate ${
-                            isOn
-                              ? "border-slate-200 border-l-[3px] border-l-[#0B1E6E] font-extrabold text-slate-900"
-                              : "border-slate-200 font-semibold text-slate-400 hover:text-slate-600 hover:bg-slate-50"
-                          }`}
-                        >
-                          {label}
-                        </button>
-                      );
-                    })}
+                    {breakdownTab === "Property" ? (
+                      BREAKDOWN_COLUMNS.map(c => {
+                        const isOn = breakdownVisibleColumns[c.key];
+                        return (
+                          <button
+                            key={c.key}
+                            type="button"
+                            onClick={() => toggleBreakdownColumn(c.key)}
+                            className={`text-left pl-3 pr-2.5 py-2.5 text-xs rounded-lg border transition-colors truncate ${
+                              isOn
+                                ? "border-slate-200 border-l-[3px] border-l-[#0B1E6E] font-extrabold text-slate-900"
+                                : "border-slate-200 font-semibold text-slate-400 hover:text-slate-600 hover:bg-slate-50"
+                            }`}
+                          >
+                            {c.label}
+                          </button>
+                        );
+                      })
+                    ) : (
+                      STATUS_COLUMNS.map(c => {
+                        const isOn = statusVisibleColumns[c.key];
+                        return (
+                          <button
+                            key={c.key}
+                            type="button"
+                            onClick={() => toggleStatusColumn(c.key)}
+                            className={`text-left pl-3 pr-2.5 py-2.5 text-xs rounded-lg border transition-colors truncate ${
+                              isOn
+                                ? "border-slate-200 border-l-[3px] border-l-[#0B1E6E] font-extrabold text-slate-900"
+                                : "border-slate-200 font-semibold text-slate-400 hover:text-slate-600 hover:bg-slate-50"
+                            }`}
+                          >
+                            {c.label}
+                          </button>
+                        );
+                      })
+                    )}
                   </div>
                 </div>
               </div>
