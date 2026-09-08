@@ -427,16 +427,27 @@ export default function LeadDashboard() {
   const [analyticsManagerSearchOpen, setAnalyticsManagerSearchOpen] = useState(false);
   const [analyticsManagerSearch, setAnalyticsManagerSearch] = useState("");
 
-  // Every clickable number/name in the breakdown table jumps to the Leads
-  // tab pre-filtered to exactly the leads that number represents: who it's
-  // assigned to (a manager's whole team, or a single person) and, for the
-  // qualified/unqualified/site-visit columns, which real statuses make up
-  // that category (statusScope === null means no status filter — "all").
-  const drillToLeadsTab = (assignedNames: string[], statusScope: LeadStatus[] | null) => {
-    setAdminAssignedFilter(assignedNames);
-    setAdminStatusFilter(statusScope ?? []);
-    setAdminTab("leads");
-    setAdminPage(1);
+  // Every clickable number/name in the breakdown table opens a real drill-down
+  // card right there on the Analytics tab (not a tab switch — the admin stays
+  // in context) showing exactly the real Lead rows that number represents:
+  // who it's assigned to (a manager's whole team, or a single person) and,
+  // for the qualified/unqualified/site-visit columns, which real statuses
+  // make up that category (statusScope === null means no status filter —
+  // "all" leads for that scope).
+  const [analyticsDrilldown, setAnalyticsDrilldown] = useState<{ title: string; leads: Lead[] } | null>(null);
+  const [drilldownSearch, setDrilldownSearch] = useState("");
+  const [drilldownSearchOpen, setDrilldownSearchOpen] = useState(false);
+  const [drilldownPage, setDrilldownPage] = useState(1);
+  const [drilldownRowsPerPage, setDrilldownRowsPerPage] = useState(10);
+
+  const openAnalyticsDrilldown = (assignedNames: string[], statusScope: LeadStatus[] | null, title: string) => {
+    const matched = analyticsScopedLeads.filter(l =>
+      assignedNames.includes(l.assignedAgent) && (!statusScope || statusScope.includes(l.status))
+    );
+    setAnalyticsDrilldown({ title, leads: matched });
+    setDrilldownSearch("");
+    setDrilldownSearchOpen(false);
+    setDrilldownPage(1);
   };
 
   const QUALIFIED_STATUS_OPTIONS = STATUS_OPTIONS.filter(s => !UNQUALIFIED_STATUSES.includes(s));
@@ -1730,7 +1741,7 @@ export default function LeadDashboard() {
                                   <div className="flex items-center gap-2">
                                     <StatCell
                                       value={row.agentName}
-                                      onClick={() => drillToLeadsTab(teamNames, null)}
+                                      onClick={() => openAnalyticsDrilldown(teamNames, null, `${row.agentName}'s Team — All Leads`)}
                                     />
                                     {row.isManager && (
                                       <button
@@ -1746,37 +1757,37 @@ export default function LeadDashboard() {
                                 </td>
                                 {analyticsVisibleColumns.teamTotal && (
                                   <td className="px-4 py-3 font-semibold">
-                                    <StatCell value={row.teamTotal} onClick={() => drillToLeadsTab(teamNames, null)} />
+                                    <StatCell value={row.teamTotal} onClick={() => openAnalyticsDrilldown(teamNames, null, `${row.agentName}'s Team — All Leads`)} />
                                   </td>
                                 )}
                                 {analyticsVisibleColumns.total && (
                                   <td className="px-4 py-3 font-semibold">
-                                    <StatCell value={row.total} onClick={() => drillToLeadsTab([row.agentName], null)} />
+                                    <StatCell value={row.total} onClick={() => openAnalyticsDrilldown([row.agentName], null, `${row.agentName} — All Leads`)} />
                                   </td>
                                 )}
                                 {analyticsVisibleColumns.qualified && (
                                   <td className="px-4 py-3 font-semibold">
-                                    <StatCell value={row.qualified} onClick={() => drillToLeadsTab([row.agentName], QUALIFIED_STATUS_OPTIONS)} />
+                                    <StatCell value={row.qualified} onClick={() => openAnalyticsDrilldown([row.agentName], QUALIFIED_STATUS_OPTIONS, `${row.agentName} — Qualified Leads`)} />
                                   </td>
                                 )}
                                 {analyticsVisibleColumns.unqualified && (
                                   <td className="px-4 py-3 font-semibold">
-                                    <StatCell value={row.unqualified} onClick={() => drillToLeadsTab([row.agentName], UNQUALIFIED_STATUSES)} />
+                                    <StatCell value={row.unqualified} onClick={() => openAnalyticsDrilldown([row.agentName], UNQUALIFIED_STATUSES, `${row.agentName} — Unqualified Leads`)} />
                                   </td>
                                 )}
                                 {analyticsVisibleColumns.siteVisits && (
                                   <td className="px-4 py-3 font-semibold">
-                                    <StatCell value={row.siteVisits} onClick={() => drillToLeadsTab([row.agentName], SITE_VISIT_STATUSES)} />
+                                    <StatCell value={row.siteVisits} onClick={() => openAnalyticsDrilldown([row.agentName], SITE_VISIT_STATUSES, `${row.agentName} — Site Visit Leads`)} />
                                   </td>
                                 )}
                                 {analyticsVisibleColumns.qlPct && (
                                   <td className="px-4 py-3 font-semibold">
-                                    <StatCell value={`${row.qlPct.toFixed(2)}%`} onClick={() => drillToLeadsTab([row.agentName], QUALIFIED_STATUS_OPTIONS)} />
+                                    <StatCell value={`${row.qlPct.toFixed(2)}%`} onClick={() => openAnalyticsDrilldown([row.agentName], QUALIFIED_STATUS_OPTIONS, `${row.agentName} — Qualified Leads`)} />
                                   </td>
                                 )}
                                 {analyticsVisibleColumns.ql2svPct && (
                                   <td className="px-4 py-3 font-semibold">
-                                    <StatCell value={`${row.ql2svPct.toFixed(2)}%`} onClick={() => drillToLeadsTab([row.agentName], SITE_VISIT_STATUSES)} />
+                                    <StatCell value={`${row.ql2svPct.toFixed(2)}%`} onClick={() => openAnalyticsDrilldown([row.agentName], SITE_VISIT_STATUSES, `${row.agentName} — Site Visit Leads`)} />
                                   </td>
                                 )}
                               </tr>
@@ -1803,36 +1814,36 @@ export default function LeadDashboard() {
                                             {row.directReports.map(member => (
                                               <tr key={member.name}>
                                                 <td className="py-2 pr-4 font-semibold">
-                                                  <StatCell value={member.name} onClick={() => drillToLeadsTab([member.name], null)} />
+                                                  <StatCell value={member.name} onClick={() => openAnalyticsDrilldown([member.name], null, `${member.name} — All Leads`)} />
                                                 </td>
                                                 {analyticsVisibleColumns.total && (
                                                   <td className="py-2 pr-4">
-                                                    <StatCell value={member.total} onClick={() => drillToLeadsTab([member.name], null)} />
+                                                    <StatCell value={member.total} onClick={() => openAnalyticsDrilldown([member.name], null, `${member.name} — All Leads`)} />
                                                   </td>
                                                 )}
                                                 {analyticsVisibleColumns.qualified && (
                                                   <td className="py-2 pr-4">
-                                                    <StatCell value={member.qualified} onClick={() => drillToLeadsTab([member.name], QUALIFIED_STATUS_OPTIONS)} />
+                                                    <StatCell value={member.qualified} onClick={() => openAnalyticsDrilldown([member.name], QUALIFIED_STATUS_OPTIONS, `${member.name} — Qualified Leads`)} />
                                                   </td>
                                                 )}
                                                 {analyticsVisibleColumns.unqualified && (
                                                   <td className="py-2 pr-4">
-                                                    <StatCell value={member.unqualified} onClick={() => drillToLeadsTab([member.name], UNQUALIFIED_STATUSES)} />
+                                                    <StatCell value={member.unqualified} onClick={() => openAnalyticsDrilldown([member.name], UNQUALIFIED_STATUSES, `${member.name} — Unqualified Leads`)} />
                                                   </td>
                                                 )}
                                                 {analyticsVisibleColumns.siteVisits && (
                                                   <td className="py-2 pr-4">
-                                                    <StatCell value={member.siteVisits} onClick={() => drillToLeadsTab([member.name], SITE_VISIT_STATUSES)} />
+                                                    <StatCell value={member.siteVisits} onClick={() => openAnalyticsDrilldown([member.name], SITE_VISIT_STATUSES, `${member.name} — Site Visit Leads`)} />
                                                   </td>
                                                 )}
                                                 {analyticsVisibleColumns.qlPct && (
                                                   <td className="py-2 pr-4">
-                                                    <StatCell value={`${member.qlPct.toFixed(2)}%`} onClick={() => drillToLeadsTab([member.name], QUALIFIED_STATUS_OPTIONS)} />
+                                                    <StatCell value={`${member.qlPct.toFixed(2)}%`} onClick={() => openAnalyticsDrilldown([member.name], QUALIFIED_STATUS_OPTIONS, `${member.name} — Qualified Leads`)} />
                                                   </td>
                                                 )}
                                                 {analyticsVisibleColumns.ql2svPct && (
                                                   <td className="py-2 pr-4">
-                                                    <StatCell value={`${member.ql2svPct.toFixed(2)}%`} onClick={() => drillToLeadsTab([member.name], SITE_VISIT_STATUSES)} />
+                                                    <StatCell value={`${member.ql2svPct.toFixed(2)}%`} onClick={() => openAnalyticsDrilldown([member.name], SITE_VISIT_STATUSES, `${member.name} — Site Visit Leads`)} />
                                                   </td>
                                                 )}
                                               </tr>
@@ -1889,6 +1900,165 @@ export default function LeadDashboard() {
                 </>
               )}
             </div>
+
+            {/* Drill-down card — opened by clicking any manager/team-member
+                name or number above. Shows the real matching Lead rows right
+                here on the Analytics tab (no tab switch), same shape as the
+                Leads tab's own table: Lead Name (search), Email, Status
+                (live-editable), Assigned To, Date, Notes, Next Call Date,
+                Campaign. */}
+            {analyticsDrilldown && (() => {
+              const filtered = analyticsDrilldown.leads.filter(l =>
+                !drilldownSearch || l.name.toLowerCase().includes(drilldownSearch.toLowerCase()) || l.phone.includes(drilldownSearch)
+              );
+              const totalPages = Math.max(1, Math.ceil(filtered.length / drilldownRowsPerPage));
+              const currentPage = Math.min(drilldownPage, totalPages);
+              const pageLeads = filtered.slice((currentPage - 1) * drilldownRowsPerPage, currentPage * drilldownRowsPerPage);
+              const rangeStart = filtered.length === 0 ? 0 : (currentPage - 1) * drilldownRowsPerPage + 1;
+              const rangeEnd = Math.min(currentPage * drilldownRowsPerPage, filtered.length);
+              return (
+                <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden animate-fade-in">
+                  <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+                    <h3 className="text-sm font-extrabold text-slate-900">{analyticsDrilldown.title}</h3>
+                    <button
+                      type="button"
+                      onClick={() => setAnalyticsDrilldown(null)}
+                      className="text-slate-400 hover:text-slate-700"
+                      title="Close"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                  {filtered.length === 0 ? (
+                    <p className="text-xs text-slate-400 italic p-6">No leads match this view.</p>
+                  ) : (
+                    <>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs border-collapse table-fixed min-w-[900px]">
+                          <colgroup>
+                            <col className="w-[150px]" />
+                            <col className="w-[170px]" />
+                            <col className="w-[120px]" />
+                            <col className="w-[130px]" />
+                            <col className="w-[110px]" />
+                            <col className="w-[200px]" />
+                            <col className="w-[130px]" />
+                            <col className="w-[130px]" />
+                          </colgroup>
+                          <thead>
+                            <tr className="border-b border-slate-200 font-bold text-slate-800">
+                              <th className="px-4 py-2.5">
+                                {drilldownSearchOpen ? (
+                                  <div className="flex items-center gap-1">
+                                    <input
+                                      autoFocus
+                                      value={drilldownSearch}
+                                      onChange={(e) => { setDrilldownSearch(e.target.value); setDrilldownPage(1); }}
+                                      onBlur={() => { if (!drilldownSearch) setDrilldownSearchOpen(false); }}
+                                      placeholder="Search name or phone..."
+                                      className="min-w-0 flex-1 bg-white border border-brand-400 rounded-md px-1.5 py-1 text-[11px] font-normal focus:outline-none"
+                                    />
+                                    <button
+                                      onMouseDown={(e) => e.preventDefault()}
+                                      onClick={() => { setDrilldownSearch(""); setDrilldownSearchOpen(false); }}
+                                      className="text-slate-400 hover:text-slate-700 shrink-0"
+                                      title="Close search"
+                                    >
+                                      <X className="h-3.5 w-3.5" />
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center gap-1.5">
+                                    Lead Name
+                                    <button onClick={() => setDrilldownSearchOpen(true)} className="text-slate-400 hover:text-brand-700" title="Search">
+                                      <Search className="h-3.5 w-3.5" />
+                                    </button>
+                                  </div>
+                                )}
+                              </th>
+                              <th className="px-4 py-2.5 whitespace-nowrap">Email</th>
+                              <th className="px-4 py-2.5 whitespace-nowrap">Status</th>
+                              <th className="px-4 py-2.5 whitespace-nowrap">Assigned To</th>
+                              <th className="px-4 py-2.5 whitespace-nowrap">Date</th>
+                              <th className="px-4 py-2.5 whitespace-nowrap">Notes</th>
+                              <th className="px-4 py-2.5 whitespace-nowrap">Next Call Date</th>
+                              <th className="px-4 py-2.5 whitespace-nowrap">Campaign</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {pageLeads.map(l => (
+                              <tr key={l.id} className="hover:bg-slate-50/60 transition-colors">
+                                <td className="px-4 py-3 align-top overflow-hidden">
+                                  <button
+                                    onClick={() => setSelectedLead(l)}
+                                    className="font-bold text-[#0B1E6E] hover:underline text-left truncate block max-w-full"
+                                    title={l.name}
+                                  >
+                                    {l.name}
+                                  </button>
+                                  <p className="text-[11px] text-slate-500 font-mono mt-0.5 truncate">{l.phone}</p>
+                                </td>
+                                <td className="px-4 py-3 text-slate-600 align-top truncate" title={l.email || "—"}>{l.email || "—"}</td>
+                                <td className="px-4 py-3 align-top">
+                                  <select
+                                    value={l.status}
+                                    onChange={(e) => handleUpdateLeadStatus(l.id, e.target.value as LeadStatus)}
+                                    className="w-full max-w-[110px] bg-slate-50 border border-slate-200 rounded-md px-1.5 py-0.5 text-[11px] font-bold text-slate-700 focus:outline-none cursor-pointer"
+                                  >
+                                    {!STATUS_OPTIONS.includes(l.status) && <option value={l.status}>{l.status}</option>}
+                                    {STATUS_OPTIONS.map((opt) => (
+                                      <option key={opt} value={opt}>{opt}</option>
+                                    ))}
+                                  </select>
+                                </td>
+                                <td className="px-4 py-3 text-slate-700 font-medium align-top truncate" title={l.assignedAgent || "Unassigned"}>{l.assignedAgent || "Unassigned"}</td>
+                                <td className="px-4 py-3 text-slate-500 align-top truncate">{adminFormatDateTime(l.createdAtStr)}</td>
+                                <td className="px-4 py-3 text-slate-600 truncate align-top" title={adminLatestLogMessage(l)}>{adminLatestLogMessage(l)}</td>
+                                <td className="px-4 py-3 text-slate-500 align-top truncate">{adminNextCallDateFor(l.id)}</td>
+                                <td className="px-4 py-3 text-slate-700 font-medium align-top truncate" title={l.campaign || l.source || "—"}>{l.campaign || l.source || "—"}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      <div className="px-4 py-3 flex flex-wrap justify-between items-center gap-3 border-t border-slate-100 text-[11px] text-slate-500 font-semibold">
+                        <span>{filtered.length} Row{filtered.length === 1 ? "" : "s"}</span>
+                        <div className="flex items-center gap-4">
+                          <span className="flex items-center gap-1.5">
+                            Rows per page
+                            <select
+                              value={drilldownRowsPerPage}
+                              onChange={(e) => { setDrilldownRowsPerPage(Number(e.target.value)); setDrilldownPage(1); }}
+                              className="bg-slate-50 border border-slate-200 rounded px-1.5 py-1 font-bold text-slate-700 focus:outline-none"
+                            >
+                              {[10, 25, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
+                            </select>
+                          </span>
+                          <span>{rangeStart}-{rangeEnd} of {filtered.length}</span>
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => setDrilldownPage(p => Math.max(1, p - 1))}
+                              disabled={currentPage <= 1}
+                              className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                            >
+                              ‹
+                            </button>
+                            <button
+                              onClick={() => setDrilldownPage(p => Math.min(totalPages, p + 1))}
+                              disabled={currentPage >= totalPages}
+                              className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                            >
+                              ›
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* RNR Analysis — Total Leads and Date are real; the two call-attempt
                 averages and AI Notes have no data source anywhere in this app
