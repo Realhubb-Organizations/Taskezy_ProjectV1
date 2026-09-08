@@ -707,7 +707,7 @@ export default function AdminCampaignsPage() {
                   Select All
                 </button>
               </div>
-              <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+              <div className="grid grid-cols-2 gap-3">
                 {CAMPAIGN_COLUMNS.map(c => {
                   const isOn = campaignVisibleColumns[c.key];
                   return (
@@ -715,10 +715,10 @@ export default function AdminCampaignsPage() {
                       key={c.key}
                       type="button"
                       onClick={() => toggleCampaignColumn(c.key)}
-                      className={`text-left pl-2.5 py-2 text-xs transition-colors truncate ${
+                      className={`text-left pl-3 pr-2.5 py-2.5 text-xs rounded-lg border transition-colors truncate ${
                         isOn
-                          ? "border-l-[3px] border-[#0B1E6E] font-extrabold text-slate-900"
-                          : "border-l-[3px] border-transparent font-semibold text-slate-400 hover:text-slate-600"
+                          ? "border-slate-200 border-l-[3px] border-l-[#0B1E6E] font-extrabold text-slate-900"
+                          : "border-slate-200 font-semibold text-slate-400 hover:text-slate-600 hover:bg-slate-50"
                       }`}
                     >
                       {c.label}
