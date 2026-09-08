@@ -46,13 +46,35 @@ const ADMIN_DEFAULT_VISIBLE_COLUMNS: Record<AdminColumnKey, boolean> = {
   notes: true, propertyMatch: false
 };
 
+// Every number (and the manager/team-member name) in the Leads Analytics
+// breakdown table drills into the Leads tab pre-filtered to exactly the
+// leads that number represents — this is the shared clickable-cell look.
+function StatCell({ value, onClick }: { value: string | number; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className="hover:underline hover:text-[#0B1E6E] transition-colors text-left">
+      {value}
+    </button>
+  );
+}
+
+// The same lead-quality categorization used by the stat cards up top,
+// pulled out to module scope so both the per-agent breakdown math and the
+// drill-down click handlers (which need to set the Leads tab's status
+// filter to "whichever statuses this number represents") share one
+// definition instead of drifting apart.
+const UNQUALIFIED_STATUSES: LeadStatus[] = ["Unassigned", "RNR", "Switch off", "Not Interested", "Invalid", "Low Budget", "Dead"];
+const SITE_VISIT_STATUSES: LeadStatus[] = ["Site Visit", "Meeting Done", "Visit Schedule"];
+
 // The Leads Analytics per-agent table's togglable columns — Member Name
 // itself stays pinned (same role as Lead Name in the Leads table), the rest
 // are driven by the same Filter panel, switched to this set while that tab
-// is active.
-type AnalyticsColumnKey = "total" | "qualified" | "unqualified" | "siteVisits" | "qlPct" | "ql2svPct";
+// is active. "Team Total Leads" only applies to top-level Manager rows
+// (self + every direct report's total) — the nested Team Member sub-table
+// skips it since a leaf member's team total is just their own total.
+type AnalyticsColumnKey = "teamTotal" | "total" | "qualified" | "unqualified" | "siteVisits" | "qlPct" | "ql2svPct";
 
 const ANALYTICS_COLUMNS: { key: AnalyticsColumnKey; label: string }[] = [
+  { key: "teamTotal", label: "Team Total Leads" },
   { key: "total", label: "Total Leads Assigned" },
   { key: "qualified", label: "Qualified Leads" },
   { key: "unqualified", label: "Unqualified Leads" },
@@ -62,7 +84,7 @@ const ANALYTICS_COLUMNS: { key: AnalyticsColumnKey; label: string }[] = [
 ];
 
 const ANALYTICS_DEFAULT_VISIBLE_COLUMNS: Record<AnalyticsColumnKey, boolean> = {
-  total: true, qualified: true, unqualified: true, siteVisits: true, qlPct: true, ql2svPct: true
+  teamTotal: true, total: true, qualified: true, unqualified: true, siteVisits: true, qlPct: true, ql2svPct: true
 };
 
 export default function LeadDashboard() {
@@ -402,6 +424,23 @@ export default function LeadDashboard() {
     });
   };
 
+  const [analyticsManagerSearchOpen, setAnalyticsManagerSearchOpen] = useState(false);
+  const [analyticsManagerSearch, setAnalyticsManagerSearch] = useState("");
+
+  // Every clickable number/name in the breakdown table jumps to the Leads
+  // tab pre-filtered to exactly the leads that number represents: who it's
+  // assigned to (a manager's whole team, or a single person) and, for the
+  // qualified/unqualified/site-visit columns, which real statuses make up
+  // that category (statusScope === null means no status filter — "all").
+  const drillToLeadsTab = (assignedNames: string[], statusScope: LeadStatus[] | null) => {
+    setAdminAssignedFilter(assignedNames);
+    setAdminStatusFilter(statusScope ?? []);
+    setAdminTab("leads");
+    setAdminPage(1);
+  };
+
+  const QUALIFIED_STATUS_OPTIONS = STATUS_OPTIONS.filter(s => !UNQUALIFIED_STATUSES.includes(s));
+
   const [adminVisibleColumns, setAdminVisibleColumns] = useState<Record<AdminColumnKey, boolean>>(ADMIN_DEFAULT_VISIBLE_COLUMNS);
 
   const toggleAdminColumn = (key: AdminColumnKey) => {
@@ -636,8 +675,8 @@ export default function LeadDashboard() {
   const analyticsCampaignsList = Array.from(new Set(scopedLeads.map(l => l.campaign).filter(Boolean))) as string[];
 
   const computeLeadStats = (leadsForPerson: Lead[]) => {
-    const qualified = leadsForPerson.filter(l => !["Unassigned", "RNR", "Switch off", "Not Interested", "Invalid", "Low Budget", "Dead"].includes(l.status)).length;
-    const siteVisits = leadsForPerson.filter(l => ["Site Visit", "Meeting Done", "Visit Schedule"].includes(l.status)).length;
+    const qualified = leadsForPerson.filter(l => !UNQUALIFIED_STATUSES.includes(l.status)).length;
+    const siteVisits = leadsForPerson.filter(l => SITE_VISIT_STATUSES.includes(l.status)).length;
     const total = leadsForPerson.length;
     return {
       total,
@@ -673,8 +712,13 @@ export default function LeadDashboard() {
             ...computeLeadStats(analyticsScopedLeads.filter(l => l.assignedAgent === member.name))
           }))
       : [];
-    return { agentName, isManager, directReports, ...stats };
-  }).filter(row => row.isManager && (row.total > 0 || row.directReports.some(d => d.total > 0)));
+    const teamTotal = stats.total + directReports.reduce((sum, d) => sum + d.total, 0);
+    return { agentName, isManager, directReports, teamTotal, ...stats };
+  }).filter(row =>
+    row.isManager &&
+    (row.total > 0 || row.directReports.some(d => d.total > 0)) &&
+    (!analyticsManagerSearch || row.agentName.toLowerCase().includes(analyticsManagerSearch.toLowerCase()))
+  );
 
   const analyticsTotalPages = Math.max(1, Math.ceil(adminAgentBreakdown.length / analyticsRowsPerPage));
   const analyticsCurrentPage = Math.min(analyticsPage, analyticsTotalPages);
@@ -688,6 +732,7 @@ export default function LeadDashboard() {
     const visibleCols = ANALYTICS_COLUMNS.filter(c => analyticsVisibleColumns[c.key]);
     const header = ["Manager Name", ...visibleCols.map(c => c.label)];
     const cellValue: Record<AnalyticsColumnKey, (r: typeof adminAgentBreakdown[number]) => string | number> = {
+      teamTotal: r => r.teamTotal,
       total: r => r.total,
       qualified: r => r.qualified,
       unqualified: r => r.unqualified,
@@ -1636,8 +1681,35 @@ export default function LeadDashboard() {
                       <thead>
                         <tr className="border-b border-slate-200 text-[11px] font-bold text-slate-800">
                           <th className="px-4 py-3">
-                            <div className="flex items-center gap-1.5">Manager Name <Search className="h-3 w-3 text-slate-400" /></div>
+                            {analyticsManagerSearchOpen ? (
+                              <div className="flex items-center gap-1">
+                                <input
+                                  autoFocus
+                                  value={analyticsManagerSearch}
+                                  onChange={(e) => setAnalyticsManagerSearch(e.target.value)}
+                                  onBlur={() => { if (!analyticsManagerSearch) setAnalyticsManagerSearchOpen(false); }}
+                                  placeholder="Search manager..."
+                                  className="min-w-0 flex-1 bg-white border border-brand-400 rounded-md px-1.5 py-1 text-[11px] font-normal focus:outline-none"
+                                />
+                                <button
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onClick={() => { setAnalyticsManagerSearch(""); setAnalyticsManagerSearchOpen(false); }}
+                                  className="text-slate-400 hover:text-slate-700 shrink-0"
+                                  title="Close search"
+                                >
+                                  <X className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-1.5">
+                                Manager Name
+                                <button onClick={() => setAnalyticsManagerSearchOpen(true)} className="text-slate-400 hover:text-brand-700" title="Search">
+                                  <Search className="h-3 w-3" />
+                                </button>
+                              </div>
+                            )}
                           </th>
+                          {analyticsVisibleColumns.teamTotal && <th className="px-4 py-3 whitespace-nowrap">Team Total Leads</th>}
                           {analyticsVisibleColumns.total && <th className="px-4 py-3 whitespace-nowrap">Total Leads Assigned</th>}
                           {analyticsVisibleColumns.qualified && <th className="px-4 py-3 whitespace-nowrap">Qualified Leads</th>}
                           {analyticsVisibleColumns.unqualified && <th className="px-4 py-3 whitespace-nowrap">Unqualified Leads</th>}
@@ -1650,22 +1722,16 @@ export default function LeadDashboard() {
                         {analyticsPageRows.map(row => {
                           const isExpanded = expandedManagers.has(row.agentName);
                           const visibleColCount = ANALYTICS_COLUMNS.filter(c => analyticsVisibleColumns[c.key]).length;
+                          const teamNames = [row.agentName, ...row.directReports.map(d => d.name)];
                           return (
                             <React.Fragment key={row.agentName}>
                               <tr className={`transition-colors ${isExpanded ? "bg-slate-50" : "hover:bg-slate-50/60"}`}>
                                 <td className="px-4 py-3 font-bold">
                                   <div className="flex items-center gap-2">
-                                    <button
-                                      onClick={() => {
-                                        setAdminAssignedFilter([row.agentName]);
-                                        setAdminTab("leads");
-                                        setAdminPage(1);
-                                      }}
-                                      className="text-[#0B1E6E] hover:underline text-left"
-                                      title={`View ${row.agentName}'s leads`}
-                                    >
-                                      {row.agentName}
-                                    </button>
+                                    <StatCell
+                                      value={row.agentName}
+                                      onClick={() => drillToLeadsTab(teamNames, null)}
+                                    />
                                     {row.isManager && (
                                       <button
                                         type="button"
@@ -1678,12 +1744,41 @@ export default function LeadDashboard() {
                                     )}
                                   </div>
                                 </td>
-                                {analyticsVisibleColumns.total && <td className="px-4 py-3 font-semibold">{row.total}</td>}
-                                {analyticsVisibleColumns.qualified && <td className="px-4 py-3 font-semibold">{row.qualified}</td>}
-                                {analyticsVisibleColumns.unqualified && <td className="px-4 py-3 font-semibold">{row.unqualified}</td>}
-                                {analyticsVisibleColumns.siteVisits && <td className="px-4 py-3 font-semibold">{row.siteVisits}</td>}
-                                {analyticsVisibleColumns.qlPct && <td className="px-4 py-3 font-semibold">{row.qlPct.toFixed(2)}%</td>}
-                                {analyticsVisibleColumns.ql2svPct && <td className="px-4 py-3 font-semibold">{row.ql2svPct.toFixed(2)}%</td>}
+                                {analyticsVisibleColumns.teamTotal && (
+                                  <td className="px-4 py-3 font-semibold">
+                                    <StatCell value={row.teamTotal} onClick={() => drillToLeadsTab(teamNames, null)} />
+                                  </td>
+                                )}
+                                {analyticsVisibleColumns.total && (
+                                  <td className="px-4 py-3 font-semibold">
+                                    <StatCell value={row.total} onClick={() => drillToLeadsTab([row.agentName], null)} />
+                                  </td>
+                                )}
+                                {analyticsVisibleColumns.qualified && (
+                                  <td className="px-4 py-3 font-semibold">
+                                    <StatCell value={row.qualified} onClick={() => drillToLeadsTab([row.agentName], QUALIFIED_STATUS_OPTIONS)} />
+                                  </td>
+                                )}
+                                {analyticsVisibleColumns.unqualified && (
+                                  <td className="px-4 py-3 font-semibold">
+                                    <StatCell value={row.unqualified} onClick={() => drillToLeadsTab([row.agentName], UNQUALIFIED_STATUSES)} />
+                                  </td>
+                                )}
+                                {analyticsVisibleColumns.siteVisits && (
+                                  <td className="px-4 py-3 font-semibold">
+                                    <StatCell value={row.siteVisits} onClick={() => drillToLeadsTab([row.agentName], SITE_VISIT_STATUSES)} />
+                                  </td>
+                                )}
+                                {analyticsVisibleColumns.qlPct && (
+                                  <td className="px-4 py-3 font-semibold">
+                                    <StatCell value={`${row.qlPct.toFixed(2)}%`} onClick={() => drillToLeadsTab([row.agentName], QUALIFIED_STATUS_OPTIONS)} />
+                                  </td>
+                                )}
+                                {analyticsVisibleColumns.ql2svPct && (
+                                  <td className="px-4 py-3 font-semibold">
+                                    <StatCell value={`${row.ql2svPct.toFixed(2)}%`} onClick={() => drillToLeadsTab([row.agentName], SITE_VISIT_STATUSES)} />
+                                  </td>
+                                )}
                               </tr>
                               {row.isManager && isExpanded && (
                                 <tr>
@@ -1707,13 +1802,39 @@ export default function LeadDashboard() {
                                           <tbody className="divide-y divide-slate-100 text-slate-700">
                                             {row.directReports.map(member => (
                                               <tr key={member.name}>
-                                                <td className="py-2 pr-4 font-semibold">{member.name}</td>
-                                                {analyticsVisibleColumns.total && <td className="py-2 pr-4">{member.total}</td>}
-                                                {analyticsVisibleColumns.qualified && <td className="py-2 pr-4">{member.qualified}</td>}
-                                                {analyticsVisibleColumns.unqualified && <td className="py-2 pr-4">{member.unqualified}</td>}
-                                                {analyticsVisibleColumns.siteVisits && <td className="py-2 pr-4">{member.siteVisits}</td>}
-                                                {analyticsVisibleColumns.qlPct && <td className="py-2 pr-4">{member.qlPct.toFixed(2)}%</td>}
-                                                {analyticsVisibleColumns.ql2svPct && <td className="py-2 pr-4">{member.ql2svPct.toFixed(2)}%</td>}
+                                                <td className="py-2 pr-4 font-semibold">
+                                                  <StatCell value={member.name} onClick={() => drillToLeadsTab([member.name], null)} />
+                                                </td>
+                                                {analyticsVisibleColumns.total && (
+                                                  <td className="py-2 pr-4">
+                                                    <StatCell value={member.total} onClick={() => drillToLeadsTab([member.name], null)} />
+                                                  </td>
+                                                )}
+                                                {analyticsVisibleColumns.qualified && (
+                                                  <td className="py-2 pr-4">
+                                                    <StatCell value={member.qualified} onClick={() => drillToLeadsTab([member.name], QUALIFIED_STATUS_OPTIONS)} />
+                                                  </td>
+                                                )}
+                                                {analyticsVisibleColumns.unqualified && (
+                                                  <td className="py-2 pr-4">
+                                                    <StatCell value={member.unqualified} onClick={() => drillToLeadsTab([member.name], UNQUALIFIED_STATUSES)} />
+                                                  </td>
+                                                )}
+                                                {analyticsVisibleColumns.siteVisits && (
+                                                  <td className="py-2 pr-4">
+                                                    <StatCell value={member.siteVisits} onClick={() => drillToLeadsTab([member.name], SITE_VISIT_STATUSES)} />
+                                                  </td>
+                                                )}
+                                                {analyticsVisibleColumns.qlPct && (
+                                                  <td className="py-2 pr-4">
+                                                    <StatCell value={`${member.qlPct.toFixed(2)}%`} onClick={() => drillToLeadsTab([member.name], QUALIFIED_STATUS_OPTIONS)} />
+                                                  </td>
+                                                )}
+                                                {analyticsVisibleColumns.ql2svPct && (
+                                                  <td className="py-2 pr-4">
+                                                    <StatCell value={`${member.ql2svPct.toFixed(2)}%`} onClick={() => drillToLeadsTab([member.name], SITE_VISIT_STATUSES)} />
+                                                  </td>
+                                                )}
                                               </tr>
                                             ))}
                                           </tbody>
