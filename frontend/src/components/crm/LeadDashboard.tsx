@@ -339,7 +339,23 @@ export default function LeadDashboard() {
   // duplicating them in a second file.
   // ===========================================================================
 
-  const [adminTab, setAdminTab] = useState<"leads" | "analytics">("leads");
+  // Initialized from the URL's ?tab= param (if present) so a refresh/bookmark
+  // while on Leads Analytics reopens on that tab, and kept in sync below so
+  // the shared page header (getActiveTabName in the app layout) can show
+  // "Leads Analytics" instead of always "Leads".
+  const [adminTab, setAdminTab] = useState<"leads" | "analytics">(
+    () => (searchParams.get("tab") === "analytics" ? "analytics" : "leads")
+  );
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    const params = new URLSearchParams(searchParams.toString());
+    if (adminTab === "analytics") params.set("tab", "analytics");
+    else params.delete("tab");
+    const query = params.toString();
+    router.replace(`/dashboard/crm${query ? `?${query}` : ""}`, { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminTab, isAdmin]);
   const [adminDateRange, setAdminDateRange] = useState<"today" | "yesterday" | "week" | "month" | "all" | "custom">("today");
   const [adminCustomRange, setAdminCustomRange] = useState<{ start: string; end: string } | null>(null);
   const [adminMetric, setAdminMetric] = useState<string | null>(null);
@@ -410,6 +426,8 @@ export default function LeadDashboard() {
   const [analyticsCampaignMenuOpen, setAnalyticsCampaignMenuOpen] = useState(false);
   const [analyticsCampaignMenuPos, setAnalyticsCampaignMenuPos] = useState<{ top: number; left: number } | null>(null);
   const analyticsCampaignBtnRef = useRef<HTMLButtonElement>(null);
+  const [analyticsCampaignsMetaOpen, setAnalyticsCampaignsMetaOpen] = useState(true);
+  const [analyticsCampaignsGoogleOpen, setAnalyticsCampaignsGoogleOpen] = useState(true);
 
   const [analyticsPage, setAnalyticsPage] = useState(1);
   const [analyticsRowsPerPage, setAnalyticsRowsPerPage] = useState(100);
@@ -729,6 +747,12 @@ export default function LeadDashboard() {
 
   const analyticsPropertiesList = Array.from(new Set(scopedLeads.map(l => l.property).filter(Boolean))) as string[];
   const analyticsCampaignsList = Array.from(new Set(scopedLeads.map(l => l.campaign).filter(Boolean))) as string[];
+  // Same Meta/Google grouping as the Leads tab's own Campaigns dropdown
+  // (classifyCampaignPlatform, defined above), reused here rather than
+  // re-implemented.
+  const analyticsMetaCampaigns = analyticsCampaignsList.filter(c => classifyCampaignPlatform(c) === "Meta");
+  const analyticsGoogleCampaigns = analyticsCampaignsList.filter(c => classifyCampaignPlatform(c) === "Google");
+  const analyticsOtherCampaigns = analyticsCampaignsList.filter(c => classifyCampaignPlatform(c) === "Other");
 
   const computeLeadStats = (leadsForPerson: Lead[]) => {
     const qualified = leadsForPerson.filter(l => !UNQUALIFIED_STATUSES.includes(l.status)).length;
@@ -1686,12 +1710,12 @@ export default function LeadDashboard() {
                   )}
                 </div>
 
-                {/* Campaigns */}
+                {/* Campaigns — grouped by ad platform, same pattern as the Leads tab's own Campaigns dropdown */}
                 <div className="relative">
                   <button
                     ref={analyticsCampaignBtnRef}
                     type="button"
-                    onClick={() => openPositionedMenu(analyticsCampaignBtnRef, setAnalyticsCampaignMenuPos, setAnalyticsCampaignMenuOpen, "right", 224)}
+                    onClick={() => openPositionedMenu(analyticsCampaignBtnRef, setAnalyticsCampaignMenuPos, setAnalyticsCampaignMenuOpen, "right", 260)}
                     className="h-10 flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-4 text-xs text-slate-700 font-bold shadow-sm hover:bg-slate-50 transition-all whitespace-nowrap"
                   >
                     {analyticsCampaignFilter.length === 0 ? "Campaigns" : analyticsCampaignFilter.length === 1 ? analyticsCampaignFilter[0] : `${analyticsCampaignFilter.length} Campaigns`}
@@ -1701,25 +1725,100 @@ export default function LeadDashboard() {
                     <>
                       <div className="fixed inset-0 z-[60]" onClick={() => setAnalyticsCampaignMenuOpen(false)} />
                       <div
-                        className="fixed z-[70] w-56 bg-white border border-slate-200 rounded-lg shadow-lg py-1.5 max-h-56 overflow-y-auto"
+                        className="fixed z-[70] w-64 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 max-h-80 overflow-y-auto"
                         style={{ top: analyticsCampaignMenuPos.top, left: analyticsCampaignMenuPos.left }}
                       >
-                        {analyticsCampaignsList.length === 0 ? (
-                          <p className="px-3 py-2 text-xs text-slate-400 italic font-normal">No data yet</p>
-                        ) : (
-                          analyticsCampaignsList.map(opt => (
-                            <label key={opt} className="flex items-center gap-2 px-3 py-1.5 text-xs font-normal text-slate-700 hover:bg-slate-50 cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={analyticsCampaignFilter.includes(opt)}
-                                onChange={() => {
-                                  setAnalyticsPage(1);
-                                  setAnalyticsCampaignFilter(prev => prev.includes(opt) ? prev.filter(v => v !== opt) : [...prev, opt]);
-                                }}
-                              />
-                              {opt}
-                            </label>
-                          ))
+                        {analyticsCampaignFilter.length > 0 && (
+                          <button
+                            onClick={() => { setAnalyticsPage(1); setAnalyticsCampaignFilter([]); }}
+                            className="w-full text-left px-3 py-1.5 text-[11px] font-bold text-brand-700 hover:bg-slate-50"
+                          >
+                            Clear selection
+                          </button>
+                        )}
+
+                        {/* Meta group */}
+                        <button
+                          onClick={() => setAnalyticsCampaignsMetaOpen(o => !o)}
+                          className="w-full flex items-center justify-between px-3 py-2 text-xs font-bold text-slate-800 hover:bg-slate-50"
+                        >
+                          <span className="flex items-center gap-2">
+                            <img src="https://img.icons8.com/?size=100&id=wA5rN96FVDtq&format=png&color=000000" alt="Meta" className="h-4 w-4" />
+                            Meta
+                          </span>
+                          <ChevronDown className={`h-3 w-3 text-slate-400 transition-transform ${analyticsCampaignsMetaOpen ? "rotate-180" : ""}`} />
+                        </button>
+                        {analyticsCampaignsMetaOpen && (
+                          analyticsMetaCampaigns.length === 0 ? (
+                            <p className="pl-9 pr-3 py-1.5 text-[11px] text-slate-400 italic font-normal">No Meta campaigns yet</p>
+                          ) : (
+                            analyticsMetaCampaigns.map(opt => (
+                              <label key={opt} className="flex items-center gap-2 pl-9 pr-3 py-1.5 text-xs font-normal text-slate-700 hover:bg-slate-50 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={analyticsCampaignFilter.includes(opt)}
+                                  onChange={() => {
+                                    setAnalyticsPage(1);
+                                    setAnalyticsCampaignFilter(prev => prev.includes(opt) ? prev.filter(v => v !== opt) : [...prev, opt]);
+                                  }}
+                                />
+                                <span className="truncate">{opt}</span>
+                              </label>
+                            ))
+                          )
+                        )}
+
+                        <div className="border-t border-slate-100 my-1" />
+
+                        {/* Google group */}
+                        <button
+                          onClick={() => setAnalyticsCampaignsGoogleOpen(o => !o)}
+                          className="w-full flex items-center justify-between px-3 py-2 text-xs font-bold text-slate-800 hover:bg-slate-50"
+                        >
+                          <span className="flex items-center gap-2">
+                            <img src="https://img.icons8.com/?size=100&id=4hR4Ih04Je2t&format=png&color=000000" alt="Google" className="h-4 w-4" />
+                            Google
+                          </span>
+                          <ChevronDown className={`h-3 w-3 text-slate-400 transition-transform ${analyticsCampaignsGoogleOpen ? "rotate-180" : ""}`} />
+                        </button>
+                        {analyticsCampaignsGoogleOpen && (
+                          analyticsGoogleCampaigns.length === 0 ? (
+                            <p className="pl-9 pr-3 py-1.5 text-[11px] text-slate-400 italic font-normal">No Google campaigns yet</p>
+                          ) : (
+                            analyticsGoogleCampaigns.map(opt => (
+                              <label key={opt} className="flex items-center gap-2 pl-9 pr-3 py-1.5 text-xs font-normal text-slate-700 hover:bg-slate-50 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={analyticsCampaignFilter.includes(opt)}
+                                  onChange={() => {
+                                    setAnalyticsPage(1);
+                                    setAnalyticsCampaignFilter(prev => prev.includes(opt) ? prev.filter(v => v !== opt) : [...prev, opt]);
+                                  }}
+                                />
+                                <span className="truncate">{opt}</span>
+                              </label>
+                            ))
+                          )
+                        )}
+
+                        {analyticsOtherCampaigns.length > 0 && (
+                          <>
+                            <div className="border-t border-slate-100 my-1" />
+                            <p className="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wide">Other</p>
+                            {analyticsOtherCampaigns.map(opt => (
+                              <label key={opt} className="flex items-center gap-2 px-3 py-1.5 text-xs font-normal text-slate-700 hover:bg-slate-50 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={analyticsCampaignFilter.includes(opt)}
+                                  onChange={() => {
+                                    setAnalyticsPage(1);
+                                    setAnalyticsCampaignFilter(prev => prev.includes(opt) ? prev.filter(v => v !== opt) : [...prev, opt]);
+                                  }}
+                                />
+                                <span className="truncate">{opt}</span>
+                              </label>
+                            ))}
+                          </>
                         )}
                       </div>
                     </>,

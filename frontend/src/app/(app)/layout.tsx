@@ -216,6 +216,10 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
 
   const getActiveTabName = () => {
     if (pathname === "/home") return "Home";
+    // The Leads/Leads Analytics toggle on /dashboard/crm is internal
+    // component state, not a route — LeadDashboard.tsx mirrors it into
+    // ?tab=analytics so this header can reflect it.
+    if (pathname === "/dashboard/crm" && activeTabParam === "analytics") return "Leads Analytics";
     for (const group of sidebarGroups) {
       for (const item of group.items) {
         if (item.activeCheck(pathname, activeTabParam)) return item.name;
