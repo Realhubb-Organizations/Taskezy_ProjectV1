@@ -2,7 +2,6 @@
 
 import React, { useState, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
-import Link from "next/link";
 import { useApp, Lead } from "@/context/AppContext";
 import { computeCPL } from "@/lib/reportMetrics";
 import { WhatsAppIcon, CallIcon } from "@/components/icons/ContactIcons";
@@ -11,7 +10,6 @@ import {
   Calendar,
   Search,
   ChevronRight,
-  Filter,
   CheckCircle,
   X,
   Phone,
@@ -20,8 +18,10 @@ import {
   Check,
   Building,
   Sliders,
-  Minus
+  Minus,
+  Download
 } from "lucide-react";
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine } from "recharts";
 
 interface CampaignItem {
   id: string;
@@ -32,6 +32,7 @@ interface CampaignItem {
   unqualifiedLeads: number;
   siteVisit: number;
   cpl: number;
+  spend: number;
   platform: "Meta" | "Google" | "Other";
 }
 
@@ -270,6 +271,7 @@ export default function AdminCampaignsPage() {
           unqualifiedLeads: unqualified,
           siteVisit: siteVisits,
           cpl: cplVal,
+          spend: item.spend,
           platform: item.platform
         });
       }
@@ -314,16 +316,156 @@ export default function AdminCampaignsPage() {
   // campaigns (matching the summary card's own unit), not a leads list.
   const activeCampaignsDrill = useMemo(() => campaignsList.filter(c => c.status === "Active"), [campaignsList]);
 
-  // Campaigns Analytics tab — real ad-spend totals, no hardcoded figures.
-  const analyticsSummary = useMemo(() => {
-    const metaSpend = adSpendRecords.filter(r => r.platform === "Meta").reduce((acc, r) => acc + r.spend, 0);
-    const googleSpend = adSpendRecords.filter(r => r.platform === "Google").reduce((acc, r) => acc + r.spend, 0);
-    const totalSpend = metaSpend + googleSpend;
-    const totalLeadsGenerated = adSpendRecords.reduce((acc, r) => acc + r.leadsGenerated, 0);
-    return { metaSpend, googleSpend, avgCPL: computeCPL(totalSpend, totalLeadsGenerated) };
-  }, [adSpendRecords]);
-
   const formatCurrency = (n: number) => `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  // ---- Campaigns Analytics tab ----------------------------------------
+
+  // Chart: spend/leads over time, split by whichever real platforms exist
+  // in adSpendRecords (checkboxes below let the user include/exclude one).
+  const [chartMetric, setChartMetric] = useState<"Spend" | "Leads">("Spend");
+  const [chartMetricMenuOpen, setChartMetricMenuOpen] = useState(false);
+  const [chartMetricMenuPos, setChartMetricMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const chartMetricBtnRef = useRef<HTMLButtonElement>(null);
+
+  // "Campaign Type" breakdown can group real ad-spend by Platform (Meta/
+  // Google/whatever the backend actually sends) or by campaign Status
+  // (Active/Pause/Stopped, using each campaign's own real spend) — both
+  // are genuine dimensions already present in the fetched data.
+  const [typeGroupBy, setTypeGroupBy] = useState<"Platform" | "Status">("Platform");
+  const [typeGroupByMenuOpen, setTypeGroupByMenuOpen] = useState(false);
+  const [typeGroupByMenuPos, setTypeGroupByMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const typeGroupByBtnRef = useRef<HTMLButtonElement>(null);
+  const [selectedChartTypes, setSelectedChartTypes] = useState<Record<string, boolean>>({});
+  const isTypeChecked = (type: string) => selectedChartTypes[type] !== false;
+  const toggleChartType = (type: string) => setSelectedChartTypes(prev => ({ ...prev, [type]: !isTypeChecked(type) }));
+
+  const typeBreakdown = useMemo(() => {
+    const map: Record<string, number> = {};
+    if (typeGroupBy === "Platform") {
+      adSpendRecords.forEach(r => { map[r.platform] = (map[r.platform] || 0) + r.spend; });
+    } else {
+      campaignsList.forEach(c => { map[c.status] = (map[c.status] || 0) + c.spend; });
+    }
+    return Object.entries(map).map(([type, spend]) => ({ type, spend })).sort((a, b) => b.spend - a.spend);
+  }, [adSpendRecords, campaignsList, typeGroupBy]);
+
+  const typeBreakdownTotal = typeBreakdown.filter(t => isTypeChecked(t.type)).reduce((acc, t) => acc + t.spend, 0);
+
+  const chartData = useMemo(() => {
+    const includedPlatforms = new Set(
+      typeGroupBy === "Platform" ? typeBreakdown.filter(t => isTypeChecked(t.type)).map(t => t.type) : null
+    );
+    const includedStatuses = new Set(
+      typeGroupBy === "Status" ? typeBreakdown.filter(t => isTypeChecked(t.type)).map(t => t.type) : null
+    );
+    const statusByAccountName: Record<string, CampaignItem["status"]> = {};
+    campaignsList.forEach(c => { statusByAccountName[c.name.toLowerCase()] = c.status; });
+
+    const byDate: Record<string, { spend: number; leads: number }> = {};
+    adSpendRecords.forEach(r => {
+      if (typeGroupBy === "Platform" && !includedPlatforms.has(r.platform)) return;
+      if (typeGroupBy === "Status") {
+        const st = statusByAccountName[r.accountName.toLowerCase()];
+        if (!st || !includedStatuses.has(st)) return;
+      }
+      if (!byDate[r.date]) byDate[r.date] = { spend: 0, leads: 0 };
+      byDate[r.date].spend += r.spend;
+      byDate[r.date].leads += r.leadsGenerated;
+    });
+
+    return Object.keys(byDate).sort().map(date => {
+      const d = new Date(date);
+      const label = isNaN(d.getTime())
+        ? date
+        : `${d.toLocaleDateString("en-GB", { day: "2-digit" })} ${d.toLocaleDateString("en-GB", { month: "short" })}, ${d.getFullYear()}`;
+      return { date, label, value: chartMetric === "Spend" ? byDate[date].spend : byDate[date].leads };
+    });
+  }, [adSpendRecords, campaignsList, typeGroupBy, selectedChartTypes, chartMetric, typeBreakdown]);
+
+  const chartAverage = chartData.length === 0 ? 0 : chartData.reduce((acc, c) => acc + c.value, 0) / chartData.length;
+
+  // Property / Status breakdown table below the chart.
+  const [breakdownTab, setBreakdownTab] = useState<"Property" | "Status">("Property");
+  const [breakdownCampaignFilter, setBreakdownCampaignFilter] = useState<string>("All");
+  const [breakdownCampaignMenuOpen, setBreakdownCampaignMenuOpen] = useState(false);
+  const [breakdownCampaignMenuPos, setBreakdownCampaignMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const breakdownCampaignBtnRef = useRef<HTMLButtonElement>(null);
+  const [breakdownColumnsMenuOpen, setBreakdownColumnsMenuOpen] = useState(false);
+  const [breakdownColumnsMenuPos, setBreakdownColumnsMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const breakdownColumnsBtnRef = useRef<HTMLButtonElement>(null);
+  const [breakdownVisibleColumns, setBreakdownVisibleColumns] = useState({ source: true, cpl: true, qcpl: true, spend: true });
+
+  const propertyBreakdown = useMemo(() => {
+    type Bucket = { campaigns: Set<string>; platforms: Set<string>; spend: number; leads: Lead[] };
+    const map: Record<string, Bucket> = {};
+    const getBucket = (property: string): Bucket => {
+      if (!map[property]) map[property] = { campaigns: new Set(), platforms: new Set(), spend: 0, leads: [] };
+      return map[property];
+    };
+    adSpendRecords.forEach(r => {
+      if (breakdownCampaignFilter !== "All" && r.accountName !== breakdownCampaignFilter) return;
+      const b = getBucket(r.property || "Unspecified");
+      b.campaigns.add(r.accountName);
+      b.platforms.add(r.platform);
+      b.spend += r.spend;
+    });
+    leads.forEach(l => {
+      if (breakdownCampaignFilter !== "All" && (l.campaign || l.source) !== breakdownCampaignFilter) return;
+      getBucket(l.property || "Unspecified").leads.push(l);
+    });
+    return Object.entries(map).map(([property, b]) => {
+      const totalLeads = b.leads.length;
+      const qualifiedLeads = b.leads.filter(l => QUALIFIED_LEAD_STATUSES.includes(l.status)).length;
+      return {
+        property,
+        campaigns: b.campaigns.size,
+        platforms: Array.from(b.platforms),
+        totalLeads,
+        qualifiedLeads,
+        cpl: computeCPL(b.spend, totalLeads),
+        qcpl: computeCPL(b.spend, qualifiedLeads),
+        spend: b.spend
+      };
+    }).sort((a, b) => b.spend - a.spend);
+  }, [adSpendRecords, leads, breakdownCampaignFilter]);
+
+  const statusBreakdown = useMemo(() => {
+    const map: Record<string, { campaigns: number; totalLeads: number; qualifiedLeads: number; spend: number }> = {};
+    campaignsList
+      .filter(c => breakdownCampaignFilter === "All" || c.name === breakdownCampaignFilter)
+      .forEach(c => {
+        if (!map[c.status]) map[c.status] = { campaigns: 0, totalLeads: 0, qualifiedLeads: 0, spend: 0 };
+        map[c.status].campaigns += 1;
+        map[c.status].totalLeads += c.totalLeads;
+        map[c.status].qualifiedLeads += c.qualifiedLeads;
+        map[c.status].spend += c.spend;
+      });
+    return Object.entries(map).map(([status, d]) => ({
+      status,
+      campaigns: d.campaigns,
+      totalLeads: d.totalLeads,
+      qualifiedLeads: d.qualifiedLeads,
+      cpl: computeCPL(d.spend, d.totalLeads),
+      qcpl: computeCPL(d.spend, d.qualifiedLeads),
+      spend: d.spend
+    }));
+  }, [campaignsList, breakdownCampaignFilter]);
+
+  const exportBreakdownCsv = () => {
+    const rows = breakdownTab === "Property"
+      ? [["Property", "Campaigns", "Source", "Total Leads", "Qualified Leads", "CPL", "QCPL", "Spend"],
+          ...propertyBreakdown.map(r => [r.property, r.campaigns, r.platforms.join("/"), r.totalLeads, r.qualifiedLeads, r.cpl.toFixed(2), r.qcpl.toFixed(2), r.spend.toFixed(2)])]
+      : [["Status", "Campaigns", "Total Leads", "Qualified Leads", "CPL", "QCPL", "Spend"],
+          ...statusBreakdown.map(r => [r.status, r.campaigns, r.totalLeads, r.qualifiedLeads, r.cpl.toFixed(2), r.qcpl.toFixed(2), r.spend.toFixed(2)])];
+    const csv = rows.map(r => r.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `campaigns-${breakdownTab.toLowerCase()}-breakdown.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
 
   // Filtered table rows
   const filteredCampaigns = useMemo(() => {
@@ -380,39 +522,10 @@ export default function AdminCampaignsPage() {
         </div>
       </div>
 
-      {activeTab === "Analytics" ? (
-        /* Redirect or show integrated marketing analytics directly */
-        <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-sm font-bold text-slate-800">Campaign Performance & ROI Analytics</h3>
-            <Link href="/dashboard/reports?tab=marketing" className="text-xs text-blue-600 font-semibold hover:underline">
-              Open Full Reports Portal &rarr;
-            </Link>
-          </div>
-          <p className="text-xs text-slate-500 mb-4">
-            View detailed performance breakdowns, CPL tracking, lead quality, and property-wise ad spend analytics.
-          </p>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
-              <span className="text-xs text-slate-400 font-medium">Meta Ad Spend</span>
-              <p className="text-xl font-bold text-slate-800 mt-1">{formatCurrency(analyticsSummary.metaSpend)}</p>
-            </div>
-            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
-              <span className="text-xs text-slate-400 font-medium">Google Ads Spend</span>
-              <p className="text-xl font-bold text-slate-800 mt-1">{formatCurrency(analyticsSummary.googleSpend)}</p>
-            </div>
-            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
-              <span className="text-xs text-slate-400 font-medium">Average CPL</span>
-              <p className="text-xl font-bold text-emerald-600 mt-1">{formatCurrency(analyticsSummary.avgCPL)}</p>
-            </div>
-          </div>
-        </div>
-      ) : (
-        <>
-          {/* Date Filter & Metrics — one unified card matching the CRM dashboard's
-              layout: a header bar (date range) sitting directly on top of the
-              stat columns, separated by a divider instead of floating as a
-              separate padded/shadowed card. */}
+      {/* Date Filter & Metrics — one unified card matching the CRM dashboard's
+          layout: a header bar (date range) sitting directly on top of the
+          stat columns, separated by a divider instead of floating as a
+          separate padded/shadowed card. Shown on both tabs. */}
           <div className="bg-slate-100/70 border border-slate-200/60 rounded-2xl overflow-hidden shadow-sm">
             {/* Header bar */}
             <div className="flex items-center px-4 py-2.5 text-[11px] border-b border-slate-200/60">
@@ -588,6 +701,327 @@ export default function AdminCampaignsPage() {
             );
           })()}
 
+      {activeTab === "Analytics" ? (
+        <div className="space-y-4">
+          {/* Spend/Leads-over-time chart + Campaign Type/Status breakdown */}
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-4">
+            <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm p-5">
+              <div className="flex justify-end mb-1">
+                <div className="relative">
+                  <button
+                    type="button"
+                    ref={chartMetricBtnRef}
+                    onClick={() => openPositionedMenu(chartMetricBtnRef, setChartMetricMenuPos, setChartMetricMenuOpen, "right", 120)}
+                    className="flex items-center gap-1.5 bg-white border border-slate-300/80 rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+                  >
+                    {chartMetric}
+                    <ChevronDown className={`h-3 w-3 text-slate-400 transition-transform ${chartMetricMenuOpen ? "rotate-180" : ""}`} />
+                  </button>
+                  {chartMetricMenuOpen && chartMetricMenuPos && createPortal(
+                    <>
+                      <div className="fixed inset-0 z-[60]" onClick={() => setChartMetricMenuOpen(false)} />
+                      <div
+                        className="fixed z-[70] w-28 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 overflow-hidden text-xs font-semibold"
+                        style={{ top: chartMetricMenuPos.top, left: chartMetricMenuPos.left }}
+                      >
+                        {(["Spend", "Leads"] as const).map(opt => (
+                          <button
+                            key={opt}
+                            onClick={() => { setChartMetric(opt); setChartMetricMenuOpen(false); }}
+                            className={`w-full text-left px-3 py-1.5 transition-colors ${chartMetric === opt ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"}`}
+                          >
+                            {opt}
+                          </button>
+                        ))}
+                      </div>
+                    </>,
+                    document.body
+                  )}
+                </div>
+              </div>
+              {chartData.length === 0 ? (
+                <div className="h-[260px] flex items-center justify-center text-xs text-slate-400 italic">
+                  No ad spend data yet.
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height={260}>
+                  <LineChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                    <CartesianGrid vertical={false} stroke="#e2e8f0" />
+                    <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
+                    <YAxis
+                      tick={{ fontSize: 10, fill: "#94a3b8" }}
+                      axisLine={false}
+                      tickLine={false}
+                      tickFormatter={(v: number) => chartMetric === "Spend" ? `₹${(v / 1000).toFixed(1)}K` : `${v}`}
+                    />
+                    <Tooltip
+                      formatter={(v) => [chartMetric === "Spend" ? formatCurrency(Number(v)) : Number(v), chartMetric]}
+                      labelStyle={{ fontSize: 11, fontWeight: 600 }}
+                      contentStyle={{ fontSize: 11, borderRadius: 8, borderColor: "#e2e8f0" }}
+                    />
+                    <ReferenceLine y={chartAverage} stroke="#6366f1" strokeDasharray="4 4" />
+                    <Line type="monotone" dataKey="value" stroke="#6366f1" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
+              <div className="flex items-center gap-1.5 text-[11px] text-slate-500 mt-2">
+                <span className="h-2 w-2 rounded-full bg-[#6366f1]" />
+                {chartMetric}
+              </div>
+            </div>
+
+            <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm p-4 flex flex-col">
+              <div className="flex justify-end mb-3">
+                <div className="relative">
+                  <button
+                    type="button"
+                    ref={typeGroupByBtnRef}
+                    onClick={() => openPositionedMenu(typeGroupByBtnRef, setTypeGroupByMenuPos, setTypeGroupByMenuOpen, "right", 160)}
+                    className="flex items-center gap-1.5 bg-white border border-slate-300/80 rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+                  >
+                    {typeGroupBy === "Platform" ? "Campaign Type" : "Campaign Status"}
+                    <ChevronDown className={`h-3 w-3 text-slate-400 transition-transform ${typeGroupByMenuOpen ? "rotate-180" : ""}`} />
+                  </button>
+                  {typeGroupByMenuOpen && typeGroupByMenuPos && createPortal(
+                    <>
+                      <div className="fixed inset-0 z-[60]" onClick={() => setTypeGroupByMenuOpen(false)} />
+                      <div
+                        className="fixed z-[70] w-36 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 overflow-hidden text-xs font-semibold"
+                        style={{ top: typeGroupByMenuPos.top, left: typeGroupByMenuPos.left }}
+                      >
+                        {([{ v: "Platform" as const, label: "Campaign Type" }, { v: "Status" as const, label: "Campaign Status" }]).map(opt => (
+                          <button
+                            key={opt.v}
+                            onClick={() => { setTypeGroupBy(opt.v); setSelectedChartTypes({}); setTypeGroupByMenuOpen(false); }}
+                            className={`w-full text-left px-3 py-1.5 transition-colors ${typeGroupBy === opt.v ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"}`}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    </>,
+                    document.body
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase pb-2 border-b border-slate-100">
+                <span>{typeGroupBy === "Platform" ? "Type" : "Status"}</span>
+                <span>Spend</span>
+              </div>
+              <div className="overflow-y-auto max-h-[160px] divide-y divide-slate-50">
+                {typeBreakdown.length === 0 ? (
+                  <p className="text-xs text-slate-400 italic py-4 text-center">No data yet.</p>
+                ) : (
+                  typeBreakdown.map(t => (
+                    <label key={t.type} className="flex items-center justify-between py-2 text-xs cursor-pointer">
+                      <span className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={isTypeChecked(t.type)}
+                          onChange={() => toggleChartType(t.type)}
+                          className="h-3.5 w-3.5 rounded border-slate-300 text-[#0B1E6E] focus:ring-0 focus:ring-offset-0"
+                        />
+                        <span className="font-semibold text-slate-700">{t.type}</span>
+                      </span>
+                      <span className="text-slate-600">{formatCurrency(t.spend)}</span>
+                    </label>
+                  ))
+                )}
+              </div>
+              <div className="flex items-center justify-between pt-2 mt-2 border-t border-slate-200 text-xs font-bold text-slate-900">
+                <span>Total</span>
+                <span>{formatCurrency(typeBreakdownTotal)}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Property / Status breakdown table */}
+          <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden">
+            <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5 border-b border-slate-200/80">
+              <div className="flex items-center gap-4 text-sm">
+                <button
+                  type="button"
+                  onClick={() => setBreakdownTab("Property")}
+                  className={`font-bold pb-1 border-b-2 transition-colors ${breakdownTab === "Property" ? "text-[#0B1E6E] border-[#0B1E6E]" : "text-slate-400 border-transparent hover:text-slate-600"}`}
+                >
+                  Property
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBreakdownTab("Status")}
+                  className={`font-bold pb-1 border-b-2 transition-colors ${breakdownTab === "Status" ? "text-[#0B1E6E] border-[#0B1E6E]" : "text-slate-400 border-transparent hover:text-slate-600"}`}
+                >
+                  Status
+                </button>
+              </div>
+              <div className="flex flex-wrap items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={exportBreakdownCsv}
+                  title="Download CSV"
+                  className="p-2 border border-slate-300/80 rounded-lg hover:bg-slate-50 transition-colors"
+                >
+                  <Download className="h-3.5 w-3.5 text-blue-600" />
+                </button>
+                <div className="flex items-center gap-1.5 bg-white border border-slate-300/80 rounded-xl px-3 py-1.5 text-xs text-slate-600 font-medium">
+                  <Calendar className="h-3.5 w-3.5 text-blue-600" />
+                  {dateRange === "Custom" && appliedCustomRange ? `${appliedCustomRange.start} to ${appliedCustomRange.end}` : dateRange}
+                </div>
+                <div className="relative">
+                  <button
+                    type="button"
+                    ref={breakdownCampaignBtnRef}
+                    onClick={() => openPositionedMenu(breakdownCampaignBtnRef, setBreakdownCampaignMenuPos, setBreakdownCampaignMenuOpen, "right", 200)}
+                    className="flex items-center gap-2 bg-white border border-slate-300/80 rounded-xl px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+                  >
+                    <span>{breakdownCampaignFilter === "All" ? "Campaigns" : breakdownCampaignFilter}</span>
+                    <ChevronDown className={`h-3.5 w-3.5 text-slate-400 transition-transform ${breakdownCampaignMenuOpen ? "rotate-180" : ""}`} />
+                  </button>
+                  {breakdownCampaignMenuOpen && breakdownCampaignMenuPos && createPortal(
+                    <>
+                      <div className="fixed inset-0 z-[60]" onClick={() => setBreakdownCampaignMenuOpen(false)} />
+                      <div
+                        className="fixed z-[70] w-52 max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 text-xs font-medium"
+                        style={{ top: breakdownCampaignMenuPos.top, left: breakdownCampaignMenuPos.left }}
+                      >
+                        <button
+                          onClick={() => { setBreakdownCampaignFilter("All"); setBreakdownCampaignMenuOpen(false); }}
+                          className={`w-full text-left px-3 py-1.5 transition-colors ${breakdownCampaignFilter === "All" ? "bg-blue-600 text-white font-bold" : "text-slate-700 hover:bg-slate-50"}`}
+                        >
+                          All Campaigns
+                        </button>
+                        {campaignsList.map(c => (
+                          <button
+                            key={c.id}
+                            onClick={() => { setBreakdownCampaignFilter(c.name); setBreakdownCampaignMenuOpen(false); }}
+                            className={`w-full text-left px-3 py-1.5 truncate transition-colors ${breakdownCampaignFilter === c.name ? "bg-blue-600 text-white font-bold" : "text-slate-700 hover:bg-slate-50"}`}
+                          >
+                            {c.name}
+                          </button>
+                        ))}
+                      </div>
+                    </>,
+                    document.body
+                  )}
+                </div>
+                <div className="relative">
+                  <button
+                    type="button"
+                    ref={breakdownColumnsBtnRef}
+                    onClick={() => openPositionedMenu(breakdownColumnsBtnRef, setBreakdownColumnsMenuPos, setBreakdownColumnsMenuOpen, "right", 180)}
+                    className="flex items-center gap-1.5 bg-white border border-slate-300/80 rounded-xl px-3.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+                  >
+                    <Sliders className="h-3.5 w-3.5 text-slate-500" />
+                    <span>Settings</span>
+                  </button>
+                  {breakdownColumnsMenuOpen && breakdownColumnsMenuPos && createPortal(
+                    <>
+                      <div className="fixed inset-0 z-[60]" onClick={() => setBreakdownColumnsMenuOpen(false)} />
+                      <div
+                        className="fixed z-[70] w-44 bg-white border border-slate-200 rounded-xl shadow-lg py-2 px-3 space-y-1.5 text-xs font-semibold"
+                        style={{ top: breakdownColumnsMenuPos.top, left: breakdownColumnsMenuPos.left }}
+                      >
+                        {([
+                          { key: "source" as const, label: "Source", hideForStatus: true },
+                          { key: "cpl" as const, label: "CPL" },
+                          { key: "qcpl" as const, label: "QCPL" },
+                          { key: "spend" as const, label: "Spend" }
+                        ]).filter(c => !(c.hideForStatus && breakdownTab === "Status")).map(c => (
+                          <label key={c.key} className="flex items-center gap-2 py-1 cursor-pointer text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={breakdownVisibleColumns[c.key]}
+                              onChange={() => setBreakdownVisibleColumns(prev => ({ ...prev, [c.key]: !prev[c.key] }))}
+                              className="h-3.5 w-3.5 rounded border-slate-300 text-[#0B1E6E] focus:ring-0 focus:ring-offset-0"
+                            />
+                            {c.label}
+                          </label>
+                        ))}
+                      </div>
+                    </>,
+                    document.body
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="overflow-auto max-h-[40vh]">
+              <table className="w-full text-left border-collapse min-w-[720px]">
+                {breakdownTab === "Property" ? (
+                  <>
+                    <thead className="sticky top-0 z-10 bg-white">
+                      <tr className="border-b border-slate-200/80 text-[12px] font-bold text-slate-900">
+                        <th className="px-5 py-3">Property</th>
+                        <th className="px-5 py-3 whitespace-nowrap">Campaigns</th>
+                        {breakdownVisibleColumns.source && <th className="px-5 py-3 whitespace-nowrap">Source</th>}
+                        <th className="px-5 py-3 whitespace-nowrap">Total Leads</th>
+                        <th className="px-5 py-3 whitespace-nowrap">Qualified Leads</th>
+                        {breakdownVisibleColumns.cpl && <th className="px-5 py-3 whitespace-nowrap">CPL</th>}
+                        {breakdownVisibleColumns.qcpl && <th className="px-5 py-3 whitespace-nowrap">QCPL</th>}
+                        {breakdownVisibleColumns.spend && <th className="px-5 py-3 whitespace-nowrap">Spend</th>}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-[12px] font-medium text-slate-700">
+                      {propertyBreakdown.length === 0 ? (
+                        <tr>
+                          <td colSpan={8} className="px-5 py-8 text-center text-slate-400 italic">No campaign/ad-spend data yet.</td>
+                        </tr>
+                      ) : (
+                        propertyBreakdown.map(row => (
+                          <tr key={row.property} className="hover:bg-slate-50/50 transition-colors">
+                            <td className="px-5 py-3 text-slate-900 font-semibold">{row.property}</td>
+                            <td className="px-5 py-3">{row.campaigns}</td>
+                            {breakdownVisibleColumns.source && <td className="px-5 py-3">{row.platforms.length ? row.platforms.join(", ") : "—"}</td>}
+                            <td className="px-5 py-3">{row.totalLeads}</td>
+                            <td className="px-5 py-3">{row.qualifiedLeads}</td>
+                            {breakdownVisibleColumns.cpl && <td className="px-5 py-3">{row.cpl.toFixed(2)}</td>}
+                            {breakdownVisibleColumns.qcpl && <td className="px-5 py-3">{row.qcpl.toFixed(2)}</td>}
+                            {breakdownVisibleColumns.spend && <td className="px-5 py-3 font-semibold text-slate-800">{formatCurrency(row.spend)}</td>}
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </>
+                ) : (
+                  <>
+                    <thead className="sticky top-0 z-10 bg-white">
+                      <tr className="border-b border-slate-200/80 text-[12px] font-bold text-slate-900">
+                        <th className="px-5 py-3">Status</th>
+                        <th className="px-5 py-3 whitespace-nowrap">Campaigns</th>
+                        <th className="px-5 py-3 whitespace-nowrap">Total Leads</th>
+                        <th className="px-5 py-3 whitespace-nowrap">Qualified Leads</th>
+                        {breakdownVisibleColumns.cpl && <th className="px-5 py-3 whitespace-nowrap">CPL</th>}
+                        {breakdownVisibleColumns.qcpl && <th className="px-5 py-3 whitespace-nowrap">QCPL</th>}
+                        {breakdownVisibleColumns.spend && <th className="px-5 py-3 whitespace-nowrap">Spend</th>}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-[12px] font-medium text-slate-700">
+                      {statusBreakdown.length === 0 ? (
+                        <tr>
+                          <td colSpan={7} className="px-5 py-8 text-center text-slate-400 italic">No campaign data yet.</td>
+                        </tr>
+                      ) : (
+                        statusBreakdown.map(row => (
+                          <tr key={row.status} className="hover:bg-slate-50/50 transition-colors">
+                            <td className="px-5 py-3 text-slate-900 font-semibold">{row.status}</td>
+                            <td className="px-5 py-3">{row.campaigns}</td>
+                            <td className="px-5 py-3">{row.totalLeads}</td>
+                            <td className="px-5 py-3">{row.qualifiedLeads}</td>
+                            {breakdownVisibleColumns.cpl && <td className="px-5 py-3">{row.cpl.toFixed(2)}</td>}
+                            {breakdownVisibleColumns.qcpl && <td className="px-5 py-3">{row.qcpl.toFixed(2)}</td>}
+                            {breakdownVisibleColumns.spend && <td className="px-5 py-3 font-semibold text-slate-800">{formatCurrency(row.spend)}</td>}
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </>
+                )}
+              </table>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <>
           {/* Action Toolbar (Date Picker Pill, Campaigns Dropdown, Filter Button) */}
           <div className="flex flex-wrap items-center justify-end gap-2.5 pt-1">
             {/* Date Range Picker Pill */}
