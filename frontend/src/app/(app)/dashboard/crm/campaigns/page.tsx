@@ -44,6 +44,7 @@ const QUALIFIED_LEAD_STATUSES = ["Interested", "Connected", "Visit Schedule", "S
 const UNQUALIFIED_LEAD_STATUSES = ["Dead", "Invalid", "RNR"];
 const SITE_VISIT_LEAD_STATUSES = ["Visit Schedule", "Site Visit"];
 const FOLLOW_UP_LEAD_STATUSES = ["Follow-ups", "Call Back"];
+const BOOKING_LEAD_STATUSES = ["Booking Done", "Booking Approved", "Booked"];
 
 // Same icon URLs the admin leads page uses for these platforms (LeadDashboard.tsx).
 const PLATFORM_ICON_URL: Partial<Record<CampaignItem["platform"], string>> = {
@@ -132,23 +133,35 @@ const BREAKDOWN_DEFAULT_VISIBLE_COLUMNS: Record<BreakdownColumnKey, boolean> = {
 // pipeline status (not campaign Active/Pause/Stopped) — one row per real
 // AdSpendRecord (its own date + accountName), with each status column
 // counting real Lead records for that campaign created on that date.
-type StatusColumnKey = "date" | "campaign" | "totalLeads" | "callBack" | "followUps" | "siteVisits" | "dead" | "rnr" | "lowBudget";
+// "Other Req." and "Cancelled" have no matching value in the real
+// LeadStatus enum (no fabricated bucket for them), so they render "—"
+// rather than a made-up count, same convention as every other untracked
+// column on this page.
+type StatusColumnKey =
+  | "date" | "campaign" | "totalLeads" | "source" | "newLead" | "callBack" | "followUps"
+  | "siteVisits" | "eoi" | "booked" | "dead" | "rnr" | "lowBudget" | "otherReq" | "cancelled";
 
 const STATUS_COLUMNS: { key: StatusColumnKey; label: string }[] = [
   { key: "date", label: "Date" },
   { key: "campaign", label: "Campaign" },
   { key: "totalLeads", label: "Total Leads" },
+  { key: "source", label: "Source" },
+  { key: "newLead", label: "New Lead" },
   { key: "callBack", label: "Call Back" },
   { key: "followUps", label: "Follow ups" },
   { key: "siteVisits", label: "Site Visits" },
+  { key: "eoi", label: "EOI" },
+  { key: "booked", label: "Booked" },
   { key: "dead", label: "Dead" },
   { key: "rnr", label: "RNR" },
-  { key: "lowBudget", label: "Low Budget" }
+  { key: "lowBudget", label: "Low Budget" },
+  { key: "otherReq", label: "Other Req." },
+  { key: "cancelled", label: "Cancelled" }
 ];
 
 const STATUS_DEFAULT_VISIBLE_COLUMNS: Record<StatusColumnKey, boolean> = {
-  date: true, campaign: true, totalLeads: true, callBack: true, followUps: true,
-  siteVisits: true, dead: true, rnr: true, lowBudget: true
+  date: true, campaign: true, totalLeads: true, source: false, newLead: false, callBack: true, followUps: true,
+  siteVisits: true, eoi: false, booked: false, dead: true, rnr: true, lowBudget: true, otherReq: false, cancelled: false
 };
 
 // The custom date-range calendar pill — used both by the Campaigns tab's
@@ -742,16 +755,23 @@ export default function AdminCampaignsPage() {
         && l.createdAtStr && l.createdAtStr.slice(0, 10) === rec.date
       );
       const countStatus = (statuses: string[]) => dayLeads.filter(l => statuses.includes(l.status)).length;
-      const [year, month, day] = rec.date.split("-");
+      const d = new Date(rec.date);
+      const dateLabel = isNaN(d.getTime())
+        ? rec.date
+        : d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
       return {
         id: rec.id,
         date: rec.date,
-        dateLabel: year && month && day ? `${day}-${month}-${year}` : rec.date,
+        dateLabel,
         campaign: rec.accountName,
+        platform: rec.platform,
         totalLeads: rec.leadsGenerated,
+        newLead: countStatus(["New Lead", "New", "New Leads"]),
         callBack: countStatus(["Call Back"]),
         followUps: countStatus(["Follow-ups"]),
         siteVisits: countStatus(SITE_VISIT_LEAD_STATUSES),
+        eoi: countStatus(["EOI Customers"]),
+        booked: countStatus(BOOKING_LEAD_STATUSES),
         dead: countStatus(["Dead"]),
         rnr: countStatus(["RNR"]),
         lowBudget: countStatus(["Low Budget"])
@@ -1346,12 +1366,18 @@ export default function AdminCampaignsPage() {
                         {statusVisibleColumns.date && <th className="px-5 py-3 whitespace-nowrap">Date</th>}
                         {statusVisibleColumns.campaign && <th className="px-5 py-3 whitespace-nowrap">Campaign</th>}
                         {statusVisibleColumns.totalLeads && <th className="px-5 py-3 whitespace-nowrap">Total Leads</th>}
+                        {statusVisibleColumns.source && <th className="px-5 py-3 whitespace-nowrap">Source</th>}
+                        {statusVisibleColumns.newLead && <th className="px-5 py-3 whitespace-nowrap">New Lead</th>}
                         {statusVisibleColumns.callBack && <th className="px-5 py-3 whitespace-nowrap">Call Back</th>}
                         {statusVisibleColumns.followUps && <th className="px-5 py-3 whitespace-nowrap">Follow ups</th>}
                         {statusVisibleColumns.siteVisits && <th className="px-5 py-3 whitespace-nowrap">Site Visits</th>}
+                        {statusVisibleColumns.eoi && <th className="px-5 py-3 whitespace-nowrap">EOI</th>}
+                        {statusVisibleColumns.booked && <th className="px-5 py-3 whitespace-nowrap">Booked</th>}
                         {statusVisibleColumns.dead && <th className="px-5 py-3 whitespace-nowrap">Dead</th>}
                         {statusVisibleColumns.rnr && <th className="px-5 py-3 whitespace-nowrap">RNR</th>}
                         {statusVisibleColumns.lowBudget && <th className="px-5 py-3 whitespace-nowrap">Low Budget</th>}
+                        {statusVisibleColumns.otherReq && <th className="px-5 py-3 whitespace-nowrap">Other Req.</th>}
+                        {statusVisibleColumns.cancelled && <th className="px-5 py-3 whitespace-nowrap">Cancelled</th>}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-[12px] font-medium text-slate-700">
@@ -1362,15 +1388,21 @@ export default function AdminCampaignsPage() {
                       ) : (
                         statusDateBreakdown.map(row => (
                           <tr key={row.id} className="hover:bg-slate-50/50 transition-colors">
-                            {statusVisibleColumns.date && <td className="px-5 py-3 text-slate-700">{row.dateLabel}</td>}
+                            {statusVisibleColumns.date && <td className="px-5 py-3 text-slate-700 whitespace-nowrap">{row.dateLabel}</td>}
                             {statusVisibleColumns.campaign && <td className="px-5 py-3 text-slate-900 font-semibold">{row.campaign}</td>}
                             {statusVisibleColumns.totalLeads && <td className="px-5 py-3">{row.totalLeads}</td>}
+                            {statusVisibleColumns.source && <td className="px-5 py-3"><PlatformIcon platform={row.platform} /></td>}
+                            {statusVisibleColumns.newLead && <td className="px-5 py-3">{row.newLead}</td>}
                             {statusVisibleColumns.callBack && <td className="px-5 py-3">{row.callBack}</td>}
                             {statusVisibleColumns.followUps && <td className="px-5 py-3">{row.followUps}</td>}
                             {statusVisibleColumns.siteVisits && <td className="px-5 py-3">{row.siteVisits}</td>}
+                            {statusVisibleColumns.eoi && <td className="px-5 py-3">{row.eoi}</td>}
+                            {statusVisibleColumns.booked && <td className="px-5 py-3">{row.booked}</td>}
                             {statusVisibleColumns.dead && <td className="px-5 py-3">{row.dead}</td>}
                             {statusVisibleColumns.rnr && <td className="px-5 py-3">{row.rnr}</td>}
                             {statusVisibleColumns.lowBudget && <td className="px-5 py-3">{row.lowBudget}</td>}
+                            {statusVisibleColumns.otherReq && <td className="px-5 py-3 text-slate-300" title="Not tracked yet — no matching lead status defined">—</td>}
+                            {statusVisibleColumns.cancelled && <td className="px-5 py-3 text-slate-300" title="Not tracked yet — no matching lead status defined">—</td>}
                           </tr>
                         ))
                       )}
