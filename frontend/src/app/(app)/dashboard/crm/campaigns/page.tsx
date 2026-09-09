@@ -711,26 +711,35 @@ export default function AdminCampaignsPage() {
   const isTypeChecked = (type: string) => selectedChartTypes[type] !== false;
   const toggleChartType = (type: string) => setSelectedChartTypes(prev => ({ ...prev, [type]: !isTypeChecked(type) }));
 
-  // Grouped by campaignsList (not raw adSpendRecords) for both Platform and
-  // Status — same source, same per-campaign totalLeads/spend either way, so
-  // switching the grouping dimension can never change the grand total (it
-  // used to: Platform grouping counted real individual Lead records via
-  // platformFromText while Status grouping summed campaignsList.totalLeads,
-  // two different real numbers that don't agree — 989 vs 10888 for the same
-  // underlying leads).
+  // Spend still comes from campaignsList (its own real per-campaign spend,
+  // all-time — this card is shared by both tabs and isn't Date-Range-scoped
+  // for spend). Leads counts real individual synced Lead records instead of
+  // campaignsList[].totalLeads (the ad platform's own self-reported,
+  // un-date-scoped counter) — same source and same Date Range the top
+  // summary bar's Total Leads card uses, so this card's grand total always
+  // equals that card's number, whichever grouping dimension is active. A
+  // lead whose campaign/source doesn't match a known real campaign still
+  // gets counted (as "Other"/"Unmatched") rather than silently dropped —
+  // dropping it would make the totals disagree again depending on grouping.
   const typeBreakdown = useMemo(() => {
-    const groupKey = (c: CampaignItem) => (typeGroupBy === "Platform" ? c.platform : c.status);
     const map: Record<string, { spend: number; leads: number }> = {};
     campaignsList.forEach(c => {
-      const key = groupKey(c);
+      const key = typeGroupBy === "Platform" ? c.platform : c.status;
       if (!map[key]) map[key] = { spend: 0, leads: 0 };
       map[key].spend += c.spend;
-      map[key].leads += c.totalLeads;
+    });
+    (categoryLeadsInRange["Total Leads"] || []).forEach(l => {
+      const campaign = campaignByName[(l.campaign || l.source || "").toLowerCase()];
+      const key = typeGroupBy === "Platform"
+        ? (campaign ? campaign.platform : (platformFromText(l.source || l.campaign) || "Other"))
+        : (campaign ? campaign.status : "Unmatched");
+      if (!map[key]) map[key] = { spend: 0, leads: 0 };
+      map[key].leads += 1;
     });
     return Object.entries(map)
       .map(([type, v]) => ({ type, spend: v.spend, leads: v.leads }))
       .sort((a, b) => b.spend - a.spend);
-  }, [campaignsList, typeGroupBy]);
+  }, [campaignsList, categoryLeadsInRange, campaignByName, typeGroupBy]);
 
   const typeBreakdownTotal = typeBreakdown.filter(t => isTypeChecked(t.type)).reduce((acc, t) => acc + t.spend, 0);
   const typeBreakdownLeadsTotal = typeBreakdown.filter(t => isTypeChecked(t.type)).reduce((acc, t) => acc + t.leads, 0);
