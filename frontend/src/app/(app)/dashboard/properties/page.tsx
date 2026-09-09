@@ -24,6 +24,7 @@ import AddPropertyModal from "@/components/properties/AddPropertyModal";
 import MetaCampaignLinker from "@/components/properties/MetaCampaignLinker";
 import GoogleCampaignLinker from "@/components/properties/GoogleCampaignLinker";
 import SheetSourceLinker from "@/components/properties/SheetSourceLinker";
+import { MetaIcon, GoogleIcon, platformFromText } from "@/components/icons/ContactIcons";
 
 const ROWS_PER_PAGE_OPTIONS = [25, 50, 100];
 
@@ -36,7 +37,7 @@ function formatDateTime(iso?: string): string {
 }
 
 export default function PropertiesPage() {
-  const { properties, users, deleteProperty, editProperty, activeRole } = useApp();
+  const { properties, users, leads, deleteProperty, editProperty, activeRole } = useApp();
   const isAdmin = activeRole === "ADMIN";
 
   // Drawer (view/edit) state
@@ -94,6 +95,23 @@ export default function PropertiesPage() {
       return p.assignedTeam.length === 1 ? p.assignedTeam[0].name : `${p.assignedTeam.length} Members`;
     }
     return "All Members";
+  };
+
+  // Which ad platform(s) are actually generating leads for this property —
+  // read straight from the real leads tied to it (matched by property name,
+  // the same field every lead-to-property association in this app already
+  // uses), not from the separate Meta/Google campaign-linker config, which
+  // only tracks ad spend attribution and isn't necessarily where every lead
+  // came from.
+  const propertySourcePlatforms = (propertyName: string): ("Meta" | "Google")[] => {
+    const platforms = new Set<"Meta" | "Google">();
+    leads
+      .filter(l => l.property === propertyName)
+      .forEach(l => {
+        const platform = platformFromText(l.source || l.campaign);
+        if (platform) platforms.add(platform);
+      });
+    return Array.from(platforms);
   };
 
   const openDrawer = (p: Property, editMode: boolean) => {
@@ -329,13 +347,14 @@ export default function PropertiesPage() {
                   </button>
                 </th>
                 <th className="p-3.5">Assigned To</th>
+                <th className="p-3.5">Source</th>
                 <th className="p-3.5">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {pageRows.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="p-8 text-center text-slate-400 font-semibold italic">
+                  <td colSpan={8} className="p-8 text-center text-slate-400 font-semibold italic">
                     No properties match the current filters.
                   </td>
                 </tr>
@@ -353,6 +372,18 @@ export default function PropertiesPage() {
                     <td className="p-3.5 font-semibold text-slate-800">{p.price ? `${p.price}*` : "—"}</td>
                     <td className="p-3.5 text-slate-500 whitespace-nowrap">{formatDateTime(p.createdAt)}</td>
                     <td className="p-3.5 text-slate-600">{teamLabelForProperty(p)}</td>
+                    <td className="p-3.5">
+                      {(() => {
+                        const platforms = propertySourcePlatforms(p.name);
+                        if (platforms.length === 0) return <span className="text-slate-400">—</span>;
+                        return (
+                          <div className="flex items-center gap-1.5" title={platforms.join(" & ")}>
+                            {platforms.includes("Meta") && <MetaIcon className="h-4 w-4" />}
+                            {platforms.includes("Google") && <GoogleIcon className="h-4 w-4" />}
+                          </div>
+                        );
+                      })()}
+                    </td>
                     <td className="p-3.5">
                       <div className="flex items-center gap-1">
                         <button onClick={() => openDrawer(p, false)} className="p-1.5 rounded-lg text-slate-500 hover:text-brand-700 hover:bg-brand-50 transition-colors" title="View details">
