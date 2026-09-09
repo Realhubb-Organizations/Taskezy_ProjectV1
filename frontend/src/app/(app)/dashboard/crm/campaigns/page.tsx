@@ -578,10 +578,11 @@ export default function AdminCampaignsPage() {
   // records — the two are genuinely different real metrics (platforms
   // routinely report more leads than have been individually synced into
   // the CRM yet), and this total is the one that's meant to track ad
-  // platform intake. Its drill-down reflects that: it lists the real
-  // campaign-by-campaign breakdown that sums to this number (see the
-  // isTotalLeadsCampaignBreakdown branch below), not individual leads —
-  // there aren't that many individual Lead records to list.
+  // platform intake. Its drill-down, however, lists the real individual
+  // leads (pure lead details, same as every other card here) rather than
+  // a campaign breakdown — the two numbers can legitimately differ; the
+  // card is a platform-reported aggregate, the list is what's actually
+  // been synced.
   //
   // Qualified Leads/Site Visits/Follow Ups are current pipeline-status
   // snapshots over every real lead regardless of which campaign (or
@@ -1038,20 +1039,17 @@ export default function AdminCampaignsPage() {
               other four open the actual leads behind that number. Either
               way a search box lets the user narrow down a long list. */}
           {selectedCategory && (() => {
-            // "Active Campaigns" and "Total Leads" both drill into the real
-            // campaign-by-campaign breakdown (Total Leads is a platform-
-            // reported ad-spend aggregate, not a count of individual synced
-            // Lead records — see summaryMetrics above — so its drill-down
-            // has to be "which campaigns make up this number", same shape
-            // as Active Campaigns, just unfiltered by status). The other
-            // three (Qualified Leads/Site Visits/Follow Ups) are real
-            // individual-lead counts, so they drill into the leads
-            // themselves.
-            const isCampaignsTable = selectedCategory === "Active Campaigns" || selectedCategory === "Total Leads";
+            // "Active Campaigns" is the one card that's a count of campaigns
+            // rather than leads, so it's the only one that drills into the
+            // campaign table. Total Leads/Qualified Leads/Site Visits/Follow
+            // Ups all drill into the real, individual leads behind that
+            // number (pure lead details — Name/Phone/Status/Campaign),
+            // pulled from categoryLeads regardless of how the summary
+            // card's own number is computed.
+            const isCampaignsTable = selectedCategory === "Active Campaigns";
             const q = drillSearchQuery.trim().toLowerCase();
-            const campaignsSource = selectedCategory === "Active Campaigns" ? activeCampaignsDrill : campaignsList;
             const shownCampaigns = isCampaignsTable
-              ? campaignsSource.filter(c => !q || c.name.toLowerCase().includes(q))
+              ? activeCampaignsDrill.filter(c => !q || c.name.toLowerCase().includes(q))
               : [];
             const shownLeads = !isCampaignsTable
               ? (categoryLeads[selectedCategory] || []).filter(l =>
