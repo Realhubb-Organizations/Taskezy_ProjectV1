@@ -508,23 +508,24 @@ export default function AdminCampaignsPage() {
   };
 
   // Builds the campaigns list from a given set of ad-spend records — shared
-  // by campaignsList (records pre-filtered to the selected Date Range, so
-  // Total Leads/Spend/CPL/Active Campaigns are all genuinely accurate for
-  // whichever range is picked) and campaignsListAllTime (every record, no
-  // date filter, used only where full history is required regardless of
-  // Date Range — see campaignByName below).
+  // by campaignsList (records pre-filtered to the selected Date Range) and
+  // campaignsListAllTime (every record, no date filter — see campaignByName
+  // below).
   //
-  // totalLeads is the pure real sum of leadsGenerated across these
-  // records — deliberately NOT Math.max'd against the count of individually
-  // synced Lead records anymore. That blend used to occasionally push a
-  // campaign's total above its own leadsGenerated sum, which made the
-  // Analytics chart (built purely from per-day leadsGenerated) permanently
-  // unable to add up to the same grand total as this list, however the
-  // data was sliced — a real mismatch with no fix short of dropping the
-  // blend. Every card/chart that shows "Total Leads" now sums this exact
-  // same field, so they can never disagree again.
-  const buildCampaignsList = (records: AdSpendRecord[]): CampaignItem[] => {
-    const spendCampaignMap: Record<string, { spend: number; platformLeads: number; status: "Active" | "Pause" | "Stopped"; platform: "Meta" | "Google" | "Other"; property?: string }> = {};
+  // A campaign's totalLeads is the sum, over every real day it has data,
+  // of max(that day's platform-reported leadsGenerated, that day's real
+  // synced Lead count) — never less than what the platform reported, and
+  // never less than what's actually been synced into the CRM either. The
+  // max used to be taken once across the whole range instead of per day,
+  // which could push a campaign's range total above its own leadsGenerated
+  // sum in a way no per-day chart series could ever be sliced to add back
+  // up to — a real, unfixable mismatch. Taking the max per day instead
+  // means the exact same real per-(campaign, day) numbers (returned as
+  // leadsByDateByCampaign) can drive both a day-by-day chart AND the
+  // range's grand total, and the two are then mathematically guaranteed to
+  // always agree, however the data is sliced.
+  const buildCampaignsList = (records: AdSpendRecord[]): { items: CampaignItem[]; leadsByDateByCampaign: Record<string, Record<string, number>> } => {
+    const spendCampaignMap: Record<string, { spend: number; platformLeadsByDate: Record<string, number>; status: "Active" | "Pause" | "Stopped"; platform: "Meta" | "Google" | "Other"; property?: string }> = {};
 
     records.forEach(rec => {
       const name = rec.accountName;
@@ -539,7 +540,7 @@ export default function AdminCampaignsPage() {
 
         spendCampaignMap[name] = {
           spend: 0,
-          platformLeads: 0,
+          platformLeadsByDate: {},
           status: st,
           platform: plat,
           property: rec.property
@@ -547,10 +548,11 @@ export default function AdminCampaignsPage() {
       }
       if (!spendCampaignMap[name].property && rec.property) spendCampaignMap[name].property = rec.property;
       spendCampaignMap[name].spend += rec.spend;
-      spendCampaignMap[name].platformLeads += rec.leadsGenerated;
+      spendCampaignMap[name].platformLeadsByDate[rec.date] = (spendCampaignMap[name].platformLeadsByDate[rec.date] || 0) + rec.leadsGenerated;
     });
 
     const result: CampaignItem[] = [];
+    const leadsByDateByCampaign: Record<string, Record<string, number>> = {};
 
     Object.keys(spendCampaignMap).forEach((cName, idx) => {
       if (!result.some(r => r.name.toLowerCase() === cName.toLowerCase())) {
@@ -560,7 +562,23 @@ export default function AdminCampaignsPage() {
         // today should still count even if it came in last week, so those
         // read off every matched lead regardless of creation date.
         const campaignLeads = leads.filter(l => (l.campaign || l.source)?.toLowerCase() === cName.toLowerCase());
-        const total = item.platformLeads;
+
+        const syncedLeadsByDate: Record<string, number> = {};
+        campaignLeads.forEach(l => {
+          if (!l.createdAtStr) return;
+          const d = new Date(l.createdAtStr);
+          if (isNaN(d.getTime())) return;
+          const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+          syncedLeadsByDate[key] = (syncedLeadsByDate[key] || 0) + 1;
+        });
+
+        const perDayMax: Record<string, number> = {};
+        new Set([...Object.keys(item.platformLeadsByDate), ...Object.keys(syncedLeadsByDate)]).forEach(date => {
+          perDayMax[date] = Math.max(item.platformLeadsByDate[date] || 0, syncedLeadsByDate[date] || 0);
+        });
+        leadsByDateByCampaign[cName] = perDayMax;
+
+        const total = Object.values(perDayMax).reduce((acc, v) => acc + v, 0);
         const qualified = campaignLeads.filter(l => QUALIFIED_LEAD_STATUSES.includes(l.status)).length;
         const unqualified = campaignLeads.filter(l => UNQUALIFIED_LEAD_STATUSES.includes(l.status)).length;
         const siteVisits = campaignLeads.filter(l => SITE_VISIT_LEAD_STATUSES.includes(l.status)).length;
@@ -582,20 +600,24 @@ export default function AdminCampaignsPage() {
       }
     });
 
-    return result;
+    return { items: result, leadsByDateByCampaign };
   };
 
   // The real, Date-Range-scoped campaigns list — Total Leads is the sum of
-  // every campaign's own leadsGenerated (Meta + Google + Other) within the
-  // selected range, so "All Time" gives the true platform-reported grand
-  // total and narrower ranges (Today/This Week/...) give real, smaller
-  // numbers instead of always showing the same all-time figure. Drives the
-  // Campaigns tab table, Active Campaigns/Total Leads cards, the Campaign
-  // Type/Status breakdown, Deep Dive, and CSV export.
-  const campaignsList: CampaignItem[] = useMemo(
+  // every campaign's own real per-day leads (see buildCampaignsList) within
+  // the selected range, so "All Time" gives the true platform-reported
+  // grand total and narrower ranges (Today/This Week/...) give real,
+  // smaller numbers instead of always showing the same all-time figure.
+  // Drives the Campaigns tab table, Active Campaigns/Total Leads cards,
+  // the Campaign Type/Status breakdown, Deep Dive, and CSV export.
+  // leadsByDateByCampaignInRange is reused as-is by the Analytics chart so
+  // its Total Leads line always adds up to this same grand total.
+  const campaignsListResult = useMemo(
     () => buildCampaignsList(adSpendRecords.filter(recordInSelectedRange)),
     [adSpendRecords, leads, appliedCustomRange, dateRange, today]
   );
+  const campaignsList: CampaignItem[] = campaignsListResult.items;
+  const leadsByDateByCampaignInRange = campaignsListResult.leadsByDateByCampaign;
 
   // Same real campaigns, but always all-time — a campaign's status
   // (Active/Pause/Stopped) and platform are snapshot properties of the
@@ -606,7 +628,7 @@ export default function AdminCampaignsPage() {
   // Status breakdown's checkboxes so a type never disappears from the list
   // just because it had no activity in the current range.
   const campaignsListAllTime: CampaignItem[] = useMemo(
-    () => buildCampaignsList(adSpendRecords),
+    () => buildCampaignsList(adSpendRecords).items,
     [adSpendRecords, leads]
   );
 
@@ -803,21 +825,31 @@ export default function AdminCampaignsPage() {
       }
       if (!byDate[r.date]) byDate[r.date] = { spend: 0, leads: 0 };
       byDate[r.date].spend += r.spend;
-      // "Total Leads" plots the same real per-day platform-reported
-      // leadsGenerated that campaignsList[].totalLeads sums for the
-      // breakdown card and the top summary bar — reusing this same loop
-      // (same date/platform/status filters already applied above for
-      // Spend) so the chart's Total Leads line always adds up to exactly
-      // the same grand total those cards show, never a different real
-      // number under the same label.
-      if (chartCategory === "Total Leads") byDate[r.date].leads += r.leadsGenerated;
     });
 
-    // Qualified Leads/Site Visits/Follow Ups/Active Campaigns have no
-    // platform-reported equivalent (Meta/Google don't report CRM pipeline
-    // status) — those stay real per-day counts of individual synced Lead
-    // records, same Date-Range-scoped list the drill-down card uses.
-    if (chartCategory !== "Total Leads") {
+    if (chartCategory === "Total Leads") {
+      // Same real per-(campaign, day) max(platform-reported, synced)
+      // values campaignsList sums for its own totalLeads — reused here so
+      // the chart's Total Leads line always adds up to exactly the same
+      // grand total shown on the breakdown card and top summary bar.
+      Object.entries(leadsByDateByCampaignInRange).forEach(([cName, perDate]) => {
+        const c = campaignByName[cName.toLowerCase()];
+        if (typeGroupBy === "Platform") {
+          if (!c || !includedPlatforms.has(c.platform)) return;
+        } else {
+          if (!c || !includedStatuses.has(c.status)) return;
+        }
+        Object.entries(perDate).forEach(([date, count]) => {
+          if (!byDate[date]) byDate[date] = { spend: 0, leads: 0 };
+          byDate[date].leads += count;
+        });
+      });
+    } else {
+      // Qualified Leads/Site Visits/Follow Ups/Active Campaigns have no
+      // platform-reported equivalent (Meta/Google don't report CRM
+      // pipeline status) — those stay real per-day counts of individual
+      // synced Lead records, same Date-Range-scoped list the drill-down
+      // card uses.
       (categoryLeadsInRange[chartCategory] || []).forEach(l => {
         const campaign = campaignByName[(l.campaign || l.source || "").toLowerCase()];
         if (typeGroupBy === "Platform") {
@@ -842,7 +874,7 @@ export default function AdminCampaignsPage() {
         : `${d.toLocaleDateString("en-GB", { day: "2-digit" })} ${d.toLocaleDateString("en-GB", { month: "short" })}, ${d.getFullYear()}`;
       return { date, label, spend: byDate[date].spend, leads: byDate[date].leads };
     });
-  }, [adSpendRecords, campaignByName, categoryLeadsInRange, chartCategory, typeGroupBy, selectedChartTypes, typeBreakdown, dateRange, appliedCustomRange, today]);
+  }, [adSpendRecords, campaignByName, categoryLeadsInRange, leadsByDateByCampaignInRange, chartCategory, typeGroupBy, selectedChartTypes, typeBreakdown, dateRange, appliedCustomRange, today]);
 
   const chartSpendAverage = chartData.length === 0 ? 0 : chartData.reduce((acc, c) => acc + c.spend, 0) / chartData.length;
   const chartLeadsAverage = chartData.length === 0 ? 0 : chartData.reduce((acc, c) => acc + c.leads, 0) / chartData.length;
