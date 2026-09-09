@@ -4,7 +4,7 @@ import React, { useState, useRef, useMemo, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useApp, Lead } from "@/context/AppContext";
 import { computeCPL } from "@/lib/reportMetrics";
-import { WhatsAppIcon, CallIcon, platformFromText } from "@/components/icons/ContactIcons";
+import { WhatsAppIcon, CallIcon } from "@/components/icons/ContactIcons";
 import {
   ChevronDown,
   Calendar,
@@ -651,25 +651,26 @@ export default function AdminCampaignsPage() {
   const isTypeChecked = (type: string) => selectedChartTypes[type] !== false;
   const toggleChartType = (type: string) => setSelectedChartTypes(prev => ({ ...prev, [type]: !isTypeChecked(type) }));
 
+  // Grouped by campaignsList (not raw adSpendRecords) for both Platform and
+  // Status — same source, same per-campaign totalLeads/spend either way, so
+  // switching the grouping dimension can never change the grand total (it
+  // used to: Platform grouping counted real individual Lead records via
+  // platformFromText while Status grouping summed campaignsList.totalLeads,
+  // two different real numbers that don't agree — 989 vs 10888 for the same
+  // underlying leads).
   const typeBreakdown = useMemo(() => {
-    const spendMap: Record<string, number> = {};
-    if (typeGroupBy === "Platform") {
-      adSpendRecords.forEach(r => { spendMap[r.platform] = (spendMap[r.platform] || 0) + r.spend; });
-    } else {
-      campaignsList.forEach(c => { spendMap[c.status] = (spendMap[c.status] || 0) + c.spend; });
-    }
-    return Object.keys(spendMap).map(type => {
-      // Exact real lead count per type — for Platform, every real Lead
-      // classified to that platform (same platformFromText classification
-      // used everywhere else in the app, not the ad platform's own
-      // self-reported leadsGenerated); for Status, each real campaign's
-      // own totalLeads summed for campaigns currently in that status.
-      const leadCount = typeGroupBy === "Platform"
-        ? leads.filter(l => platformFromText(l.source || l.campaign) === type).length
-        : campaignsList.filter(c => c.status === type).reduce((sum, c) => sum + c.totalLeads, 0);
-      return { type, spend: spendMap[type], leads: leadCount };
-    }).sort((a, b) => b.spend - a.spend);
-  }, [adSpendRecords, campaignsList, leads, typeGroupBy]);
+    const groupKey = (c: CampaignItem) => (typeGroupBy === "Platform" ? c.platform : c.status);
+    const map: Record<string, { spend: number; leads: number }> = {};
+    campaignsList.forEach(c => {
+      const key = groupKey(c);
+      if (!map[key]) map[key] = { spend: 0, leads: 0 };
+      map[key].spend += c.spend;
+      map[key].leads += c.totalLeads;
+    });
+    return Object.entries(map)
+      .map(([type, v]) => ({ type, spend: v.spend, leads: v.leads }))
+      .sort((a, b) => b.spend - a.spend);
+  }, [campaignsList, typeGroupBy]);
 
   const typeBreakdownTotal = typeBreakdown.filter(t => isTypeChecked(t.type)).reduce((acc, t) => acc + t.spend, 0);
   const typeBreakdownLeadsTotal = typeBreakdown.filter(t => isTypeChecked(t.type)).reduce((acc, t) => acc + t.leads, 0);
@@ -1435,7 +1436,7 @@ export default function AdminCampaignsPage() {
                   )}
                 </div>
               </div>
-              <div className="grid grid-cols-[1fr_auto_auto] gap-x-4 items-center text-[10px] font-bold text-slate-400 uppercase pb-2 border-b border-slate-100">
+              <div className="grid grid-cols-[1fr_64px_112px] gap-x-4 items-center text-[10px] font-bold text-slate-400 uppercase pb-2 border-b border-slate-100">
                 <span>{typeGroupBy === "Platform" ? "Type" : "Status"}</span>
                 <span className="text-right">Leads</span>
                 <span className="text-right">Spend</span>
@@ -1445,7 +1446,7 @@ export default function AdminCampaignsPage() {
                   <p className="text-xs text-slate-400 italic py-4 text-center">No data yet.</p>
                 ) : (
                   typeBreakdown.map(t => (
-                    <label key={t.type} className="grid grid-cols-[1fr_auto_auto] gap-x-4 items-center py-2 text-xs cursor-pointer">
+                    <label key={t.type} className="grid grid-cols-[1fr_64px_112px] gap-x-4 items-center py-2 text-xs cursor-pointer">
                       <span className="flex items-center gap-2 min-w-0">
                         <input
                           type="checkbox"
@@ -1464,7 +1465,7 @@ export default function AdminCampaignsPage() {
                   ))
                 )}
               </div>
-              <div className="grid grid-cols-[1fr_auto_auto] gap-x-4 items-center pt-2 mt-2 border-t border-slate-200 text-xs font-bold text-slate-900">
+              <div className="grid grid-cols-[1fr_64px_112px] gap-x-4 items-center pt-2 mt-2 border-t border-slate-200 text-xs font-bold text-slate-900">
                 <span>Total</span>
                 <span className="text-right">{typeBreakdownLeadsTotal.toLocaleString("en-IN")}</span>
                 <span className="text-right">{formatCurrency(typeBreakdownTotal)}</span>
