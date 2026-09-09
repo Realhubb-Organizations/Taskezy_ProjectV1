@@ -7,6 +7,7 @@ import { useApp, Lead, LeadStatus } from "@/context/AppContext";
 import AddLeadModal from "@/components/crm/AddLeadModal";
 import PendingLeadsTable, { PendingRow } from "@/components/dashboard/PendingLeadsTable";
 import { DB_CODE_TO_FRONTEND_STATUS, deriveActivityTimeline } from "@/lib/leadStatusMapping";
+import { computeLeadSummaryStats } from "@/lib/leadSummaryStats";
 import { WhatsAppIcon, CallIcon } from "@/components/icons/ContactIcons";
 import { ChevronDown, Plus, CheckCircle, Phone, Mail, X, Copy, Check, User, Search, ArrowRight } from "lucide-react";
 
@@ -174,49 +175,40 @@ export default function CrmDashboardPage() {
   });
 
   const now = new Date();
-  // "Date Range" filters by when a lead was *created* — meaningful for "how
-  // many leads came in today", but wrong for a status like RNR: a lead
-  // created last week that gets marked RNR today would be created-date
-  // "not today" and silently disappear from the count even though it's
-  // sitting in RNR right now. Total Leads/New Leads use it (they're about
-  // intake volume); every other card below reflects the lead's current
-  // status regardless of when it was created — a live pipeline snapshot,
-  // not an intake-date snapshot.
+  // Every card below now respects Date Range — including RNR/Call Backs/
+  // Follow Ups/Site Visit Scheduled/Site Visit Done, which used to
+  // deliberately stay all-time live-pipeline snapshots (a lead created
+  // last week that's marked RNR today would used to still count; it won't
+  // now unless it was also created within the selected range). The user
+  // explicitly chose full Date Range reactivity across every admin CRM
+  // page over that older behavior. computeLeadSummaryStats is the single
+  // shared source for these 7 predicates — the admin Leads page and the
+  // Campaigns page's top bar call the exact same function, so a same-
+  // named card can never drift into a different real number per page.
   const rangeLeads = scopedLeads.filter(l => dateInRange(l.createdAtStr, dateRange, now));
+  const stats = computeLeadSummaryStats(scopedLeads, l => dateInRange(l.createdAtStr, dateRange, now));
 
-  const totalLeadsCount = rangeLeads.length;
-  const newLeadsCount = rangeLeads.filter(l => l.status === "New Lead").length;
-  const rnrCount = scopedLeads.filter(l => l.status === "RNR").length;
-  // "Call Backs" deliberately reads the lead's own status (like every other
-  // card here) rather than the followup_calls table: a FollowupCall row is
-  // only created when an agent also fills in the optional reminder date/time
-  // picker after changing status, so sourcing this metric from that table
-  // would silently show 0 even when leads are genuinely sitting in Call Back.
-  const callBacksCount = scopedLeads.filter(l => l.status === "Call Back").length;
-  const followUpsCount = scopedLeads.filter(l => l.status === "Follow-ups").length;
-  const siteVisitScheduledCount = scopedLeads.filter(l => l.status === "Visit Schedule").length;
-  const siteVisitDoneCount = scopedLeads.filter(l => l.status === "Site Visit").length;
-
-  // Each card's real underlying lead list — same predicates as the counts
-  // above — so clicking a card can drill into exactly what it counted.
+  // Each card's real underlying lead list — same predicates
+  // computeLeadSummaryStats uses — so clicking a card can drill into
+  // exactly what it counted.
   const categoryLeads: Record<string, Lead[]> = {
     "Total Leads": rangeLeads,
     "New Leads": rangeLeads.filter(l => l.status === "New Lead"),
-    "RNR": scopedLeads.filter(l => l.status === "RNR"),
-    "Call Backs": scopedLeads.filter(l => l.status === "Call Back"),
-    "Follow Ups": scopedLeads.filter(l => l.status === "Follow-ups"),
-    "Site Visit Scheduled": scopedLeads.filter(l => l.status === "Visit Schedule"),
-    "Site Visit Done": scopedLeads.filter(l => l.status === "Site Visit")
+    "RNR": rangeLeads.filter(l => l.status === "RNR"),
+    "Call Backs": rangeLeads.filter(l => l.status === "Call Back"),
+    "Follow Ups": rangeLeads.filter(l => l.status === "Follow-ups"),
+    "Site Visit Scheduled": rangeLeads.filter(l => l.status === "Visit Schedule"),
+    "Site Visit Done": rangeLeads.filter(l => l.status === "Site Visit")
   };
 
   const statCards: { label: string; value: number; color: string }[] = [
-    { label: "Total Leads", value: totalLeadsCount, color: "text-slate-900" },
-    { label: "New Leads", value: newLeadsCount, color: "text-[#0084FF]" },
-    { label: "RNR", value: rnrCount, color: "text-[#FF0000]" },
-    { label: "Call Backs", value: callBacksCount, color: "text-[#FF8C00]" },
-    { label: "Follow Ups", value: followUpsCount, color: "text-[#0084FF]" },
-    { label: "Site Visit Scheduled", value: siteVisitScheduledCount, color: "text-[#FF0000]" },
-    { label: "Site Visit Done", value: siteVisitDoneCount, color: "text-[#015814]" }
+    { label: "Total Leads", value: stats.totalLeads, color: "text-slate-900" },
+    { label: "New Leads", value: stats.newLeads, color: "text-[#0084FF]" },
+    { label: "RNR", value: stats.rnr, color: "text-[#FF0000]" },
+    { label: "Call Backs", value: stats.callBacks, color: "text-[#FF8C00]" },
+    { label: "Follow Ups", value: stats.followUps, color: "text-[#0084FF]" },
+    { label: "Site Visit Scheduled", value: stats.siteVisitScheduled, color: "text-[#FF0000]" },
+    { label: "Site Visit Done", value: stats.siteVisitDone, color: "text-[#015814]" }
   ];
 
   const toggleCategory = (label: string) => {
