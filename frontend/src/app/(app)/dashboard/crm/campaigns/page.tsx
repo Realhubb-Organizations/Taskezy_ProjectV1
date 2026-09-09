@@ -541,7 +541,7 @@ export default function AdminCampaignsPage() {
   // leadsByDateByCampaign) can drive both a day-by-day chart AND the
   // range's grand total, and the two are then mathematically guaranteed to
   // always agree, however the data is sliced.
-  const buildCampaignsList = (records: AdSpendRecord[], leadDateFilter: (l: Lead) => boolean): { items: CampaignItem[]; leadsByDateByCampaign: Record<string, Record<string, number>> } => {
+  const buildCampaignsList = (records: AdSpendRecord[], leadDateFilter: (l: Lead) => boolean): { items: CampaignItem[]; leadsByDateByCampaign: Record<string, Record<string, number>>; platformReportedTotal: number } => {
     const spendCampaignMap: Record<string, { spend: number; platformLeadsByDate: Record<string, number>; status: "Active" | "Pause" | "Stopped"; platform: "Meta" | "Google" | "Other"; property?: string }> = {};
 
     records.forEach(rec => {
@@ -570,10 +570,17 @@ export default function AdminCampaignsPage() {
 
     const result: CampaignItem[] = [];
     const leadsByDateByCampaign: Record<string, Record<string, number>> = {};
+    // Pure ad-platform self-reported total (Meta + Google + Other's own
+    // leadsGenerated, unblended with any synced-lead boost) — shown
+    // alongside the real synced-lead count on the Total Leads card so an
+    // admin can see both numbers and how far apart they are, instead of
+    // just one blended figure.
+    let platformReportedTotal = 0;
 
     Object.keys(spendCampaignMap).forEach((cName, idx) => {
       if (!result.some(r => r.name.toLowerCase() === cName.toLowerCase())) {
         const item = spendCampaignMap[cName];
+        platformReportedTotal += Object.values(item.platformLeadsByDate).reduce((acc, v) => acc + v, 0);
         // Qualified/Unqualified/Site Visit are current pipeline status
         // snapshots (like the CRM Dashboard's own cards) — a lead qualified
         // today should still count even if it came in last week, so those
@@ -625,7 +632,7 @@ export default function AdminCampaignsPage() {
       }
     });
 
-    return { items: result, leadsByDateByCampaign };
+    return { items: result, leadsByDateByCampaign, platformReportedTotal };
   };
 
   // The real, Date-Range-scoped campaigns list — each campaign's own
@@ -641,6 +648,10 @@ export default function AdminCampaignsPage() {
     [adSpendRecords, leads, appliedCustomRange, dateRange, today]
   );
   const campaignsList: CampaignItem[] = campaignsListResult.items;
+  // Pure Meta+Google+Other self-reported total for the same Date Range —
+  // shown alongside the real synced-lead Total Leads count so both real
+  // numbers are visible together, not just one.
+  const platformReportedLeadsTotal = campaignsListResult.platformReportedTotal;
 
   // Same real campaigns, but always all-time — a campaign's status
   // (Active/Pause/Stopped) and platform are snapshot properties of the
@@ -1219,12 +1230,18 @@ export default function AdminCampaignsPage() {
                 same "open the respective card" pattern as the CRM Dashboard. */}
             <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 bg-white divide-y sm:divide-y-0 sm:divide-x divide-slate-100">
               {([
-                { label: "Active Campaigns", value: summaryMetrics.activeCampaigns, color: "text-slate-900" },
-                { label: "Total Leads", value: summaryMetrics.totalLeads, color: "text-slate-900" },
-                { label: "Qualified Leads", value: summaryMetrics.qualifiedLeads, color: "text-rose-600" },
-                { label: "Site Visits", value: summaryMetrics.siteVisits, color: "text-amber-500" },
-                { label: "Follow Ups", value: summaryMetrics.followUps, color: "text-blue-500" },
-                { label: "Call Backs", value: summaryMetrics.callBacks, color: "text-orange-500" }
+                { label: "Active Campaigns", value: summaryMetrics.activeCampaigns, color: "text-slate-900", subtitle: null as string | null },
+                // Real synced-lead count is the main number; the ad
+                // platforms' own self-reported total (Meta + Google +
+                // Other's leadsGenerated, same Date Range) is shown
+                // alongside it so both real numbers are visible together —
+                // they're genuinely different metrics and can legitimately
+                // differ, this isn't a mismatch to resolve.
+                { label: "Total Leads", value: summaryMetrics.totalLeads, color: "text-slate-900", subtitle: `${platformReportedLeadsTotal.toLocaleString("en-IN")} platform-reported` },
+                { label: "Qualified Leads", value: summaryMetrics.qualifiedLeads, color: "text-rose-600", subtitle: null },
+                { label: "Site Visits", value: summaryMetrics.siteVisits, color: "text-amber-500", subtitle: null },
+                { label: "Follow Ups", value: summaryMetrics.followUps, color: "text-blue-500", subtitle: null },
+                { label: "Call Backs", value: summaryMetrics.callBacks, color: "text-orange-500", subtitle: null }
               ] as const).map(s => {
                 const isActive = selectedCategory === s.label;
                 return (
@@ -1239,6 +1256,7 @@ export default function AdminCampaignsPage() {
                     <div>
                       <span className="text-[11px] font-medium text-slate-500 block">{s.label}</span>
                       <span className={`text-lg font-extrabold mt-1.5 block ${s.color}`}>{s.value}</span>
+                      {s.subtitle && <span className="text-[10px] text-slate-400 block mt-0.5" title="Meta + Google + Other's own self-reported total for this Date Range">{s.subtitle}</span>}
                     </div>
                     <ChevronRight className={`h-3.5 w-3.5 text-slate-300 transition-transform ${isActive ? "rotate-90 text-blue-500" : "group-hover:translate-x-0.5"}`} />
                   </button>
