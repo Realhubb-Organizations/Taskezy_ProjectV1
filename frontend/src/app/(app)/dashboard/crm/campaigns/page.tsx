@@ -302,8 +302,8 @@ export default function AdminCampaignsPage() {
   const [drillSearchQuery, setDrillSearchQuery] = useState("");
   const [drillPage, setDrillPage] = useState(1);
   const [drillRowsPerPage, setDrillRowsPerPage] = useState(8);
-  // toggleCategory is defined further below, once chartCategory exists —
-  // it also drives which category the Spend/Leads chart's Leads line shows.
+  // toggleCategory (opens/closes the drill-down) is defined further below —
+  // it's independent of the chart's own category dropdown.
 
   // Same scroll-spy + synced-pagination pattern used on the admin Leads
   // table: rows render continuously in a capped-height scroll container,
@@ -645,25 +645,23 @@ export default function AdminCampaignsPage() {
 
   // ---- Campaigns Analytics tab ----------------------------------------
 
-  // Chart: real spend AND real lead counts shown together, always both —
-  // no metric switcher. The "leads" side is scoped to whichever top stat
-  // card was last clicked (defaults to Total Leads), using the exact same
-  // categoryLeads lists the drill-down cards use, so the chart and the
-  // drill-down a click opens are always reading the same real data.
+  // Chart: real spend AND real lead counts shown together, always both.
+  // Which category the "leads" side is scoped to is picked explicitly via
+  // its own dropdown (below) — independent of the top stat cards, which
+  // only open/close their drill-down — so browsing a drill-down never
+  // silently changes what the chart is plotting. Defaults to Total Leads,
+  // using the exact same categoryLeads lists the drill-down cards use.
   const CHART_CATEGORIES = ["Active Campaigns", "Total Leads", "Qualified Leads", "Site Visits", "Follow Ups"] as const;
   type ChartCategory = typeof CHART_CATEGORIES[number];
   const [chartCategory, setChartCategory] = useState<ChartCategory>("Total Leads");
+  const [chartCategoryMenuOpen, setChartCategoryMenuOpen] = useState(false);
+  const [chartCategoryMenuPos, setChartCategoryMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const chartCategoryBtnRef = useRef<HTMLButtonElement>(null);
 
-  // Clicking a top stat card both opens its drill-down (as before) and
-  // switches the chart's "leads" series to that same category — so the
-  // chart always reflects whichever number the admin just looked at.
   const toggleCategory = (label: string) => {
     setSelectedCategory(prev => (prev === label ? null : label));
     setDrillSearchQuery("");
     setDrillPage(1);
-    if ((CHART_CATEGORIES as readonly string[]).includes(label)) {
-      setChartCategory(label as ChartCategory);
-    }
   };
 
   // "Campaign Type" breakdown can group real ad-spend by Platform (Meta/
@@ -816,19 +814,20 @@ export default function AdminCampaignsPage() {
   // visually detaches from its button) if the page scrolls while open —
   // closing on scroll is simpler and safer than re-measuring position live.
   useEffect(() => {
-    const anyOpen = summaryDateMenuOpen || statusColumnMenuOpen
+    const anyOpen = summaryDateMenuOpen || statusColumnMenuOpen || chartCategoryMenuOpen
       || typeGroupByMenuOpen || breakdownCampaignMenuOpen || deepDiveSourceMenuOpen;
     if (!anyOpen) return;
     const closeAll = () => {
       setSummaryDateMenuOpen(false);
       setStatusColumnMenuOpen(false);
+      setChartCategoryMenuOpen(false);
       setTypeGroupByMenuOpen(false);
       setBreakdownCampaignMenuOpen(false);
       setDeepDiveSourceMenuOpen(false);
     };
     window.addEventListener("scroll", closeAll, true);
     return () => window.removeEventListener("scroll", closeAll, true);
-  }, [summaryDateMenuOpen, statusColumnMenuOpen, typeGroupByMenuOpen, breakdownCampaignMenuOpen, deepDiveSourceMenuOpen]);
+  }, [summaryDateMenuOpen, statusColumnMenuOpen, chartCategoryMenuOpen, typeGroupByMenuOpen, breakdownCampaignMenuOpen, deepDiveSourceMenuOpen]);
 
   const deepDiveSourceOptions = useMemo(() => Array.from(new Set(campaignsList.map(c => c.platform))), [campaignsList]);
 
@@ -1387,7 +1386,37 @@ export default function AdminCampaignsPage() {
             <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm p-5">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-semibold text-slate-500">Spend &amp; Leads over time</span>
-                <span className="text-[11px] font-semibold text-amber-600 bg-amber-50 rounded-full px-2.5 py-0.5">{chartCategory}</span>
+                <div className="relative">
+                  <button
+                    type="button"
+                    ref={chartCategoryBtnRef}
+                    onClick={() => openPositionedMenu(chartCategoryBtnRef, setChartCategoryMenuPos, setChartCategoryMenuOpen, "right", 160)}
+                    className="flex items-center gap-1.5 bg-white border border-slate-300/80 rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+                  >
+                    {chartCategory}
+                    <ChevronDown className={`h-3 w-3 text-slate-400 transition-transform ${chartCategoryMenuOpen ? "rotate-180" : ""}`} />
+                  </button>
+                  {chartCategoryMenuOpen && chartCategoryMenuPos && createPortal(
+                    <>
+                      <div className="fixed inset-0 z-[60]" onClick={() => setChartCategoryMenuOpen(false)} />
+                      <div
+                        className="fixed z-[70] bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 overflow-hidden text-xs font-semibold"
+                        style={{ top: chartCategoryMenuPos.top, left: chartCategoryMenuPos.left, width: 160 }}
+                      >
+                        {CHART_CATEGORIES.map(opt => (
+                          <button
+                            key={opt}
+                            onClick={() => { setChartCategory(opt); setChartCategoryMenuOpen(false); }}
+                            className={`w-full text-left px-3 py-1.5 transition-colors ${chartCategory === opt ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"}`}
+                          >
+                            {opt}
+                          </button>
+                        ))}
+                      </div>
+                    </>,
+                    document.body
+                  )}
+                </div>
               </div>
               {chartData.length === 0 ? (
                 <div className="h-[260px] flex items-center justify-center text-xs text-slate-400 italic">
