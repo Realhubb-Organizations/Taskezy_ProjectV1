@@ -4,7 +4,7 @@ import React, { useState, useRef, useMemo, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useApp, Lead } from "@/context/AppContext";
 import { computeCPL } from "@/lib/reportMetrics";
-import { WhatsAppIcon, CallIcon } from "@/components/icons/ContactIcons";
+import { WhatsAppIcon, CallIcon, platformFromText } from "@/components/icons/ContactIcons";
 import {
   ChevronDown,
   Calendar,
@@ -652,16 +652,27 @@ export default function AdminCampaignsPage() {
   const toggleChartType = (type: string) => setSelectedChartTypes(prev => ({ ...prev, [type]: !isTypeChecked(type) }));
 
   const typeBreakdown = useMemo(() => {
-    const map: Record<string, number> = {};
+    const spendMap: Record<string, number> = {};
     if (typeGroupBy === "Platform") {
-      adSpendRecords.forEach(r => { map[r.platform] = (map[r.platform] || 0) + r.spend; });
+      adSpendRecords.forEach(r => { spendMap[r.platform] = (spendMap[r.platform] || 0) + r.spend; });
     } else {
-      campaignsList.forEach(c => { map[c.status] = (map[c.status] || 0) + c.spend; });
+      campaignsList.forEach(c => { spendMap[c.status] = (spendMap[c.status] || 0) + c.spend; });
     }
-    return Object.entries(map).map(([type, spend]) => ({ type, spend })).sort((a, b) => b.spend - a.spend);
-  }, [adSpendRecords, campaignsList, typeGroupBy]);
+    return Object.keys(spendMap).map(type => {
+      // Exact real lead count per type — for Platform, every real Lead
+      // classified to that platform (same platformFromText classification
+      // used everywhere else in the app, not the ad platform's own
+      // self-reported leadsGenerated); for Status, each real campaign's
+      // own totalLeads summed for campaigns currently in that status.
+      const leadCount = typeGroupBy === "Platform"
+        ? leads.filter(l => platformFromText(l.source || l.campaign) === type).length
+        : campaignsList.filter(c => c.status === type).reduce((sum, c) => sum + c.totalLeads, 0);
+      return { type, spend: spendMap[type], leads: leadCount };
+    }).sort((a, b) => b.spend - a.spend);
+  }, [adSpendRecords, campaignsList, leads, typeGroupBy]);
 
   const typeBreakdownTotal = typeBreakdown.filter(t => isTypeChecked(t.type)).reduce((acc, t) => acc + t.spend, 0);
+  const typeBreakdownLeadsTotal = typeBreakdown.filter(t => isTypeChecked(t.type)).reduce((acc, t) => acc + t.leads, 0);
 
   const chartData = useMemo(() => {
     const includedPlatforms = new Set(
@@ -1424,33 +1435,39 @@ export default function AdminCampaignsPage() {
                   )}
                 </div>
               </div>
-              <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase pb-2 border-b border-slate-100">
+              <div className="grid grid-cols-[1fr_auto_auto] gap-x-4 items-center text-[10px] font-bold text-slate-400 uppercase pb-2 border-b border-slate-100">
                 <span>{typeGroupBy === "Platform" ? "Type" : "Status"}</span>
-                <span>Spend</span>
+                <span className="text-right">Leads</span>
+                <span className="text-right">Spend</span>
               </div>
               <div className="overflow-y-auto max-h-[160px] divide-y divide-slate-50">
                 {typeBreakdown.length === 0 ? (
                   <p className="text-xs text-slate-400 italic py-4 text-center">No data yet.</p>
                 ) : (
                   typeBreakdown.map(t => (
-                    <label key={t.type} className="flex items-center justify-between py-2 text-xs cursor-pointer">
-                      <span className="flex items-center gap-2">
+                    <label key={t.type} className="grid grid-cols-[1fr_auto_auto] gap-x-4 items-center py-2 text-xs cursor-pointer">
+                      <span className="flex items-center gap-2 min-w-0">
                         <input
                           type="checkbox"
                           checked={isTypeChecked(t.type)}
                           onChange={() => toggleChartType(t.type)}
-                          className="h-3.5 w-3.5 rounded border-slate-300 text-[#0B1E6E] focus:ring-0 focus:ring-offset-0"
+                          className="h-3.5 w-3.5 rounded border-slate-300 text-[#0B1E6E] focus:ring-0 focus:ring-offset-0 shrink-0"
                         />
-                        <span className="font-semibold text-slate-700">{t.type}</span>
+                        {typeGroupBy === "Platform" && (t.type === "Meta" || t.type === "Google") && (
+                          <PlatformIcon platform={t.type} />
+                        )}
+                        <span className="font-semibold text-slate-700 truncate">{t.type}</span>
                       </span>
-                      <span className="text-slate-600">{formatCurrency(t.spend)}</span>
+                      <span className="text-slate-600 text-right">{t.leads.toLocaleString("en-IN")}</span>
+                      <span className="text-slate-600 text-right">{formatCurrency(t.spend)}</span>
                     </label>
                   ))
                 )}
               </div>
-              <div className="flex items-center justify-between pt-2 mt-2 border-t border-slate-200 text-xs font-bold text-slate-900">
+              <div className="grid grid-cols-[1fr_auto_auto] gap-x-4 items-center pt-2 mt-2 border-t border-slate-200 text-xs font-bold text-slate-900">
                 <span>Total</span>
-                <span>{formatCurrency(typeBreakdownTotal)}</span>
+                <span className="text-right">{typeBreakdownLeadsTotal.toLocaleString("en-IN")}</span>
+                <span className="text-right">{formatCurrency(typeBreakdownTotal)}</span>
               </div>
             </div>
           </div>
