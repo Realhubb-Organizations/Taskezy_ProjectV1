@@ -4,7 +4,7 @@ import React, { useState, useRef, useMemo, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useApp, Lead } from "@/context/AppContext";
 import { computeCPL } from "@/lib/reportMetrics";
-import { WhatsAppIcon, CallIcon } from "@/components/icons/ContactIcons";
+import { WhatsAppIcon, CallIcon, platformFromText } from "@/components/icons/ContactIcons";
 import {
   ChevronDown,
   Calendar,
@@ -302,11 +302,8 @@ export default function AdminCampaignsPage() {
   const [drillSearchQuery, setDrillSearchQuery] = useState("");
   const [drillPage, setDrillPage] = useState(1);
   const [drillRowsPerPage, setDrillRowsPerPage] = useState(8);
-  const toggleCategory = (label: string) => {
-    setSelectedCategory(prev => (prev === label ? null : label));
-    setDrillSearchQuery("");
-    setDrillPage(1);
-  };
+  // toggleCategory is defined further below, once chartMetric exists — it
+  // also drives which metric the Spend/Leads chart shows.
 
   // Same scroll-spy + synced-pagination pattern used on the admin Leads
   // table: rows render continuously in a capped-height scroll container,
@@ -632,12 +629,32 @@ export default function AdminCampaignsPage() {
 
   // ---- Campaigns Analytics tab ----------------------------------------
 
-  // Chart: spend/leads over time, split by whichever real platforms exist
-  // in adSpendRecords (checkboxes below let the user include/exclude one).
-  const [chartMetric, setChartMetric] = useState<"Spend" | "Leads">("Spend");
+  // Chart: spend or real lead counts over time, split by whichever real
+  // platforms exist in adSpendRecords (checkboxes below let the user
+  // include/exclude one). Defaults to Total Leads and follows whichever
+  // top stat card was last clicked (see toggleCategory) — Active Campaigns
+  // is excluded since there's no real per-day "campaigns were active on
+  // this date" data to chart, only a current snapshot.
+  const CHART_METRIC_OPTIONS = ["Spend", "Total Leads", "Qualified Leads", "Site Visits", "Follow Ups"] as const;
+  type ChartMetric = typeof CHART_METRIC_OPTIONS[number];
+  const [chartMetric, setChartMetric] = useState<ChartMetric>("Total Leads");
   const [chartMetricMenuOpen, setChartMetricMenuOpen] = useState(false);
   const [chartMetricMenuPos, setChartMetricMenuPos] = useState<{ top: number; left: number } | null>(null);
   const chartMetricBtnRef = useRef<HTMLButtonElement>(null);
+
+  // Clicking a top stat card both opens its drill-down (as before) and, for
+  // the four cards with a real per-day trend (everything but Active
+  // Campaigns), switches the chart to that same metric — so the chart
+  // always reflects whichever number the admin just looked at, instead of
+  // needing the separate dropdown to stay in sync by hand.
+  const toggleCategory = (label: string) => {
+    setSelectedCategory(prev => (prev === label ? null : label));
+    setDrillSearchQuery("");
+    setDrillPage(1);
+    if ((CHART_METRIC_OPTIONS as readonly string[]).includes(label)) {
+      setChartMetric(label as ChartMetric);
+    }
+  };
 
   // "Campaign Type" breakdown can group real ad-spend by Platform (Meta/
   // Google/whatever the backend actually sends) or by campaign Status
@@ -682,29 +699,58 @@ export default function AdminCampaignsPage() {
     const includedStatuses = new Set(
       typeGroupBy === "Status" ? typeBreakdown.filter(t => isTypeChecked(t.type)).map(t => t.type) : null
     );
-    const statusByAccountName: Record<string, CampaignItem["status"]> = {};
-    campaignsList.forEach(c => { statusByAccountName[c.name.toLowerCase()] = c.status; });
+    const campaignByName: Record<string, CampaignItem> = {};
+    campaignsList.forEach(c => { campaignByName[c.name.toLowerCase()] = c; });
 
-    const byDate: Record<string, { spend: number; leads: number }> = {};
-    adSpendRecords.forEach(r => {
-      if (typeGroupBy === "Platform" && !includedPlatforms.has(r.platform)) return;
-      if (typeGroupBy === "Status") {
-        const st = statusByAccountName[r.accountName.toLowerCase()];
-        if (!st || !includedStatuses.has(st)) return;
+    const toRows = (byDate: Record<string, number>) =>
+      Object.keys(byDate).sort().map(date => {
+        const d = new Date(date);
+        const label = isNaN(d.getTime())
+          ? date
+          : `${d.toLocaleDateString("en-GB", { day: "2-digit" })} ${d.toLocaleDateString("en-GB", { month: "short" })}, ${d.getFullYear()}`;
+        return { date, label, value: byDate[date] };
+      });
+
+    if (chartMetric === "Spend") {
+      const byDate: Record<string, number> = {};
+      adSpendRecords.forEach(r => {
+        if (typeGroupBy === "Platform" && !includedPlatforms.has(r.platform)) return;
+        if (typeGroupBy === "Status") {
+          const c = campaignByName[r.accountName.toLowerCase()];
+          if (!c || !includedStatuses.has(c.status)) return;
+        }
+        byDate[r.date] = (byDate[r.date] || 0) + r.spend;
+      });
+      return toRows(byDate);
+    }
+
+    // Real per-day lead counts for the selected category — the exact same
+    // predicates categoryLeads/the stat cards use, not the ad platform's
+    // own self-reported leadsGenerated, so this can differ in scale from
+    // the Spend view (same as the stat cards already do).
+    const statusFilter: (l: Lead) => boolean =
+      chartMetric === "Qualified Leads" ? (l => QUALIFIED_LEAD_STATUSES.includes(l.status)) :
+      chartMetric === "Site Visits" ? (l => SITE_VISIT_LEAD_STATUSES.includes(l.status)) :
+      chartMetric === "Follow Ups" ? (l => FOLLOW_UP_LEAD_STATUSES.includes(l.status)) :
+      (l => !!(l.campaign || l.source)); // Total Leads
+
+    const byDate: Record<string, number> = {};
+    leads.filter(statusFilter).forEach(l => {
+      const campaign = campaignByName[(l.campaign || l.source || "").toLowerCase()];
+      if (typeGroupBy === "Platform") {
+        const platform = campaign ? campaign.platform : platformFromText(l.source || l.campaign);
+        if (!platform || !includedPlatforms.has(platform)) return;
+      } else {
+        if (!campaign || !includedStatuses.has(campaign.status)) return;
       }
-      if (!byDate[r.date]) byDate[r.date] = { spend: 0, leads: 0 };
-      byDate[r.date].spend += r.spend;
-      byDate[r.date].leads += r.leadsGenerated;
+      if (!l.createdAtStr) return;
+      const d = new Date(l.createdAtStr);
+      if (isNaN(d.getTime())) return;
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      byDate[key] = (byDate[key] || 0) + 1;
     });
-
-    return Object.keys(byDate).sort().map(date => {
-      const d = new Date(date);
-      const label = isNaN(d.getTime())
-        ? date
-        : `${d.toLocaleDateString("en-GB", { day: "2-digit" })} ${d.toLocaleDateString("en-GB", { month: "short" })}, ${d.getFullYear()}`;
-      return { date, label, value: chartMetric === "Spend" ? byDate[date].spend : byDate[date].leads };
-    });
-  }, [adSpendRecords, campaignsList, typeGroupBy, selectedChartTypes, chartMetric, typeBreakdown]);
+    return toRows(byDate);
+  }, [adSpendRecords, campaignsList, leads, typeGroupBy, selectedChartTypes, chartMetric, typeBreakdown]);
 
   const chartAverage = chartData.length === 0 ? 0 : chartData.reduce((acc, c) => acc + c.value, 0) / chartData.length;
 
@@ -1343,7 +1389,7 @@ export default function AdminCampaignsPage() {
                   <button
                     type="button"
                     ref={chartMetricBtnRef}
-                    onClick={() => openPositionedMenu(chartMetricBtnRef, setChartMetricMenuPos, setChartMetricMenuOpen, "right", 120)}
+                    onClick={() => openPositionedMenu(chartMetricBtnRef, setChartMetricMenuPos, setChartMetricMenuOpen, "right", 152)}
                     className="flex items-center gap-1.5 bg-white border border-slate-300/80 rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
                   >
                     {chartMetric}
@@ -1353,10 +1399,10 @@ export default function AdminCampaignsPage() {
                     <>
                       <div className="fixed inset-0 z-[60]" onClick={() => setChartMetricMenuOpen(false)} />
                       <div
-                        className="fixed z-[70] w-28 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 overflow-hidden text-xs font-semibold"
-                        style={{ top: chartMetricMenuPos.top, left: chartMetricMenuPos.left }}
+                        className="fixed z-[70] bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 overflow-hidden text-xs font-semibold"
+                        style={{ top: chartMetricMenuPos.top, left: chartMetricMenuPos.left, width: 152 }}
                       >
-                        {(["Spend", "Leads"] as const).map(opt => (
+                        {CHART_METRIC_OPTIONS.map(opt => (
                           <button
                             key={opt}
                             onClick={() => { setChartMetric(opt); setChartMetricMenuOpen(false); }}
@@ -1373,7 +1419,7 @@ export default function AdminCampaignsPage() {
               </div>
               {chartData.length === 0 ? (
                 <div className="h-[260px] flex items-center justify-center text-xs text-slate-400 italic">
-                  No ad spend data yet.
+                  No {chartMetric.toLowerCase()} data yet.
                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height={260}>
