@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useApp, Lead, LeadStatus } from "@/context/AppContext";
 import { Sliders, Sparkles, Plus, Check, ChevronDown, Search, Calendar, X, Minus, Download, RotateCcw } from "lucide-react";
 import { DB_CODE_TO_FRONTEND_STATUS } from "@/lib/leadStatusMapping";
+import { computeLeadSummaryStats } from "@/lib/leadSummaryStats";
 import { WhatsAppIcon, CallIcon, PlatformLabel } from "@/components/icons/ContactIcons";
 import TopMetricsCards from "./TopMetricsCards";
 import LeadFilterBar from "./LeadFilterBar";
@@ -641,15 +642,19 @@ export default function LeadDashboard() {
     : scopedLeads.filter(l => !!l.campaign && adminCampaignFilter.includes(l.campaign));
 
   const adminRangeLeads = adminCampaignScopedLeads.filter(l => adminDateInRange(l.createdAtStr, adminDateRange, today));
+  // Same shared predicates the CRM Dashboard and the Campaigns page's top
+  // bar use — a same-named card can never drift into a different real
+  // number per page.
+  const adminStats = computeLeadSummaryStats(adminCampaignScopedLeads, l => adminDateInRange(l.createdAtStr, adminDateRange, today));
 
   const adminStatCards: { key: string; label: string; value: number; color: string }[] = [
-    { key: "total", label: "Total Leads", value: adminRangeLeads.length, color: "text-slate-900" },
-    { key: "new", label: "New Leads", value: adminRangeLeads.filter(l => l.status === "New Lead").length, color: "text-[#0084FF]" },
-    { key: "rnr", label: "RNR", value: adminCampaignScopedLeads.filter(l => l.status === "RNR").length, color: "text-[#FF0000]" },
-    { key: "callbacks", label: "Call Backs", value: adminCampaignScopedLeads.filter(l => l.status === "Call Back").length, color: "text-[#FF8C00]" },
-    { key: "followups", label: "Follow Ups", value: adminCampaignScopedLeads.filter(l => l.status === "Follow-ups").length, color: "text-[#0084FF]" },
-    { key: "sitevisit_sched", label: "Site Visit Scheduled", value: adminCampaignScopedLeads.filter(l => l.status === "Visit Schedule").length, color: "text-[#FF0000]" },
-    { key: "sitevisit_done", label: "Site Visit Done", value: adminCampaignScopedLeads.filter(l => l.status === "Site Visit").length, color: "text-[#015814]" }
+    { key: "total", label: "Total Leads", value: adminStats.totalLeads, color: "text-slate-900" },
+    { key: "new", label: "New Leads", value: adminStats.newLeads, color: "text-[#0084FF]" },
+    { key: "rnr", label: "RNR", value: adminStats.rnr, color: "text-[#FF0000]" },
+    { key: "callbacks", label: "Call Backs", value: adminStats.callBacks, color: "text-[#FF8C00]" },
+    { key: "followups", label: "Follow Ups", value: adminStats.followUps, color: "text-[#0084FF]" },
+    { key: "sitevisit_sched", label: "Site Visit Scheduled", value: adminStats.siteVisitScheduled, color: "text-[#FF0000]" },
+    { key: "sitevisit_done", label: "Site Visit Done", value: adminStats.siteVisitDone, color: "text-[#015814]" }
   ];
 
   const adminMetricPredicate: Record<string, (l: Lead) => boolean> = {

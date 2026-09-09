@@ -652,12 +652,13 @@ export default function AdminCampaignsPage() {
   //
   // "Total Leads" is every real lead, full stop — same definition the CRM
   // Dashboard and the admin Leads page use for their own "Total Leads"
-  // cards (scopedLeads.filter(dateInRange...).length). It used to be
-  // restricted to leads with a campaign/source (an "ad-attributed leads"
-  // concept), which is why this page's Total Leads never matched the same
-  // field on the other two admin CRM pages for the same Date Range — same
-  // label, three different real numbers. All three now count the exact
-  // same thing: every real Lead record within the selected range.
+  // cards. Qualified Leads/Site Visit Scheduled/Site Visit Done/Follow
+  // Ups/Call Backs use the exact same predicates as computeLeadSummaryStats
+  // (the shared function the CRM Dashboard and admin Leads page call for
+  // their identically-named cards) — same label, same real data, on every
+  // admin CRM page. This dictionary keeps full Lead[] lists (not just
+  // counts) because both the drill-down and the Analytics chart need the
+  // real leads themselves, not just a number.
   const categoryLeads: Record<string, Lead[]> = useMemo(() => {
     return {
       // Real leads whose own campaign is currently Active — same
@@ -670,22 +671,29 @@ export default function AdminCampaignsPage() {
       }),
       "Total Leads": leads,
       "Qualified Leads": leads.filter(l => QUALIFIED_LEAD_STATUSES.includes(l.status)),
-      "Site Visits": leads.filter(l => SITE_VISIT_LEAD_STATUSES.includes(l.status)),
-      // Split into two cards, same as the CRM Dashboard/admin Leads page —
-      // those show Follow Ups and Call Backs separately (Follow-ups vs
-      // Call Back are different real statuses), so this page did too until
-      // it combined them into one number that couldn't match either card.
+      "Site Visit Scheduled": leads.filter(l => l.status === "Visit Schedule"),
+      "Site Visit Done": leads.filter(l => l.status === "Site Visit"),
       "Follow Ups": leads.filter(l => l.status === "Follow-ups"),
       "Call Backs": leads.filter(l => l.status === "Call Back")
     };
   }, [leads, campaignByName]);
 
-  // Every category's real leads, additionally narrowed to the selected Date
-  // Range — used only by the top summary bar and its drill-downs, so the
-  // bar actually responds to Date Range (Today/This Week/etc.) instead of
-  // always showing the same all-time numbers. categoryLeads itself stays
-  // unscoped because the Analytics chart needs its full multi-day history
-  // to draw a trend regardless of which Date Range bucket is selected.
+  // "Total Leads" and "Active Campaigns" are about intake volume (how many
+  // leads/campaigns actually happened within a window), so they respect
+  // Date Range. Everything else here is a live pipeline-status snapshot —
+  // Qualified Leads/Site Visit Scheduled/Site Visit Done/Follow Ups/Call
+  // Backs deliberately do NOT respect Date Range, same as their identically
+  // named cards on the CRM Dashboard/admin Leads page (a lead created last
+  // week that's sitting in Follow-ups today should still count). Scoping
+  // these by Date Range was the actual bug behind Follow Ups/Call Backs
+  // showing 0 on "Today" while the other two pages showed the real,
+  // all-time pipeline count for the exact same statuses.
+  const DATE_SCOPED_CATEGORIES = new Set(["Total Leads", "Active Campaigns"]);
+
+  // categoryLeads further narrowed to the selected Date Range — only
+  // meaningful for the two intake-volume categories above; every other
+  // category should read categoryLeads directly (see
+  // categoryLeadsForCategory below), never this.
   const categoryLeadsInRange = useMemo(() => {
     const out: Record<string, Lead[]> = {};
     Object.entries(categoryLeads).forEach(([key, list]) => {
@@ -694,24 +702,29 @@ export default function AdminCampaignsPage() {
     return out;
   }, [categoryLeads, dateRange, appliedCustomRange, today]);
 
-  // Aggregate Metrics for Top Summary Card.
-  //
-  // Total Leads/Qualified Leads/Site Visits/Follow Ups/Call Backs all come from
-  // categoryLeadsInRange — real individual Lead records, same Date Range,
-  // same predicates the CRM Dashboard and admin Leads page use for their
-  // own same-named cards, so this page's numbers can't drift from theirs.
-  // Active Campaigns is a real count of campaigns with that status within
-  // the range, from the Date-Range-scoped campaignsList.
+  // Picks the right source list for a given category — Date-Range-scoped
+  // for Total Leads/Active Campaigns, real all-time pipeline snapshot for
+  // everything else. Used by the summary bar, its drill-downs, and the
+  // Analytics chart, so all three can never disagree about what a
+  // category's real leads are.
+  const categoryLeadsForCategory = (category: string): Lead[] =>
+    (DATE_SCOPED_CATEGORIES.has(category) ? categoryLeadsInRange[category] : categoryLeads[category]) || [];
+
+  // Aggregate Metrics for Top Summary Card — every field here uses
+  // categoryLeadsForCategory (or campaignsList for Active Campaigns), so
+  // the number always matches what clicking the card drills into and what
+  // the chart plots for that same category.
   const summaryMetrics = useMemo(() => {
     return {
       activeCampaigns: campaignsList.filter(c => c.status === "Active").length,
-      totalLeads: categoryLeadsInRange["Total Leads"].length,
-      qualifiedLeads: categoryLeadsInRange["Qualified Leads"].length,
-      siteVisits: categoryLeadsInRange["Site Visits"].length,
-      followUps: categoryLeadsInRange["Follow Ups"].length,
-      callBacks: categoryLeadsInRange["Call Backs"].length
+      totalLeads: categoryLeadsForCategory("Total Leads").length,
+      qualifiedLeads: categoryLeadsForCategory("Qualified Leads").length,
+      siteVisitScheduled: categoryLeadsForCategory("Site Visit Scheduled").length,
+      siteVisitDone: categoryLeadsForCategory("Site Visit Done").length,
+      followUps: categoryLeadsForCategory("Follow Ups").length,
+      callBacks: categoryLeadsForCategory("Call Backs").length
     };
-  }, [campaignsList, categoryLeadsInRange]);
+  }, [campaignsList, categoryLeads, categoryLeadsInRange]);
 
   // "Active Campaigns" drills into campaigns, not leads — it's a count of
   // campaigns (matching the summary card's own unit), not a leads list.
@@ -739,12 +752,15 @@ export default function AdminCampaignsPage() {
   // ---- Campaigns Analytics tab ----------------------------------------
 
   // Chart: real spend AND real lead counts shown together, both scoped to
-  // the selected Date Range (same as every other card on this tab) — "All
-  // Time" plots the full history, a narrower range shows only that
-  // window's real days. Which category the "leads" side is scoped to
-  // follows whichever top stat card was last clicked (see toggleCategory).
-  // Defaults to Total Leads.
-  const CHART_CATEGORIES = ["Active Campaigns", "Total Leads", "Qualified Leads", "Site Visits", "Follow Ups", "Call Backs"] as const;
+  // the selected Date Range for Total Leads/Active Campaigns (intake-volume
+  // categories) — "All Time" plots the full history, a narrower range shows
+  // only that window's real days. Every other category is a live pipeline
+  // snapshot (see DATE_SCOPED_CATEGORIES above) and always plots its real
+  // all-time trend by creation date, regardless of Date Range, same as its
+  // summary card. Which category the "leads" side is scoped to follows
+  // whichever top stat card was last clicked (see toggleCategory). Defaults
+  // to Total Leads.
+  const CHART_CATEGORIES = ["Active Campaigns", "Total Leads", "Qualified Leads", "Site Visit Scheduled", "Site Visit Done", "Follow Ups", "Call Backs"] as const;
   type ChartCategory = typeof CHART_CATEGORIES[number];
   const [chartCategory, setChartCategory] = useState<ChartCategory>("Total Leads");
 
@@ -846,12 +862,13 @@ export default function AdminCampaignsPage() {
     });
 
     // Real per-day lead counts for whichever category was last clicked —
-    // the exact same Date-Range-scoped list (categoryLeadsInRange) the top
-    // summary bar and breakdown card count, classified the same way (a
-    // lead with no matched campaign still counts, under "Other"/
-    // "Unmatched", never silently dropped) — so the chart's line always
-    // adds up to the same grand total those show.
-    (categoryLeadsInRange[chartCategory] || []).forEach(l => {
+    // the exact same list (categoryLeadsForCategory: Date-Range-scoped for
+    // Total Leads/Active Campaigns, real all-time pipeline snapshot for
+    // everything else) the top summary bar and breakdown card count,
+    // classified the same way (a lead with no matched campaign still
+    // counts, under "Other"/"Unmatched", never silently dropped) — so the
+    // chart's line always adds up to the same grand total those show.
+    categoryLeadsForCategory(chartCategory).forEach(l => {
       const campaign = campaignByName[(l.campaign || l.source || "").toLowerCase()];
       if (typeGroupBy === "Platform") {
         const platform = campaign ? campaign.platform : (platformFromText(l.source || l.campaign) || "Other");
@@ -875,7 +892,7 @@ export default function AdminCampaignsPage() {
         : `${d.toLocaleDateString("en-GB", { day: "2-digit" })} ${d.toLocaleDateString("en-GB", { month: "short" })}, ${d.getFullYear()}`;
       return { date, label, spend: byDate[date].spend, leads: byDate[date].leads };
     });
-  }, [adSpendRecords, campaignByName, categoryLeadsInRange, chartCategory, typeGroupBy, selectedChartTypes, typeBreakdown, dateRange, appliedCustomRange, today]);
+  }, [adSpendRecords, campaignByName, categoryLeads, categoryLeadsInRange, chartCategory, typeGroupBy, selectedChartTypes, typeBreakdown, dateRange, appliedCustomRange, today]);
 
   const chartSpendAverage = chartData.length === 0 ? 0 : chartData.reduce((acc, c) => acc + c.spend, 0) / chartData.length;
   const chartLeadsAverage = chartData.length === 0 ? 0 : chartData.reduce((acc, c) => acc + c.leads, 0) / chartData.length;
@@ -1199,12 +1216,13 @@ export default function AdminCampaignsPage() {
 
             {/* Stat columns — click one to drill into the leads it counted,
                 same "open the respective card" pattern as the CRM Dashboard. */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 bg-white divide-y sm:divide-y-0 sm:divide-x divide-slate-100">
+            <div className="flex md:grid md:grid-cols-7 bg-white divide-x divide-slate-100 overflow-x-auto min-w-full">
               {([
                 { label: "Active Campaigns", value: summaryMetrics.activeCampaigns, color: "text-slate-900" },
                 { label: "Total Leads", value: summaryMetrics.totalLeads, color: "text-slate-900" },
                 { label: "Qualified Leads", value: summaryMetrics.qualifiedLeads, color: "text-rose-600" },
-                { label: "Site Visits", value: summaryMetrics.siteVisits, color: "text-amber-500" },
+                { label: "Site Visit Scheduled", value: summaryMetrics.siteVisitScheduled, color: "text-amber-500" },
+                { label: "Site Visit Done", value: summaryMetrics.siteVisitDone, color: "text-[#015814]" },
                 { label: "Follow Ups", value: summaryMetrics.followUps, color: "text-blue-500" },
                 { label: "Call Backs", value: summaryMetrics.callBacks, color: "text-orange-500" }
               ] as const).map(s => {
@@ -1214,7 +1232,7 @@ export default function AdminCampaignsPage() {
                     key={s.label}
                     type="button"
                     onClick={() => toggleCategory(s.label)}
-                    className={`p-3 flex items-center justify-between text-left group transition-colors ${
+                    className={`p-3 flex items-center justify-between min-w-[130px] md:min-w-0 flex-1 text-left group transition-colors ${
                       isActive ? "bg-blue-50/70" : "hover:bg-slate-50/50"
                     }`}
                   >
@@ -1222,7 +1240,7 @@ export default function AdminCampaignsPage() {
                       <span className="text-[11px] font-medium text-slate-500 block">{s.label}</span>
                       <span className={`text-lg font-extrabold mt-1.5 block ${s.color}`}>{s.value}</span>
                     </div>
-                    <ChevronRight className={`h-3.5 w-3.5 text-slate-300 transition-transform ${isActive ? "rotate-90 text-blue-500" : "group-hover:translate-x-0.5"}`} />
+                    <ChevronRight className={`h-3.5 w-3.5 text-slate-300 shrink-0 transition-transform ${isActive ? "rotate-90 text-blue-500" : "group-hover:translate-x-0.5"}`} />
                   </button>
                 );
               })}
@@ -1236,18 +1254,19 @@ export default function AdminCampaignsPage() {
           {selectedCategory && (() => {
             // "Active Campaigns" is the one card that's a count of campaigns
             // rather than leads, so it's the only one that drills into the
-            // campaign table. Total Leads/Qualified Leads/Site Visits/Follow
-            // Ups all drill into the real, individual leads behind that
-            // number (pure lead details — Name/Phone/Status/Campaign),
-            // pulled from categoryLeads regardless of how the summary
-            // card's own number is computed.
+            // campaign table. Every other card drills into the real,
+            // individual leads behind that number (pure lead details —
+            // Name/Phone/Status/Campaign), pulled from
+            // categoryLeadsForCategory — the exact same list the card's own
+            // number and the chart both use, so this list is always what
+            // clicking the card promised.
             const isCampaignsTable = selectedCategory === "Active Campaigns";
             const q = drillSearchQuery.trim().toLowerCase();
             const shownCampaigns = isCampaignsTable
               ? activeCampaignsDrill.filter(c => !q || c.name.toLowerCase().includes(q))
               : [];
             const shownLeads = !isCampaignsTable
-              ? (categoryLeadsInRange[selectedCategory] || []).filter(l =>
+              ? categoryLeadsForCategory(selectedCategory).filter(l =>
                   !q || l.name.toLowerCase().includes(q) || l.phone.includes(q) || (l.campaign || l.source || "").toLowerCase().includes(q)
                 )
               : [];
