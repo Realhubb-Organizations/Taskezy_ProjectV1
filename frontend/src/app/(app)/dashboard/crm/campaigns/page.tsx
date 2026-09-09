@@ -38,6 +38,12 @@ interface CampaignItem {
   spend: number;
   platform: "Meta" | "Google" | "Other";
   property: string;
+  // Pure ad-platform self-reported leads (unblended with synced-lead
+  // count) — kept alongside totalLeads so anywhere that pairs a real
+  // spend figure with a leads figure can show the platform-reported
+  // number too, since spend was actually incurred to generate this
+  // (usually larger) count, not the smaller real-synced totalLeads.
+  platformReportedLeads: number;
 }
 
 const CAMPAIGN_STATUSES: CampaignItem["status"][] = ["Active", "Pause", "Stopped"];
@@ -580,7 +586,8 @@ export default function AdminCampaignsPage() {
     Object.keys(spendCampaignMap).forEach((cName, idx) => {
       if (!result.some(r => r.name.toLowerCase() === cName.toLowerCase())) {
         const item = spendCampaignMap[cName];
-        platformReportedTotal += Object.values(item.platformLeadsByDate).reduce((acc, v) => acc + v, 0);
+        const campaignPlatformReportedLeads = Object.values(item.platformLeadsByDate).reduce((acc, v) => acc + v, 0);
+        platformReportedTotal += campaignPlatformReportedLeads;
         // Qualified/Unqualified/Site Visit are current pipeline status
         // snapshots (like the CRM Dashboard's own cards) — a lead qualified
         // today should still count even if it came in last week, so those
@@ -627,7 +634,8 @@ export default function AdminCampaignsPage() {
           cpl: cplVal,
           spend: item.spend,
           platform: item.platform,
-          property: item.property || "Unspecified"
+          property: item.property || "Unspecified",
+          platformReportedLeads: campaignPlatformReportedLeads
         });
       }
     });
@@ -826,31 +834,36 @@ export default function AdminCampaignsPage() {
   // Analytics chart's own platform/status filters from silently narrowing
   // when a short range is picked.
   const typeBreakdown = useMemo(() => {
-    const map: Record<string, { spend: number; leads: number }> = {};
+    const map: Record<string, { spend: number; leads: number; platformLeads: number }> = {};
     campaignsListAllTime.forEach(c => {
       const key = typeGroupBy === "Platform" ? c.platform : c.status;
-      if (!map[key]) map[key] = { spend: 0, leads: 0 };
+      if (!map[key]) map[key] = { spend: 0, leads: 0, platformLeads: 0 };
     });
     campaignsList.forEach(c => {
       const key = typeGroupBy === "Platform" ? c.platform : c.status;
-      if (!map[key]) map[key] = { spend: 0, leads: 0 };
+      if (!map[key]) map[key] = { spend: 0, leads: 0, platformLeads: 0 };
       map[key].spend += c.spend;
+      // Same real per-platform/status self-reported number the Total Leads
+      // card's subtitle shows — spend was actually incurred to generate
+      // this (usually larger) count, not the smaller synced count below.
+      map[key].platformLeads += c.platformReportedLeads;
     });
     (categoryLeadsInRange["Total Leads"] || []).forEach(l => {
       const campaign = campaignByName[(l.campaign || l.source || "").toLowerCase()];
       const key = typeGroupBy === "Platform"
         ? (campaign ? campaign.platform : (platformFromText(l.source || l.campaign) || "Other"))
         : (campaign ? campaign.status : "Unmatched");
-      if (!map[key]) map[key] = { spend: 0, leads: 0 };
+      if (!map[key]) map[key] = { spend: 0, leads: 0, platformLeads: 0 };
       map[key].leads += 1;
     });
     return Object.entries(map)
-      .map(([type, v]) => ({ type, spend: v.spend, leads: v.leads }))
+      .map(([type, v]) => ({ type, spend: v.spend, leads: v.leads, platformLeads: v.platformLeads }))
       .sort((a, b) => b.spend - a.spend);
   }, [campaignsList, campaignsListAllTime, categoryLeadsInRange, campaignByName, typeGroupBy]);
 
   const typeBreakdownTotal = typeBreakdown.filter(t => isTypeChecked(t.type)).reduce((acc, t) => acc + t.spend, 0);
   const typeBreakdownLeadsTotal = typeBreakdown.filter(t => isTypeChecked(t.type)).reduce((acc, t) => acc + t.leads, 0);
+  const typeBreakdownPlatformLeadsTotal = typeBreakdown.filter(t => isTypeChecked(t.type)).reduce((acc, t) => acc + t.platformLeads, 0);
 
   const chartData = useMemo(() => {
     const includedPlatforms = new Set(
@@ -1706,10 +1719,19 @@ export default function AdminCampaignsPage() {
                   ))
                 )}
               </div>
-              <div className="grid grid-cols-[1fr_64px_112px] gap-x-4 items-center pt-2 mt-2 border-t border-slate-200 text-xs font-bold text-slate-900">
-                <span>Total</span>
-                <span className="text-right">{typeBreakdownLeadsTotal.toLocaleString("en-IN")}</span>
-                <span className="text-right">{formatCurrency(typeBreakdownTotal)}</span>
+              <div className="grid grid-cols-[1fr_64px_112px] gap-x-4 items-start pt-2 mt-2 border-t border-slate-200 text-xs font-bold text-slate-900">
+                <span className="pt-0.5">Total</span>
+                <span className="text-right">
+                  {typeBreakdownLeadsTotal.toLocaleString("en-IN")}
+                  {/* Spend was actually incurred to generate the platforms'
+                      own larger reported count, not just the smaller real-
+                      synced number above it — shown here so the two never
+                      read as an unexplained ~10x cost-per-lead jump. */}
+                  <span className="block text-right text-[9px] font-normal text-slate-400" title="Meta + Google + Other's own self-reported total for this Date Range">
+                    {typeBreakdownPlatformLeadsTotal.toLocaleString("en-IN")} platform-reported
+                  </span>
+                </span>
+                <span className="text-right pt-0.5">{formatCurrency(typeBreakdownTotal)}</span>
               </div>
             </div>
           </div>
