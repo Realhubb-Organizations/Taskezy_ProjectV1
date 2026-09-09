@@ -214,6 +214,9 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     // component state, not a route — LeadDashboard.tsx mirrors it into
     // ?tab=analytics so this header can reflect it.
     if (pathname === "/dashboard/crm" && activeTabParam === "analytics") return "Leads Analytics";
+    // Same pattern for the Campaigns page's Campaigns/Campaigns Analytics
+    // toggle.
+    if (pathname === "/dashboard/crm/campaigns" && activeTabParam === "analytics") return "Campaigns Analytics";
     for (const group of sidebarGroups) {
       for (const item of group.items) {
         if (item.activeCheck(pathname, activeTabParam)) return item.name;

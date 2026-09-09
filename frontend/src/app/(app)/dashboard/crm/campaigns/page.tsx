@@ -2,6 +2,7 @@
 
 import React, { useState, useRef, useMemo, useEffect } from "react";
 import { createPortal } from "react-dom";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useApp, Lead, AdSpendRecord } from "@/context/AppContext";
 import { computeCPL } from "@/lib/reportMetrics";
 import { WhatsAppIcon, CallIcon, platformFromText } from "@/components/icons/ContactIcons";
@@ -282,9 +283,26 @@ function CampaignDateRangePicker({
 
 export default function AdminCampaignsPage() {
   const { leads, adSpendRecords, followupCalls } = useApp();
+  const router = useRouter();
+  const searchParams = useSearchParams();
 
   // Navigation tab inside Campaigns page ("Campaigns" | "Campaigns Analytics")
-  const [activeTab, setActiveTab] = useState<"Campaigns" | "Analytics">("Campaigns");
+  // — mirrored into ?tab=analytics so the shared page header (getActiveTabName
+  // in the app layout) can show "Campaigns Analytics" instead of always
+  // "Campaigns", same pattern as the admin Leads page's Leads/Leads Analytics
+  // toggle.
+  const [activeTab, setActiveTab] = useState<"Campaigns" | "Analytics">(
+    () => (searchParams.get("tab") === "analytics" ? "Analytics" : "Campaigns")
+  );
+
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (activeTab === "Analytics") params.set("tab", "analytics");
+    else params.delete("tab");
+    const query = params.toString();
+    router.replace(`/dashboard/crm/campaigns${query ? `?${query}` : ""}`, { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
 
   // Summary Card Filters — "Custom" is set behind the scenes by the
   // toolbar's calendar picker (below), not offered as its own menu option
