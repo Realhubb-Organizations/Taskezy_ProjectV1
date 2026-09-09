@@ -1249,8 +1249,11 @@ export default function AdminCampaignsPage() {
                 // Other's leadsGenerated, same Date Range) is shown
                 // alongside it so both real numbers are visible together —
                 // they're genuinely different metrics and can legitimately
-                // differ, this isn't a mismatch to resolve.
-                { label: "Total Leads", value: summaryMetrics.totalLeads, color: "text-slate-900", subtitle: `${platformReportedLeadsTotal.toLocaleString("en-IN")} platform-reported` },
+                // differ, this isn't a mismatch to resolve. Platform-
+                // reported (Meta + Google + Other's own leadsGenerated) is
+                // the headline number here; the real synced-lead count
+                // sits underneath.
+                { label: "Total Leads", value: platformReportedLeadsTotal, color: "text-slate-900", subtitle: `${summaryMetrics.totalLeads.toLocaleString("en-IN")} synced` },
                 { label: "Qualified Leads", value: summaryMetrics.qualifiedLeads, color: "text-rose-600", subtitle: null },
                 { label: "Site Visits", value: summaryMetrics.siteVisits, color: "text-amber-500", subtitle: null },
                 { label: "Follow Ups", value: summaryMetrics.followUps, color: "text-blue-500", subtitle: null },
@@ -1722,13 +1725,13 @@ export default function AdminCampaignsPage() {
               <div className="grid grid-cols-[1fr_64px_112px] gap-x-4 items-start pt-2 mt-2 border-t border-slate-200 text-xs font-bold text-slate-900">
                 <span className="pt-0.5">Total</span>
                 <span className="text-right">
-                  {typeBreakdownLeadsTotal.toLocaleString("en-IN")}
-                  {/* Spend was actually incurred to generate the platforms'
-                      own larger reported count, not just the smaller real-
-                      synced number above it — shown here so the two never
+                  {typeBreakdownPlatformLeadsTotal.toLocaleString("en-IN")}
+                  {/* Spend was actually incurred to generate this larger
+                      platform-reported count, not the smaller real-synced
+                      number underneath it — shown here so the two never
                       read as an unexplained ~10x cost-per-lead jump. */}
-                  <span className="block text-right text-[9px] font-normal text-slate-400" title="Meta + Google + Other's own self-reported total for this Date Range">
-                    {typeBreakdownPlatformLeadsTotal.toLocaleString("en-IN")} platform-reported
+                  <span className="block text-right text-[9px] font-normal text-slate-400" title="Real individual leads actually synced into the CRM for this Date Range">
+                    {typeBreakdownLeadsTotal.toLocaleString("en-IN")} synced
                   </span>
                 </span>
                 <span className="text-right pt-0.5">{formatCurrency(typeBreakdownTotal)}</span>
