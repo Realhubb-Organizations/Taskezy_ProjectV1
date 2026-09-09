@@ -43,7 +43,6 @@ const CAMPAIGN_STATUSES: CampaignItem["status"][] = ["Active", "Pause", "Stopped
 const QUALIFIED_LEAD_STATUSES = ["Interested", "Connected", "Visit Schedule", "Site Visit", "Booking Done", "Booked"];
 const UNQUALIFIED_LEAD_STATUSES = ["Dead", "Invalid", "RNR"];
 const SITE_VISIT_LEAD_STATUSES = ["Visit Schedule", "Site Visit"];
-const FOLLOW_UP_LEAD_STATUSES = ["Follow-ups", "Call Back"];
 const BOOKING_LEAD_STATUSES = ["Booking Done", "Booking Approved", "Booked"];
 
 // Same icon URLs the admin leads page uses for these platforms (LeadDashboard.tsx).
@@ -672,7 +671,12 @@ export default function AdminCampaignsPage() {
       "Total Leads": leads,
       "Qualified Leads": leads.filter(l => QUALIFIED_LEAD_STATUSES.includes(l.status)),
       "Site Visits": leads.filter(l => SITE_VISIT_LEAD_STATUSES.includes(l.status)),
-      "Follow Ups": leads.filter(l => FOLLOW_UP_LEAD_STATUSES.includes(l.status))
+      // Split into two cards, same as the CRM Dashboard/admin Leads page —
+      // those show Follow Ups and Call Backs separately (Follow-ups vs
+      // Call Back are different real statuses), so this page did too until
+      // it combined them into one number that couldn't match either card.
+      "Follow Ups": leads.filter(l => l.status === "Follow-ups"),
+      "Call Backs": leads.filter(l => l.status === "Call Back")
     };
   }, [leads, campaignByName]);
 
@@ -692,7 +696,7 @@ export default function AdminCampaignsPage() {
 
   // Aggregate Metrics for Top Summary Card.
   //
-  // Total Leads/Qualified Leads/Site Visits/Follow Ups all come from
+  // Total Leads/Qualified Leads/Site Visits/Follow Ups/Call Backs all come from
   // categoryLeadsInRange — real individual Lead records, same Date Range,
   // same predicates the CRM Dashboard and admin Leads page use for their
   // own same-named cards, so this page's numbers can't drift from theirs.
@@ -704,7 +708,8 @@ export default function AdminCampaignsPage() {
       totalLeads: categoryLeadsInRange["Total Leads"].length,
       qualifiedLeads: categoryLeadsInRange["Qualified Leads"].length,
       siteVisits: categoryLeadsInRange["Site Visits"].length,
-      followUps: categoryLeadsInRange["Follow Ups"].length
+      followUps: categoryLeadsInRange["Follow Ups"].length,
+      callBacks: categoryLeadsInRange["Call Backs"].length
     };
   }, [campaignsList, categoryLeadsInRange]);
 
@@ -739,7 +744,7 @@ export default function AdminCampaignsPage() {
   // window's real days. Which category the "leads" side is scoped to
   // follows whichever top stat card was last clicked (see toggleCategory).
   // Defaults to Total Leads.
-  const CHART_CATEGORIES = ["Active Campaigns", "Total Leads", "Qualified Leads", "Site Visits", "Follow Ups"] as const;
+  const CHART_CATEGORIES = ["Active Campaigns", "Total Leads", "Qualified Leads", "Site Visits", "Follow Ups", "Call Backs"] as const;
   type ChartCategory = typeof CHART_CATEGORIES[number];
   const [chartCategory, setChartCategory] = useState<ChartCategory>("Total Leads");
 
@@ -1194,13 +1199,14 @@ export default function AdminCampaignsPage() {
 
             {/* Stat columns — click one to drill into the leads it counted,
                 same "open the respective card" pattern as the CRM Dashboard. */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 bg-white divide-y sm:divide-y-0 sm:divide-x divide-slate-100">
+            <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 bg-white divide-y sm:divide-y-0 sm:divide-x divide-slate-100">
               {([
                 { label: "Active Campaigns", value: summaryMetrics.activeCampaigns, color: "text-slate-900" },
                 { label: "Total Leads", value: summaryMetrics.totalLeads, color: "text-slate-900" },
                 { label: "Qualified Leads", value: summaryMetrics.qualifiedLeads, color: "text-rose-600" },
                 { label: "Site Visits", value: summaryMetrics.siteVisits, color: "text-amber-500" },
-                { label: "Follow Ups", value: summaryMetrics.followUps, color: "text-blue-500" }
+                { label: "Follow Ups", value: summaryMetrics.followUps, color: "text-blue-500" },
+                { label: "Call Backs", value: summaryMetrics.callBacks, color: "text-orange-500" }
               ] as const).map(s => {
                 const isActive = selectedCategory === s.label;
                 return (
