@@ -524,7 +524,7 @@ export default function AdminCampaignsPage() {
   // leadsByDateByCampaign) can drive both a day-by-day chart AND the
   // range's grand total, and the two are then mathematically guaranteed to
   // always agree, however the data is sliced.
-  const buildCampaignsList = (records: AdSpendRecord[]): { items: CampaignItem[]; leadsByDateByCampaign: Record<string, Record<string, number>> } => {
+  const buildCampaignsList = (records: AdSpendRecord[], leadDateFilter: (l: Lead) => boolean): { items: CampaignItem[]; leadsByDateByCampaign: Record<string, Record<string, number>> } => {
     const spendCampaignMap: Record<string, { spend: number; platformLeadsByDate: Record<string, number>; status: "Active" | "Pause" | "Stopped"; platform: "Meta" | "Google" | "Other"; property?: string }> = {};
 
     records.forEach(rec => {
@@ -563,8 +563,16 @@ export default function AdminCampaignsPage() {
         // read off every matched lead regardless of creation date.
         const campaignLeads = leads.filter(l => (l.campaign || l.source)?.toLowerCase() === cName.toLowerCase());
 
+        // records was already pre-filtered to the selected Date Range, so
+        // platformLeadsByDate only ever has dates inside that range. The
+        // synced side must be scoped the same way — otherwise a campaign's
+        // leads from months ago leak into "Today"'s union of dates below
+        // and get summed in as if they happened today (this is what
+        // inflated Today's Total Leads to 202: every historical day for
+        // every campaign, each contributing its own synced count with no
+        // platform-reported number to compare against).
         const syncedLeadsByDate: Record<string, number> = {};
-        campaignLeads.forEach(l => {
+        campaignLeads.filter(leadDateFilter).forEach(l => {
           if (!l.createdAtStr) return;
           const d = new Date(l.createdAtStr);
           if (isNaN(d.getTime())) return;
@@ -613,7 +621,7 @@ export default function AdminCampaignsPage() {
   // leadsByDateByCampaignInRange is reused as-is by the Analytics chart so
   // its Total Leads line always adds up to this same grand total.
   const campaignsListResult = useMemo(
-    () => buildCampaignsList(adSpendRecords.filter(recordInSelectedRange)),
+    () => buildCampaignsList(adSpendRecords.filter(recordInSelectedRange), leadInSelectedRange),
     [adSpendRecords, leads, appliedCustomRange, dateRange, today]
   );
   const campaignsList: CampaignItem[] = campaignsListResult.items;
@@ -628,7 +636,7 @@ export default function AdminCampaignsPage() {
   // Status breakdown's checkboxes so a type never disappears from the list
   // just because it had no activity in the current range.
   const campaignsListAllTime: CampaignItem[] = useMemo(
-    () => buildCampaignsList(adSpendRecords).items,
+    () => buildCampaignsList(adSpendRecords, () => true).items,
     [adSpendRecords, leads]
   );
 
