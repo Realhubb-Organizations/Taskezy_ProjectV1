@@ -452,10 +452,14 @@ export default function AdminCampaignsPage() {
   };
 
   const dateInRange = (dateStr: string | undefined, range: "today" | "yesterday" | "week" | "month" | "all", refNow: Date): boolean => {
+    // "All Time" means no date restriction at all — it must include leads
+    // with a missing or unparseable date too, not just leads that happen to
+    // have a valid one. Every other bucket (Today/Week/Month/...) genuinely
+    // needs a real date to place a lead inside it, so only "all" short-circuits.
+    if (range === "all") return true;
     if (!dateStr) return false;
     const d = new Date(dateStr);
     if (isNaN(d.getTime())) return false;
-    if (range === "all") return true;
     const startOfToday = new Date(refNow.getFullYear(), refNow.getMonth(), refNow.getDate());
     if (range === "today") return d.toDateString() === refNow.toDateString();
     if (range === "yesterday") {
