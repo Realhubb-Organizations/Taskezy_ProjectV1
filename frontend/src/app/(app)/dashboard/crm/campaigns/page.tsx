@@ -300,9 +300,48 @@ export default function AdminCampaignsPage() {
   // Dashboard page.
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [drillSearchQuery, setDrillSearchQuery] = useState("");
+  const [drillPage, setDrillPage] = useState(1);
+  const [drillRowsPerPage, setDrillRowsPerPage] = useState(8);
   const toggleCategory = (label: string) => {
     setSelectedCategory(prev => (prev === label ? null : label));
     setDrillSearchQuery("");
+    setDrillPage(1);
+  };
+
+  // Same scroll-spy + synced-pagination pattern used on the admin Leads
+  // table: rows render continuously in a capped-height scroll container,
+  // scrolling past a page boundary advances drillPage, and the pagination
+  // arrows scroll that page's first row back to the top.
+  const drillScrollRef = useRef<HTMLDivElement>(null);
+  const drillPageRowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
+  const drillProgrammaticScroll = useRef(false);
+
+  const handleDrillScroll = () => {
+    if (drillProgrammaticScroll.current) return;
+    const container = drillScrollRef.current;
+    if (!container) return;
+    const scrollTop = container.scrollTop;
+    let current = 1;
+    for (let i = 0; i < drillPageRowRefs.current.length; i++) {
+      const row = drillPageRowRefs.current[i];
+      if (row && row.offsetTop - container.offsetTop <= scrollTop + 4) {
+        current = i + 1;
+      }
+    }
+    setDrillPage(prev => (prev !== current ? current : prev));
+  };
+
+  const goToDrillPage = (page: number, totalPages: number) => {
+    const clamped = Math.max(1, Math.min(totalPages, page));
+    setDrillPage(clamped);
+    const row = drillPageRowRefs.current[clamped - 1];
+    const container = drillScrollRef.current;
+    if (!row || !container) return;
+    drillProgrammaticScroll.current = true;
+    container.scrollTop = clamped === 1 ? 0 : row.offsetTop - container.offsetTop;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => { drillProgrammaticScroll.current = false; });
+    });
   };
 
   // Table Filters & Search
@@ -531,22 +570,29 @@ export default function AdminCampaignsPage() {
     };
   }, [leads, dateRange, appliedCustomRange, today]);
 
-  // Aggregate Metrics for Top Summary Card — each number is the length of
-  // the exact same real lead list categoryLeads exposes for that card's
-  // drill-down, so the big number and "click to see the list" can never
-  // disagree. (Previously this summed each campaign's totalLeads/
-  // qualifiedLeads instead: totalLeads used Math.max(platform-self-reported
-  // leadsGenerated, real synced leads) per campaign, which is legitimate
-  // for the per-campaign Deep Dive column but massively overcounts once
-  // summed across every campaign; qualifiedLeads only summed campaigns that
-  // had a matching AdSpendRecord, silently dropping qualified leads whose
-  // campaign/source didn't match any spend record. Both produced a summary
-  // number that didn't match what the drill-down actually listed.)
+  // Aggregate Metrics for Top Summary Card.
+  //
+  // Total Leads intentionally sums campaignsList[].totalLeads (real
+  // platform-reported ad-spend volume, Math.max'd against real synced
+  // leads per campaign) rather than counting individual synced Lead
+  // records — the two are genuinely different real metrics (platforms
+  // routinely report more leads than have been individually synced into
+  // the CRM yet), and this total is the one that's meant to track ad
+  // platform intake. Its drill-down reflects that: it lists the real
+  // campaign-by-campaign breakdown that sums to this number (see the
+  // isTotalLeadsCampaignBreakdown branch below), not individual leads —
+  // there aren't that many individual Lead records to list.
+  //
+  // Qualified Leads/Site Visits/Follow Ups are current pipeline-status
+  // snapshots over every real lead regardless of which campaign (or
+  // whether any ad-spend record) it's tied to, so those come from
+  // categoryLeads and their drill-downs list the real leads themselves.
   const summaryMetrics = useMemo(() => {
     const activeCount = campaignsList.filter(c => c.status === "Active").length;
+    const totalLeadsSum = campaignsList.reduce((acc, c) => acc + c.totalLeads, 0);
     return {
       activeCampaigns: activeCount,
-      totalLeads: categoryLeads["Total Leads"].length,
+      totalLeads: totalLeadsSum,
       qualifiedLeads: categoryLeads["Qualified Leads"].length,
       siteVisits: categoryLeads["Site Visits"].length,
       followUps: categoryLeads["Follow Ups"].length
@@ -992,17 +1038,31 @@ export default function AdminCampaignsPage() {
               other four open the actual leads behind that number. Either
               way a search box lets the user narrow down a long list. */}
           {selectedCategory && (() => {
-            const isCampaignsDrill = selectedCategory === "Active Campaigns";
+            // "Active Campaigns" and "Total Leads" both drill into the real
+            // campaign-by-campaign breakdown (Total Leads is a platform-
+            // reported ad-spend aggregate, not a count of individual synced
+            // Lead records — see summaryMetrics above — so its drill-down
+            // has to be "which campaigns make up this number", same shape
+            // as Active Campaigns, just unfiltered by status). The other
+            // three (Qualified Leads/Site Visits/Follow Ups) are real
+            // individual-lead counts, so they drill into the leads
+            // themselves.
+            const isCampaignsTable = selectedCategory === "Active Campaigns" || selectedCategory === "Total Leads";
             const q = drillSearchQuery.trim().toLowerCase();
-            const shownCampaigns = isCampaignsDrill
-              ? activeCampaignsDrill.filter(c => !q || c.name.toLowerCase().includes(q))
+            const campaignsSource = selectedCategory === "Active Campaigns" ? activeCampaignsDrill : campaignsList;
+            const shownCampaigns = isCampaignsTable
+              ? campaignsSource.filter(c => !q || c.name.toLowerCase().includes(q))
               : [];
-            const shownLeads = !isCampaignsDrill
+            const shownLeads = !isCampaignsTable
               ? (categoryLeads[selectedCategory] || []).filter(l =>
                   !q || l.name.toLowerCase().includes(q) || l.phone.includes(q) || (l.campaign || l.source || "").toLowerCase().includes(q)
                 )
               : [];
-            const shownCount = isCampaignsDrill ? shownCampaigns.length : shownLeads.length;
+            const shownCount = isCampaignsTable ? shownCampaigns.length : shownLeads.length;
+            const totalPages = Math.max(1, Math.ceil(shownCount / drillRowsPerPage));
+            const currentPage = Math.min(drillPage, totalPages);
+            const rangeStart = shownCount === 0 ? 0 : (currentPage - 1) * drillRowsPerPage + 1;
+            const rangeEnd = Math.min(currentPage * drillRowsPerPage, shownCount);
 
             return (
               <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden animate-fade-in">
@@ -1016,8 +1076,8 @@ export default function AdminCampaignsPage() {
                       <Search className="h-3.5 w-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
                       <input
                         value={drillSearchQuery}
-                        onChange={(e) => setDrillSearchQuery(e.target.value)}
-                        placeholder={isCampaignsDrill ? "Search campaign..." : "Search name, phone, campaign..."}
+                        onChange={(e) => { setDrillSearchQuery(e.target.value); setDrillPage(1); }}
+                        placeholder={isCampaignsTable ? "Search campaign..." : "Search name, phone, campaign..."}
                         className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-8 pr-2.5 py-1.5 text-xs focus:outline-none focus:border-[#0B1E6E]"
                       />
                     </div>
@@ -1026,8 +1086,8 @@ export default function AdminCampaignsPage() {
                     </button>
                   </div>
                 </div>
-                <div className="max-h-80 overflow-y-auto">
-                  {isCampaignsDrill ? (
+                <div ref={drillScrollRef} onScroll={handleDrillScroll} className="max-h-80 overflow-y-auto">
+                  {isCampaignsTable ? (
                     <table className="w-full text-left border-collapse min-w-[500px]">
                       <thead className="sticky top-0 bg-white">
                         <tr className="border-b border-slate-100 text-[11px] font-bold text-slate-500">
@@ -1041,18 +1101,22 @@ export default function AdminCampaignsPage() {
                         {shownCampaigns.length === 0 ? (
                           <tr>
                             <td colSpan={4} className="px-5 py-6 text-center text-slate-400 italic">
-                              No active campaigns found.
+                              No campaigns found.
                             </td>
                           </tr>
                         ) : (
-                          shownCampaigns.map(c => (
-                            <tr key={c.id} className="hover:bg-slate-50/50 transition-colors">
+                          (drillPageRowRefs.current = [], shownCampaigns.map((c, idx) => (
+                            <tr
+                              key={c.id}
+                              ref={idx % drillRowsPerPage === 0 ? (el) => { drillPageRowRefs.current[Math.floor(idx / drillRowsPerPage)] = el; } : undefined}
+                              className="hover:bg-slate-50/50 transition-colors"
+                            >
                               <td className="px-5 py-2.5 font-semibold text-slate-900">{c.name}</td>
                               <td className="px-5 py-2.5">{c.totalLeads}</td>
                               <td className="px-5 py-2.5">{c.qualifiedLeads}</td>
                               <td className="px-5 py-2.5">{c.siteVisit}</td>
                             </tr>
-                          ))
+                          )))
                         )}
                       </tbody>
                     </table>
@@ -1074,18 +1138,62 @@ export default function AdminCampaignsPage() {
                             </td>
                           </tr>
                         ) : (
-                          shownLeads.map(l => (
-                            <tr key={l.id} className="hover:bg-slate-50/50 transition-colors">
+                          (drillPageRowRefs.current = [], shownLeads.map((l, idx) => (
+                            <tr
+                              key={l.id}
+                              ref={idx % drillRowsPerPage === 0 ? (el) => { drillPageRowRefs.current[Math.floor(idx / drillRowsPerPage)] = el; } : undefined}
+                              className="hover:bg-slate-50/50 transition-colors"
+                            >
                               <td className="px-5 py-2.5 font-semibold text-slate-900">{l.name}</td>
                               <td className="px-5 py-2.5 font-mono">{l.phone}</td>
                               <td className="px-5 py-2.5">{l.status}</td>
                               <td className="px-5 py-2.5">{l.campaign || l.source || "—"}</td>
                             </tr>
-                          ))
+                          )))
                         )}
                       </tbody>
                     </table>
                   )}
+                </div>
+                <div className="px-5 py-3 flex flex-wrap justify-between items-center gap-3 border-t border-slate-100 text-[11px] text-slate-500 font-semibold">
+                  <span>{shownCount} Row{shownCount === 1 ? "" : "s"}</span>
+                  <div className="flex items-center gap-4">
+                    <span className="flex items-center gap-1.5">
+                      Rows per page
+                      <select
+                        value={drillRowsPerPage}
+                        onChange={(e) => {
+                          drillProgrammaticScroll.current = true;
+                          setDrillRowsPerPage(Number(e.target.value));
+                          setDrillPage(1);
+                          drillScrollRef.current?.scrollTo(0, 0);
+                          requestAnimationFrame(() => {
+                            requestAnimationFrame(() => { drillProgrammaticScroll.current = false; });
+                          });
+                        }}
+                        className="bg-slate-50 border border-slate-200 rounded px-1.5 py-1 font-bold text-slate-700 focus:outline-none"
+                      >
+                        {[8, 25, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
+                      </select>
+                    </span>
+                    <span>{rangeStart}-{rangeEnd} of {shownCount}</span>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => goToDrillPage(currentPage - 1, totalPages)}
+                        disabled={currentPage <= 1}
+                        className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                      >
+                        ‹
+                      </button>
+                      <button
+                        onClick={() => goToDrillPage(currentPage + 1, totalPages)}
+                        disabled={currentPage >= totalPages}
+                        className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                      >
+                        ›
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             );
