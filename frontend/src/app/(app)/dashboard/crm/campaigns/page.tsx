@@ -512,11 +512,18 @@ export default function AdminCampaignsPage() {
   // Total Leads/Spend/CPL/Active Campaigns are all genuinely accurate for
   // whichever range is picked) and campaignsListAllTime (every record, no
   // date filter, used only where full history is required regardless of
-  // Date Range — see campaignByName below). countTotalLeads decides how
-  // many of a campaign's real synced leads to compare against the
-  // platform's own self-reported leadsGenerated: date-scoped for the
-  // former, every real lead ever synced for the latter.
-  const buildCampaignsList = (records: AdSpendRecord[], countTotalLeads: (campaignLeads: Lead[]) => number): CampaignItem[] => {
+  // Date Range — see campaignByName below).
+  //
+  // totalLeads is the pure real sum of leadsGenerated across these
+  // records — deliberately NOT Math.max'd against the count of individually
+  // synced Lead records anymore. That blend used to occasionally push a
+  // campaign's total above its own leadsGenerated sum, which made the
+  // Analytics chart (built purely from per-day leadsGenerated) permanently
+  // unable to add up to the same grand total as this list, however the
+  // data was sliced — a real mismatch with no fix short of dropping the
+  // blend. Every card/chart that shows "Total Leads" now sums this exact
+  // same field, so they can never disagree again.
+  const buildCampaignsList = (records: AdSpendRecord[]): CampaignItem[] => {
     const spendCampaignMap: Record<string, { spend: number; platformLeads: number; status: "Active" | "Pause" | "Stopped"; platform: "Meta" | "Google" | "Other"; property?: string }> = {};
 
     records.forEach(rec => {
@@ -553,7 +560,7 @@ export default function AdminCampaignsPage() {
         // today should still count even if it came in last week, so those
         // read off every matched lead regardless of creation date.
         const campaignLeads = leads.filter(l => (l.campaign || l.source)?.toLowerCase() === cName.toLowerCase());
-        const total = Math.max(item.platformLeads, countTotalLeads(campaignLeads));
+        const total = item.platformLeads;
         const qualified = campaignLeads.filter(l => QUALIFIED_LEAD_STATUSES.includes(l.status)).length;
         const unqualified = campaignLeads.filter(l => UNQUALIFIED_LEAD_STATUSES.includes(l.status)).length;
         const siteVisits = campaignLeads.filter(l => SITE_VISIT_LEAD_STATUSES.includes(l.status)).length;
@@ -586,7 +593,7 @@ export default function AdminCampaignsPage() {
   // Campaigns tab table, Active Campaigns/Total Leads cards, the Campaign
   // Type/Status breakdown, Deep Dive, and CSV export.
   const campaignsList: CampaignItem[] = useMemo(
-    () => buildCampaignsList(adSpendRecords.filter(recordInSelectedRange), campaignLeads => campaignLeads.filter(leadInSelectedRange).length),
+    () => buildCampaignsList(adSpendRecords.filter(recordInSelectedRange)),
     [adSpendRecords, leads, appliedCustomRange, dateRange, today]
   );
 
@@ -599,7 +606,7 @@ export default function AdminCampaignsPage() {
   // Status breakdown's checkboxes so a type never disappears from the list
   // just because it had no activity in the current range.
   const campaignsListAllTime: CampaignItem[] = useMemo(
-    () => buildCampaignsList(adSpendRecords, campaignLeads => campaignLeads.length),
+    () => buildCampaignsList(adSpendRecords),
     [adSpendRecords, leads]
   );
 
