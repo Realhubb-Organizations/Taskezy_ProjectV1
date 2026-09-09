@@ -796,27 +796,37 @@ export default function AdminCampaignsPage() {
       }
       if (!byDate[r.date]) byDate[r.date] = { spend: 0, leads: 0 };
       byDate[r.date].spend += r.spend;
+      // "Total Leads" plots the same real per-day platform-reported
+      // leadsGenerated that campaignsList[].totalLeads sums for the
+      // breakdown card and the top summary bar — reusing this same loop
+      // (same date/platform/status filters already applied above for
+      // Spend) so the chart's Total Leads line always adds up to exactly
+      // the same grand total those cards show, never a different real
+      // number under the same label.
+      if (chartCategory === "Total Leads") byDate[r.date].leads += r.leadsGenerated;
     });
 
-    // Real per-day lead counts for whichever category was last clicked —
-    // the exact same Date-Range-scoped list the drill-down card uses, not
-    // the ad platform's own self-reported leadsGenerated, so this can
-    // differ in scale from the Spend series (same as the stat cards).
-    (categoryLeadsInRange[chartCategory] || []).forEach(l => {
-      const campaign = campaignByName[(l.campaign || l.source || "").toLowerCase()];
-      if (typeGroupBy === "Platform") {
-        const platform = campaign ? campaign.platform : platformFromText(l.source || l.campaign);
-        if (!platform || !includedPlatforms.has(platform)) return;
-      } else {
-        if (!campaign || !includedStatuses.has(campaign.status)) return;
-      }
-      if (!l.createdAtStr) return;
-      const d = new Date(l.createdAtStr);
-      if (isNaN(d.getTime())) return;
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-      if (!byDate[key]) byDate[key] = { spend: 0, leads: 0 };
-      byDate[key].leads += 1;
-    });
+    // Qualified Leads/Site Visits/Follow Ups/Active Campaigns have no
+    // platform-reported equivalent (Meta/Google don't report CRM pipeline
+    // status) — those stay real per-day counts of individual synced Lead
+    // records, same Date-Range-scoped list the drill-down card uses.
+    if (chartCategory !== "Total Leads") {
+      (categoryLeadsInRange[chartCategory] || []).forEach(l => {
+        const campaign = campaignByName[(l.campaign || l.source || "").toLowerCase()];
+        if (typeGroupBy === "Platform") {
+          const platform = campaign ? campaign.platform : platformFromText(l.source || l.campaign);
+          if (!platform || !includedPlatforms.has(platform)) return;
+        } else {
+          if (!campaign || !includedStatuses.has(campaign.status)) return;
+        }
+        if (!l.createdAtStr) return;
+        const d = new Date(l.createdAtStr);
+        if (isNaN(d.getTime())) return;
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        if (!byDate[key]) byDate[key] = { spend: 0, leads: 0 };
+        byDate[key].leads += 1;
+      });
+    }
 
     return Object.keys(byDate).sort().map(date => {
       const d = new Date(date);
