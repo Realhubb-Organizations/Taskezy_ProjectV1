@@ -557,18 +557,27 @@ export default function AdminCampaignsPage() {
 
   // Each lead-based stat card's real underlying lead list — same predicates
   // the counts below use, so clicking a card always drills into exactly
-  // what it counted, mirroring the CRM Dashboard's drill-down. Only "Total
-  // Leads" is intake-volume (respects Date Range); Qualified Leads/Site
-  // Visits/Follow Ups are current pipeline-status snapshots, so they aren't
-  // date-filtered.
+  // what it counted, mirroring the CRM Dashboard's drill-down.
+  //
+  // "Total Leads" used to be date-range-filtered here (leadInSelectedRange)
+  // on the theory that it's "intake volume, respects Date Range" — but the
+  // summary card's own number (campaignsList[].totalLeads, summed) isn't
+  // meaningfully date-scoped: it comes from AdSpendRecord.leadsGenerated,
+  // summed across every spend record for a campaign with no date filter
+  // at all (see campaignsList above). So on "Today" the card kept showing
+  // the real all-time platform total while this list narrowed to just
+  // today's synced leads — a handful, not what "all leads from all
+  // campaigns" means. Matches the card's real scope now: every real lead
+  // that actually has a campaign/source (i.e. came from an ad campaign),
+  // regardless of creation date.
   const categoryLeads: Record<string, Lead[]> = useMemo(() => {
     return {
-      "Total Leads": leads.filter(leadInSelectedRange),
+      "Total Leads": leads.filter(l => !!(l.campaign || l.source)),
       "Qualified Leads": leads.filter(l => QUALIFIED_LEAD_STATUSES.includes(l.status)),
       "Site Visits": leads.filter(l => SITE_VISIT_LEAD_STATUSES.includes(l.status)),
       "Follow Ups": leads.filter(l => FOLLOW_UP_LEAD_STATUSES.includes(l.status))
     };
-  }, [leads, dateRange, appliedCustomRange, today]);
+  }, [leads]);
 
   // Aggregate Metrics for Top Summary Card.
   //
