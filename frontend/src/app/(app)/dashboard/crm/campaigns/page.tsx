@@ -516,29 +516,12 @@ export default function AdminCampaignsPage() {
     return result;
   }, [adSpendRecords, leads, appliedCustomRange, dateRange, today]);
 
-  // Aggregate Metrics for Top Summary Card
-  const summaryMetrics = useMemo(() => {
-    const activeCount = campaignsList.filter(c => c.status === "Active").length;
-    const totalLeadsSum = campaignsList.reduce((acc, c) => acc + c.totalLeads, 0);
-    const qualifiedLeadsSum = campaignsList.reduce((acc, c) => acc + c.qualifiedLeads, 0);
-    const siteVisitsSum = campaignsList.reduce((acc, c) => acc + c.siteVisit, 0);
-    const followUpsCount = leads.filter(l => FOLLOW_UP_LEAD_STATUSES.includes(l.status)).length;
-
-    return {
-      activeCampaigns: activeCount,
-      totalLeads: totalLeadsSum,
-      qualifiedLeads: qualifiedLeadsSum,
-      siteVisits: siteVisitsSum,
-      followUps: followUpsCount
-    };
-  }, [campaignsList, leads]);
-
-  // Each lead-based stat card's real underlying lead list — same
-  // predicates as the counts above — so clicking a card can drill into
-  // exactly what it counted, mirroring the CRM Dashboard's drill-down.
-  // Only "Total Leads" is intake-volume (respects Date Range); Qualified
-  // Leads/Site Visits/Follow Ups are current pipeline-status snapshots,
-  // same convention as summaryMetrics above, so they aren't date-filtered.
+  // Each lead-based stat card's real underlying lead list — same predicates
+  // the counts below use, so clicking a card always drills into exactly
+  // what it counted, mirroring the CRM Dashboard's drill-down. Only "Total
+  // Leads" is intake-volume (respects Date Range); Qualified Leads/Site
+  // Visits/Follow Ups are current pipeline-status snapshots, so they aren't
+  // date-filtered.
   const categoryLeads: Record<string, Lead[]> = useMemo(() => {
     return {
       "Total Leads": leads.filter(leadInSelectedRange),
@@ -547,6 +530,28 @@ export default function AdminCampaignsPage() {
       "Follow Ups": leads.filter(l => FOLLOW_UP_LEAD_STATUSES.includes(l.status))
     };
   }, [leads, dateRange, appliedCustomRange, today]);
+
+  // Aggregate Metrics for Top Summary Card — each number is the length of
+  // the exact same real lead list categoryLeads exposes for that card's
+  // drill-down, so the big number and "click to see the list" can never
+  // disagree. (Previously this summed each campaign's totalLeads/
+  // qualifiedLeads instead: totalLeads used Math.max(platform-self-reported
+  // leadsGenerated, real synced leads) per campaign, which is legitimate
+  // for the per-campaign Deep Dive column but massively overcounts once
+  // summed across every campaign; qualifiedLeads only summed campaigns that
+  // had a matching AdSpendRecord, silently dropping qualified leads whose
+  // campaign/source didn't match any spend record. Both produced a summary
+  // number that didn't match what the drill-down actually listed.)
+  const summaryMetrics = useMemo(() => {
+    const activeCount = campaignsList.filter(c => c.status === "Active").length;
+    return {
+      activeCampaigns: activeCount,
+      totalLeads: categoryLeads["Total Leads"].length,
+      qualifiedLeads: categoryLeads["Qualified Leads"].length,
+      siteVisits: categoryLeads["Site Visits"].length,
+      followUps: categoryLeads["Follow Ups"].length
+    };
+  }, [campaignsList, categoryLeads]);
 
   // "Active Campaigns" drills into campaigns, not leads — it's a count of
   // campaigns (matching the summary card's own unit), not a leads list.
