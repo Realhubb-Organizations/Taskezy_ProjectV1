@@ -669,21 +669,17 @@ export default function AdminCampaignsPage() {
 
   // ---- Campaigns Analytics tab ----------------------------------------
 
-  // Chart: real spend AND real lead counts shown together, always both.
-  // Which category the "leads" side is scoped to is picked explicitly via
-  // its own dropdown (below) — independent of the top stat cards, which
-  // only open/close their drill-down — so browsing a drill-down never
-  // silently changes what the chart is plotting. Defaults to Total Leads,
-  // using the exact same categoryLeads lists the drill-down cards use.
+  // Chart: real spend AND real lead counts shown together. Which category
+  // the "leads" side is scoped to follows whichever top stat card was last
+  // clicked (see toggleCategory) — Active Campaigns included, since
+  // categoryLeads["Active Campaigns"] gives it a real per-day trend too.
+  // Defaults to Total Leads.
   const CHART_CATEGORIES = ["Active Campaigns", "Total Leads", "Qualified Leads", "Site Visits", "Follow Ups"] as const;
   type ChartCategory = typeof CHART_CATEGORIES[number];
   const [chartCategory, setChartCategory] = useState<ChartCategory>("Total Leads");
-  const [chartCategoryMenuOpen, setChartCategoryMenuOpen] = useState(false);
-  const [chartCategoryMenuPos, setChartCategoryMenuPos] = useState<{ top: number; left: number } | null>(null);
-  const chartCategoryBtnRef = useRef<HTMLButtonElement>(null);
 
-  // Separate from the category ("which leads") — controls which of the two
-  // real series actually render: Spend only, Leads only, or both together.
+  // Independent of the category — controls which of the two real series
+  // actually render: Spend only, Leads only, or both together.
   const CHART_VIEW_MODES = ["Spend", "Leads", "Both"] as const;
   type ChartViewMode = typeof CHART_VIEW_MODES[number];
   const [chartViewMode, setChartViewMode] = useState<ChartViewMode>("Both");
@@ -691,10 +687,16 @@ export default function AdminCampaignsPage() {
   const [chartViewModeMenuPos, setChartViewModeMenuPos] = useState<{ top: number; left: number } | null>(null);
   const chartViewModeBtnRef = useRef<HTMLButtonElement>(null);
 
+  // Clicking a top stat card both opens its drill-down (as before) and
+  // switches the chart's Leads series to that same category — so the
+  // chart always reflects whichever number the admin just looked at.
   const toggleCategory = (label: string) => {
     setSelectedCategory(prev => (prev === label ? null : label));
     setDrillSearchQuery("");
     setDrillPage(1);
+    if ((CHART_CATEGORIES as readonly string[]).includes(label)) {
+      setChartCategory(label as ChartCategory);
+    }
   };
 
   // "Campaign Type" breakdown can group real ad-spend by Platform (Meta/
@@ -847,13 +849,12 @@ export default function AdminCampaignsPage() {
   // visually detaches from its button) if the page scrolls while open —
   // closing on scroll is simpler and safer than re-measuring position live.
   useEffect(() => {
-    const anyOpen = summaryDateMenuOpen || statusColumnMenuOpen || chartCategoryMenuOpen || chartViewModeMenuOpen
+    const anyOpen = summaryDateMenuOpen || statusColumnMenuOpen || chartViewModeMenuOpen
       || typeGroupByMenuOpen || breakdownCampaignMenuOpen || deepDiveSourceMenuOpen;
     if (!anyOpen) return;
     const closeAll = () => {
       setSummaryDateMenuOpen(false);
       setStatusColumnMenuOpen(false);
-      setChartCategoryMenuOpen(false);
       setChartViewModeMenuOpen(false);
       setTypeGroupByMenuOpen(false);
       setBreakdownCampaignMenuOpen(false);
@@ -861,7 +862,7 @@ export default function AdminCampaignsPage() {
     };
     window.addEventListener("scroll", closeAll, true);
     return () => window.removeEventListener("scroll", closeAll, true);
-  }, [summaryDateMenuOpen, statusColumnMenuOpen, chartCategoryMenuOpen, chartViewModeMenuOpen, typeGroupByMenuOpen, breakdownCampaignMenuOpen, deepDiveSourceMenuOpen]);
+  }, [summaryDateMenuOpen, statusColumnMenuOpen, chartViewModeMenuOpen, typeGroupByMenuOpen, breakdownCampaignMenuOpen, deepDiveSourceMenuOpen]);
 
   const deepDiveSourceOptions = useMemo(() => Array.from(new Set(campaignsList.map(c => c.platform))), [campaignsList]);
 
@@ -1452,37 +1453,7 @@ export default function AdminCampaignsPage() {
                       document.body
                     )}
                   </div>
-                  <div className="relative">
-                    <button
-                      type="button"
-                      ref={chartCategoryBtnRef}
-                      onClick={() => openPositionedMenu(chartCategoryBtnRef, setChartCategoryMenuPos, setChartCategoryMenuOpen, "right", 160)}
-                      className="flex items-center gap-1.5 bg-white border border-slate-300/80 rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
-                    >
-                      {chartCategory}
-                      <ChevronDown className={`h-3 w-3 text-slate-400 transition-transform ${chartCategoryMenuOpen ? "rotate-180" : ""}`} />
-                    </button>
-                    {chartCategoryMenuOpen && chartCategoryMenuPos && createPortal(
-                      <>
-                        <div className="fixed inset-0 z-[60]" onClick={() => setChartCategoryMenuOpen(false)} />
-                        <div
-                          className="fixed z-[70] bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 overflow-hidden text-xs font-semibold"
-                          style={{ top: chartCategoryMenuPos.top, left: chartCategoryMenuPos.left, width: 160 }}
-                        >
-                          {CHART_CATEGORIES.map(opt => (
-                            <button
-                              key={opt}
-                              onClick={() => { setChartCategory(opt); setChartCategoryMenuOpen(false); }}
-                              className={`w-full text-left px-3 py-1.5 transition-colors ${chartCategory === opt ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"}`}
-                            >
-                              {opt}
-                            </button>
-                          ))}
-                        </div>
-                      </>,
-                      document.body
-                    )}
-                  </div>
+                  <span className="text-[11px] font-semibold text-amber-600 bg-amber-50 rounded-full px-2.5 py-1">{chartCategory}</span>
                 </div>
               </div>
               {chartData.length === 0 ? (
