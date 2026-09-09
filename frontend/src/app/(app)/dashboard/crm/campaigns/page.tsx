@@ -611,21 +611,19 @@ export default function AdminCampaignsPage() {
     return { items: result, leadsByDateByCampaign };
   };
 
-  // The real, Date-Range-scoped campaigns list — Total Leads is the sum of
-  // every campaign's own real per-day leads (see buildCampaignsList) within
-  // the selected range, so "All Time" gives the true platform-reported
-  // grand total and narrower ranges (Today/This Week/...) give real,
-  // smaller numbers instead of always showing the same all-time figure.
-  // Drives the Campaigns tab table, Active Campaigns/Total Leads cards,
-  // the Campaign Type/Status breakdown, Deep Dive, and CSV export.
-  // leadsByDateByCampaignInRange is reused as-is by the Analytics chart so
-  // its Total Leads line always adds up to this same grand total.
+  // The real, Date-Range-scoped campaigns list — each campaign's own
+  // totalLeads is the sum of its real per-day leads (see
+  // buildCampaignsList) within the selected range. Drives the Campaigns
+  // tab table (each campaign's own row), Active Campaigns, the Campaign
+  // Type/Status breakdown's Spend column, Deep Dive, and CSV export. The
+  // top summary bar's own Total Leads card does NOT use this — it counts
+  // real individual Lead records directly (categoryLeadsInRange), same as
+  // the CRM Dashboard and admin Leads page, so all three agree.
   const campaignsListResult = useMemo(
     () => buildCampaignsList(adSpendRecords.filter(recordInSelectedRange), leadInSelectedRange),
     [adSpendRecords, leads, appliedCustomRange, dateRange, today]
   );
   const campaignsList: CampaignItem[] = campaignsListResult.items;
-  const leadsByDateByCampaignInRange = campaignsListResult.leadsByDateByCampaign;
 
   // Same real campaigns, but always all-time — a campaign's status
   // (Active/Pause/Stopped) and platform are snapshot properties of the
@@ -653,17 +651,14 @@ export default function AdminCampaignsPage() {
   // the counts below use, so clicking a card always drills into exactly
   // what it counted, mirroring the CRM Dashboard's drill-down.
   //
-  // "Total Leads" used to be date-range-filtered here (leadInSelectedRange)
-  // on the theory that it's "intake volume, respects Date Range" — but the
-  // summary card's own number (campaignsList[].totalLeads, summed) isn't
-  // meaningfully date-scoped: it comes from AdSpendRecord.leadsGenerated,
-  // summed across every spend record for a campaign with no date filter
-  // at all (see campaignsList above). So on "Today" the card kept showing
-  // the real all-time platform total while this list narrowed to just
-  // today's synced leads — a handful, not what "all leads from all
-  // campaigns" means. Matches the card's real scope now: every real lead
-  // that actually has a campaign/source (i.e. came from an ad campaign),
-  // regardless of creation date.
+  // "Total Leads" is every real lead, full stop — same definition the CRM
+  // Dashboard and the admin Leads page use for their own "Total Leads"
+  // cards (scopedLeads.filter(dateInRange...).length). It used to be
+  // restricted to leads with a campaign/source (an "ad-attributed leads"
+  // concept), which is why this page's Total Leads never matched the same
+  // field on the other two admin CRM pages for the same Date Range — same
+  // label, three different real numbers. All three now count the exact
+  // same thing: every real Lead record within the selected range.
   const categoryLeads: Record<string, Lead[]> = useMemo(() => {
     return {
       // Real leads whose own campaign is currently Active — same
@@ -674,7 +669,7 @@ export default function AdminCampaignsPage() {
         const c = campaignByName[(l.campaign || l.source || "").toLowerCase()];
         return !!c && c.status === "Active";
       }),
-      "Total Leads": leads.filter(l => !!(l.campaign || l.source)),
+      "Total Leads": leads,
       "Qualified Leads": leads.filter(l => QUALIFIED_LEAD_STATUSES.includes(l.status)),
       "Site Visits": leads.filter(l => SITE_VISIT_LEAD_STATUSES.includes(l.status)),
       "Follow Ups": leads.filter(l => FOLLOW_UP_LEAD_STATUSES.includes(l.status))
@@ -697,18 +692,16 @@ export default function AdminCampaignsPage() {
 
   // Aggregate Metrics for Top Summary Card.
   //
-  // Active Campaigns and Total Leads both come straight off the
-  // Date-Range-scoped campaignsList: Active Campaigns is a real count of
-  // campaigns with that status within the range, and Total Leads is the
-  // real sum of every campaign's own leadsGenerated (Meta + Google +
-  // Other) within the range — "All Time" gives the true platform-reported
-  // grand total; narrower ranges give real, smaller numbers. Qualified
-  // Leads/Site Visits/Follow Ups come from categoryLeadsInRange (real
-  // individual synced leads, same Date Range).
+  // Total Leads/Qualified Leads/Site Visits/Follow Ups all come from
+  // categoryLeadsInRange — real individual Lead records, same Date Range,
+  // same predicates the CRM Dashboard and admin Leads page use for their
+  // own same-named cards, so this page's numbers can't drift from theirs.
+  // Active Campaigns is a real count of campaigns with that status within
+  // the range, from the Date-Range-scoped campaignsList.
   const summaryMetrics = useMemo(() => {
     return {
       activeCampaigns: campaignsList.filter(c => c.status === "Active").length,
-      totalLeads: campaignsList.reduce((acc, c) => acc + c.totalLeads, 0),
+      totalLeads: categoryLeadsInRange["Total Leads"].length,
       qualifiedLeads: categoryLeadsInRange["Qualified Leads"].length,
       siteVisits: categoryLeadsInRange["Site Visits"].length,
       followUps: categoryLeadsInRange["Follow Ups"].length
@@ -783,16 +776,21 @@ export default function AdminCampaignsPage() {
   const isTypeChecked = (type: string) => selectedChartTypes[type] !== false;
   const toggleChartType = (type: string) => setSelectedChartTypes(prev => ({ ...prev, [type]: !isTypeChecked(type) }));
 
-  // Leads and Spend both sum campaignsList[].totalLeads/.spend — the same
-  // Date-Range-scoped real numbers the top summary bar's Active
-  // Campaigns/Total Leads cards use, so this card's grand total always
-  // equals those cards', whichever grouping dimension is active (grouping
-  // can never change the sum, only how it's split). Every real
-  // platform/status ever seen (campaignsListAllTime) is seeded into the map
-  // first so a type doesn't disappear from the checkboxes just because it
-  // had no activity in the currently selected Date Range — it shows ₹0/0
-  // leads instead, which also keeps the Analytics chart's own platform/
-  // status filters from silently narrowing when a short range is picked.
+  // Spend sums campaignsList[].spend (real per-campaign ad spend, same
+  // Date-Range-scoped list the Campaigns tab table uses). Leads classifies
+  // every real lead in categoryLeadsInRange["Total Leads"] — the exact
+  // same list the top summary bar's Total Leads card counts — by its own
+  // campaign's platform/status, so this card's grand total always equals
+  // that card's number, whichever grouping dimension is active. A lead
+  // with no campaign/source, or one that doesn't match a known campaign,
+  // still gets counted (as "Other"/"Unmatched") rather than silently
+  // dropped — dropping it would make the totals disagree depending on
+  // grouping. Every real platform/status ever seen (campaignsListAllTime)
+  // is seeded into the map first so a type doesn't disappear from the
+  // checkboxes just because it had no activity in the currently selected
+  // Date Range — it shows ₹0/0 leads instead, which also keeps the
+  // Analytics chart's own platform/status filters from silently narrowing
+  // when a short range is picked.
   const typeBreakdown = useMemo(() => {
     const map: Record<string, { spend: number; leads: number }> = {};
     campaignsListAllTime.forEach(c => {
@@ -803,12 +801,19 @@ export default function AdminCampaignsPage() {
       const key = typeGroupBy === "Platform" ? c.platform : c.status;
       if (!map[key]) map[key] = { spend: 0, leads: 0 };
       map[key].spend += c.spend;
-      map[key].leads += c.totalLeads;
+    });
+    (categoryLeadsInRange["Total Leads"] || []).forEach(l => {
+      const campaign = campaignByName[(l.campaign || l.source || "").toLowerCase()];
+      const key = typeGroupBy === "Platform"
+        ? (campaign ? campaign.platform : (platformFromText(l.source || l.campaign) || "Other"))
+        : (campaign ? campaign.status : "Unmatched");
+      if (!map[key]) map[key] = { spend: 0, leads: 0 };
+      map[key].leads += 1;
     });
     return Object.entries(map)
       .map(([type, v]) => ({ type, spend: v.spend, leads: v.leads }))
       .sort((a, b) => b.spend - a.spend);
-  }, [campaignsList, campaignsListAllTime, typeGroupBy]);
+  }, [campaignsList, campaignsListAllTime, categoryLeadsInRange, campaignByName, typeGroupBy]);
 
   const typeBreakdownTotal = typeBreakdown.filter(t => isTypeChecked(t.type)).reduce((acc, t) => acc + t.spend, 0);
   const typeBreakdownLeadsTotal = typeBreakdown.filter(t => isTypeChecked(t.type)).reduce((acc, t) => acc + t.leads, 0);
@@ -835,45 +840,28 @@ export default function AdminCampaignsPage() {
       byDate[r.date].spend += r.spend;
     });
 
-    if (chartCategory === "Total Leads") {
-      // Same real per-(campaign, day) max(platform-reported, synced)
-      // values campaignsList sums for its own totalLeads — reused here so
-      // the chart's Total Leads line always adds up to exactly the same
-      // grand total shown on the breakdown card and top summary bar.
-      Object.entries(leadsByDateByCampaignInRange).forEach(([cName, perDate]) => {
-        const c = campaignByName[cName.toLowerCase()];
-        if (typeGroupBy === "Platform") {
-          if (!c || !includedPlatforms.has(c.platform)) return;
-        } else {
-          if (!c || !includedStatuses.has(c.status)) return;
-        }
-        Object.entries(perDate).forEach(([date, count]) => {
-          if (!byDate[date]) byDate[date] = { spend: 0, leads: 0 };
-          byDate[date].leads += count;
-        });
-      });
-    } else {
-      // Qualified Leads/Site Visits/Follow Ups/Active Campaigns have no
-      // platform-reported equivalent (Meta/Google don't report CRM
-      // pipeline status) — those stay real per-day counts of individual
-      // synced Lead records, same Date-Range-scoped list the drill-down
-      // card uses.
-      (categoryLeadsInRange[chartCategory] || []).forEach(l => {
-        const campaign = campaignByName[(l.campaign || l.source || "").toLowerCase()];
-        if (typeGroupBy === "Platform") {
-          const platform = campaign ? campaign.platform : platformFromText(l.source || l.campaign);
-          if (!platform || !includedPlatforms.has(platform)) return;
-        } else {
-          if (!campaign || !includedStatuses.has(campaign.status)) return;
-        }
-        if (!l.createdAtStr) return;
-        const d = new Date(l.createdAtStr);
-        if (isNaN(d.getTime())) return;
-        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-        if (!byDate[key]) byDate[key] = { spend: 0, leads: 0 };
-        byDate[key].leads += 1;
-      });
-    }
+    // Real per-day lead counts for whichever category was last clicked —
+    // the exact same Date-Range-scoped list (categoryLeadsInRange) the top
+    // summary bar and breakdown card count, classified the same way (a
+    // lead with no matched campaign still counts, under "Other"/
+    // "Unmatched", never silently dropped) — so the chart's line always
+    // adds up to the same grand total those show.
+    (categoryLeadsInRange[chartCategory] || []).forEach(l => {
+      const campaign = campaignByName[(l.campaign || l.source || "").toLowerCase()];
+      if (typeGroupBy === "Platform") {
+        const platform = campaign ? campaign.platform : (platformFromText(l.source || l.campaign) || "Other");
+        if (!includedPlatforms.has(platform)) return;
+      } else {
+        const status = campaign ? campaign.status : "Unmatched";
+        if (!includedStatuses.has(status)) return;
+      }
+      if (!l.createdAtStr) return;
+      const d = new Date(l.createdAtStr);
+      if (isNaN(d.getTime())) return;
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      if (!byDate[key]) byDate[key] = { spend: 0, leads: 0 };
+      byDate[key].leads += 1;
+    });
 
     return Object.keys(byDate).sort().map(date => {
       const d = new Date(date);
@@ -882,7 +870,7 @@ export default function AdminCampaignsPage() {
         : `${d.toLocaleDateString("en-GB", { day: "2-digit" })} ${d.toLocaleDateString("en-GB", { month: "short" })}, ${d.getFullYear()}`;
       return { date, label, spend: byDate[date].spend, leads: byDate[date].leads };
     });
-  }, [adSpendRecords, campaignByName, categoryLeadsInRange, leadsByDateByCampaignInRange, chartCategory, typeGroupBy, selectedChartTypes, typeBreakdown, dateRange, appliedCustomRange, today]);
+  }, [adSpendRecords, campaignByName, categoryLeadsInRange, chartCategory, typeGroupBy, selectedChartTypes, typeBreakdown, dateRange, appliedCustomRange, today]);
 
   const chartSpendAverage = chartData.length === 0 ? 0 : chartData.reduce((acc, c) => acc + c.spend, 0) / chartData.length;
   const chartLeadsAverage = chartData.length === 0 ? 0 : chartData.reduce((acc, c) => acc + c.leads, 0) / chartData.length;
