@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useMemo, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { useApp, Lead } from "@/context/AppContext";
+import { useApp, Lead, AdSpendRecord } from "@/context/AppContext";
 import { computeCPL } from "@/lib/reportMetrics";
 import { WhatsAppIcon, CallIcon, platformFromText } from "@/components/icons/ContactIcons";
 import {
@@ -486,6 +486,23 @@ export default function AdminCampaignsPage() {
     return dateInRange(l.createdAtStr, mapDateRangeToKey(dateRange), today);
   };
 
+  // Same "in range" check as leadInSelectedRange, for an AdSpendRecord's own
+  // date — used to decide which campaigns actually had activity within the
+  // selected Date Range (for the top summary bar only; campaignsList itself
+  // stays all-time so the Campaigns tab table / chart / breakdown keep their
+  // full history).
+  const recordInSelectedRange = (r: AdSpendRecord): boolean => {
+    if (dateRange === "Custom" && appliedCustomRange) {
+      const d = new Date(r.date);
+      if (isNaN(d.getTime())) return false;
+      const start = new Date(appliedCustomRange.start);
+      const end = new Date(appliedCustomRange.end);
+      end.setHours(23, 59, 59, 999);
+      return d >= start && d <= end;
+    }
+    return dateInRange(r.date, mapDateRangeToKey(dateRange), today);
+  };
+
   // Derive campaigns data from context adSpend + leads
   const campaignsList: CampaignItem[] = useMemo(() => {
     // Collect all campaign names from ad spend records and lead sources
@@ -592,39 +609,46 @@ export default function AdminCampaignsPage() {
     };
   }, [leads, campaignByName]);
 
-  // Aggregate Metrics for Top Summary Card.
-  //
-  // Total Leads intentionally sums campaignsList[].totalLeads (real
-  // platform-reported ad-spend volume, Math.max'd against real synced
-  // leads per campaign) rather than counting individual synced Lead
-  // records — the two are genuinely different real metrics (platforms
-  // routinely report more leads than have been individually synced into
-  // the CRM yet), and this total is the one that's meant to track ad
-  // platform intake. Its drill-down, however, lists the real individual
-  // leads (pure lead details, same as every other card here) rather than
-  // a campaign breakdown — the two numbers can legitimately differ; the
-  // card is a platform-reported aggregate, the list is what's actually
-  // been synced.
-  //
-  // Qualified Leads/Site Visits/Follow Ups are current pipeline-status
-  // snapshots over every real lead regardless of which campaign (or
-  // whether any ad-spend record) it's tied to, so those come from
-  // categoryLeads and their drill-downs list the real leads themselves.
+  // Every category's real leads, additionally narrowed to the selected Date
+  // Range — used only by the top summary bar and its drill-downs, so the
+  // bar actually responds to Date Range (Today/This Week/etc.) instead of
+  // always showing the same all-time numbers. categoryLeads itself stays
+  // unscoped because the Analytics chart needs its full multi-day history
+  // to draw a trend regardless of which Date Range bucket is selected.
+  const categoryLeadsInRange = useMemo(() => {
+    const out: Record<string, Lead[]> = {};
+    Object.entries(categoryLeads).forEach(([key, list]) => {
+      out[key] = list.filter(leadInSelectedRange);
+    });
+    return out;
+  }, [categoryLeads, dateRange, appliedCustomRange, today]);
+
+  // Real campaigns that are Active AND actually had ad-spend activity within
+  // the selected Date Range — same reasoning as categoryLeadsInRange, kept
+  // separate from campaignsList (which stays all-time for the Campaigns tab
+  // table, chart, and breakdown card).
+  const activeCampaignsInRange = useMemo(
+    () => campaignsList.filter(c => c.status === "Active" && adSpendRecords.some(r => r.accountName.toLowerCase() === c.name.toLowerCase() && recordInSelectedRange(r))),
+    [campaignsList, adSpendRecords, dateRange, appliedCustomRange, today]
+  );
+
+  // Aggregate Metrics for Top Summary Card — all five now reflect the
+  // selected Date Range, using the same real data their drill-downs list
+  // (categoryLeadsInRange / activeCampaignsInRange), so the card number and
+  // what you see after clicking it always match.
   const summaryMetrics = useMemo(() => {
-    const activeCount = campaignsList.filter(c => c.status === "Active").length;
-    const totalLeadsSum = campaignsList.reduce((acc, c) => acc + c.totalLeads, 0);
     return {
-      activeCampaigns: activeCount,
-      totalLeads: totalLeadsSum,
-      qualifiedLeads: categoryLeads["Qualified Leads"].length,
-      siteVisits: categoryLeads["Site Visits"].length,
-      followUps: categoryLeads["Follow Ups"].length
+      activeCampaigns: activeCampaignsInRange.length,
+      totalLeads: categoryLeadsInRange["Total Leads"].length,
+      qualifiedLeads: categoryLeadsInRange["Qualified Leads"].length,
+      siteVisits: categoryLeadsInRange["Site Visits"].length,
+      followUps: categoryLeadsInRange["Follow Ups"].length
     };
-  }, [campaignsList, categoryLeads]);
+  }, [activeCampaignsInRange, categoryLeadsInRange]);
 
   // "Active Campaigns" drills into campaigns, not leads — it's a count of
   // campaigns (matching the summary card's own unit), not a leads list.
-  const activeCampaignsDrill = useMemo(() => campaignsList.filter(c => c.status === "Active"), [campaignsList]);
+  const activeCampaignsDrill = activeCampaignsInRange;
 
   const formatCurrency = (n: number) => `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -657,6 +681,15 @@ export default function AdminCampaignsPage() {
   const [chartCategoryMenuOpen, setChartCategoryMenuOpen] = useState(false);
   const [chartCategoryMenuPos, setChartCategoryMenuPos] = useState<{ top: number; left: number } | null>(null);
   const chartCategoryBtnRef = useRef<HTMLButtonElement>(null);
+
+  // Separate from the category ("which leads") — controls which of the two
+  // real series actually render: Spend only, Leads only, or both together.
+  const CHART_VIEW_MODES = ["Spend", "Leads", "Both"] as const;
+  type ChartViewMode = typeof CHART_VIEW_MODES[number];
+  const [chartViewMode, setChartViewMode] = useState<ChartViewMode>("Both");
+  const [chartViewModeMenuOpen, setChartViewModeMenuOpen] = useState(false);
+  const [chartViewModeMenuPos, setChartViewModeMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const chartViewModeBtnRef = useRef<HTMLButtonElement>(null);
 
   const toggleCategory = (label: string) => {
     setSelectedCategory(prev => (prev === label ? null : label));
@@ -814,20 +847,21 @@ export default function AdminCampaignsPage() {
   // visually detaches from its button) if the page scrolls while open —
   // closing on scroll is simpler and safer than re-measuring position live.
   useEffect(() => {
-    const anyOpen = summaryDateMenuOpen || statusColumnMenuOpen || chartCategoryMenuOpen
+    const anyOpen = summaryDateMenuOpen || statusColumnMenuOpen || chartCategoryMenuOpen || chartViewModeMenuOpen
       || typeGroupByMenuOpen || breakdownCampaignMenuOpen || deepDiveSourceMenuOpen;
     if (!anyOpen) return;
     const closeAll = () => {
       setSummaryDateMenuOpen(false);
       setStatusColumnMenuOpen(false);
       setChartCategoryMenuOpen(false);
+      setChartViewModeMenuOpen(false);
       setTypeGroupByMenuOpen(false);
       setBreakdownCampaignMenuOpen(false);
       setDeepDiveSourceMenuOpen(false);
     };
     window.addEventListener("scroll", closeAll, true);
     return () => window.removeEventListener("scroll", closeAll, true);
-  }, [summaryDateMenuOpen, statusColumnMenuOpen, chartCategoryMenuOpen, typeGroupByMenuOpen, breakdownCampaignMenuOpen, deepDiveSourceMenuOpen]);
+  }, [summaryDateMenuOpen, statusColumnMenuOpen, chartCategoryMenuOpen, chartViewModeMenuOpen, typeGroupByMenuOpen, breakdownCampaignMenuOpen, deepDiveSourceMenuOpen]);
 
   const deepDiveSourceOptions = useMemo(() => Array.from(new Set(campaignsList.map(c => c.platform))), [campaignsList]);
 
@@ -1119,7 +1153,7 @@ export default function AdminCampaignsPage() {
               ? activeCampaignsDrill.filter(c => !q || c.name.toLowerCase().includes(q))
               : [];
             const shownLeads = !isCampaignsTable
-              ? (categoryLeads[selectedCategory] || []).filter(l =>
+              ? (categoryLeadsInRange[selectedCategory] || []).filter(l =>
                   !q || l.name.toLowerCase().includes(q) || l.phone.includes(q) || (l.campaign || l.source || "").toLowerCase().includes(q)
                 )
               : [];
@@ -1384,38 +1418,71 @@ export default function AdminCampaignsPage() {
           {/* Spend/Leads-over-time chart + Campaign Type/Status breakdown */}
           <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-4">
             <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm p-5">
-              <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center justify-between mb-2 gap-2">
                 <span className="text-xs font-semibold text-slate-500">Spend &amp; Leads over time</span>
-                <div className="relative">
-                  <button
-                    type="button"
-                    ref={chartCategoryBtnRef}
-                    onClick={() => openPositionedMenu(chartCategoryBtnRef, setChartCategoryMenuPos, setChartCategoryMenuOpen, "right", 160)}
-                    className="flex items-center gap-1.5 bg-white border border-slate-300/80 rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
-                  >
-                    {chartCategory}
-                    <ChevronDown className={`h-3 w-3 text-slate-400 transition-transform ${chartCategoryMenuOpen ? "rotate-180" : ""}`} />
-                  </button>
-                  {chartCategoryMenuOpen && chartCategoryMenuPos && createPortal(
-                    <>
-                      <div className="fixed inset-0 z-[60]" onClick={() => setChartCategoryMenuOpen(false)} />
-                      <div
-                        className="fixed z-[70] bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 overflow-hidden text-xs font-semibold"
-                        style={{ top: chartCategoryMenuPos.top, left: chartCategoryMenuPos.left, width: 160 }}
-                      >
-                        {CHART_CATEGORIES.map(opt => (
-                          <button
-                            key={opt}
-                            onClick={() => { setChartCategory(opt); setChartCategoryMenuOpen(false); }}
-                            className={`w-full text-left px-3 py-1.5 transition-colors ${chartCategory === opt ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"}`}
-                          >
-                            {opt}
-                          </button>
-                        ))}
-                      </div>
-                    </>,
-                    document.body
-                  )}
+                <div className="flex items-center gap-2">
+                  <div className="relative">
+                    <button
+                      type="button"
+                      ref={chartViewModeBtnRef}
+                      onClick={() => openPositionedMenu(chartViewModeBtnRef, setChartViewModeMenuPos, setChartViewModeMenuOpen, "right", 110)}
+                      className="flex items-center gap-1.5 bg-white border border-slate-300/80 rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+                    >
+                      {chartViewMode}
+                      <ChevronDown className={`h-3 w-3 text-slate-400 transition-transform ${chartViewModeMenuOpen ? "rotate-180" : ""}`} />
+                    </button>
+                    {chartViewModeMenuOpen && chartViewModeMenuPos && createPortal(
+                      <>
+                        <div className="fixed inset-0 z-[60]" onClick={() => setChartViewModeMenuOpen(false)} />
+                        <div
+                          className="fixed z-[70] bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 overflow-hidden text-xs font-semibold"
+                          style={{ top: chartViewModeMenuPos.top, left: chartViewModeMenuPos.left, width: 110 }}
+                        >
+                          {CHART_VIEW_MODES.map(opt => (
+                            <button
+                              key={opt}
+                              onClick={() => { setChartViewMode(opt); setChartViewModeMenuOpen(false); }}
+                              className={`w-full text-left px-3 py-1.5 transition-colors ${chartViewMode === opt ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"}`}
+                            >
+                              {opt}
+                            </button>
+                          ))}
+                        </div>
+                      </>,
+                      document.body
+                    )}
+                  </div>
+                  <div className="relative">
+                    <button
+                      type="button"
+                      ref={chartCategoryBtnRef}
+                      onClick={() => openPositionedMenu(chartCategoryBtnRef, setChartCategoryMenuPos, setChartCategoryMenuOpen, "right", 160)}
+                      className="flex items-center gap-1.5 bg-white border border-slate-300/80 rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+                    >
+                      {chartCategory}
+                      <ChevronDown className={`h-3 w-3 text-slate-400 transition-transform ${chartCategoryMenuOpen ? "rotate-180" : ""}`} />
+                    </button>
+                    {chartCategoryMenuOpen && chartCategoryMenuPos && createPortal(
+                      <>
+                        <div className="fixed inset-0 z-[60]" onClick={() => setChartCategoryMenuOpen(false)} />
+                        <div
+                          className="fixed z-[70] bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 overflow-hidden text-xs font-semibold"
+                          style={{ top: chartCategoryMenuPos.top, left: chartCategoryMenuPos.left, width: 160 }}
+                        >
+                          {CHART_CATEGORIES.map(opt => (
+                            <button
+                              key={opt}
+                              onClick={() => { setChartCategory(opt); setChartCategoryMenuOpen(false); }}
+                              className={`w-full text-left px-3 py-1.5 transition-colors ${chartCategory === opt ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"}`}
+                            >
+                              {opt}
+                            </button>
+                          ))}
+                        </div>
+                      </>,
+                      document.body
+                    )}
+                  </div>
                 </div>
               </div>
               {chartData.length === 0 ? (
@@ -1427,36 +1494,52 @@ export default function AdminCampaignsPage() {
                   <LineChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                     <CartesianGrid vertical={false} stroke="#e2e8f0" />
                     <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
-                    <YAxis
-                      yAxisId="spend"
-                      tick={{ fontSize: 10, fill: "#94a3b8" }}
-                      axisLine={false}
-                      tickLine={false}
-                      tickFormatter={(v: number) => `₹${(v / 1000).toFixed(1)}K`}
-                    />
-                    <YAxis
-                      yAxisId="leads"
-                      orientation="right"
-                      tick={{ fontSize: 10, fill: "#94a3b8" }}
-                      axisLine={false}
-                      tickLine={false}
-                      allowDecimals={false}
-                    />
+                    {chartViewMode !== "Leads" && (
+                      <YAxis
+                        yAxisId="spend"
+                        tick={{ fontSize: 10, fill: "#94a3b8" }}
+                        axisLine={false}
+                        tickLine={false}
+                        tickFormatter={(v: number) => `₹${(v / 1000).toFixed(1)}K`}
+                      />
+                    )}
+                    {chartViewMode !== "Spend" && (
+                      <YAxis
+                        yAxisId="leads"
+                        orientation={chartViewMode === "Both" ? "right" : "left"}
+                        tick={{ fontSize: 10, fill: "#94a3b8" }}
+                        axisLine={false}
+                        tickLine={false}
+                        allowDecimals={false}
+                      />
+                    )}
                     <Tooltip
                       formatter={(v, name) => name === "Spend" ? [formatCurrency(Number(v)), "Spend"] : [Number(v), chartCategory]}
                       labelStyle={{ fontSize: 11, fontWeight: 600 }}
                       contentStyle={{ fontSize: 11, borderRadius: 8, borderColor: "#e2e8f0" }}
                     />
-                    <ReferenceLine yAxisId="spend" y={chartSpendAverage} stroke="#6366f1" strokeDasharray="4 4" />
-                    <ReferenceLine yAxisId="leads" y={chartLeadsAverage} stroke="#f59e0b" strokeDasharray="4 4" />
-                    <Line yAxisId="spend" type="monotone" dataKey="spend" name="Spend" stroke="#6366f1" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
-                    <Line yAxisId="leads" type="monotone" dataKey="leads" name={chartCategory} stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                    {chartViewMode !== "Leads" && (
+                      <ReferenceLine yAxisId="spend" y={chartSpendAverage} stroke="#6366f1" strokeDasharray="4 4" />
+                    )}
+                    {chartViewMode !== "Spend" && (
+                      <ReferenceLine yAxisId="leads" y={chartLeadsAverage} stroke="#f59e0b" strokeDasharray="4 4" />
+                    )}
+                    {chartViewMode !== "Leads" && (
+                      <Line yAxisId="spend" type="monotone" dataKey="spend" name="Spend" stroke="#6366f1" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                    )}
+                    {chartViewMode !== "Spend" && (
+                      <Line yAxisId="leads" type="monotone" dataKey="leads" name={chartCategory} stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                    )}
                   </LineChart>
                 </ResponsiveContainer>
               )}
               <div className="flex items-center gap-4 text-[11px] text-slate-500 mt-2">
-                <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-[#6366f1]" />Spend</span>
-                <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-[#f59e0b]" />{chartCategory}</span>
+                {chartViewMode !== "Leads" && (
+                  <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-[#6366f1]" />Spend</span>
+                )}
+                {chartViewMode !== "Spend" && (
+                  <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-[#f59e0b]" />{chartCategory}</span>
+                )}
               </div>
             </div>
 
