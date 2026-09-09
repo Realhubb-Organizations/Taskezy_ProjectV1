@@ -590,22 +590,22 @@ export default function AdminCampaignsPage() {
     [adSpendRecords, leads, appliedCustomRange, dateRange, today]
   );
 
-  // Same real campaigns, but always all-time — used only where full history
-  // is required regardless of the top Date Range selector, i.e. the
-  // Analytics chart's per-day trend (campaignByName below): if it looked up
-  // campaigns through the date-scoped list instead, picking "Today" would
-  // make historical records from other days fail to classify and vanish
-  // from the chart, even though the chart is meant to show its own full
-  // multi-month history independent of Date Range.
+  // Same real campaigns, but always all-time — a campaign's status
+  // (Active/Pause/Stopped) and platform are snapshot properties of the
+  // campaign itself, not something that should flip depending on which
+  // date window happens to be selected, so classification (campaignByName
+  // below) always reads the campaign's real overall status rather than
+  // "was it Active within just this range." Also seeds the Campaign Type/
+  // Status breakdown's checkboxes so a type never disappears from the list
+  // just because it had no activity in the current range.
   const campaignsListAllTime: CampaignItem[] = useMemo(
     () => buildCampaignsList(adSpendRecords, campaignLeads => campaignLeads.length),
     [adSpendRecords, leads]
   );
 
-  // Shared campaign-name lookup — sourced from the all-time list (not the
-  // Date-Range-scoped campaignsList) so a lead's campaign classification
-  // stays stable no matter which Date Range is selected; every current use
-  // (categoryLeads["Active Campaigns"], the chart) needs full history.
+  // Shared campaign-name lookup — sourced from the all-time list so a
+  // lead/record's campaign classification (status/platform) stays the
+  // real, stable value regardless of which Date Range is selected.
   const campaignByName = useMemo(() => {
     const map: Record<string, CampaignItem> = {};
     campaignsListAllTime.forEach(c => { map[c.name.toLowerCase()] = c; });
@@ -703,10 +703,11 @@ export default function AdminCampaignsPage() {
 
   // ---- Campaigns Analytics tab ----------------------------------------
 
-  // Chart: real spend AND real lead counts shown together. Which category
-  // the "leads" side is scoped to follows whichever top stat card was last
-  // clicked (see toggleCategory) — Active Campaigns included, since
-  // categoryLeads["Active Campaigns"] gives it a real per-day trend too.
+  // Chart: real spend AND real lead counts shown together, both scoped to
+  // the selected Date Range (same as every other card on this tab) — "All
+  // Time" plots the full history, a narrower range shows only that
+  // window's real days. Which category the "leads" side is scoped to
+  // follows whichever top stat card was last clicked (see toggleCategory).
   // Defaults to Total Leads.
   const CHART_CATEGORIES = ["Active Campaigns", "Total Leads", "Qualified Leads", "Site Visits", "Follow Ups"] as const;
   type ChartCategory = typeof CHART_CATEGORIES[number];
@@ -786,6 +787,7 @@ export default function AdminCampaignsPage() {
     const byDate: Record<string, { spend: number; leads: number }> = {};
 
     adSpendRecords.forEach(r => {
+      if (!recordInSelectedRange(r)) return;
       if (typeGroupBy === "Platform") {
         if (!includedPlatforms.has(r.platform)) return;
       } else {
@@ -797,10 +799,10 @@ export default function AdminCampaignsPage() {
     });
 
     // Real per-day lead counts for whichever category was last clicked —
-    // the exact same list categoryLeads/the drill-down card uses, not the
-    // ad platform's own self-reported leadsGenerated, so this can differ
-    // in scale from the Spend series (same as the stat cards already do).
-    (categoryLeads[chartCategory] || []).forEach(l => {
+    // the exact same Date-Range-scoped list the drill-down card uses, not
+    // the ad platform's own self-reported leadsGenerated, so this can
+    // differ in scale from the Spend series (same as the stat cards).
+    (categoryLeadsInRange[chartCategory] || []).forEach(l => {
       const campaign = campaignByName[(l.campaign || l.source || "").toLowerCase()];
       if (typeGroupBy === "Platform") {
         const platform = campaign ? campaign.platform : platformFromText(l.source || l.campaign);
@@ -823,7 +825,7 @@ export default function AdminCampaignsPage() {
         : `${d.toLocaleDateString("en-GB", { day: "2-digit" })} ${d.toLocaleDateString("en-GB", { month: "short" })}, ${d.getFullYear()}`;
       return { date, label, spend: byDate[date].spend, leads: byDate[date].leads };
     });
-  }, [adSpendRecords, campaignByName, categoryLeads, chartCategory, typeGroupBy, selectedChartTypes, typeBreakdown]);
+  }, [adSpendRecords, campaignByName, categoryLeadsInRange, chartCategory, typeGroupBy, selectedChartTypes, typeBreakdown, dateRange, appliedCustomRange, today]);
 
   const chartSpendAverage = chartData.length === 0 ? 0 : chartData.reduce((acc, c) => acc + c.spend, 0) / chartData.length;
   const chartLeadsAverage = chartData.length === 0 ? 0 : chartData.reduce((acc, c) => acc + c.leads, 0) / chartData.length;
