@@ -277,7 +277,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                 <img
                   src="/Blue White Professional Minimal Company Business Card.png"
                   alt="TASKEZY Logo"
-                  className="h-10 w-auto object-contain"
+                  className="h-14 w-auto object-contain"
                 />
               </Link>
             )}
@@ -451,7 +451,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                   <img
                     src="/Blue White Professional Minimal Company Business Card.png"
                     alt="TASKEZY Logo"
-                    className="h-9 w-auto object-contain"
+                    className="h-12 w-auto object-contain"
                   />
                 </Link>
                 <button
