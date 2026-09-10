@@ -1085,6 +1085,28 @@ export default function LeadDashboard() {
               </button>
             </div>
 
+            {/* Which stat card's filter is currently applied to the table
+                below — sales agent only. Every card (Total Leads and New
+                Leads included) sets adminMetric on click, same as RNR/Call
+                Backs/etc., but without this there was no visible
+                confirmation of which one was actually active, so Total
+                Leads (whose filter matches everything, so the table looks
+                unchanged) and New Leads looked like they "did nothing". */}
+            {!isAdmin && adminMetric && (
+              <div className="flex items-center justify-between px-1">
+                <h3 className="text-sm font-extrabold text-slate-900">
+                  Showing: {adminStatCards.find(s => s.key === adminMetric)?.label}
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => { setAdminMetric(null); setAdminPage(1); }}
+                  className="text-[11px] font-bold text-slate-400 hover:text-slate-700"
+                >
+                  Clear ✕
+                </button>
+              </div>
+            )}
+
             {/* Main Leads Table Card — the row area is height-capped with its
                 own vertical scroll (independent of the page scroll), so a
                 100-rows-per-page setting doesn't stretch the whole page;
