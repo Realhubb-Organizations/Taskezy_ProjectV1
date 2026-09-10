@@ -3,7 +3,8 @@ import { requireAuth } from "../../middleware/auth";
 import { asyncHandler } from "../../utils/asyncHandler";
 import { sendOk } from "../../utils/apiResponse";
 import { query } from "../../db/pool";
-import { listAdLevelSpend } from "../meta/meta.repository";
+import { listAdLevelSpend as listMetaAdLevelSpend } from "../meta/meta.repository";
+import { listAdLevelSpend as listGoogleAdLevelSpend } from "../google-ads/google-ads.repository";
 
 export const adSpendRouter = Router();
 
@@ -28,14 +29,16 @@ adSpendRouter.get(
 /**
  * Real per-ad, per-day spend/leads with each row's real ad set/ad/creative
  * name attached — un-aggregated (one row per ad per day), same grain as
- * "/" above, for Campaign Deep Dive. The frontend applies its own Date
+ * "/" above, for Campaign Deep Dive. Combines both platforms (each row
+ * tagged platform: "META" | "GOOGLE") the same way "/" already unifies
+ * Meta + Google campaign-level spend. The frontend applies its own Date
  * Range scoping to this the same way it already does for "/", rather than
  * this route pre-aggregating a range server-side.
  */
 adSpendRouter.get(
   "/ad-level",
   asyncHandler(async (_req, res) => {
-    const rows = await listAdLevelSpend();
-    sendOk(res, rows);
+    const [metaRows, googleRows] = await Promise.all([listMetaAdLevelSpend(), listGoogleAdLevelSpend()]);
+    sendOk(res, [...metaRows, ...googleRows]);
   })
 );

@@ -1,5 +1,5 @@
 import { logger } from "../utils/logger";
-import { listLinkedAccounts, listCampaigns, getAccountDailyStats } from "../modules/google-ads/google-ads-client";
+import { listLinkedAccounts, listCampaigns, getAccountDailyStats, listAdGroups, listAds, getAdDailyStats } from "../modules/google-ads/google-ads-client";
 import * as googleAdsRepo from "../modules/google-ads/google-ads.repository";
 
 const POLL_INTERVAL_MS = 6 * 60 * 60 * 1000; // matches metaAdSpendSync.ts — spend doesn't need per-minute freshness
@@ -16,6 +16,12 @@ function isoDateNDaysAgo(n: number): string {
  * one credential auto-discovers every linked client account (no per-account
  * OAuth to loop over), and daily stats come back one call per account
  * (covering all its campaigns) rather than one call per campaign.
+ *
+ * Also pulls every real ad group and ad (with Google's ad_type as an honest
+ * fallback name when ad.name is unset, common for Responsive Search Ads)
+ * and real per-ad daily spend/conversions, account-wide in one call each —
+ * same philosophy as the campaign-level daily stats above. Feeds Campaign
+ * Deep Dive's Ad Set Name/Ad creative Name columns and a real per-ad CPL.
  */
 async function syncOnce(): Promise<void> {
   let accounts;
@@ -72,6 +78,37 @@ async function syncOnce(): Promise<void> {
       }
     } catch (err) {
       logger.error({ err, accountId: account.id }, "Could not sync daily stats for Google Ads account — skipping, will retry next cycle");
+    }
+
+    // Real ad group/ad names + real per-ad daily spend/conversions, for
+    // Campaign Deep Dive's Ad Set Name/Ad creative Name columns (Google
+    // calls an "ad set" an "ad group") and a real per-ad CPL breakdown.
+    // Account-wide calls, same "one call covers everything" philosophy as
+    // getAccountDailyStats above, kept in its own try/catch so a failure
+    // here never blocks the campaign-level spend sync that already worked
+    // before this existed.
+    try {
+      const adGroups = await listAdGroups(account.id);
+      for (const adGroup of adGroups) {
+        if (!campaignById.has(adGroup.campaignId)) continue; // ad group under a campaign outside today's list — skip rather than guess
+        await googleAdsRepo.upsertAdGroup({ id: adGroup.id, campaignId: adGroup.campaignId, name: adGroup.name, status: adGroup.status });
+      }
+
+      const ads = await listAds(account.id);
+      const validAdIds = new Set<string>();
+      for (const ad of ads) {
+        if (!campaignById.has(ad.campaignId)) continue;
+        validAdIds.add(ad.id);
+        await googleAdsRepo.upsertAd({ id: ad.id, campaignId: ad.campaignId, adGroupId: ad.adGroupId, name: ad.name, adType: ad.adType, status: ad.status });
+      }
+
+      const adStats = await getAdDailyStats(account.id, since, until);
+      for (const stat of adStats) {
+        if (!validAdIds.has(stat.adId)) continue;
+        await googleAdsRepo.upsertAdLevelSpendRecord({ adId: stat.adId, spendDate: stat.date, spend: stat.spend, leadsGenerated: stat.conversions });
+      }
+    } catch (err) {
+      logger.error({ err, accountId: account.id }, "Could not sync ad groups/ads for Google Ads account — skipping, will retry next cycle");
     }
   }
 

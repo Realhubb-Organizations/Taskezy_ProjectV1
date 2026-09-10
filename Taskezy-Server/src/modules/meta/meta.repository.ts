@@ -227,6 +227,7 @@ export async function upsertAdLevelSpendRecord(input: UpsertAdLevelSpendInput): 
 }
 
 export interface AdLevelSpendRow {
+  platform: "META";
   meta_ad_id: string;
   ad_name: string;
   creative_name: string | null;
@@ -245,10 +246,13 @@ export interface AdLevelSpendRow {
  * (one row per ad per day) so the frontend applies the exact same
  * Date-Range logic to this as it already does for campaign-level spend,
  * rather than duplicating a second date-scoping implementation server-side.
+ * See google-ads.repository.listAdLevelSpend for the Google equivalent —
+ * the ad-spend route combines both under one endpoint.
  */
 export async function listAdLevelSpend(): Promise<AdLevelSpendRow[]> {
   const { rows } = await query<AdLevelSpendRow>(
     `SELECT
+       'META' AS platform,
        a.meta_ad_id, ma.name AS ad_name, ma.creative_name,
        mas.name AS ad_set_name,
        mc.id AS campaign_id, mc.name AS campaign_name, mc.status AS campaign_status,

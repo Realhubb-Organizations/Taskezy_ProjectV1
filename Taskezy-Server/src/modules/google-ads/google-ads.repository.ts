@@ -82,3 +82,104 @@ export async function upsertSpendRecord(input: UpsertSpendInput): Promise<void> 
     [input.accountName, input.propertyId, input.spendDate, input.spend, input.leadsGenerated, input.campaignId]
   );
 }
+
+// --- Ad groups / ads / per-ad spend (Campaign Deep Dive's real Ad Set
+// Name/Ad creative Name columns for Google — mirrors the Meta side in
+// meta.repository.ts; see jobs/googleAdsSpendSync.ts) ---
+
+export interface UpsertAdGroupInput {
+  id: string;
+  campaignId: string;
+  name: string;
+  status?: string;
+}
+
+export async function upsertAdGroup(input: UpsertAdGroupInput): Promise<void> {
+  await pool.query(
+    `INSERT INTO google_ad_groups (id, campaign_id, name, status)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (id) DO UPDATE SET
+       campaign_id = EXCLUDED.campaign_id,
+       name = EXCLUDED.name,
+       status = EXCLUDED.status`,
+    [input.id, input.campaignId, input.name, input.status ?? null]
+  );
+}
+
+export interface UpsertGoogleAdInput {
+  id: string;
+  campaignId: string;
+  adGroupId: string;
+  name?: string;
+  adType?: string;
+  status?: string;
+}
+
+export async function upsertAd(input: UpsertGoogleAdInput): Promise<void> {
+  await pool.query(
+    `INSERT INTO google_ads (id, campaign_id, ad_group_id, name, ad_type, status)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT (id) DO UPDATE SET
+       campaign_id = EXCLUDED.campaign_id,
+       ad_group_id = EXCLUDED.ad_group_id,
+       name = EXCLUDED.name,
+       ad_type = EXCLUDED.ad_type,
+       status = EXCLUDED.status`,
+    [input.id, input.campaignId, input.adGroupId, input.name ?? null, input.adType ?? null, input.status ?? null]
+  );
+}
+
+export interface UpsertGoogleAdLevelSpendInput {
+  adId: string;
+  spendDate: string;
+  spend: number;
+  leadsGenerated: number;
+}
+
+export async function upsertAdLevelSpendRecord(input: UpsertGoogleAdLevelSpendInput): Promise<void> {
+  await pool.query(
+    `INSERT INTO google_ad_level_spend_records (google_ad_id, spend_date, spend, leads_generated)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (google_ad_id, spend_date) DO UPDATE SET
+       spend = EXCLUDED.spend,
+       leads_generated = EXCLUDED.leads_generated`,
+    [input.adId, input.spendDate, input.spend, input.leadsGenerated]
+  );
+}
+
+export interface GoogleAdLevelSpendRow {
+  platform: "GOOGLE";
+  google_ad_id: string;
+  ad_name: string | null;
+  ad_type: string | null;
+  ad_group_name: string;
+  campaign_id: string;
+  campaign_name: string;
+  campaign_status: "ACTIVE" | "INACTIVE";
+  spend_date: string;
+  spend: string;
+  leads_generated: number;
+}
+
+/**
+ * Real per-ad, per-day spend/conversions with each row's real ad group/ad
+ * name attached — mirrors meta.repository.listAdLevelSpend's shape and
+ * un-aggregated grain (one row per ad per day), so the frontend applies
+ * the same Date-Range logic to both.
+ */
+export async function listAdLevelSpend(): Promise<GoogleAdLevelSpendRow[]> {
+  const { rows } = await query<GoogleAdLevelSpendRow>(
+    `SELECT
+       'GOOGLE' AS platform,
+       a.google_ad_id, ga.name AS ad_name, ga.ad_type,
+       gag.name AS ad_group_name,
+       gc.id AS campaign_id, gc.name AS campaign_name, gc.status AS campaign_status,
+       a.spend_date, a.spend, a.leads_generated
+     FROM google_ad_level_spend_records a
+     JOIN google_ads ga ON ga.id = a.google_ad_id
+     JOIN google_ad_groups gag ON gag.id = ga.ad_group_id
+     JOIN google_ads_campaigns gc ON gc.id = ga.campaign_id
+     ORDER BY a.spend_date`
+  );
+  return rows;
+}
