@@ -8,9 +8,6 @@ import { Sliders, Sparkles, Plus, Check, ChevronDown, Search, Calendar, X, Minus
 import { DB_CODE_TO_FRONTEND_STATUS } from "@/lib/leadStatusMapping";
 import { computeLeadSummaryStats } from "@/lib/leadSummaryStats";
 import { WhatsAppIcon, CallIcon, PlatformLabel } from "@/components/icons/ContactIcons";
-import TopMetricsCards from "./TopMetricsCards";
-import LeadFilterBar from "./LeadFilterBar";
-import LeadTable from "./LeadTable";
 import AddLeadModal from "./AddLeadModal";
 import LeadDetailDrawer from "./LeadDetailDrawer";
 
@@ -93,23 +90,15 @@ export default function LeadDashboard() {
     leads,
     addLead,
     updateLeadStatus,
-    activeRole,
-    deleteLead,
     editLead,
     currentUser,
     properties,
-    calendarEvents,
     users,
     followupCalls
   } = useApp();
 
   const router = useRouter();
   const searchParams = useSearchParams();
-
-  // Search & Filter State
-  const [searchQuery, setSearchQuery] = useState("");
-  const [selectedStatuses, setSelectedStatuses] = useState<LeadStatus[]>([]);
-  const [activeMetricFilter, setActiveMetricFilter] = useState("all");
 
   // Drawer / Modals State
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
@@ -131,7 +120,6 @@ export default function LeadDashboard() {
 
   // Scoping check: is the current user a Sales Member?
   const isSalesMember = currentUser?.role_type === "Member" && currentUser?.role !== "ADMIN";
-  const isAdmin = currentUser?.role === "ADMIN";
 
   // Data scoping based on role
   const scopedLeads = leads.filter(l => {
@@ -141,102 +129,8 @@ export default function LeadDashboard() {
     return true;
   });
 
-  // Unique status list gathered from the requested list of 20 statuses
-  const availableStatuses: LeadStatus[] = [
-    "Unassigned", "RNR", "Call Back", "Switch off", "Booked", "New Leads",
-    "Assigned", "Connected", "Interested", "Follow-ups", "Visit Schedule",
-    "Not Interested", "EOI Customers", "Invalid", "Low Budget",
-    "Meeting Scheduled", "Meeting Done", "Site Visit", "Completed",
-    "In Negotiation", "Dead"
-  ];
-
-  // Sub-account breakdown, grouped from real leads by ad-source keyword —
-  // populates for real once the Meta/Google Ads integration starts writing
-  // leads with source="Meta Ads"/"Google Ads". Empty until then, honestly.
-  const groupBySourceKeyword = (pattern: RegExp) => {
-    const counts = new Map<string, number>();
-    scopedLeads.forEach(l => {
-      const haystack = `${l.source || ""} ${l.campaign || ""}`;
-      if (!pattern.test(haystack)) return;
-      const key = l.campaign || l.source || "Unlabeled";
-      counts.set(key, (counts.get(key) || 0) + 1);
-    });
-    return Array.from(counts.entries()).map(([name, count]) => ({ name, count }));
-  };
-
-  const metaSubAccounts = groupBySourceKeyword(/meta|facebook|instagram/i);
-  const googleSubAccounts = groupBySourceKeyword(/google/i);
-
-  const metaLeadsSum = metaSubAccounts.reduce((sum, a) => sum + a.count, 0);
-  const googleLeadsSum = googleSubAccounts.reduce((sum, a) => sum + a.count, 0);
-  const totalLeadsSum = scopedLeads.length;
-
-  const isSameLocalDay = (isoStr: string | undefined, ref: Date) => {
-    if (!isoStr) return false;
-    const d = new Date(isoStr);
-    return d.toDateString() === ref.toDateString();
-  };
-
   const today = new Date();
   const todayStr = today.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-  const leadsToday = scopedLeads.filter(l => isSameLocalDay(l.createdAtStr, today)).length;
-  const visitsToday = scopedLeads.filter(l =>
-    ["Visit Schedule", "Site Visit", "Site Visit Scheduled", "Meeting Scheduled"].includes(l.status)
-  ).length;
-  // Site-visit calendar events falling on this week's Saturday/Sunday.
-  const startOfWeek = new Date(today);
-  startOfWeek.setDate(today.getDate() - today.getDay());
-  const endOfWeek = new Date(startOfWeek);
-  endOfWeek.setDate(startOfWeek.getDate() + 6);
-  const weekendVisits = calendarEvents.filter(e => {
-    if (e.type !== "SITE_VISIT") return false;
-    const d = new Date(e.date);
-    const isWeekendDay = d.getDay() === 0 || d.getDay() === 6;
-    return isWeekendDay && d >= startOfWeek && d <= endOfWeek;
-  }).length;
-  const monthBookings = scopedLeads.filter(l => {
-    if (!["Booked", "Booking Done", "Booking Approved"].includes(l.status)) return false;
-    if (!l.createdAtStr) return false;
-    const d = new Date(l.createdAtStr);
-    return d.getMonth() === today.getMonth() && d.getFullYear() === today.getFullYear();
-  }).length;
-
-  // Dynamic filter logic
-  const filteredLeads = scopedLeads.filter(l => {
-    const matchesSearch =
-      l.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      l.phone.includes(searchQuery) ||
-      (l.email && l.email.toLowerCase().includes(searchQuery.toLowerCase()));
-
-    // Match any of the selected statuses in multi-select pool (if empty, matches all)
-    const matchesStatus =
-      selectedStatuses.length === 0 ||
-      selectedStatuses.includes(l.status) ||
-      (selectedStatuses.includes("New Leads") && l.status === "New Lead"); // mapping fallback
-
-    // Match activeMetricFilter — real dates/statuses only (this used to match
-    // on leftover literal mock-date substrings and on a lead's ID containing
-    // "2"/"4" as a fake stand-in for "weekend").
-    let matchesMetric = true;
-    if (activeMetricFilter === "today") {
-      matchesMetric = isSameLocalDay(l.createdAtStr, today);
-    } else if (activeMetricFilter === "visits") {
-      matchesMetric = l.status === "Visit Schedule" || l.status === "Site Visit" || l.status === "Site Visit Scheduled" || l.status === "Meeting Scheduled";
-    } else if (activeMetricFilter === "weekend") {
-      const isVisitStatus = ["Visit Schedule", "Site Visit Scheduled", "Meeting Scheduled", "Site Visit"].includes(l.status);
-      const d = l.createdAtStr ? new Date(l.createdAtStr) : null;
-      const isWeekendDay = !!d && !isNaN(d.getTime()) && (d.getDay() === 0 || d.getDay() === 6);
-      matchesMetric = isVisitStatus && isWeekendDay;
-    } else if (activeMetricFilter === "bookings") {
-      matchesMetric = l.status === "Booked" || l.status === "Booking Done" || l.status === "Booking Approved";
-    } else if (activeMetricFilter === "meta") {
-      matchesMetric = /meta|facebook|instagram/i.test(`${l.campaign || ""} ${l.source || ""}`);
-    } else if (activeMetricFilter === "google") {
-      matchesMetric = /google/i.test(`${l.campaign || ""} ${l.source || ""}`);
-    }
-
-    return matchesSearch && matchesStatus && matchesMetric;
-  });
 
   // Extract properties lists for Bulk Upload assignments
   const propertiesList = properties.map(p => p.name);
@@ -246,11 +140,6 @@ export default function LeadDashboard() {
   const agentsList = users
     .filter(u => u.department === "SALES" && u.status !== "INACTIVE")
     .map(u => u.name);
-
-  // Callback Handlers
-  const handleViewLeadDetails = (lead: Lead) => {
-    setSelectedLead(lead);
-  };
 
   const handleUpdateLeadStatus = (leadId: string, status: LeadStatus) => {
     // Booking a lead auto-generates a real invoice using this deal value as
@@ -319,25 +208,11 @@ export default function LeadDashboard() {
     setIsAddOpen(false);
   };
 
-  const handleDeleteLead = (leadId: string) => {
-    if (confirm("Are you sure you want to delete this lead from the partition database?")) {
-      deleteLead(leadId);
-      setSelectedLead(null);
-      setSuccessMsg("Lead successfully deleted.");
-      setTimeout(() => setSuccessMsg(""), 3000);
-    }
-  };
-
-  const handleMetricFilterChange = (filter: string) => {
-    setActiveMetricFilter(filter);
-  };
-
   // ===========================================================================
-  // ADMIN-ONLY Leads console — everything below this point (state, helpers and
-  // JSX) is scoped to currentUser.role === "ADMIN" and renders instead of the
-  // member/manager view further down. Kept in the same component so it shares
-  // scopedLeads/handleUpdateLeadStatus/AddLeadModal wiring/etc. rather than
-  // duplicating them in a second file.
+  // The Leads console below is shared by every role — scopedLeads already
+  // restricts a Sales Member to their own leads (see isSalesMember above),
+  // so the same JSX/table/Leads Analytics tab is safe to render for anyone;
+  // there's no per-row destructive/admin-only action in here to gate.
   // ===========================================================================
 
   // Initialized from the URL's ?tab= param (if present) so a refresh/bookmark
@@ -349,14 +224,13 @@ export default function LeadDashboard() {
   );
 
   useEffect(() => {
-    if (!isAdmin) return;
     const params = new URLSearchParams(searchParams.toString());
     if (adminTab === "analytics") params.set("tab", "analytics");
     else params.delete("tab");
     const query = params.toString();
     router.replace(`/dashboard/crm${query ? `?${query}` : ""}`, { scroll: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adminTab, isAdmin]);
+  }, [adminTab]);
   const [adminDateRange, setAdminDateRange] = useState<"today" | "yesterday" | "week" | "month" | "all" | "custom">("today");
   const [adminCustomRange, setAdminCustomRange] = useState<{ start: string; end: string } | null>(null);
   const [adminMetric, setAdminMetric] = useState<string | null>(null);
@@ -854,10 +728,9 @@ export default function LeadDashboard() {
     .filter((d): d is string => !!d)
     .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
 
-  if (isAdmin) {
-    return (
-      <div className="space-y-4 pb-12 animate-fade-in">
-        <div className="flex flex-wrap justify-between items-center gap-3">
+  return (
+    <div className="space-y-4 pb-12 animate-fade-in">
+      <div className="flex flex-wrap justify-between items-center gap-3">
           <div className="bg-slate-200/60 p-1 rounded-xl flex items-center gap-1">
             <button
               onClick={() => setAdminTab("leads")}
@@ -2355,84 +2228,4 @@ export default function LeadDashboard() {
         )}
       </div>
     );
-  }
-
-  return (
-    <div className="space-y-6 pb-12 animate-fade-in">
-      {/* Top Title Bar */}
-      <div className="flex justify-between items-center">
-        <div>
-          <h2 className="text-xl font-bold text-[#0B1E6E] flex items-center gap-2">
-            <Sliders className="h-6.5 w-6.5 text-[#0B1E6E]" />
-            CRM Lead Partition Management
-          </h2>
-          <p className="text-xs text-slate-500">Acquire, distribute, and audit property buyer lead pipelines.</p>
-        </div>
-        <button
-          onClick={() => setIsAddOpen(true)}
-          className="inline-flex items-center gap-2 bg-[#0B1E6E] hover:bg-[#081650] text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-md shadow-[#0B1E6E]/10 shrink-0"
-        >
-          <Plus className="h-4 w-4" />
-          Add Lead
-        </button>
-      </div>
-
-      {successMsg && (
-        <div className="p-3.5 bg-emerald-50 border border-emerald-100 text-xs text-emerald-700 rounded-xl font-bold flex items-center gap-2 animate-fade-in shadow-sm">
-          <Check className="h-4 w-4 text-emerald-600 shrink-0" />
-          <span>{successMsg}</span>
-        </div>
-      )}
-
-      {/* Step 1: Top Metrics Summary Cards */}
-      <TopMetricsCards
-        totalLeads={totalLeadsSum}
-        metaLeads={metaLeadsSum}
-        googleLeads={googleLeadsSum}
-        leadsToday={leadsToday}
-        visitsToday={visitsToday}
-        weekendVisits={weekendVisits}
-        monthBookings={monthBookings}
-        metaSubAccounts={metaSubAccounts}
-        googleSubAccounts={googleSubAccounts}
-        activeFilter={activeMetricFilter}
-        onFilterChange={handleMetricFilterChange}
-      />
-
-      {/* Step 2: Search & scrollable Status Pool filters */}
-      <LeadFilterBar
-        searchQuery={searchQuery}
-        setSearchQuery={setSearchQuery}
-        selectedStatuses={selectedStatuses}
-        setSelectedStatuses={setSelectedStatuses}
-        availableStatuses={availableStatuses}
-      />
-
-      {/* Step 3: Core Leads Data Table */}
-      <LeadTable
-        leads={filteredLeads}
-        onViewDetails={handleViewLeadDetails}
-        onDelete={handleDeleteLead}
-        activeRole={activeRole}
-      />
-
-      {/* Step 4: Add Lead Modal (Manual & Bulk Import) */}
-      <AddLeadModal
-        isOpen={isAddOpen}
-        onClose={() => setIsAddOpen(false)}
-        onSubmitManual={handleAddManualLead}
-        onSubmitBulk={handleAddBulkLeads}
-        agentsList={agentsList}
-        propertiesList={propertiesList}
-      />
-
-      {/* Step 5: Side Slide-Out Details Drawer */}
-      <LeadDetailDrawer
-        lead={selectedLead}
-        isOpen={selectedLead !== null}
-        onClose={() => setSelectedLead(null)}
-        onUpdateStatus={handleUpdateLeadStatus}
-      />
-    </div>
-  );
 }
