@@ -286,14 +286,13 @@ export default function LeadDashboard() {
   const [customRangeStartDraft, setCustomRangeStartDraft] = useState("");
   const [customRangeEndDraft, setCustomRangeEndDraft] = useState("");
 
-  // Filter button → Settings panel for which table columns are shown — for
-  // admin this stays the full-height right-docked drawer (same pattern as
-  // the lead quick-view drawer elsewhere in this app); for a Sales Member/
-  // Manager it instead opens as a small anchored box, matching the boxed
-  // look of the admin Campaigns filter dropdown (see filterBtnRef below).
+  // Filter button → Settings panel for which table columns are shown — both
+  // roles get the full-height right-docked drawer (same pattern as the lead
+  // quick-view drawer elsewhere in this app); a Sales Member/Manager's
+  // column buttons render in the boxed style of the admin Campaigns filter
+  // (a bordered box with a navy left accent) instead of admin's plain
+  // left-strip style, since they only ever see the Leads columns list.
   const [isColumnsSettingsOpen, setIsColumnsSettingsOpen] = useState(false);
-  const filterBtnRef = useRef<HTMLButtonElement>(null);
-  const [filterMenuPos, setFilterMenuPos] = useState<{ top: number; left: number } | null>(null);
 
   // Leads Analytics tab's own toolbar — a fully independent set of filters
   // (date range, member, property, campaign) from the Leads tab's, so
@@ -1077,11 +1076,8 @@ export default function LeadDashboard() {
                 )}
               </div>
               <button
-                ref={filterBtnRef}
                 type="button"
-                onClick={() => (isAdmin
-                  ? setIsColumnsSettingsOpen(true)
-                  : openPositionedMenu(filterBtnRef, setFilterMenuPos, setIsColumnsSettingsOpen, "right", 260))}
+                onClick={() => setIsColumnsSettingsOpen(true)}
                 className="flex items-center gap-2 border border-slate-200 bg-white rounded-lg px-3 py-1.5 text-xs text-slate-700 font-bold shadow-sm hover:bg-slate-50 transition-all"
               >
                 <Sliders className="h-4 w-4 text-blue-600" />
@@ -2182,15 +2178,15 @@ export default function LeadDashboard() {
 
         {/* Filter panel (column visibility) — opened from both the Leads
             tab's own Filter button and the Leads Analytics tab's sliders
-            icon, since it's the same underlying table-column state. Admin
-            keeps the full-height right-docked drawer (same pattern as the
-            lead quick-view drawer elsewhere in this app): no dark backdrop,
-            the rest of the page stays visible, closes on an invisible
-            click-outside catcher. A Sales Member/Manager never reaches the
-            Leads Analytics tab, so their version only ever needs the Leads
-            columns — rendered instead as a small anchored box next to the
-            Filter button, matching the boxed look of the admin Campaigns
-            filter dropdown. */}
+            icon, since it's the same underlying table-column state. Both
+            roles get the full-height right-docked drawer (same pattern as
+            the lead quick-view drawer elsewhere in this app): no dark
+            backdrop, the rest of the page stays visible, closes on an
+            invisible click-outside catcher. A Sales Member/Manager never
+            reaches the Leads Analytics tab, so their version only ever
+            needs the Leads columns — and renders each one as a bordered
+            box with a navy left accent (the admin Campaigns page's Filter
+            drawer style) instead of admin's plain left-strip buttons. */}
         {isColumnsSettingsOpen && (isAdmin ? createPortal(
           <div className="fixed inset-0 z-[100]">
             <div className="fixed inset-0" onClick={() => setIsColumnsSettingsOpen(false)} />
@@ -2258,32 +2254,53 @@ export default function LeadDashboard() {
           </div>,
           document.body
         ) : (
-          filterMenuPos && createPortal(
-            <>
-              <div className="fixed inset-0 z-[60]" onClick={() => setIsColumnsSettingsOpen(false)} />
-              <div
-                className="fixed z-[70] w-64 bg-white border border-slate-200 rounded-xl shadow-lg py-2 max-h-80 overflow-y-auto"
-                style={{ top: filterMenuPos.top, left: filterMenuPos.left }}
-              >
-                <div className="flex items-center justify-between px-3 pb-1.5 mb-1 border-b border-slate-100">
-                  <span className="text-[10px] font-black text-slate-700 uppercase tracking-wider">Columns</span>
+          createPortal(
+            <div className="fixed inset-0 z-[100]">
+              <div className="fixed inset-0" onClick={() => setIsColumnsSettingsOpen(false)} />
+              <div className="fixed inset-y-0 right-0 w-full max-w-sm bg-white border-l border-slate-200 shadow-2xl flex flex-col animate-slide-in">
+                <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-slate-100 shrink-0">
+                  <h3 className="text-base font-extrabold text-slate-900">Filter</h3>
                   <button
-                    type="button"
-                    onClick={toggleSelectAllAdminColumns}
-                    className="flex items-center gap-1 text-[10px] font-bold text-slate-500 hover:text-[#0B1E6E]"
+                    onClick={() => setIsColumnsSettingsOpen(false)}
+                    className="text-slate-400 hover:text-slate-700"
                   >
-                    <Minus className="h-3 w-3" />
-                    Select All
+                    <X className="h-4.5 w-4.5" />
                   </button>
                 </div>
-                {ADMIN_COLUMNS.map(c => (
-                  <label key={c.key} className="flex items-center gap-2 px-3 py-1.5 text-xs font-normal text-slate-700 hover:bg-slate-50 cursor-pointer">
-                    <input type="checkbox" checked={adminVisibleColumns[c.key]} onChange={() => toggleAdminColumn(c.key)} />
-                    {c.label}
-                  </label>
-                ))}
+                <div className="px-5 py-5 flex-1 overflow-y-auto">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-xs font-extrabold text-slate-800">Columns</span>
+                    <button
+                      type="button"
+                      onClick={toggleSelectAllAdminColumns}
+                      className="flex items-center gap-1 text-[11px] font-bold text-slate-500 hover:text-[#0B1E6E]"
+                    >
+                      <Minus className="h-3 w-3" />
+                      Select All
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    {ADMIN_COLUMNS.map(c => {
+                      const isOn = adminVisibleColumns[c.key];
+                      return (
+                        <button
+                          key={c.key}
+                          type="button"
+                          onClick={() => toggleAdminColumn(c.key)}
+                          className={`text-left pl-3 pr-2.5 py-2.5 text-xs rounded-lg border transition-colors truncate ${
+                            isOn
+                              ? "border-slate-200 border-l-[3px] border-l-[#0B1E6E] font-extrabold text-slate-900"
+                              : "border-slate-200 font-semibold text-slate-400 hover:text-slate-600 hover:bg-slate-50"
+                          }`}
+                        >
+                          {c.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
-            </>,
+            </div>,
             document.body
           )
         ))}
