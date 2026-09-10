@@ -240,13 +240,7 @@ export default function LeadDashboard() {
     router.replace(`/dashboard/crm${query ? `?${query}` : ""}`, { scroll: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminTab]);
-  // Admin's default view opens on "Today" (unchanged). A Sales Member/
-  // Manager's own leads aren't necessarily created today, so "Today" made
-  // the page look empty by default even though their leads exist — default
-  // them to "All Time" instead, same as their old Leads page always showed.
-  const [adminDateRange, setAdminDateRange] = useState<"today" | "yesterday" | "week" | "month" | "all" | "custom">(
-    () => (isAdmin ? "today" : "all")
-  );
+  const [adminDateRange, setAdminDateRange] = useState<"today" | "yesterday" | "week" | "month" | "all" | "custom">("today");
   const [adminCustomRange, setAdminCustomRange] = useState<{ start: string; end: string } | null>(null);
   const [adminMetric, setAdminMetric] = useState<string | null>(null);
   const [adminSearch, setAdminSearch] = useState("");
