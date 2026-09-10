@@ -46,6 +46,13 @@ function checkUserAccess(user: { role: string; department?: string; role_type?: 
   if (!user) return false;
   if (user.role === "ADMIN") return true; // GOD ADMIN has absolute monitoring access
 
+  // Campaigns: admin-only within CRM — campaign management isn't something
+  // a Sales Member/Manager should reach, whether via the sidebar link
+  // (filtered out below) or by navigating to the URL directly.
+  if (path.startsWith("/dashboard/crm/campaigns")) {
+    return user.role === "ADMIN";
+  }
+
   // CRM: accessible only to SALES department
   if (path.startsWith("/dashboard/crm") || path.startsWith("/crm/dashboard")) {
     return user.department === "SALES";
