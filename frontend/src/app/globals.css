@@ -75,6 +75,17 @@ body {
     animation: fade-in 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
   }
 
+  /* animate-slide-in is referenced by right-side slide-out drawers (e.g.
+     LeadDetailDrawer) but, like animate-fade-in above, its keyframes were
+     never defined anywhere. */
+  @keyframes slide-in {
+    from { transform: translateX(100%); }
+    to { transform: translateX(0); }
+  }
+  .animate-slide-in {
+    animation: slide-in 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
   /* Landing-page hero entrance — more pronounced than the small-UI fade-in above. */
   @keyframes fade-in-up {
     from { opacity: 0; transform: translateY(22px); }

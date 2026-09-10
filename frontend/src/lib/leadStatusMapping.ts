@@ -1,4 +1,4 @@
-import { LeadStatus } from "@/context/AppContext";
+import { LeadStatus, LeadLog } from "@/context/AppContext";
 
 // The frontend's LeadStatus union has real duplication (e.g. "New Lead" vs
 // "New", "Booked" vs "Booking Done") that accumulated as different screens
@@ -70,3 +70,59 @@ export function isRealLeadId(id: string): boolean {
 // Same check, generic name — every domain (properties, users, claims, etc.)
 // uses the identical "real UUID from Postgres vs local mock id" distinction.
 export const isRealId = isRealLeadId;
+
+// --- Lead activity timeline: real state transitions parsed from real log
+// messages, never fabricated ---
+//
+// LeadLog only stores {timestamp, message, user} — there's no structured
+// "previous status / new status" pair anywhere in the schema. Rather than
+// invent one, this parses the message formats actually observed in real
+// production log entries (the backend and the client's own optimistic
+// updates don't always word things identically, so this matches both):
+//   - a real creation message ("Lead added manually...", "Lead assigned
+//     to...") → "Lead Captured"
+//   - `Status changed to "X"` → X, resolved through the DB-code map when
+//     X is a raw DB code like "FOLLOW_UP" (real backend messages use the
+//     DB code, not the frontend label), otherwise used verbatim
+//   - "Reassigned to a different agent" or "Reassigned from A to B" →
+//     "Reassigned"
+// A message that matches none of these gets no derived label — including
+// the chronologically-first entry, if for whatever reason it isn't a real
+// creation message (e.g. only a partial log history is available) —
+// forcing "Lead Captured" onto whatever happens to be oldest would be a
+// guess, not a real read of the data. The UI falls back to showing the
+// raw message with no transition arrow in that case. Each entry's "from"
+// state is simply the previous entry's real derived "to" state, so the
+// arrow is a real sequence, not an invented pairing.
+export interface ActivityTimelineEntry {
+  log: LeadLog;
+  toLabel: string | null;
+  fromLabel: string | null;
+}
+
+function resolveStatusLabel(rawStatus: string): string {
+  const dbCodeMatch = DB_CODE_TO_FRONTEND_STATUS[rawStatus.toUpperCase().replace(/\s+/g, "_")];
+  if (dbCodeMatch) return dbCodeMatch;
+  return rawStatus.replace(/_/g, " ").replace(/-/g, " ");
+}
+
+function deriveLogStateLabel(message: string): string | null {
+  if (/^Lead (added|assigned|captured)/i.test(message)) return "Lead Captured";
+  const statusMatch = message.match(/^Status changed to "(.+)"$/i);
+  if (statusMatch) return resolveStatusLabel(statusMatch[1]);
+  if (/^Reassigned( to a different agent| from .+ to .+)?$/i.test(message)) return "Reassigned";
+  return null;
+}
+
+// Oldest first ("down word approach") — Lead Captured at the top, each
+// later update reading downward in the order it actually happened.
+export function deriveActivityTimeline(logs: LeadLog[]): ActivityTimelineEntry[] {
+  const chronological = [...logs].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+  let previousLabel: string | null = null;
+  return chronological.map((log) => {
+    const toLabel = deriveLogStateLabel(log.message);
+    const entry: ActivityTimelineEntry = { log, toLabel, fromLabel: previousLabel };
+    previousLabel = toLabel ?? previousLabel;
+    return entry;
+  });
+}

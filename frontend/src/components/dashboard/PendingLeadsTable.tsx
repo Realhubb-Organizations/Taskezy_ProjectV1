@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
-import Link from "next/link";
-import { Search, ChevronDown, ChevronLeft, ChevronRight, Copy, Check, Phone, Eye } from "lucide-react";
+import React, { useMemo, useRef, useState } from "react";
+import { Search, ChevronDown, ChevronLeft, ChevronRight, Copy, Check, X } from "lucide-react";
+import { WhatsAppIcon, CallIcon } from "@/components/icons/ContactIcons";
 
 export interface PendingRow {
   id: string;
@@ -15,7 +15,15 @@ export interface PendingRow {
   leadId?: string; // present when this row can deep-link to a real lead in the CRM
 }
 
-export default function PendingLeadsTable({ title, rows }: { title: string; rows: PendingRow[] }) {
+export default function PendingLeadsTable({
+  title,
+  rows,
+  onViewLead
+}: {
+  title: string;
+  rows: PendingRow[];
+  onViewLead?: (leadId: string) => void;
+}) {
   const [search, setSearch] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [assignedFilter, setAssignedFilter] = useState<string[]>([]);
@@ -40,9 +48,44 @@ export default function PendingLeadsTable({ title, rows }: { title: string; rows
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / rowsPerPage));
   const currentPage = Math.min(page, totalPages);
-  const pageRows = filteredRows.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
   const rangeStart = filteredRows.length === 0 ? 0 : (currentPage - 1) * rowsPerPage + 1;
   const rangeEnd = Math.min(currentPage * rowsPerPage, filteredRows.length);
+
+  // Rows render continuously in one scrollable container instead of being
+  // sliced per page — a scroll-spy tracks each page-boundary row's real DOM
+  // position to keep the page number and pagination controls synced with
+  // wherever the user has scrolled to, in both directions.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const pageRowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
+  const programmaticScroll = useRef(false);
+
+  const handleTableScroll = () => {
+    if (programmaticScroll.current) return;
+    const container = scrollRef.current;
+    if (!container) return;
+    const scrollTop = container.scrollTop;
+    let current = 1;
+    for (let i = 0; i < pageRowRefs.current.length; i++) {
+      const row = pageRowRefs.current[i];
+      if (row && row.offsetTop - container.offsetTop <= scrollTop + 4) {
+        current = i + 1;
+      }
+    }
+    setPage(prev => (prev !== current ? current : prev));
+  };
+
+  const goToPage = (target: number) => {
+    const clamped = Math.max(1, Math.min(totalPages, target));
+    setPage(clamped);
+    const row = pageRowRefs.current[clamped - 1];
+    const container = scrollRef.current;
+    if (!row || !container) return;
+    programmaticScroll.current = true;
+    container.scrollTop = clamped === 1 ? 0 : row.offsetTop - container.offsetTop;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => { programmaticScroll.current = false; });
+    });
+  };
 
   const toggleFilterValue = (list: string[], value: string, setList: (v: string[]) => void) => {
     setPage(1);
@@ -61,44 +104,63 @@ export default function PendingLeadsTable({ title, rows }: { title: string; rows
 
   return (
     <div className="bg-white rounded-2xl shadow-md">
-      <div className="px-6 py-5 border-b border-slate-100">
-        <h3 className="text-xl sm:text-2xl font-extrabold text-slate-900">{title}</h3>
+      <div className="px-4 py-3 border-b border-slate-100">
+        <h3 className="text-sm font-extrabold text-slate-900">{title}</h3>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-left border-collapse min-w-[760px]">
+      <div ref={scrollRef} onScroll={handleTableScroll} className="overflow-auto max-h-[70vh]">
+        <table className="w-full text-left border-collapse table-fixed min-w-[900px]">
+          <colgroup>
+            <col className="w-[130px]" />
+            <col className="w-[170px]" />
+            <col className="w-[150px]" />
+            <col className="w-[220px]" />
+            <col className="w-[160px]" />
+            <col className="w-[90px]" />
+          </colgroup>
           <thead>
-            <tr className="border-b border-slate-200 text-sm font-bold text-slate-800">
-              <th className="px-6 py-4 whitespace-nowrap">Time</th>
-              <th className="px-6 py-4">
-                <div className="relative flex items-center gap-2">
-                  Lead Name
-                  <button onClick={() => setSearchOpen(o => !o)} className="text-slate-400 hover:text-brand-700" title="Search">
-                    <Search className="h-4 w-4" />
-                  </button>
-                  {searchOpen && (
+            <tr className="border-b border-slate-200 text-xs font-bold text-slate-800">
+              <th className="px-4 py-2.5 whitespace-nowrap">Time</th>
+              <th className="px-4 py-2.5">
+                {searchOpen ? (
+                  <div className="flex items-center gap-1">
                     <input
                       autoFocus
                       value={search}
                       onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-                      onBlur={() => { if (!search) setSearchOpen(false); }}
+                      onBlur={() => { setSearch(""); setSearchOpen(false); }}
                       placeholder="Search name or phone..."
-                      className="absolute left-0 top-9 z-20 w-52 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-normal shadow-lg focus:outline-none focus:border-brand-500"
+                      className="min-w-0 flex-1 bg-white border border-brand-400 rounded-md px-1.5 py-1 text-[11px] font-normal focus:outline-none"
                     />
-                  )}
-                </div>
+                    <button
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => { setSearch(""); setSearchOpen(false); }}
+                      className="text-slate-400 hover:text-slate-700 shrink-0"
+                      title="Close search"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5">
+                    Lead Name
+                    <button onClick={() => setSearchOpen(true)} className="text-slate-400 hover:text-brand-700" title="Search">
+                      <Search className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                )}
               </th>
-              <th className="px-6 py-4">
+              <th className="px-4 py-2.5">
                 <div className="relative">
                   <button onClick={() => setAssignedMenuOpen(o => !o)} className="flex items-center gap-1.5 hover:text-brand-700">
                     Assigned To
-                    <ChevronDown className="h-3.5 w-3.5" />
+                    <ChevronDown className="h-3 w-3" />
                     {assignedFilter.length > 0 && (
                       <span className="text-[9px] bg-brand-50 text-brand-700 rounded-full px-1.5 py-0.5 font-bold">{assignedFilter.length}</span>
                     )}
                   </button>
                   {assignedMenuOpen && (
-                    <div className="absolute left-0 top-9 z-20 w-56 bg-white border border-slate-200 rounded-lg shadow-lg py-1.5 max-h-56 overflow-y-auto">
+                    <div className="absolute left-0 top-8 z-20 w-56 bg-white border border-slate-200 rounded-lg shadow-lg py-1.5 max-h-56 overflow-y-auto">
                       {assignedOptions.length === 0 ? (
                         <p className="px-3 py-2 text-xs text-slate-400 italic font-normal">No data yet</p>
                       ) : (
@@ -113,18 +175,18 @@ export default function PendingLeadsTable({ title, rows }: { title: string; rows
                   )}
                 </div>
               </th>
-              <th className="px-6 py-4">Feedback</th>
-              <th className="px-6 py-4">
+              <th className="px-4 py-2.5">Feedback</th>
+              <th className="px-4 py-2.5">
                 <div className="relative">
                   <button onClick={() => setPropertyMenuOpen(o => !o)} className="flex items-center gap-1.5 hover:text-brand-700">
                     Property
-                    <ChevronDown className="h-3.5 w-3.5" />
+                    <ChevronDown className="h-3 w-3" />
                     {propertyFilter.length > 0 && (
                       <span className="text-[9px] bg-brand-50 text-brand-700 rounded-full px-1.5 py-0.5 font-bold">{propertyFilter.length}</span>
                     )}
                   </button>
                   {propertyMenuOpen && (
-                    <div className="absolute right-0 top-9 z-20 w-56 bg-white border border-slate-200 rounded-lg shadow-lg py-1.5 max-h-56 overflow-y-auto">
+                    <div className="absolute right-0 top-8 z-20 w-56 bg-white border border-slate-200 rounded-lg shadow-lg py-1.5 max-h-56 overflow-y-auto">
                       {propertyOptions.length === 0 ? (
                         <p className="px-3 py-2 text-xs text-slate-400 italic font-normal">No data yet</p>
                       ) : (
@@ -139,67 +201,89 @@ export default function PendingLeadsTable({ title, rows }: { title: string; rows
                   )}
                 </div>
               </th>
-              <th className="px-6 py-4 text-right">Actions</th>
+              <th className="px-4 py-2.5 text-right">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {pageRows.length === 0 ? (
+            {filteredRows.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-6 py-12 text-center text-slate-400 font-semibold italic">
+                <td colSpan={6} className="px-4 py-8 text-center text-slate-400 font-semibold italic text-xs">
                   {rows.length === 0 ? "No records in this range." : "No records match the current search/filters."}
                 </td>
               </tr>
             ) : (
-              pageRows.map(row => (
-                <tr key={row.id} className="hover:bg-slate-50/60 transition-colors">
-                  <td className="px-6 py-5 font-mono text-slate-700 text-sm whitespace-nowrap align-top">{row.time}</td>
-                  <td className="px-6 py-5 align-top">
-                    <p className="font-bold text-slate-900 text-base">{row.name}</p>
+              (pageRowRefs.current = [], filteredRows.map((row, idx) => (
+                <tr
+                  key={row.id}
+                  ref={idx % rowsPerPage === 0 ? (el) => { pageRowRefs.current[Math.floor(idx / rowsPerPage)] = el; } : undefined}
+                  className="hover:bg-slate-50/60 transition-colors text-xs"
+                >
+                  <td className="px-4 py-3 font-mono text-slate-700 truncate align-top">{row.time}</td>
+                  <td className="px-4 py-3 align-top overflow-hidden">
+                    {row.leadId && onViewLead ? (
+                      <button
+                        onClick={() => onViewLead(row.leadId!)}
+                        className="font-bold text-[#0B1E6E] hover:underline text-xs text-left truncate block max-w-full"
+                        title={row.name}
+                      >
+                        {row.name}
+                      </button>
+                    ) : (
+                      <p className="font-bold text-slate-900 text-xs truncate">{row.name}</p>
+                    )}
                     <div className="flex items-center gap-1.5 mt-0.5">
-                      <span className="text-xs text-slate-500 font-mono">{row.phone}</span>
-                      <button onClick={() => handleCopy(row)} className="text-slate-350 hover:text-brand-700" title="Copy phone number">
+                      <span className="text-[11px] text-slate-500 font-mono truncate">{row.phone}</span>
+                      <button onClick={() => handleCopy(row)} className="text-slate-350 hover:text-brand-700 shrink-0" title="Copy phone number">
                         {copiedId === row.id ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
                       </button>
                     </div>
                   </td>
-                  <td className="px-6 py-5 text-slate-700 font-medium text-sm align-top">{row.assignedTo}</td>
-                  <td className="px-6 py-5 text-slate-600 text-sm max-w-[220px] truncate align-top" title={row.feedback}>{row.feedback}</td>
-                  <td className="px-6 py-5 text-slate-700 font-medium text-sm align-top">{row.property}</td>
-                  <td className="px-6 py-5 align-top">
-                    <div className="flex items-center justify-end gap-2">
+                  <td className="px-4 py-3 text-slate-700 font-medium align-top truncate" title={row.assignedTo}>{row.assignedTo}</td>
+                  <td className="px-4 py-3 text-slate-600 truncate align-top" title={row.feedback}>{row.feedback}</td>
+                  <td className="px-4 py-3 text-slate-700 font-medium align-top truncate" title={row.property}>{row.property}</td>
+                  <td className="px-4 py-3 align-top">
+                    <div className="flex items-center justify-end gap-1.5">
+                      <a
+                        href={`https://wa.me/${row.phone.replace(/[^0-9]/g, "")}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center justify-center h-7 w-7 rounded-lg bg-slate-100 text-slate-700 hover:bg-emerald-50 hover:text-emerald-600 transition-colors shrink-0"
+                        title="WhatsApp"
+                      >
+                        <WhatsAppIcon className="h-4 w-4" />
+                      </a>
                       <a
                         href={`tel:${row.phone}`}
-                        className="h-9 w-9 rounded-full bg-slate-900 hover:bg-brand-700 text-white flex items-center justify-center transition-colors shrink-0"
+                        className="inline-flex items-center justify-center h-7 w-7 rounded-lg bg-slate-100 text-slate-700 hover:bg-brand-50 hover:text-brand-700 transition-colors shrink-0"
                         title="Call"
                       >
-                        <Phone className="h-4 w-4" />
+                        <CallIcon className="h-3.5 w-3.5" />
                       </a>
-                      {row.leadId && (
-                        <Link
-                          href={`/dashboard/crm?openLead=${row.leadId}`}
-                          className="h-9 w-9 rounded-full bg-slate-900 hover:bg-brand-700 text-white flex items-center justify-center transition-colors shrink-0"
-                          title="View lead"
-                        >
-                          <Eye className="h-4 w-4" />
-                        </Link>
-                      )}
                     </div>
                   </td>
                 </tr>
-              ))
+              )))
             )}
           </tbody>
         </table>
       </div>
 
-      <div className="px-6 py-4 flex flex-wrap justify-between items-center gap-3 border-t border-slate-100 text-xs text-slate-500 font-semibold">
+      <div className="px-4 py-3 flex flex-wrap justify-between items-center gap-3 border-t border-slate-100 text-[11px] text-slate-500 font-semibold">
         <span>{filteredRows.length} Row{filteredRows.length === 1 ? "" : "s"}</span>
         <div className="flex items-center gap-4">
           <span className="flex items-center gap-1.5">
             Rows per page
             <select
               value={rowsPerPage}
-              onChange={(e) => { setRowsPerPage(Number(e.target.value)); setPage(1); }}
+              onChange={(e) => {
+                programmaticScroll.current = true;
+                setRowsPerPage(Number(e.target.value));
+                setPage(1);
+                scrollRef.current?.scrollTo(0, 0);
+                requestAnimationFrame(() => {
+                  requestAnimationFrame(() => { programmaticScroll.current = false; });
+                });
+              }}
               className="bg-slate-50 border border-slate-200 rounded px-1.5 py-1 font-bold text-slate-700 focus:outline-none"
             >
               {[10, 25, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
@@ -208,18 +292,18 @@ export default function PendingLeadsTable({ title, rows }: { title: string; rows
           <span>{rangeStart}-{rangeEnd} of {filteredRows.length}</span>
           <div className="flex items-center gap-1">
             <button
-              onClick={() => setPage(p => Math.max(1, p - 1))}
+              onClick={() => goToPage(currentPage - 1)}
               disabled={currentPage <= 1}
               className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
             >
-              <ChevronLeft className="h-4 w-4" />
+              <ChevronLeft className="h-3.5 w-3.5" />
             </button>
             <button
-              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+              onClick={() => goToPage(currentPage + 1)}
               disabled={currentPage >= totalPages}
               className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
             >
-              <ChevronRight className="h-4 w-4" />
+              <ChevronRight className="h-3.5 w-3.5" />
             </button>
           </div>
         </div>

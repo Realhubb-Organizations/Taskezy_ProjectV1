@@ -469,9 +469,14 @@ interface AppActions {
     managerId?: string | null
   ) => void;
   setCurrentUserPasswordActive: () => void;
-  // Now async: tries the real API server first (Taskezy-Server) and falls back to
-  // local mock credentials only if the server is unreachable — see the implementation.
-  loginWithTempPassword: (email: string, pass: string) => Promise<User | null>;
+  // errorType distinguishes genuinely wrong credentials from the API being
+  // unreachable (network failure, CORS, or a 5xx — e.g. mid-deploy restart)
+  // so the login screen can show an accurate message instead of blaming
+  // the password for a server outage.
+  loginWithTempPassword: (
+    email: string,
+    pass: string
+  ) => Promise<{ user: User } | { user: null; errorType: "invalid_credentials" | "network" }>;
   logout: () => void;
   switchUserRole: (role: Role, userId?: string) => void;
   setActiveSystem: (system: SystemType) => void;
@@ -1175,7 +1180,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Login handler
-  const loginWithTempPassword = async (email: string, pass: string): Promise<User | null> => {
+  const loginWithTempPassword = async (
+    email: string,
+    pass: string
+  ): Promise<{ user: User } | { user: null; errorType: "invalid_credentials" | "network" }> => {
     try {
       const apiUser = await apiLogin(email, pass);
       const mapped = mapApiUserToFrontendUser(apiUser);
@@ -1184,14 +1192,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setActiveSystem(getDefaultSystem(mapped));
       await loadAllRealData(mapped.role);
       setShowLoginSplash(true);
-      return mapped;
+      return { user: mapped };
     } catch (err) {
-      // Any failure — bad credentials (401), inactive account, or the API
-      // server being unreachable — is a failed login. No mock fallback.
+      // A 401/403 from the API means the credentials really are wrong.
+      // Anything else — the fetch itself failing (network/CORS), or the API
+      // returning a 5xx — means the server was unreachable, not that the
+      // password was wrong. Collapsing both into "Invalid email or
+      // password" (the old behavior) was actively misleading right after a
+      // backend deploy/restart, when every login fails for a few seconds
+      // for a reason that has nothing to do with the credentials.
+      const isBadCredentials = err instanceof ApiRequestError && (err.status === 401 || err.status === 403);
       if (!(err instanceof ApiRequestError)) {
         console.error("Login request failed (is Taskezy-Server running?):", err);
       }
-      return null;
+      return { user: null, errorType: isBadCredentials ? "invalid_credentials" : "network" };
     }
   };
 

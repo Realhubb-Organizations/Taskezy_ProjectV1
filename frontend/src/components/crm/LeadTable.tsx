@@ -80,7 +80,7 @@ export default function LeadTable({
           leads.map((lead) => (
             <div key={lead.id} onClick={() => onViewDetails(lead)} className="p-4 space-y-3 active:bg-slate-50 cursor-pointer">
               <div className="flex items-center gap-3">
-                <div className="h-9 w-9 rounded-xl bg-brand-50 border border-brand-100 flex items-center justify-center text-brand-700 font-bold shrink-0">
+                <div className="h-9 w-9 rounded-xl bg-[#0B1E6E]/5 border border-[#0B1E6E]/15 flex items-center justify-center text-[#0B1E6E] font-bold shrink-0">
                   {lead.name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2)}
                 </div>
                 <div className="min-w-0 flex-1">
@@ -138,7 +138,7 @@ export default function LeadTable({
                 </button>
                 <button
                   onClick={() => onViewDetails(lead)}
-                  className="p-2 hover:bg-brand-50 rounded-xl text-slate-400 hover:text-brand-700 transition-all"
+                  className="p-2 hover:bg-[#0B1E6E]/5 rounded-xl text-slate-400 hover:text-[#0B1E6E] transition-all"
                   title="View Full Profile"
                 >
                   <Eye className="h-3.5 w-3.5" />
@@ -187,7 +187,7 @@ export default function LeadTable({
                 >
                   <td className="p-4">
                     <div className="flex items-center gap-3">
-                      <div className="h-9 w-9 rounded-xl bg-brand-50 border border-brand-100 flex items-center justify-center text-brand-700 font-bold shrink-0">
+                      <div className="h-9 w-9 rounded-xl bg-[#0B1E6E]/5 border border-[#0B1E6E]/15 flex items-center justify-center text-[#0B1E6E] font-bold shrink-0">
                         {lead.name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2)}
                       </div>
                       <div className="min-w-0">
@@ -261,7 +261,7 @@ export default function LeadTable({
                       {/* View Details Action */}
                       <button
                         onClick={() => onViewDetails(lead)}
-                        className="p-2 hover:bg-brand-50 border border-transparent hover:border-brand-200 rounded-xl text-slate-400 hover:text-brand-700 transition-all"
+                        className="p-2 hover:bg-[#0B1E6E]/5 border border-transparent hover:border-[#0B1E6E]/20 rounded-xl text-slate-400 hover:text-[#0B1E6E] transition-all"
                         title="View Full Profile"
                       >
                         <Eye className="h-3.5 w-3.5" />

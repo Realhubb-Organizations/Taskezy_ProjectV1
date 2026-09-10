@@ -41,7 +41,7 @@ export default function LeadFilterBar({
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search leads by name, phone or email..."
-            className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-2.5 text-xs font-bold text-slate-700 placeholder-slate-400 focus:outline-none focus:bg-white focus:border-brand-500 transition-all shadow-sm"
+            className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-2.5 text-xs font-bold text-slate-700 placeholder-slate-400 focus:outline-none focus:bg-white focus:border-[#0B1E6E] transition-all shadow-sm"
           />
           <Search className="absolute left-3.5 top-3.5 h-4 w-4 text-slate-400" />
         </div>
@@ -72,7 +72,7 @@ export default function LeadFilterBar({
             onClick={() => setSelectedStatuses([])}
             className={`px-3 py-1.5 rounded-full text-[10px] font-bold border transition-all shrink-0 ${
               selectedStatuses.length === 0
-                ? "bg-brand-600 border-brand-600 text-white shadow-sm shadow-brand-500/10"
+                ? "bg-[#0B1E6E] border-[#0B1E6E] text-white shadow-sm shadow-[#0B1E6E]/10"
                 : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"
             }`}
           >
@@ -86,7 +86,7 @@ export default function LeadFilterBar({
                 onClick={() => handleStatusToggle(status)}
                 className={`px-3 py-1.5 rounded-full text-[10px] font-bold border transition-all shrink-0 ${
                   isSelected
-                    ? "bg-brand-600 border-brand-600 text-white shadow-sm shadow-brand-500/10"
+                    ? "bg-[#0B1E6E] border-[#0B1E6E] text-white shadow-sm shadow-[#0B1E6E]/10"
                     : "bg-slate-50 hover:bg-slate-100 border-slate-200/80 text-slate-600"
                 }`}
               >

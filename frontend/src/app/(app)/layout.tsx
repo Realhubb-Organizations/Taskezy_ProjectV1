@@ -47,17 +47,17 @@ function checkUserAccess(user: { role: string; department?: string; role_type?: 
   if (user.role === "ADMIN") return true; // GOD ADMIN has absolute monitoring access
 
   // CRM: accessible only to SALES department
-  if (path.startsWith("/dashboard/crm")) {
+  if (path.startsWith("/dashboard/crm") || path.startsWith("/crm/dashboard")) {
     return user.department === "SALES";
   }
 
   // HRMS: accessible to all departments (SALES, TECH, MARKETING, FINANCE)
-  if (path.startsWith("/dashboard/hrms")) {
+  if (path.startsWith("/dashboard/hrms") || path.startsWith("/hrms/dashboard")) {
     return !!(user.department && ["SALES", "TECH", "MARKETING", "FINANCE"].includes(user.department));
   }
 
   // Finance: accessible only to FINANCE department
-  if (path.startsWith("/dashboard/finance")) {
+  if (path.startsWith("/dashboard/finance") || path.startsWith("/finance/dashboard")) {
     return user.department === "FINANCE" || user.role === "FINANCE";
   }
 
@@ -147,17 +147,11 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   // NotificationBell, the Home dashboard's per-role content) keeps working
   // exactly as before — only how the sidebar presents them changed.
   const crmItems = [
-    { name: "Dashboard", href: "/dashboard", activeCheck: (p: string, t?: string | null) => p === "/dashboard" && !t, icon: LayoutGrid },
+    { name: "Dashboard", href: "/crm/dashboard", activeCheck: (p: string, t?: string | null) => p === "/crm/dashboard", icon: LayoutGrid },
     { name: "Properties", href: "/dashboard/properties", activeCheck: (p: string, t?: string | null) => p === "/dashboard/properties", icon: Building },
     { name: "Leads", href: "/dashboard/crm", activeCheck: (p: string, t?: string | null) => p === "/dashboard/crm", icon: Users },
-    // Campaigns/Data Calling don't have dedicated pages of their own yet —
-    // routed to the closest existing real, data-backed views (Marketing/
-    // Agent Reports) rather than a dead link or fake page. Reports' own
-    // role-scoping still applies (a sales Member following the Campaigns
-    // link lands on their own Agent Reports instead, exactly like
-    // navigating there any other way).
-    { name: "Campaigns", href: "/dashboard/reports?tab=marketing", activeCheck: (p: string, t?: string | null) => p === "/dashboard/reports" && t === "marketing", icon: Megaphone },
-    { name: "Data Calling", href: "/dashboard/reports?tab=agent", activeCheck: (p: string, t?: string | null) => p === "/dashboard/reports" && t === "agent", icon: Phone },
+    { name: "Campaigns", href: "/dashboard/crm/campaigns", activeCheck: (p: string) => p.startsWith("/dashboard/crm/campaigns"), icon: Megaphone },
+    { name: "Data Calling", href: "/dashboard/crm/data-calling", activeCheck: (p: string) => p.startsWith("/dashboard/crm/data-calling"), icon: Phone },
     { name: "Calendar", href: "/dashboard/crm/calendar", activeCheck: (p: string, t?: string | null) => p === "/dashboard/crm/calendar", icon: Calendar },
     { name: "Settings", href: "/dashboard/settings", activeCheck: (p: string, t?: string | null) => p === "/dashboard/settings", icon: Settings },
     { name: "Reports", href: "/dashboard/reports", activeCheck: (p: string, t?: string | null) => p === "/dashboard/reports", icon: BarChart }
@@ -166,7 +160,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   const hrmsItems = [
     { name: "Teams", href: "/dashboard/hrms?tab=teams", activeCheck: (p: string, t?: string | null) => p === "/dashboard/hrms" && t === "teams", icon: Users },
     { name: "Attendance", href: "/dashboard/hrms?tab=attendance", activeCheck: (p: string, t?: string | null) => p === "/dashboard/hrms" && t === "attendance", icon: Clock },
-    { name: "HR Dashboard", href: "/dashboard/hrms?tab=dashboard", activeCheck: (p: string, t?: string | null) => p === "/dashboard/hrms" && t === "dashboard", icon: LayoutDashboard },
+    { name: "HR Dashboard", href: "/hrms/dashboard", activeCheck: (p: string, t?: string | null) => p === "/hrms/dashboard", icon: LayoutDashboard },
     { name: "Calendar", href: "/dashboard/hrms?tab=calendar", activeCheck: (p: string, t?: string | null) => p === "/dashboard/hrms" && t === "calendar", icon: Calendar },
     // HRMS Settings/Reports are a distinct, HRMS-flavored view of the shared
     // pages (geofence/half-day rules; all-employee attendance report) — not
@@ -178,7 +172,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   const financeItems = [
     { name: "Billing", href: "/dashboard/finance?tab=billing", activeCheck: (p: string, t?: string | null) => p === "/dashboard/finance" && t === "billing", icon: DollarSign },
     { name: "Reimbursements", href: "/dashboard/finance?tab=reimbursements", activeCheck: (p: string, t?: string | null) => p === "/dashboard/finance" && t === "reimbursements", icon: FileText },
-    { name: "Finance Dashboard", href: "/dashboard/finance?tab=dashboard", activeCheck: (p: string, t?: string | null) => p === "/dashboard/finance" && t === "dashboard", icon: LayoutDashboard },
+    { name: "Finance Dashboard", href: "/finance/dashboard", activeCheck: (p: string, t?: string | null) => p === "/finance/dashboard", icon: LayoutDashboard },
     { name: "Calendar", href: "/dashboard/finance?tab=calendar", activeCheck: (p: string, t?: string | null) => p === "/dashboard/finance" && t === "calendar", icon: Calendar },
     // Finance Settings/Reports are a distinct, Finance-flavored view (GST/
     // due-date rules; upcoming/overdue/collected payments report) — not the
@@ -215,11 +209,14 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   };
 
   const getActiveTabName = () => {
-    // The CRM group's own "Dashboard" item already has an activeCheck that
-    // matches bare /dashboard, so the loop below finds it naturally for
-    // anyone with CRM access (including Admins) — no special case needed.
-    // A hardcoded "Home" here previously fought with that and with the page's
-    // own on-screen heading, which also says "Dashboard".
+    if (pathname === "/home") return "Home";
+    // The Leads/Leads Analytics toggle on /dashboard/crm is internal
+    // component state, not a route — LeadDashboard.tsx mirrors it into
+    // ?tab=analytics so this header can reflect it.
+    if (pathname === "/dashboard/crm" && activeTabParam === "analytics") return "Leads Analytics";
+    // Same pattern for the Campaigns page's Campaigns/Campaigns Analytics
+    // toggle.
+    if (pathname === "/dashboard/crm/campaigns" && activeTabParam === "analytics") return "Campaigns Analytics";
     for (const group of sidebarGroups) {
       for (const item of group.items) {
         if (item.activeCheck(pathname, activeTabParam)) return item.name;
@@ -245,7 +242,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
           {/* Logo + collapse toggle */}
           <div className={`flex items-center flex-shrink-0 mb-6 ${isSidebarCollapsed ? "justify-center px-2" : "justify-between px-6"}`}>
             {!isSidebarCollapsed && (
-              <Link href="/dashboard" className="flex items-center min-w-0">
+              <Link href="/home" className="flex items-center min-w-0">
                 <img
                   src="/Blue White Professional Minimal Company Business Card.png"
                   alt="TASKEZY Logo"
@@ -302,11 +299,11 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                             onClick={() => setActiveSystem(group.key)}
                             className={`flex items-center px-3 py-2 text-xs font-bold rounded-lg transition-all duration-200 ${
                               isActive
-                                ? "bg-brand-50 text-brand-700"
+                                ? "bg-brand-700 text-white shadow-sm"
                                 : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
                             }`}
                           >
-                            <item.icon className={`mr-2 h-3.5 w-3.5 ${isActive ? "text-brand-650" : "text-slate-400"}`} />
+                            <item.icon className={`mr-2 h-3.5 w-3.5 ${isActive ? "text-white" : "text-slate-400"}`} />
                             {item.name}
                           </Link>
                         );
@@ -328,9 +325,9 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                     title={item.name}
                     className={`flex items-center text-xs font-bold rounded-lg transition-all duration-200 ${
                       isSidebarCollapsed ? "justify-center py-2" : "px-4 py-2"
-                    } ${isActive ? "bg-brand-50 text-brand-700" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"}`}
+                    } ${isActive ? "bg-brand-700 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"}`}
                   >
-                    <item.icon className={`h-4 w-4 ${isSidebarCollapsed ? "" : "mr-2.5"} ${isActive ? "text-brand-650" : "text-slate-400"}`} />
+                    <item.icon className={`h-4 w-4 ${isSidebarCollapsed ? "" : "mr-2.5"} ${isActive ? "text-white" : "text-slate-400"}`} />
                     {!isSidebarCollapsed && item.name}
                   </Link>
                 );
@@ -419,7 +416,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
             />
             <div className="fixed inset-y-0 left-0 w-[82vw] max-w-72 bg-white border-r border-slate-200 p-5 flex flex-col z-40 md:hidden overflow-y-auto">
               <div className="flex items-center justify-between mb-4 border-b border-slate-100 pb-4">
-                <Link href="/dashboard" className="flex items-center">
+                <Link href="/home" className="flex items-center">
                   <img
                     src="/Blue White Professional Minimal Company Business Card.png"
                     alt="TASKEZY Logo"
@@ -491,14 +488,14 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                                 key={item.name}
                                 href={item.href}
                                 className={`flex items-center px-3 py-2 text-xs font-semibold rounded-lg ${
-                                  isActive ? "bg-brand-50 text-brand-700" : "text-slate-500 hover:bg-slate-50"
+                                  isActive ? "bg-brand-700 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50"
                                 }`}
                                 onClick={() => {
                                   setActiveSystem(group.key);
                                   setIsMobileMenuOpen(false);
                                 }}
                               >
-                                <item.icon className="mr-2 h-3.5 w-3.5 text-slate-400" />
+                                <item.icon className={`mr-2 h-3.5 w-3.5 ${isActive ? "text-white" : "text-slate-400"}`} />
                                 {item.name}
                               </Link>
                             );
@@ -520,11 +517,11 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                           key={item.name}
                           href={item.href}
                           className={`flex items-center px-4 py-1.5 text-xs font-semibold rounded-lg ${
-                            isActive ? "bg-brand-50 text-brand-700 border-l-2 border-brand-500" : "text-slate-500 hover:bg-slate-50"
+                            isActive ? "bg-brand-700 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50"
                           }`}
                           onClick={() => setIsMobileMenuOpen(false)}
                         >
-                          <item.icon className="mr-2 h-4 w-4 text-slate-400" />
+                          <item.icon className={`mr-2 h-4 w-4 ${isActive ? "text-white" : "text-slate-400"}`} />
                           {item.name}
                         </Link>
                       );
@@ -591,7 +588,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                     isActive ? "text-brand-700" : "text-slate-400"
                   }`}
                 >
-                  <item.icon className={`h-5 w-5 ${isActive ? "text-brand-650" : "text-slate-400"}`} />
+                  <item.icon className={`h-5 w-5 ${isActive ? "text-brand-700" : "text-slate-400"}`} />
                   <span className="text-[10px] font-bold truncate max-w-full px-1">{item.name}</span>
                 </Link>
               );
@@ -602,7 +599,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                 isMobileMenuOpen ? "text-brand-700" : "text-slate-400"
               }`}
             >
-              <MoreHorizontal className={`h-5 w-5 ${isMobileMenuOpen ? "text-brand-650" : "text-slate-400"}`} />
+              <MoreHorizontal className={`h-5 w-5 ${isMobileMenuOpen ? "text-brand-700" : "text-slate-400"}`} />
               <span className="text-[10px] font-bold">More</span>
             </button>
           </div>
@@ -626,10 +623,10 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
               </div>
               <div className="pt-2">
                 <Link
-                  href="/dashboard"
+                  href="/home"
                   className="bg-brand-700 hover:bg-brand-600 text-white font-bold px-4 py-2.5 rounded-lg text-xs transition-all shadow-md shadow-brand-700/10"
                 >
-                  Return to Dashboard
+                  Return to Home
                 </Link>
               </div>
             </div>

@@ -2,6 +2,8 @@ import React, { useState, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { X, Phone, MessageSquare, Mail, Share2, Award, Calendar, Clock, ArrowRight, Activity, Bell, Repeat } from "lucide-react";
 import { useApp, Lead, LeadStatus } from "@/context/AppContext";
+import { PlatformLabel } from "@/components/icons/ContactIcons";
+import { deriveActivityTimeline } from "@/lib/leadStatusMapping";
 
 interface LeadDetailDrawerProps {
   lead: Lead | null;
@@ -104,6 +106,14 @@ export default function LeadDetailDrawer({
     reassignLead(lead.id, reassignTarget);
     setReassignTarget("");
     onClose();
+  };
+
+  // "21 Jun 2026, 08:21 pm" — real timestamp formatting for the activity
+  // timeline, replacing the previous raw ISO string.
+  const formatLogTimestamp = (iso: string): string => {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    return d.toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true });
   };
 
   const shareLeadProfile = () => {
@@ -234,7 +244,9 @@ export default function LeadDetailDrawer({
             <div className="text-xs font-semibold text-slate-700 bg-slate-50 p-4 rounded-2xl border border-slate-200/60 space-y-2">
               <div className="flex justify-between items-center">
                 <span className="text-[9px] font-bold text-slate-400 uppercase">Source</span>
-                <span className="text-slate-800 bg-white border border-slate-200 px-2 py-0.5 rounded-lg font-bold">{lead.source || "Manual Entry"}</span>
+                <span className="text-slate-800 bg-white border border-slate-200 px-2 py-0.5 rounded-lg font-bold">
+                  <PlatformLabel text={lead.source || "Manual Entry"} />
+                </span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-[9px] font-bold text-slate-400 uppercase">Campaign</span>
@@ -367,29 +379,50 @@ export default function LeadDetailDrawer({
             </div>
           </div>
 
-          {/* Section D: Activity Logs */}
+          {/* Section D: Activity Logs — a real vertical timeline (connecting
+              line + node per entry, newest first) inside its own bordered,
+              independently-scrollable card. Transition labels (e.g.
+              "Call Back → Follow Up") are parsed from the lead's real log
+              messages via deriveActivityTimeline — never invented; see that
+              function's comment for exactly which formats it reads and how
+              it falls back when a message doesn't match one. */}
           <div className="space-y-3">
             <h4 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider border-b border-slate-100 pb-1.5 flex items-center gap-1.5">
               <Activity className="h-3.5 w-3.5 text-slate-500" />
               Section D: Audit logs timeline
             </h4>
-            <div className="space-y-4 relative border-l border-slate-150 pl-4 ml-2 max-h-60 overflow-y-auto pr-1">
+            <div className="bg-[#F5F9FF] border border-slate-200 rounded-2xl shadow-sm max-h-60 overflow-y-auto p-4">
               {lead.logs.length === 0 ? (
                 <p className="text-[10px] text-slate-400 font-semibold italic">No activity registered for this profile.</p>
               ) : (
-                lead.logs.map((log, idx) => (
-                  <div key={idx} className="relative text-xs">
-                    {/* Log Dot */}
-                    <span className="absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full bg-slate-300 border border-white" />
-                    <div className="bg-slate-50 border border-slate-150 rounded-xl p-3 space-y-1">
-                      <div className="flex justify-between items-center text-[9px] font-bold text-slate-400">
-                        <span>{log.user}</span>
-                        <span className="font-mono">{log.timestamp}</span>
+                <div className="relative pl-5">
+                  <div className="absolute left-[5px] top-2 bottom-2 w-0.5 bg-blue-400" />
+                  {deriveActivityTimeline(lead.logs).map((entry, idx) => (
+                    <div key={idx} className="relative pb-4 last:pb-0">
+                      <span className="absolute -left-5 top-1.5 h-3 w-3 rounded-full bg-blue-100 border-2 border-blue-500 z-10" />
+                      <div className="inline-block bg-[#0B1E6E] text-white text-[10px] font-bold px-2.5 py-1 rounded-lg mb-1.5">
+                        {formatLogTimestamp(entry.log.timestamp)}
                       </div>
-                      <p className="text-[10px] text-slate-650 font-bold leading-relaxed">{log.message}</p>
+                      <div className="bg-[#EAF3FF] rounded-xl px-3 py-2.5">
+                        <p className="text-[10px] text-slate-700 leading-relaxed">{entry.log.message}</p>
+                        {entry.toLabel || entry.fromLabel ? (
+                          <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-blue-100 text-[9px]">
+                            <span className="text-slate-500 font-bold flex items-center gap-1">
+                              {entry.fromLabel && entry.toLabel && entry.fromLabel !== entry.toLabel ? (
+                                <>{entry.fromLabel} <ArrowRight className="h-2.5 w-2.5 shrink-0" /> {entry.toLabel}</>
+                              ) : (
+                                entry.toLabel || entry.fromLabel
+                              )}
+                            </span>
+                            <span className="text-slate-400 font-semibold shrink-0">{entry.log.user}</span>
+                          </div>
+                        ) : (
+                          <p className="text-[9px] text-slate-400 font-semibold mt-1.5 pt-1.5 border-t border-blue-100 text-right">by {entry.log.user}</p>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))
+                  ))}
+                </div>
               )}
             </div>
           </div>
