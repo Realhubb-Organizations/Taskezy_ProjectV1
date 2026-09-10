@@ -26,31 +26,14 @@ import {
 } from "lucide-react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine } from "recharts";
 
-interface CampaignItem {
-  id: string;
-  name: string;
-  status: "Active" | "Pause" | "Stopped";
-  totalLeads: number;
-  qualifiedLeads: number;
-  unqualifiedLeads: number;
-  siteVisit: number;
-  cpl: number;
-  spend: number;
-  platform: "Meta" | "Google" | "Other";
-  property: string;
-  // Pure ad-platform self-reported leads (unblended with synced-lead
-  // count) — kept alongside totalLeads so anywhere that pairs a real
-  // spend figure with a leads figure can show the platform-reported
-  // number too, since spend was actually incurred to generate this
-  // (usually larger) count, not the smaller real-synced totalLeads.
-  platformReportedLeads: number;
-}
-
-const CAMPAIGN_STATUSES: CampaignItem["status"][] = ["Active", "Pause", "Stopped"];
-const QUALIFIED_LEAD_STATUSES = ["Interested", "Connected", "Visit Schedule", "Site Visit", "Booking Done", "Booked"];
-const UNQUALIFIED_LEAD_STATUSES = ["Dead", "Invalid", "RNR"];
-const SITE_VISIT_LEAD_STATUSES = ["Visit Schedule", "Site Visit"];
-const BOOKING_LEAD_STATUSES = ["Booking Done", "Booking Approved", "Booked"];
+import {
+  CampaignItem,
+  CAMPAIGN_STATUSES,
+  QUALIFIED_LEAD_STATUSES,
+  SITE_VISIT_LEAD_STATUSES,
+  BOOKING_LEAD_STATUSES,
+  buildCampaignsList
+} from "@/lib/campaignBuilder";
 
 // Same icon URLs the admin leads page uses for these platforms (LeadDashboard.tsx).
 const PLATFORM_ICON_URL: Partial<Record<CampaignItem["platform"], string>> = {
@@ -530,118 +513,9 @@ export default function AdminCampaignsPage() {
     return dateInRange(r.date, mapDateRangeToKey(dateRange), today);
   };
 
-  // Builds the campaigns list from a given set of ad-spend records — shared
-  // by campaignsList (records pre-filtered to the selected Date Range) and
-  // campaignsListAllTime (every record, no date filter — see campaignByName
-  // below).
-  //
-  // A campaign's totalLeads is the sum, over every real day it has data,
-  // of max(that day's platform-reported leadsGenerated, that day's real
-  // synced Lead count) — never less than what the platform reported, and
-  // never less than what's actually been synced into the CRM either. The
-  // max used to be taken once across the whole range instead of per day,
-  // which could push a campaign's range total above its own leadsGenerated
-  // sum in a way no per-day chart series could ever be sliced to add back
-  // up to — a real, unfixable mismatch. Taking the max per day instead
-  // means the exact same real per-(campaign, day) numbers (returned as
-  // leadsByDateByCampaign) can drive both a day-by-day chart AND the
-  // range's grand total, and the two are then mathematically guaranteed to
-  // always agree, however the data is sliced.
-  const buildCampaignsList = (records: AdSpendRecord[], leadDateFilter: (l: Lead) => boolean): { items: CampaignItem[]; leadsByDateByCampaign: Record<string, Record<string, number>>; platformReportedTotal: number } => {
-    const spendCampaignMap: Record<string, { spend: number; platformLeadsByDate: Record<string, number>; status: "Active" | "Pause" | "Stopped"; platform: "Meta" | "Google" | "Other"; property?: string }> = {};
-
-    records.forEach(rec => {
-      const name = rec.accountName;
-      if (!spendCampaignMap[name]) {
-        let st: "Active" | "Pause" | "Stopped" = "Active";
-        if (rec.campaignStatus === "INACTIVE") st = "Stopped";
-        if ((rec.campaignStatus as string) === "PAUSED") st = "Pause";
-
-        let plat: "Meta" | "Google" | "Other" = "Meta";
-        if (rec.platform.toLowerCase().includes("google")) plat = "Google";
-        else if (!rec.platform.toLowerCase().includes("meta") && !rec.platform.toLowerCase().includes("facebook")) plat = "Other";
-
-        spendCampaignMap[name] = {
-          spend: 0,
-          platformLeadsByDate: {},
-          status: st,
-          platform: plat,
-          property: rec.property
-        };
-      }
-      if (!spendCampaignMap[name].property && rec.property) spendCampaignMap[name].property = rec.property;
-      spendCampaignMap[name].spend += rec.spend;
-      spendCampaignMap[name].platformLeadsByDate[rec.date] = (spendCampaignMap[name].platformLeadsByDate[rec.date] || 0) + rec.leadsGenerated;
-    });
-
-    const result: CampaignItem[] = [];
-    const leadsByDateByCampaign: Record<string, Record<string, number>> = {};
-    // Pure ad-platform self-reported total (Meta + Google + Other's own
-    // leadsGenerated, unblended with any synced-lead boost) — shown
-    // alongside the real synced-lead count on the Total Leads card so an
-    // admin can see both numbers and how far apart they are, instead of
-    // just one blended figure.
-    let platformReportedTotal = 0;
-
-    Object.keys(spendCampaignMap).forEach((cName, idx) => {
-      if (!result.some(r => r.name.toLowerCase() === cName.toLowerCase())) {
-        const item = spendCampaignMap[cName];
-        const campaignPlatformReportedLeads = Object.values(item.platformLeadsByDate).reduce((acc, v) => acc + v, 0);
-        platformReportedTotal += campaignPlatformReportedLeads;
-        // Qualified/Unqualified/Site Visit are current pipeline status
-        // snapshots (like the CRM Dashboard's own cards) — a lead qualified
-        // today should still count even if it came in last week, so those
-        // read off every matched lead regardless of creation date.
-        const campaignLeads = leads.filter(l => (l.campaign || l.source)?.toLowerCase() === cName.toLowerCase());
-
-        // records was already pre-filtered to the selected Date Range, so
-        // platformLeadsByDate only ever has dates inside that range. The
-        // synced side must be scoped the same way — otherwise a campaign's
-        // leads from months ago leak into "Today"'s union of dates below
-        // and get summed in as if they happened today (this is what
-        // inflated Today's Total Leads to 202: every historical day for
-        // every campaign, each contributing its own synced count with no
-        // platform-reported number to compare against).
-        const syncedLeadsByDate: Record<string, number> = {};
-        campaignLeads.filter(leadDateFilter).forEach(l => {
-          if (!l.createdAtStr) return;
-          const d = new Date(l.createdAtStr);
-          if (isNaN(d.getTime())) return;
-          const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-          syncedLeadsByDate[key] = (syncedLeadsByDate[key] || 0) + 1;
-        });
-
-        const perDayMax: Record<string, number> = {};
-        new Set([...Object.keys(item.platformLeadsByDate), ...Object.keys(syncedLeadsByDate)]).forEach(date => {
-          perDayMax[date] = Math.max(item.platformLeadsByDate[date] || 0, syncedLeadsByDate[date] || 0);
-        });
-        leadsByDateByCampaign[cName] = perDayMax;
-
-        const total = Object.values(perDayMax).reduce((acc, v) => acc + v, 0);
-        const qualified = campaignLeads.filter(l => QUALIFIED_LEAD_STATUSES.includes(l.status)).length;
-        const unqualified = campaignLeads.filter(l => UNQUALIFIED_LEAD_STATUSES.includes(l.status)).length;
-        const siteVisits = campaignLeads.filter(l => SITE_VISIT_LEAD_STATUSES.includes(l.status)).length;
-        const cplVal = total > 0 ? Number((item.spend / total).toFixed(2)) : 0;
-
-        result.push({
-          id: `dyn-${idx}`,
-          name: cName,
-          status: item.status,
-          totalLeads: total,
-          qualifiedLeads: qualified,
-          unqualifiedLeads: unqualified,
-          siteVisit: siteVisits,
-          cpl: cplVal,
-          spend: item.spend,
-          platform: item.platform,
-          property: item.property || "Unspecified",
-          platformReportedLeads: campaignPlatformReportedLeads
-        });
-      }
-    });
-
-    return { items: result, leadsByDateByCampaign, platformReportedTotal };
-  };
+  // buildCampaignsList itself now lives in @/lib/campaignBuilder (imported
+  // above) so the Campaign Deep Dive page can build the exact same real
+  // per-campaign numbers without duplicating this logic.
 
   // The real, Date-Range-scoped campaigns list — each campaign's own
   // totalLeads is the sum of its real per-day leads (see
@@ -652,7 +526,7 @@ export default function AdminCampaignsPage() {
   // real individual Lead records directly (categoryLeadsInRange), same as
   // the CRM Dashboard and admin Leads page, so all three agree.
   const campaignsListResult = useMemo(
-    () => buildCampaignsList(adSpendRecords.filter(recordInSelectedRange), leadInSelectedRange),
+    () => buildCampaignsList(adSpendRecords.filter(recordInSelectedRange), leads, leadInSelectedRange),
     [adSpendRecords, leads, appliedCustomRange, dateRange, today]
   );
   const campaignsList: CampaignItem[] = campaignsListResult.items;
@@ -670,7 +544,7 @@ export default function AdminCampaignsPage() {
   // Status breakdown's checkboxes so a type never disappears from the list
   // just because it had no activity in the current range.
   const campaignsListAllTime: CampaignItem[] = useMemo(
-    () => buildCampaignsList(adSpendRecords, () => true).items,
+    () => buildCampaignsList(adSpendRecords, leads, () => true).items,
     [adSpendRecords, leads]
   );
 
