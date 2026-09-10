@@ -422,7 +422,10 @@ export default function LeadDashboard() {
     );
   };
 
-  const adminVisibleColumnList = ADMIN_COLUMNS.filter(c => adminVisibleColumns[c.key]);
+  // Sales Member/Manager never gets a Campaign column or its filter (see the
+  // Campaign <th>/<td> guards below) — excluded here too so the <colgroup>'s
+  // <col> count still matches the actual rendered <th> count for them.
+  const adminVisibleColumnList = ADMIN_COLUMNS.filter(c => adminVisibleColumns[c.key] && (isAdmin || c.key !== "campaign"));
 
   const [analyticsVisibleColumns, setAnalyticsVisibleColumns] = useState<Record<AnalyticsColumnKey, boolean>>(ANALYTICS_DEFAULT_VISIBLE_COLUMNS);
 
@@ -1254,7 +1257,7 @@ export default function LeadDashboard() {
                       {adminVisibleColumns.nextCallDate && <th className="px-4 py-2.5 whitespace-nowrap">Next Call Date</th>}
                       {adminVisibleColumns.actions && <th className="px-4 py-2.5 text-right whitespace-nowrap">Actions</th>}
                       {adminVisibleColumns.adSetName && <th className="px-4 py-2.5 whitespace-nowrap">Ad Set Name</th>}
-                      {adminVisibleColumns.campaign && (
+                      {isAdmin && adminVisibleColumns.campaign && (
                         <th className="px-4 py-2.5">
                           <div className="relative">
                             <button
@@ -1386,7 +1389,7 @@ export default function LeadDashboard() {
                           {adminVisibleColumns.adSetName && (
                             <td className="px-4 py-3 text-slate-400 align-top truncate italic" title="Not tracked yet — no ad-set-level data ingested">—</td>
                           )}
-                          {adminVisibleColumns.campaign && (
+                          {isAdmin && adminVisibleColumns.campaign && (
                             <td className="px-4 py-3 text-slate-700 font-medium align-top truncate" title={l.campaign || l.source || "—"}>
                               <PlatformLabel text={l.campaign || l.source || "—"} classifyBy={l.source || l.campaign} />
                             </td>
@@ -2302,7 +2305,7 @@ export default function LeadDashboard() {
                     </button>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
-                    {ADMIN_COLUMNS.map(c => {
+                    {ADMIN_COLUMNS.filter(c => c.key !== "campaign").map(c => {
                       const isOn = adminVisibleColumns[c.key];
                       return (
                         <button
