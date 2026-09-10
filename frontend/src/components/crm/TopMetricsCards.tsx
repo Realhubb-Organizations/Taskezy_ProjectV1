@@ -39,8 +39,8 @@ export default function TopMetricsCards({
   const getCardStyle = (filterName: string) => {
     const isActive = activeFilter === filterName;
     return `p-5 rounded-2xl border bg-white shadow-sm transition-all duration-250 cursor-pointer flex flex-col justify-between h-32 group select-none relative ${
-      isActive 
-        ? "border-brand-500 ring-2 ring-brand-500/20 shadow-md translate-y-[-2px]" 
+      isActive
+        ? "border-[#0B1E6E] ring-2 ring-[#0B1E6E]/20 shadow-md translate-y-[-2px]"
         : "border-slate-200 hover:border-slate-350 hover:shadow-md hover:translate-y-[-1px]"
     }`;
   };
@@ -52,7 +52,7 @@ export default function TopMetricsCards({
         {activeFilter !== "all" && (
           <button
             onClick={() => onFilterChange("all")}
-            className="text-[9px] font-black text-brand-700 bg-brand-50 border border-brand-100 hover:bg-brand-100 px-2 py-0.5 rounded-lg transition-all"
+            className="text-[9px] font-black text-[#0B1E6E] bg-[#0B1E6E]/5 border border-[#0B1E6E]/15 hover:bg-[#0B1E6E]/10 px-2 py-0.5 rounded-lg transition-all"
           >
             Clear Metric Filter
           </button>

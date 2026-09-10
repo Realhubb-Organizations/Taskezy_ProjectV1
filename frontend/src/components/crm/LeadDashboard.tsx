@@ -2362,15 +2362,15 @@ export default function LeadDashboard() {
       {/* Top Title Bar */}
       <div className="flex justify-between items-center">
         <div>
-          <h2 className="text-xl font-bold text-brand-700 flex items-center gap-2">
-            <Sliders className="h-6.5 w-6.5 text-brand-600" />
+          <h2 className="text-xl font-bold text-[#0B1E6E] flex items-center gap-2">
+            <Sliders className="h-6.5 w-6.5 text-[#0B1E6E]" />
             CRM Lead Partition Management
           </h2>
           <p className="text-xs text-slate-500">Acquire, distribute, and audit property buyer lead pipelines.</p>
         </div>
         <button
           onClick={() => setIsAddOpen(true)}
-          className="inline-flex items-center gap-2 bg-brand-700 hover:bg-brand-600 text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-md shadow-brand-700/10 shrink-0"
+          className="inline-flex items-center gap-2 bg-[#0B1E6E] hover:bg-[#081650] text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-md shadow-[#0B1E6E]/10 shrink-0"
         >
           <Plus className="h-4 w-4" />
           Add Lead
