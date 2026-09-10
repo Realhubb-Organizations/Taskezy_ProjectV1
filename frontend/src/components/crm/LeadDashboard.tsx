@@ -120,6 +120,11 @@ export default function LeadDashboard() {
 
   // Scoping check: is the current user a Sales Member?
   const isSalesMember = currentUser?.role_type === "Member" && currentUser?.role !== "ADMIN";
+  // Admin-only UI within the (now shared) Leads console — the Leads
+  // Analytics tab, the top Campaigns quick-filter, and the "View Detailed
+  // Analytics" link stay admin-exclusive; a Sales Member/Manager gets the
+  // same Leads table and stat bar without them.
+  const isAdmin = currentUser?.role === "ADMIN";
 
   // Data scoping based on role
   const scopedLeads = leads.filter(l => {
@@ -211,16 +216,20 @@ export default function LeadDashboard() {
   // ===========================================================================
   // The Leads console below is shared by every role — scopedLeads already
   // restricts a Sales Member to their own leads (see isSalesMember above),
-  // so the same JSX/table/Leads Analytics tab is safe to render for anyone;
-  // there's no per-row destructive/admin-only action in here to gate.
+  // so the same JSX/table is safe to render for anyone; there's no per-row
+  // destructive/admin-only action in here to gate. The Leads Analytics tab,
+  // the top Campaigns quick-filter, and "View Detailed Analytics" stay
+  // admin-only (isAdmin, below).
   // ===========================================================================
 
   // Initialized from the URL's ?tab= param (if present) so a refresh/bookmark
   // while on Leads Analytics reopens on that tab, and kept in sync below so
   // the shared page header (getActiveTabName in the app layout) can show
-  // "Leads Analytics" instead of always "Leads".
+  // "Leads Analytics" instead of always "Leads". Only admins can ever reach
+  // "analytics" — a Sales Member/Manager stays pinned to "leads" even if an
+  // old ?tab=analytics link is opened.
   const [adminTab, setAdminTab] = useState<"leads" | "analytics">(
-    () => (searchParams.get("tab") === "analytics" ? "analytics" : "leads")
+    () => (isAdmin && searchParams.get("tab") === "analytics" ? "analytics" : "leads")
   );
 
   useEffect(() => {
@@ -231,7 +240,13 @@ export default function LeadDashboard() {
     router.replace(`/dashboard/crm${query ? `?${query}` : ""}`, { scroll: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminTab]);
-  const [adminDateRange, setAdminDateRange] = useState<"today" | "yesterday" | "week" | "month" | "all" | "custom">("today");
+  // Admin's default view opens on "Today" (unchanged). A Sales Member/
+  // Manager's own leads aren't necessarily created today, so "Today" made
+  // the page look empty by default even though their leads exist — default
+  // them to "All Time" instead, same as their old Leads page always showed.
+  const [adminDateRange, setAdminDateRange] = useState<"today" | "yesterday" | "week" | "month" | "all" | "custom">(
+    () => (isAdmin ? "today" : "all")
+  );
   const [adminCustomRange, setAdminCustomRange] = useState<{ start: string; end: string } | null>(null);
   const [adminMetric, setAdminMetric] = useState<string | null>(null);
   const [adminSearch, setAdminSearch] = useState("");
@@ -731,6 +746,7 @@ export default function LeadDashboard() {
   return (
     <div className="space-y-4 pb-12 animate-fade-in">
       <div className="flex flex-wrap justify-between items-center gap-3">
+          {isAdmin && (
           <div className="bg-slate-200/60 p-1 rounded-xl flex items-center gap-1">
             <button
               onClick={() => setAdminTab("leads")}
@@ -749,9 +765,11 @@ export default function LeadDashboard() {
               Leads Analytics
             </button>
           </div>
+          )}
 
           {adminTab === "leads" && (
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3 ml-auto">
+              {isAdmin && (
               <div className="relative">
                 <button
                   ref={adminCampaignsQuickBtnRef}
@@ -848,6 +866,7 @@ export default function LeadDashboard() {
                   document.body
                 )}
               </div>
+              )}
               <button
                 onClick={() => setIsAddOpen(true)}
                 className="inline-flex items-center gap-2 bg-[#0B1E6E] hover:bg-[#081650] text-white px-4 py-2.5 rounded-lg text-xs font-bold transition-all shadow-md cursor-pointer"
@@ -866,7 +885,7 @@ export default function LeadDashboard() {
           </div>
         )}
 
-        {adminTab === "leads" ? (
+        {!isAdmin || adminTab === "leads" ? (
           <>
             {/* Date Filter & Metrics — one unified card */}
             <div className="bg-slate-100/70 border border-slate-200/60 rounded-2xl overflow-hidden shadow-sm">
@@ -906,6 +925,7 @@ export default function LeadDashboard() {
                     )}
                   </div>
                 </div>
+                {isAdmin && (
                 <button
                   type="button"
                   onClick={() => setAdminTab("analytics")}
@@ -913,6 +933,7 @@ export default function LeadDashboard() {
                 >
                   View Detailed Analytics
                 </button>
+                )}
               </div>
 
               <div className="flex md:grid md:grid-cols-7 bg-white divide-x divide-slate-100 overflow-x-auto min-w-full">
