@@ -27,6 +27,13 @@ export interface LeadListRow {
   campaign: string | null;
   meta_page_name: string | null;
   meta_form_id: string | null;
+  // Real Meta ad id this lead's Lead Ad submission came from (written on
+  // ingest, see meta/meta.lead-ingest.ts) — exposed here so the frontend
+  // can compute real Qualified Leads per ad set/ad creative for Campaign
+  // Deep Dive by matching against meta_ads.id, the same way it already
+  // computes Qualified Leads per campaign, instead of duplicating that
+  // "what counts as qualified" status logic in backend SQL too.
+  meta_ad_id: string | null;
   logs: { message: string; timestamp: string; user: string }[];
 }
 
@@ -47,7 +54,7 @@ const LIST_SELECT = `
     u.first_name || COALESCE(' ' || u.last_name, '') AS assigned_agent_name,
     l.property_id, p.name AS property_name,
     l.assigned_at, l.first_response_at, l.created_at,
-    l.source, l.campaign, l.meta_page_name, l.meta_form_id,
+    l.source, l.campaign, l.meta_page_name, l.meta_form_id, l.meta_ad_id,
     COALESCE(
       (SELECT json_agg(json_build_object('message', ll.message, 'timestamp', ll.created_at, 'user', ll.user_name_snapshot) ORDER BY ll.created_at)
        FROM lead_logs ll
