@@ -120,6 +120,30 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     });
   };
 
+  // Which top-level group (HRMS/CRM/FINANCE) the current page belongs to —
+  // used below to auto-expand that group. Computed from pathname alone
+  // (not from sidebarGroups/checkUserAccess) so it's available before the
+  // authLoading/currentUser early returns further down, keeping this hook
+  // call order-stable across renders.
+  const activeGroupKey: SystemType | null =
+    pathname.startsWith("/dashboard/hrms") || pathname.startsWith("/hrms/dashboard") ? "HRMS" :
+    pathname.startsWith("/dashboard/crm") || pathname.startsWith("/crm/dashboard") ? "CRM" :
+    pathname.startsWith("/dashboard/finance") || pathname.startsWith("/finance/dashboard") ? "FINANCE" :
+    null;
+
+  // Auto-expand whichever group you navigate into — but only when the
+  // active group actually changes, not on every render. Previously
+  // `isExpanded` OR'd in "is a page in this group currently active", which
+  // meant clicking the group's collapse chevron while on one of its own
+  // pages had no effect: the group re-expanded itself immediately because
+  // that OR condition stayed true regardless of expandedGroups. Now
+  // expandedGroups is the only thing isExpanded reads (see below), so an
+  // explicit collapse actually sticks.
+  useEffect(() => {
+    if (!activeGroupKey) return;
+    setExpandedGroups(prev => (prev.has(activeGroupKey) ? prev : new Set(prev).add(activeGroupKey)));
+  }, [activeGroupKey]);
+
   // Modals simulation state
   const [activeModal, setActiveModal] = useState<string | null>(null);
 
@@ -269,7 +293,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
           {/* Navigation Groups — HRMS/CRM/FINANCE always visible, each independently expandable */}
           <nav className={`flex-1 space-y-1 ${isSidebarCollapsed ? "px-2" : "px-4"}`}>
             {sidebarGroups.map((group) => {
-              const isExpanded = !isSidebarCollapsed && (expandedGroups.has(group.key) || group.items.some(i => i.activeCheck(pathname, activeTabParam)));
+              const isExpanded = !isSidebarCollapsed && expandedGroups.has(group.key);
               return (
                 <div key={group.key}>
                   <button
@@ -473,7 +497,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
 
               <nav className="space-y-1 flex-1 overflow-y-auto">
                 {sidebarGroups.map((group) => {
-                  const isExpanded = expandedGroups.has(group.key) || group.items.some(i => i.activeCheck(pathname, activeTabParam));
+                  const isExpanded = expandedGroups.has(group.key);
                   return (
                     <div key={group.key}>
                       <button
