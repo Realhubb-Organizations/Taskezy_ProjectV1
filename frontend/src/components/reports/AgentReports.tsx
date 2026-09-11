@@ -93,7 +93,7 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
             themselves. Visible (scoped to their team) for Managers, and
             unrestricted for Admin. */}
         {!isScopedToSelf && (
-          <div className="lg:col-span-3 glass-card p-4 rounded-2xl space-y-2">
+          <div className="lg:col-span-3 bg-white border border-slate-100 rounded-2xl shadow-sm p-4 space-y-2">
             <h3 className="text-[10px] uppercase font-extrabold text-slate-400 tracking-wider px-1">Sales Agents</h3>
             <div className="space-y-1 max-h-[28rem] overflow-y-auto pr-1">
               {agentNames.length === 0 ? (
@@ -130,13 +130,13 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
         {/* Agent detail */}
         <div className={isScopedToSelf ? "lg:col-span-12 space-y-6" : "lg:col-span-9 space-y-6"}>
           {!activeAgent ? (
-            <div className="glass-card p-8 rounded-2xl text-center text-xs text-slate-400">
+            <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-8 text-center text-xs text-slate-400">
               <Users className="h-10 w-10 text-slate-350 mx-auto mb-2" />
               Select a sales agent to view their individual report.
             </div>
           ) : (
             <>
-              <div className="glass-card p-5 rounded-2xl flex items-center gap-3">
+              <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-5 flex items-center gap-3">
                 <div className="h-10 w-10 rounded-xl bg-brand-50 border border-brand-100 flex items-center justify-center text-brand-600 shrink-0">
                   <UserCog className="h-5.5 w-5.5" />
                 </div>
@@ -148,43 +148,48 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-                <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Leads Assigned</span>
-                  <p className="text-xl font-black text-slate-800 mt-1">{agentLeads.length}</p>
-                </div>
-                <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Allocated Spend</span>
-                  <p className="text-xl font-black text-slate-800 mt-1 flex items-center gap-1">
-                    <DollarSign className="h-4 w-4 text-slate-400" />
-                    {formatCurrency(allocatedSpend)}
-                  </p>
-                </div>
-                <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Booking ROI</span>
-                  <p className="text-xl font-black text-emerald-650 mt-1 flex items-center gap-1">
-                    <TrendingUp className="h-4 w-4" />
-                    {roi.toFixed(1)}x
-                  </p>
-                  <span className="text-[9px] text-slate-450">{bookingCount} bookings • {formatCurrency(bookingValue)}</span>
-                </div>
-                <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Missed Leads</span>
-                  <p className={`text-xl font-black mt-1 ${missedLeads.length > 0 ? "text-red-650" : "text-slate-800"}`}>
-                    {missedLeads.length}
-                  </p>
-                  <span className="text-[9px] text-slate-450">SLA: 20 min response window</span>
-                </div>
-                <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Missed Follow-ups</span>
-                  <p className={`text-xl font-black mt-1 ${missedFollowups.length > 0 ? "text-red-650" : "text-slate-800"}`}>
-                    {missedFollowups.length}
-                  </p>
-                  <span className="text-[9px] text-slate-450">SLA: 10 min after reminder due</span>
+              {/* One unified card with divided stat columns, matching the
+                  Campaigns tab's Date Filter & Metrics layout, instead of
+                  five separate floating shadowed cards. */}
+              <div className="bg-slate-100/70 border border-slate-200/60 rounded-2xl overflow-hidden shadow-sm">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 bg-white divide-y sm:divide-y-0 sm:divide-x divide-slate-100">
+                  <div className="p-4">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Leads Assigned</span>
+                    <p className="text-xl font-black text-slate-800 mt-1">{agentLeads.length}</p>
+                  </div>
+                  <div className="p-4">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Allocated Spend</span>
+                    <p className="text-xl font-black text-slate-800 mt-1 flex items-center gap-1">
+                      <DollarSign className="h-4 w-4 text-slate-400" />
+                      {formatCurrency(allocatedSpend)}
+                    </p>
+                  </div>
+                  <div className="p-4">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Booking ROI</span>
+                    <p className="text-xl font-black text-emerald-650 mt-1 flex items-center gap-1">
+                      <TrendingUp className="h-4 w-4" />
+                      {roi.toFixed(1)}x
+                    </p>
+                    <span className="text-[9px] text-slate-450">{bookingCount} bookings • {formatCurrency(bookingValue)}</span>
+                  </div>
+                  <div className="p-4">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Missed Leads</span>
+                    <p className={`text-xl font-black mt-1 ${missedLeads.length > 0 ? "text-red-650" : "text-slate-800"}`}>
+                      {missedLeads.length}
+                    </p>
+                    <span className="text-[9px] text-slate-450">SLA: 20 min response window</span>
+                  </div>
+                  <div className="p-4">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Missed Follow-ups</span>
+                    <p className={`text-xl font-black mt-1 ${missedFollowups.length > 0 ? "text-red-650" : "text-slate-800"}`}>
+                      {missedFollowups.length}
+                    </p>
+                    <span className="text-[9px] text-slate-450">SLA: 10 min after reminder due</span>
+                  </div>
                 </div>
               </div>
 
-              <div className="glass-card p-6 rounded-2xl space-y-4">
+              <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 space-y-4">
                 <h3 className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
                   <AlertTriangle className="h-4 w-4 text-amber-600" />
                   Missed Leads — Full Detail
@@ -272,7 +277,7 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                 </div>
               </div>
 
-              <div className="glass-card p-6 rounded-2xl space-y-4">
+              <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 space-y-4">
                 <h3 className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
                   <AlertTriangle className="h-4 w-4 text-amber-600" />
                   Missed Follow-ups — Full Detail
