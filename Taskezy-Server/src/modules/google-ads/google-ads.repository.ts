@@ -147,12 +147,20 @@ export async function upsertAdLevelSpendRecord(input: UpsertGoogleAdLevelSpendIn
   );
 }
 
+// Field names are deliberately identical to meta.repository's
+// AdLevelSpendRow (ad_id, ad_set_name, etc.), aliasing Google's own
+// "ad group" as ad_set_name — same real concept as Meta's ad set, just
+// Google's name for it — so a row with the same field name means the same
+// thing regardless of platform, and the frontend never has to branch on
+// platform just to read one. creative_name has no Google equivalent (no
+// distinct creative object the way Meta has); ad_type is kept as its own
+// real field instead of invented as a fake creative_name.
 export interface GoogleAdLevelSpendRow {
   platform: "GOOGLE";
-  google_ad_id: string;
+  ad_id: string;
   ad_name: string | null;
   ad_type: string | null;
-  ad_group_name: string;
+  ad_set_name: string;
   campaign_id: string;
   campaign_name: string;
   campaign_status: "ACTIVE" | "INACTIVE";
@@ -171,8 +179,8 @@ export async function listAdLevelSpend(): Promise<GoogleAdLevelSpendRow[]> {
   const { rows } = await query<GoogleAdLevelSpendRow>(
     `SELECT
        'GOOGLE' AS platform,
-       a.google_ad_id, ga.name AS ad_name, ga.ad_type,
-       gag.name AS ad_group_name,
+       a.google_ad_id AS ad_id, ga.name AS ad_name, ga.ad_type,
+       gag.name AS ad_set_name,
        gc.id AS campaign_id, gc.name AS campaign_name, gc.status AS campaign_status,
        a.spend_date, a.spend, a.leads_generated
      FROM google_ad_level_spend_records a
