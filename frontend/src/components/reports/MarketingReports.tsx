@@ -115,59 +115,64 @@ export default function MarketingReports({ dateRange }: { dateRange: DateRange }
         </div>
       </div>
 
-      {/* Summary cards: CPL, Lead Quality, Booking ROI */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
-          <div className="space-y-1">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total Ad Spend</span>
-            <p className="text-xl font-black text-slate-800">{formatCurrency(totalSpend)}</p>
+      {/* Summary metrics: CPL, Lead Quality, Booking ROI — one unified card
+          matching the Campaigns tab's Date Filter & Metrics layout (divided
+          stat columns on a single card) instead of floating separate
+          shadowed cards per metric. */}
+      <div className="bg-slate-100/70 border border-slate-200/60 rounded-2xl overflow-hidden shadow-sm">
+        <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 bg-white divide-y sm:divide-y-0 sm:divide-x divide-slate-100">
+          <div className="p-4 flex items-center justify-between gap-2">
+            <div className="space-y-1">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total Ad Spend</span>
+              <p className="text-xl font-black text-slate-800">{formatCurrency(totalSpend)}</p>
+            </div>
+            <div className="h-9 w-9 rounded-lg bg-brand-50 border border-brand-100 flex items-center justify-center text-brand-600 shrink-0">
+              <DollarSign className="h-4.5 w-4.5" />
+            </div>
           </div>
-          <div className="h-10 w-10 rounded-xl bg-brand-50 border border-brand-100 flex items-center justify-center text-brand-600">
-            <DollarSign className="h-5.5 w-5.5" />
-          </div>
-        </div>
 
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
-          <div className="space-y-1">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">CPL (Cost per Lead)</span>
-            <p className="text-xl font-black text-slate-800">{formatCurrency(cpl)}</p>
-            <span className="text-[9px] text-slate-450">{totalPlatformLeads} platform-reported leads</span>
+          <div className="p-4 flex items-center justify-between gap-2">
+            <div className="space-y-1">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">CPL (Cost per Lead)</span>
+              <p className="text-xl font-black text-slate-800">{formatCurrency(cpl)}</p>
+              <span className="text-[9px] text-slate-450">{totalPlatformLeads} platform-reported leads</span>
+            </div>
+            <div className="h-9 w-9 rounded-lg bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 shrink-0">
+              <Target className="h-4.5 w-4.5" />
+            </div>
           </div>
-          <div className="h-10 w-10 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600">
-            <Target className="h-5.5 w-5.5" />
-          </div>
-        </div>
 
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
-          <div className="space-y-1">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Lead Quality</span>
-            <p className="text-xl font-black text-slate-800">{quality.qualityPercent.toFixed(1)}%</p>
-            <span className="text-[9px] text-slate-450">{quality.buyerCount} buyer-avg vs {quality.nonBuyerCount} non-buyer</span>
+          <div className="p-4 flex items-center justify-between gap-2">
+            <div className="space-y-1">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Lead Quality</span>
+              <p className="text-xl font-black text-slate-800">{quality.qualityPercent.toFixed(1)}%</p>
+              <span className="text-[9px] text-slate-450">{quality.buyerCount} buyer-avg vs {quality.nonBuyerCount} non-buyer</span>
+            </div>
+            <div className="h-9 w-9 rounded-lg bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 shrink-0">
+              <Gauge className="h-4.5 w-4.5" />
+            </div>
           </div>
-          <div className="h-10 w-10 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600">
-            <Gauge className="h-5.5 w-5.5" />
-          </div>
-        </div>
 
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
-          <div className="space-y-1">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Booking-Based ROI</span>
-            <p className="text-xl font-black text-slate-800">{roi.toFixed(1)}x</p>
-            <span className="text-[9px] text-slate-450">{bookingCount} bookings • {formatCurrency(bookingValue)}</span>
+          <div className="p-4 flex items-center justify-between gap-2">
+            <div className="space-y-1">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Booking-Based ROI</span>
+              <p className="text-xl font-black text-slate-800">{roi.toFixed(1)}x</p>
+              <span className="text-[9px] text-slate-450">{bookingCount} bookings • {formatCurrency(bookingValue)}</span>
+            </div>
+            <div className="h-9 w-9 rounded-lg bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-650 shrink-0">
+              <TrendingUp className="h-4.5 w-4.5" />
+            </div>
           </div>
-          <div className="h-10 w-10 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-650">
-            <TrendingUp className="h-5.5 w-5.5" />
-          </div>
-        </div>
 
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
-          <div className="space-y-1">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Visit/Meeting Conversion</span>
-            <p className="text-xl font-black text-slate-800">{visitConversion.conversionPercent.toFixed(1)}%</p>
-            <span className="text-[9px] text-slate-450">{visitConversion.convertedCount} of {rangeLeads.length} leads</span>
-          </div>
-          <div className="h-10 w-10 rounded-xl bg-pink-50 border border-pink-100 flex items-center justify-center text-pink-600">
-            <Building2 className="h-5.5 w-5.5" />
+          <div className="p-4 flex items-center justify-between gap-2">
+            <div className="space-y-1">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Visit/Meeting Conversion</span>
+              <p className="text-xl font-black text-slate-800">{visitConversion.conversionPercent.toFixed(1)}%</p>
+              <span className="text-[9px] text-slate-450">{visitConversion.convertedCount} of {rangeLeads.length} leads</span>
+            </div>
+            <div className="h-9 w-9 rounded-lg bg-pink-50 border border-pink-100 flex items-center justify-center text-pink-600 shrink-0">
+              <Building2 className="h-4.5 w-4.5" />
+            </div>
           </div>
         </div>
       </div>
@@ -188,7 +193,7 @@ export default function MarketingReports({ dateRange }: { dateRange: DateRange }
       </div>
 
       {subTab === "By Ad Account" && (
-        <div className="glass-card p-6 rounded-2xl space-y-4">
+        <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 space-y-4">
           <h3 className="text-xs font-bold text-slate-700">Individual Ad Account Performance</h3>
           <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm overflow-x-auto">
             <table className="w-full min-w-[760px] text-left text-[11px] border-collapse">
@@ -241,7 +246,7 @@ export default function MarketingReports({ dateRange }: { dateRange: DateRange }
 
       {subTab === "Overall" && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="glass-card p-6 rounded-2xl space-y-4">
+          <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 space-y-4">
             <h3 className="text-xs font-bold text-slate-700">Spend by Platform</h3>
             {(["Meta", "Google"] as const).map(platform => {
               const platformSpend = rangeSpend.filter(r => r.platform === platform);
@@ -265,7 +270,7 @@ export default function MarketingReports({ dateRange }: { dateRange: DateRange }
             </p>
           </div>
 
-          <div className="glass-card p-6 rounded-2xl space-y-4">
+          <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 space-y-4">
             <h3 className="text-xs font-bold text-slate-700">Lead Quality Breakdown</h3>
             <div className="flex items-end gap-6">
               <div>
@@ -289,7 +294,7 @@ export default function MarketingReports({ dateRange }: { dateRange: DateRange }
       )}
 
       {subTab === "Property-wise" && (
-        <div className="glass-card p-6 rounded-2xl space-y-4">
+        <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 space-y-4">
           <h3 className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
             <Building2 className="h-4 w-4 text-slate-500" />
             Property-wise Marketing Performance

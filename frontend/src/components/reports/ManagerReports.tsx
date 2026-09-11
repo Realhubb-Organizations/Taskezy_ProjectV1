@@ -98,7 +98,7 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="glass-card p-4 rounded-xl">
+      <div className="bg-white border border-slate-100 rounded-xl shadow-sm p-4">
         <p className="text-[11px] text-slate-500 leading-relaxed">
           Missed = a lead assigned to that person with no status update within the 20-minute SLA window. &quot;Individual&quot; reports only the
           leads assigned directly to the manager (their own spend and ROI); &quot;Team&quot; rolls up every direct report under them; &quot;Combined&quot;
@@ -106,7 +106,7 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
         </p>
       </div>
 
-      <div className="glass-card p-6 rounded-2xl space-y-4">
+      <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 space-y-4">
         <h3 className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
           <Users className="h-4 w-4 text-slate-500" />
           Manager / TL Performance

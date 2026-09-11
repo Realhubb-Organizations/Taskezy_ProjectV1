@@ -32,7 +32,7 @@ const PRESETS: { label: string; from: () => string; to: () => string }[] = [
 
 export default function DateRangeFilter({ value, onChange }: DateRangeFilterProps) {
   return (
-    <div className="glass-card p-4 rounded-xl flex flex-col sm:flex-row sm:items-center gap-3">
+    <div className="bg-slate-100/70 border border-slate-200/60 rounded-2xl shadow-sm p-4 flex flex-col sm:flex-row sm:items-center gap-3">
       <div className="flex items-center gap-1.5 text-xs font-bold text-slate-600 shrink-0">
         <CalendarRange className="h-4 w-4 text-brand-600" />
         Report Date Range

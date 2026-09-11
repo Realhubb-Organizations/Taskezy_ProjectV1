@@ -3,7 +3,7 @@
 import React, { Suspense, useState } from "react";
 import { useApp } from "@/context/AppContext";
 import { useSearchParams, useRouter } from "next/navigation";
-import { BarChart, Download, Megaphone, Users, UserCog } from "lucide-react";
+import { Download, Megaphone, Users, UserCog } from "lucide-react";
 import DateRangeFilter, { DateRange } from "@/components/reports/DateRangeFilter";
 import MarketingReports from "@/components/reports/MarketingReports";
 import ManagerReports from "@/components/reports/ManagerReports";
@@ -63,17 +63,24 @@ function ReportsPageContent() {
   };
 
   return (
-    <div className="space-y-6 pb-12">
-      {/* Title Controls */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-          <h2 className="text-xl font-bold text-brand-700 flex items-center gap-2">
-            <BarChart className="h-5.5 w-5.5 text-brand-600" />
-            Platform Analytics &amp; Reports
-          </h2>
-          <p className="text-xs text-slate-500">
-            Micro-management telemetry across marketing spend, manager pipelines, and individual agent performance.
-          </p>
+    <div className="space-y-4 pb-12 animate-fade-in">
+      {/* Main section tabs — same segmented pill switcher as the Leads and
+          Campaigns tab toggles (bg-slate-200/70 track, bg-white active pill),
+          not a standalone page title: the top bar already shows "Reports". */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="bg-slate-200/70 p-1 rounded-xl flex items-center gap-1">
+          {visibleTabs.map(t => (
+            <button
+              key={t.key}
+              onClick={() => handleTabChange(t.key)}
+              className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                activeTab === t.key ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-800"
+              }`}
+            >
+              <t.icon className="h-3.5 w-3.5" />
+              {t.label}
+            </button>
+          ))}
         </div>
         <button
           onClick={handleExportCSV}
@@ -82,22 +89,6 @@ function ReportsPageContent() {
           <Download className="h-4 w-4" />
           Export Leads CSV
         </button>
-      </div>
-
-      {/* Main section tabs */}
-      <div className="flex flex-wrap gap-2">
-        {visibleTabs.map(t => (
-          <button
-            key={t.key}
-            onClick={() => handleTabChange(t.key)}
-            className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-              activeTab === t.key ? "bg-brand-700 text-white shadow-sm" : "bg-white border border-slate-200 text-slate-500 hover:text-slate-700"
-            }`}
-          >
-            <t.icon className="h-3.5 w-3.5" />
-            {t.label}
-          </button>
-        ))}
       </div>
 
       {/* Shared date-range filter — every report is generated for this selected window */}
