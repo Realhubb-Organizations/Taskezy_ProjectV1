@@ -203,7 +203,7 @@ export interface Lead {
   campaign?: string;
   metaPageName?: string; // which connected Meta Page this lead came in through
   metaFormId?: string; // which Lead Ad Form on that Page
-  metaAdId?: string; // which real Meta ad this lead's submission came from — matches AdLevelSpendRecord.metaAdId
+  metaAdId?: string; // which real Meta ad this lead's submission came from — matches AdLevelSpendRecord.adId for a "platform": "META" row. Google leads have no per-lead ad attribution at all (Sheets-import pipeline, not a webhook), so this stays undefined for them — a real gap, not a bug.
   property?: string;
   leadScore?: number;
 
@@ -228,11 +228,16 @@ export interface AdSpendRecord {
 // Real per-ad, per-day spend/leads with each row's real ad set/ad/creative
 // name attached — one level finer than AdSpendRecord (per ad instead of
 // per campaign), for Campaign Deep Dive's Ad Set Name/Ad creative Name
-// columns and a real per-ad-set/ad-creative CPL breakdown.
+// columns and a real per-ad-set/ad-creative CPL breakdown. Covers both
+// Meta and Google (platform-tagged) under one shape — creativeName is
+// real and Meta-only, adType is real and Google-only (its honest fallback
+// label when ad.name is unset), never both on the same row.
 export interface AdLevelSpendRecord {
-  metaAdId: string;
-  adName: string;
+  platform: "Meta" | "Google";
+  adId: string;
+  adName: string | null;
   creativeName?: string;
+  adType?: string;
   adSetName: string;
   campaignId: string;
   campaignName: string;
@@ -848,9 +853,11 @@ function mapApiAdSpendToFrontend(row: ApiAdSpendRow): AdSpendRecord {
 
 function mapApiAdLevelSpendToFrontend(row: ApiAdLevelSpendRow): AdLevelSpendRecord {
   return {
-    metaAdId: row.meta_ad_id,
+    platform: row.platform === "META" ? "Meta" : "Google",
+    adId: row.ad_id,
     adName: row.ad_name,
     creativeName: row.creative_name || undefined,
+    adType: row.ad_type || undefined,
     adSetName: row.ad_set_name,
     campaignId: row.campaign_id,
     campaignName: row.campaign_name,
