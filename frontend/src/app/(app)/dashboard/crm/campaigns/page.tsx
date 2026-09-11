@@ -1648,8 +1648,8 @@ export default function AdminCampaignsPage() {
                   <p className="text-xs text-slate-400 italic py-4 text-center">No data yet.</p>
                 ) : (
                   typeBreakdown.map(t => (
-                    <label key={t.type} className="grid grid-cols-[1fr_64px_112px] gap-x-4 items-center py-2 text-xs cursor-pointer">
-                      <span className="flex items-center gap-2 min-w-0">
+                    <label key={t.type} className="grid grid-cols-[1fr_64px_112px] gap-x-4 items-start py-2 text-xs cursor-pointer">
+                      <span className="flex items-center gap-2 min-w-0 pt-0.5">
                         <input
                           type="checkbox"
                           checked={isTypeChecked(t.type)}
@@ -1661,8 +1661,17 @@ export default function AdminCampaignsPage() {
                         )}
                         <span className="font-semibold text-slate-700 truncate">{t.type}</span>
                       </span>
-                      <span className="text-slate-600 text-right">{t.leads.toLocaleString("en-IN")}</span>
-                      <span className="text-slate-600 text-right">{formatCurrency(t.spend)}</span>
+                      {/* Platform-reported is the headline (matches the Total
+                          row below and the top summary bar), real synced
+                          count as a subtitle — so this type's own number and
+                          the grand Total always visibly reconcile, instead of
+                          a row showing a small synced-only figure that looks
+                          like it doesn't add up to a much bigger Total. */}
+                      <span className="text-slate-600 text-right">
+                        {t.platformLeads.toLocaleString("en-IN")}
+                        <span className="block text-right text-[9px] font-normal text-slate-400">{t.leads.toLocaleString("en-IN")} synced</span>
+                      </span>
+                      <span className="text-slate-600 text-right pt-0.5">{formatCurrency(t.spend)}</span>
                     </label>
                   ))
                 )}
