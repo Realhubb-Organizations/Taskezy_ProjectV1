@@ -886,11 +886,18 @@ export default function AdminCampaignsPage() {
 
   // Real per-ad rows (real ad set name, real ad/creative name, real spend,
   // real platform-reported leads — see AdLevelSpendRecord), aggregated per
-  // ad and grouped by campaign name, scoped to the selected Date Range same
-  // as every other real number on this tab. Covers both Meta and Google —
-  // adId/platform are generic across both. Feeds both the compact Deep
-  // Dive card's Ad Set/Creative columns (the dominant real ad by spend) and
-  // the "adSetBreakdown" drill view's full real per-ad table.
+  // ad and grouped by campaign name. Deliberately ALL-TIME, not scoped to
+  // the selected Date Range — an ad set/creative's real name is a stable
+  // fact about the campaign's structure, not something that should
+  // disappear just because that specific ad didn't happen to spend on
+  // whichever single day is currently selected (ad-level reporting can lag
+  // same-day campaign-level totals by design on both platforms). Same
+  // "stable structural data stays all-time" precedent as campaignsListAllTime.
+  // Covers both Meta and Google — adId/platform are generic across both.
+  // Feeds both the compact Deep Dive card's Ad Set/Creative columns (the
+  // dominant real ad by spend) and the "adSetBreakdown" drill view's full
+  // real per-ad table (whose Spend/CPL/Qualified Leads are therefore also
+  // real all-time figures for that ad, not Date-Range-scoped).
   interface DeepDiveAdRow {
     adId: string;
     platform: "Meta" | "Google";
@@ -903,7 +910,7 @@ export default function AdminCampaignsPage() {
   }
   const adRowsByCampaign = useMemo(() => {
     const byAd: Record<string, DeepDiveAdRow & { campaignName: string }> = {};
-    adLevelSpendRecords.filter(recordInSelectedRange).forEach(r => {
+    adLevelSpendRecords.forEach(r => {
       if (!byAd[r.adId]) {
         byAd[r.adId] = { adId: r.adId, platform: r.platform, adSetName: r.adSetName, adName: r.adName, creativeName: r.creativeName, adType: r.adType, campaignName: r.campaignName, spend: 0, platformReportedLeads: 0 };
       }
@@ -918,7 +925,7 @@ export default function AdminCampaignsPage() {
     });
     Object.values(out).forEach(rows => rows.sort((a, b) => b.spend - a.spend));
     return out;
-  }, [adLevelSpendRecords, dateRange, appliedCustomRange, today]);
+  }, [adLevelSpendRecords]);
 
   // Real Qualified Leads / real total leads (for CPL) for one specific ad —
   // matches leads.metaAdId, same real per-lead field already used for
