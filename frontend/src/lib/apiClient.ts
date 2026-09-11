@@ -150,6 +150,7 @@ export interface ApiLeadRow {
   campaign: string | null;
   meta_page_name: string | null;
   meta_form_id: string | null;
+  meta_ad_id: string | null;
   logs: { message: string; timestamp: string; user: string }[];
 }
 
@@ -687,6 +688,26 @@ export interface ApiAdSpendRow {
 }
 export function apiListAdSpend(): Promise<ApiAdSpendRow[]> {
   return request<ApiAdSpendRow[]>("/api/v1/ad-spend");
+}
+
+// Real per-ad, per-day spend/leads with each row's real ad set/ad/creative
+// name attached — un-aggregated (one row per ad per day), same grain as
+// ApiAdSpendRow, for Campaign Deep Dive's Ad Set Name/Ad creative Name
+// columns and a real per-ad-set/ad-creative CPL breakdown.
+export interface ApiAdLevelSpendRow {
+  meta_ad_id: string;
+  ad_name: string;
+  creative_name: string | null;
+  ad_set_name: string;
+  campaign_id: string;
+  campaign_name: string;
+  campaign_status: "ACTIVE" | "INACTIVE";
+  spend_date: string;
+  spend: string;
+  leads_generated: number;
+}
+export function apiListAdLevelSpend(): Promise<ApiAdLevelSpendRow[]> {
+  return request<ApiAdLevelSpendRow[]>("/api/v1/ad-spend/ad-level");
 }
 
 // --- Meta (Facebook/Instagram) Lead Ads connection — ADMIN only ---

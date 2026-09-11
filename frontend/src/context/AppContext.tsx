@@ -45,6 +45,7 @@ import {
   apiCreateCalendarEvent,
   apiDeleteCalendarEvent,
   apiListAdSpend,
+  apiListAdLevelSpend,
   apiListMetaConnections,
   apiSetPropertyTeamMembers,
   apiListTimesheets,
@@ -70,6 +71,7 @@ import {
   ApiNotificationRow,
   ApiCalendarEventRow,
   ApiAdSpendRow,
+  ApiAdLevelSpendRow,
   ApiTimesheetRow,
   ApiTenantSettings,
   ApiRequestError
@@ -201,6 +203,7 @@ export interface Lead {
   campaign?: string;
   metaPageName?: string; // which connected Meta Page this lead came in through
   metaFormId?: string; // which Lead Ad Form on that Page
+  metaAdId?: string; // which real Meta ad this lead's submission came from — matches AdLevelSpendRecord.metaAdId
   property?: string;
   leadScore?: number;
 
@@ -220,6 +223,23 @@ export interface AdSpendRecord {
   spend: number;
   leadsGenerated: number;
   campaignStatus?: "ACTIVE" | "INACTIVE"; // undefined for records with no linked Meta campaign (legacy/manual rows)
+}
+
+// Real per-ad, per-day spend/leads with each row's real ad set/ad/creative
+// name attached — one level finer than AdSpendRecord (per ad instead of
+// per campaign), for Campaign Deep Dive's Ad Set Name/Ad creative Name
+// columns and a real per-ad-set/ad-creative CPL breakdown.
+export interface AdLevelSpendRecord {
+  metaAdId: string;
+  adName: string;
+  creativeName?: string;
+  adSetName: string;
+  campaignId: string;
+  campaignName: string;
+  campaignStatus: "ACTIVE" | "INACTIVE";
+  date: string; // YYYY-MM-DD
+  spend: number;
+  leadsGenerated: number;
 }
 
 // Real, admin-editable business rules — previously hardcoded (geofence
@@ -441,6 +461,7 @@ interface AppState {
   notifications: Notification[];
   calendarEvents: CalendarEvent[];
   adSpendRecords: AdSpendRecord[];
+  adLevelSpendRecords: AdLevelSpendRecord[];
 
   // System State
   isOnline: boolean;
@@ -574,6 +595,7 @@ function mapApiLeadToFrontendLead(row: ApiLeadRow): Lead {
     campaign: row.campaign || undefined,
     metaPageName: row.meta_page_name || undefined,
     metaFormId: row.meta_form_id || undefined,
+    metaAdId: row.meta_ad_id || undefined,
     property: row.property_name || undefined,
     leadScore: row.lead_score ?? undefined,
     assignedAt: row.assigned_at || undefined,
@@ -824,6 +846,21 @@ function mapApiAdSpendToFrontend(row: ApiAdSpendRow): AdSpendRecord {
   };
 }
 
+function mapApiAdLevelSpendToFrontend(row: ApiAdLevelSpendRow): AdLevelSpendRecord {
+  return {
+    metaAdId: row.meta_ad_id,
+    adName: row.ad_name,
+    creativeName: row.creative_name || undefined,
+    adSetName: row.ad_set_name,
+    campaignId: row.campaign_id,
+    campaignName: row.campaign_name,
+    campaignStatus: row.campaign_status,
+    date: row.spend_date.slice(0, 10),
+    spend: Number(row.spend),
+    leadsGenerated: row.leads_generated
+  };
+}
+
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // Subscription Configuration State - default to active subscription for easy demoing!
   const [adminSeats, setAdminSeats] = useState(1);
@@ -858,12 +895,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
   const [adSpendRecords, setAdSpendRecords] = useState<AdSpendRecord[]>([]);
+  const [adLevelSpendRecords, setAdLevelSpendRecords] = useState<AdLevelSpendRecord[]>([]);
 
   // Real backend integration (Taskezy-Server) — every domain below is fetched
   // from the real database. Nothing in this file falls back to mock data.
   const loadAllRealData = async (role?: Role) => {
     try {
-      const [apiLeads, apiUsers, apiProperties, apiResaleUnits, apiFollowups, apiAttendance, apiReimbursements, apiInvoices, apiNotifications, apiCalendarEvents, apiAdSpend, apiTimesheets, apiTenantSettings] = await Promise.all([
+      const [apiLeads, apiUsers, apiProperties, apiResaleUnits, apiFollowups, apiAttendance, apiReimbursements, apiInvoices, apiNotifications, apiCalendarEvents, apiAdSpend, apiAdLevelSpend, apiTimesheets, apiTenantSettings] = await Promise.all([
         apiListAllLeads(),
         apiListUsers(),
         apiListProperties(),
@@ -875,6 +913,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         apiListNotifications(),
         apiListCalendarEvents(),
         apiListAdSpend(),
+        apiListAdLevelSpend(),
         apiListTimesheets(),
         apiGetTenantSettings()
       ]);
@@ -889,6 +928,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setNotifications(apiNotifications.map(mapApiNotificationToFrontend));
       setCalendarEvents(apiCalendarEvents.map(mapApiCalendarEventToFrontend));
       setAdSpendRecords(apiAdSpend.map(mapApiAdSpendToFrontend));
+      setAdLevelSpendRecords(apiAdLevelSpend.map(mapApiAdLevelSpendToFrontend));
       setTimesheets(apiTimesheets.map(mapApiTimesheetToFrontend));
       setTenantSettings(mapApiTenantSettingsToFrontend(apiTenantSettings));
 
@@ -1924,6 +1964,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         notifications,
         calendarEvents,
         adSpendRecords,
+        adLevelSpendRecords,
         isOnline,
         pendingSyncCount: pendingSyncQueue.length,
         isSyncing,

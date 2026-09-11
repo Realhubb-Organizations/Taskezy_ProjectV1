@@ -271,7 +271,7 @@ function CampaignDateRangePicker({
 }
 
 export default function AdminCampaignsPage() {
-  const { leads, adSpendRecords, followupCalls } = useApp();
+  const { leads, adSpendRecords, adLevelSpendRecords, followupCalls } = useApp();
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -496,12 +496,13 @@ export default function AdminCampaignsPage() {
     return dateInRange(l.createdAtStr, mapDateRangeToKey(dateRange), today);
   };
 
-  // Same "in range" check as leadInSelectedRange, for an AdSpendRecord's own
+  // Same "in range" check as leadInSelectedRange, for a real record's own
   // date — used to decide which campaigns actually had activity within the
   // selected Date Range (for the top summary bar only; campaignsList itself
   // stays all-time so the Campaigns tab table / chart / breakdown keep their
-  // full history).
-  const recordInSelectedRange = (r: AdSpendRecord): boolean => {
+  // full history). Typed generically (just needs a .date) so the same check
+  // works for AdSpendRecord and AdLevelSpendRecord alike.
+  const recordInSelectedRange = (r: { date: string }): boolean => {
     if (dateRange === "Custom" && appliedCustomRange) {
       const d = new Date(r.date);
       if (isNaN(d.getTime())) return false;
@@ -882,6 +883,51 @@ export default function AdminCampaignsPage() {
       return matchesSearch && matchesSource;
     });
   }, [campaignsList, deepDiveSearchQuery, deepDiveSourceFilters]);
+
+  // Real per-ad rows (real ad set name, real ad/creative name, real spend,
+  // real platform-reported leads — see AdLevelSpendRecord), aggregated per
+  // ad and grouped by campaign name, scoped to the selected Date Range same
+  // as every other real number on this tab. Feeds both the compact Deep
+  // Dive card's Ad Set/Creative columns (the dominant real ad by spend) and
+  // the "adSetBreakdown" drill view's full real per-ad table.
+  interface DeepDiveAdRow {
+    metaAdId: string;
+    adSetName: string;
+    adName: string;
+    creativeName?: string;
+    spend: number;
+    platformReportedLeads: number;
+  }
+  const adRowsByCampaign = useMemo(() => {
+    const byAd: Record<string, DeepDiveAdRow & { campaignName: string }> = {};
+    adLevelSpendRecords.filter(recordInSelectedRange).forEach(r => {
+      if (!byAd[r.metaAdId]) {
+        byAd[r.metaAdId] = { metaAdId: r.metaAdId, adSetName: r.adSetName, adName: r.adName, creativeName: r.creativeName, campaignName: r.campaignName, spend: 0, platformReportedLeads: 0 };
+      }
+      byAd[r.metaAdId].spend += r.spend;
+      byAd[r.metaAdId].platformReportedLeads += r.leadsGenerated;
+    });
+    const out: Record<string, DeepDiveAdRow[]> = {};
+    Object.values(byAd).forEach(({ campaignName, ...ad }) => {
+      const key = campaignName.toLowerCase();
+      if (!out[key]) out[key] = [];
+      out[key].push(ad);
+    });
+    Object.values(out).forEach(rows => rows.sort((a, b) => b.spend - a.spend));
+    return out;
+  }, [adLevelSpendRecords, dateRange, appliedCustomRange, today]);
+
+  // Real Qualified Leads / real total leads (for CPL) for one specific ad —
+  // matches leads.metaAdId, same real per-lead field already used for
+  // Qualified Leads per campaign, just scoped to a single ad instead of a
+  // whole campaign's worth of leads.
+  const qualifiedLeadsForAd = (metaAdId: string): number =>
+    leads.filter(l => l.metaAdId === metaAdId && QUALIFIED_LEAD_STATUSES.includes(l.status)).length;
+  const cplForAd = (ad: DeepDiveAdRow): number => {
+    const syncedLeads = leads.filter(l => l.metaAdId === ad.metaAdId).length;
+    const totalLeads = Math.max(ad.platformReportedLeads, syncedLeads);
+    return totalLeads > 0 ? ad.spend / totalLeads : 0;
+  };
 
   // Qualified Leads drill-down page — the real leads behind a Deep Dive
   // row's Qualified Leads count.
@@ -1332,7 +1378,9 @@ export default function AdminCampaignsPage() {
               </span>
             </div>
 
-            {analyticsDrillView.type === "adSetBreakdown" ? (
+            {analyticsDrillView.type === "adSetBreakdown" ? (() => {
+              const adRows = adRowsByCampaign[analyticsDrillView.campaign.name.toLowerCase()] || [];
+              return (
               <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden">
                 <div className="px-5 py-3.5 border-b border-slate-200/80">
                   <h3 className="text-sm font-bold text-slate-900">Campaign Deep Dive</h3>
@@ -1351,23 +1399,40 @@ export default function AdminCampaignsPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-[12px] font-medium text-slate-700">
-                      <tr>
-                        <td className="px-5 py-3 text-slate-900 font-semibold">{analyticsDrillView.campaign.name}</td>
-                        <td className="px-5 py-3"><PlatformIcon platform={analyticsDrillView.campaign.platform} /></td>
-                        <td className="px-5 py-3 text-slate-300" title="Not tracked yet — no ad-set-level data ingested">—</td>
-                        <td className="px-5 py-3 text-slate-300" title="Not tracked yet — no ad-creative-level data ingested">—</td>
-                        <td className="px-5 py-3">{analyticsDrillView.campaign.qualifiedLeads}</td>
-                        <td className="px-5 py-3">{analyticsDrillView.campaign.cpl.toFixed(2)}</td>
-                        <td className="px-5 py-3 font-semibold text-slate-800">{formatCurrency(analyticsDrillView.campaign.spend)}</td>
-                      </tr>
+                      {adRows.length === 0 ? (
+                        <tr>
+                          <td className="px-5 py-3 text-slate-900 font-semibold">{analyticsDrillView.campaign.name}</td>
+                          <td className="px-5 py-3"><PlatformIcon platform={analyticsDrillView.campaign.platform} /></td>
+                          <td className="px-5 py-3 text-slate-300" title="No ad-set-level data synced for this campaign yet">—</td>
+                          <td className="px-5 py-3 text-slate-300" title="No ad-creative-level data synced for this campaign yet">—</td>
+                          <td className="px-5 py-3">{analyticsDrillView.campaign.qualifiedLeads}</td>
+                          <td className="px-5 py-3">{analyticsDrillView.campaign.cpl.toFixed(2)}</td>
+                          <td className="px-5 py-3 font-semibold text-slate-800">{formatCurrency(analyticsDrillView.campaign.spend)}</td>
+                        </tr>
+                      ) : (
+                        adRows.map((ad, i) => (
+                          <tr key={ad.metaAdId}>
+                            <td className="px-5 py-3 text-slate-900 font-semibold">{i === 0 ? analyticsDrillView.campaign.name : ""}</td>
+                            <td className="px-5 py-3">{i === 0 && <PlatformIcon platform={analyticsDrillView.campaign.platform} />}</td>
+                            <td className="px-5 py-3">{ad.adSetName}</td>
+                            <td className="px-5 py-3">{ad.creativeName || ad.adName}</td>
+                            <td className="px-5 py-3">{qualifiedLeadsForAd(ad.metaAdId)}</td>
+                            <td className="px-5 py-3">{cplForAd(ad).toFixed(2)}</td>
+                            <td className="px-5 py-3 font-semibold text-slate-800">{formatCurrency(ad.spend)}</td>
+                          </tr>
+                        ))
+                      )}
                     </tbody>
                   </table>
                 </div>
-                <p className="px-5 py-3 text-[11px] text-slate-400 italic border-t border-slate-100">
-                  Ad-set and ad-creative level breakdown is not tracked yet — Meta/Google ad-set and creative reporting is not ingested. The Qualified Leads/CPL/Spend above are this campaign&apos;s real totals.
-                </p>
+                {adRows.length === 0 && (
+                  <p className="px-5 py-3 text-[11px] text-slate-400 italic border-t border-slate-100">
+                    No real ad-set/ad-creative data has synced for this campaign yet. The Qualified Leads/CPL/Spend above are this campaign&apos;s real totals.
+                  </p>
+                )}
               </div>
-            ) : (
+              );
+            })() : (
               <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden">
                 <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5 border-b border-slate-200/80">
                   <h3 className="text-sm font-bold text-slate-900">
@@ -2025,7 +2090,10 @@ export default function AdminCampaignsPage() {
                       <td colSpan={7} className="px-5 py-8 text-center text-slate-400 italic">No campaigns found matching filter.</td>
                     </tr>
                   ) : (
-                    deepDiveCampaigns.map(c => (
+                    deepDiveCampaigns.map(c => {
+                      const adRows = adRowsByCampaign[c.name.toLowerCase()] || [];
+                      const topAd = adRows[0];
+                      return (
                       <tr key={c.id} className="hover:bg-slate-50/50 transition-colors">
                         <td className="px-5 py-3 text-slate-900 font-semibold">{c.name}</td>
                         <td className="px-5 py-3"><PlatformIcon platform={c.platform} /></td>
@@ -2033,14 +2101,19 @@ export default function AdminCampaignsPage() {
                           <button
                             type="button"
                             onClick={() => setAnalyticsDrillView({ type: "adSetBreakdown", campaign: c })}
-                            className="flex items-center gap-1 text-slate-400 hover:text-[#0B1E6E] transition-colors"
-                            title="Open ad-set breakdown"
+                            className="flex items-center gap-1 text-slate-700 hover:text-[#0B1E6E] transition-colors max-w-[160px]"
+                            title={adRows.length > 1 ? `${adRows.length} real ad sets/ads — click to see all` : "Open ad-set breakdown"}
                           >
-                            <span>—</span>
-                            <ChevronDown className="h-3.5 w-3.5" />
+                            <span className="truncate">
+                              {topAd ? topAd.adSetName : "—"}
+                              {adRows.length > 1 && <span className="text-slate-400"> +{adRows.length - 1}</span>}
+                            </span>
+                            <ChevronDown className="h-3.5 w-3.5 shrink-0" />
                           </button>
                         </td>
-                        <td className="px-5 py-3 text-slate-300" title="Not tracked yet — no ad-creative-level data ingested">—</td>
+                        <td className="px-5 py-3 truncate max-w-[160px]" title={topAd?.creativeName || topAd?.adName || undefined}>
+                          {topAd ? (topAd.creativeName || topAd.adName) : <span className="text-slate-300" title="No ad-creative data synced for this campaign yet">—</span>}
+                        </td>
                         <td className="px-5 py-3">
                           <button
                             type="button"
@@ -2053,7 +2126,8 @@ export default function AdminCampaignsPage() {
                         <td className="px-5 py-3">{c.cpl.toFixed(2)}</td>
                         <td className="px-5 py-3 font-semibold text-slate-800">{formatCurrency(c.spend)}</td>
                       </tr>
-                    ))
+                      );
+                    })
                   )}
                 </tbody>
               </table>
