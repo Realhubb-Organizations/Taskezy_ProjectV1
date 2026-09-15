@@ -22,7 +22,8 @@ import {
   Minus,
   Download,
   CirclePlus,
-  CircleMinus
+  CircleMinus,
+  RefreshCw
 } from "lucide-react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine } from "recharts";
 
@@ -271,7 +272,7 @@ function CampaignDateRangePicker({
 }
 
 export default function AdminCampaignsPage() {
-  const { leads, adSpendRecords, adLevelSpendRecords, followupCalls } = useApp();
+  const { leads, adSpendRecords, adLevelSpendRecords, followupCalls, refetchAdLevelSpend, triggerAdSpendSync } = useApp();
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -842,6 +843,42 @@ export default function AdminCampaignsPage() {
   const [deepDiveSourceMenuOpen, setDeepDiveSourceMenuOpen] = useState(false);
   const [deepDiveSourceMenuPos, setDeepDiveSourceMenuPos] = useState<{ top: number; left: number } | null>(null);
   const deepDiveSourceBtnRef = useRef<HTMLButtonElement>(null);
+
+  // Manual "Sync" button — wakes the real Meta/Google ad-level sync jobs
+  // early instead of waiting for their 6h interval. Does not bypass either
+  // platform's real rate limits (Meta's ad-account Insights limit in
+  // particular), so it can take a while to fully land — poll for new rows
+  // landing for a few minutes afterward rather than expecting an instant
+  // result, and let the admin re-trigger any time.
+  const [adSyncStatus, setAdSyncStatus] = useState<"idle" | "syncing">("idle");
+  const [adSyncNote, setAdSyncNote] = useState<string | null>(null);
+  const handleAdSpendSync = async () => {
+    setAdSyncStatus("syncing");
+    setAdSyncNote(null);
+    try {
+      const result = await triggerAdSpendSync();
+      const startedAny = result.meta.started || result.google.started;
+      setAdSyncNote(
+        startedAny
+          ? "Sync started. Meta/Google rate limits mean this can take a while to fully land — new rows will appear automatically."
+          : "A sync from an earlier trigger is still running — refreshing with whatever has landed so far."
+      );
+      let pollsLeft = 9; // ~3 minutes of polling at 20s apart, then stop and let the admin re-trigger
+      const poll = async () => {
+        await refetchAdLevelSpend();
+        pollsLeft -= 1;
+        if (pollsLeft > 0) {
+          setTimeout(poll, 20_000);
+        } else {
+          setAdSyncStatus("idle");
+        }
+      };
+      setTimeout(poll, 20_000);
+    } catch {
+      setAdSyncNote("Could not start sync — please try again.");
+      setAdSyncStatus("idle");
+    }
+  };
 
   // Page-level drill-downs from the Deep Dive table (breadcrumb-navigated,
   // replacing the Analytics tab's content, matching the reference) — Ad Set
@@ -2022,12 +2059,26 @@ export default function AdminCampaignsPage() {
 
           {/* Campaign Deep Dive — every individual campaign, not aggregated
               by property/status like the table above. "Ad Set Name" and
-              "Ad creative Name" have no backing field yet (no ad-set/ad-
-              creative-level ingestion), so they honestly render "—" rather
-              than inventing numbers, same convention used elsewhere. */}
+              "Ad creative Name" come from the real Meta/Google ad-level
+              sync (adLevelSpendRecords); a campaign shows "—" there only
+              until that campaign's own ad-level backfill has landed (real
+              platform rate limits bound how fast that happens — see the
+              Sync button below), never as an invented value. */}
           <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden">
-            <div className="px-5 py-3.5 border-b border-slate-200/80">
+            <div className="px-5 py-3.5 border-b border-slate-200/80 flex items-center justify-between gap-3">
               <h3 className="text-sm font-bold text-slate-900">Campaign Deep Dive</h3>
+              <div className="flex items-center gap-2">
+                {adSyncNote && <span className="text-[11px] text-slate-500 max-w-[320px] text-right">{adSyncNote}</span>}
+                <button
+                  onClick={handleAdSpendSync}
+                  disabled={adSyncStatus === "syncing"}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-[12px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed whitespace-nowrap"
+                  title="Fetch the latest Ad Set Name/Ad creative Name/spend from Meta and Google now, instead of waiting for the automatic sync"
+                >
+                  <RefreshCw size={13} className={adSyncStatus === "syncing" ? "animate-spin" : ""} />
+                  {adSyncStatus === "syncing" ? "Syncing…" : "Sync"}
+                </button>
+              </div>
             </div>
             <div className="overflow-auto max-h-[45vh]">
               <table className="w-full text-left border-collapse min-w-[760px]">

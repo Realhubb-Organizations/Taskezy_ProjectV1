@@ -46,6 +46,7 @@ import {
   apiDeleteCalendarEvent,
   apiListAdSpend,
   apiListAdLevelSpend,
+  apiTriggerAdSpendSync,
   apiListMetaConnections,
   apiSetPropertyTeamMembers,
   apiListTimesheets,
@@ -467,6 +468,8 @@ interface AppState {
   calendarEvents: CalendarEvent[];
   adSpendRecords: AdSpendRecord[];
   adLevelSpendRecords: AdLevelSpendRecord[];
+  refetchAdLevelSpend: () => Promise<void>;
+  triggerAdSpendSync: () => Promise<{ meta: { started: boolean }; google: { started: boolean } }>;
 
   // System State
   isOnline: boolean;
@@ -956,6 +959,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // anymore — surfaced as empty lists in the UI, not fake data.
       console.warn("Could not load real data from the API:", err);
     }
+  };
+
+  // Re-fetches just the ad-level rows (Campaign Deep Dive's Ad Set
+  // Name/Ad creative Name/CPL columns) without reloading every other
+  // domain — used to pick up new rows after a manual sync trigger.
+  const refetchAdLevelSpend = async () => {
+    const apiAdLevelSpend = await apiListAdLevelSpend();
+    setAdLevelSpendRecords(apiAdLevelSpend.map(mapApiAdLevelSpendToFrontend));
+  };
+
+  // Wakes the real Meta/Google ad-level sync jobs early (Campaign Deep
+  // Dive's Sync button) instead of waiting for their 6h interval. Does not
+  // bypass either platform's real rate limits — it only starts checking
+  // for new data sooner, so the caller should keep polling refetchAdLevelSpend
+  // for a while afterward rather than expecting an instant result.
+  const triggerAdSpendSync = async () => {
+    return apiTriggerAdSpendSync();
   };
 
   // On mount: if a token survived a page refresh, restore the session and
@@ -1980,6 +2000,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         calendarEvents,
         adSpendRecords,
         adLevelSpendRecords,
+        refetchAdLevelSpend,
+        triggerAdSpendSync,
         isOnline,
         pendingSyncCount: pendingSyncQueue.length,
         isSyncing,
