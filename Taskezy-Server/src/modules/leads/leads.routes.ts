@@ -3,6 +3,7 @@ import { requireAuth, requireRole } from "../../middleware/auth";
 import { validate } from "../../middleware/validate";
 import { asyncHandler } from "../../utils/asyncHandler";
 import {
+  bulkImportLeadsSchema,
   createLeadSchema,
   editLeadSchema,
   leadIdParamSchema,
@@ -11,6 +12,7 @@ import {
   updateLeadStatusSchema
 } from "./leads.schema";
 import {
+  bulkImportLeadsHandler,
   createLeadHandler,
   deleteLeadHandler,
   editLeadHandler,
@@ -30,6 +32,14 @@ leadsRouter.use(requireAuth);
 leadsRouter.get("/", validate({ query: listLeadsQuerySchema }), asyncHandler(listLeadsHandler));
 leadsRouter.get("/:id", validate({ params: leadIdParamSchema }), asyncHandler(getLeadHandler));
 leadsRouter.post("/", validate({ body: createLeadSchema }), asyncHandler(createLeadHandler));
+// Admin CRM Data Calling's bulk Excel upload (Name + Mobile Number only) —
+// ADMIN-only since it can immediately assign hundreds of leads at once.
+leadsRouter.post(
+  "/bulk-import",
+  requireRole("ADMIN"),
+  validate({ body: bulkImportLeadsSchema }),
+  asyncHandler(bulkImportLeadsHandler)
+);
 leadsRouter.patch(
   "/:id/status",
   validate({ params: leadIdParamSchema, body: updateLeadStatusSchema }),

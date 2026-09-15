@@ -44,3 +44,33 @@ export const editLeadSchema = z.object({
 export const reassignLeadSchema = z.object({
   newAgentId: z.string().uuid()
 });
+
+// Bulk upload rows are deliberately NOT phone-regex-validated here the way
+// createLeadSchema is — an admin's Excel sheet is messy (formatting,
+// +91 prefixes, stray spaces), so invalid rows are normalized/validated
+// per-row in the service layer and skipped with a reason instead of
+// rejecting the whole batch over one bad row.
+export const bulkImportLeadsSchema = z
+  .object({
+    subSource: z.string().trim().min(1, "Sub-source is required").max(200),
+    assignmentMode: z.enum(["PROPERTY", "AGENT"]),
+    propertyId: z.string().uuid().optional(),
+    agentId: z.string().uuid().optional(),
+    leads: z
+      .array(
+        z.object({
+          name: z.string().max(200).optional().default(""),
+          phone: z.string().max(30).optional().default("")
+        })
+      )
+      .min(1, "At least one lead row is required")
+      .max(5000, "A single upload is limited to 5000 rows")
+  })
+  .refine(d => d.assignmentMode !== "PROPERTY" || !!d.propertyId, {
+    message: "propertyId is required for Property assignment mode",
+    path: ["propertyId"]
+  })
+  .refine(d => d.assignmentMode !== "AGENT" || !!d.agentId, {
+    message: "agentId is required for Agent assignment mode",
+    path: ["agentId"]
+  });

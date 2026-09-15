@@ -111,6 +111,118 @@ export async function createLead(caller: AccessTokenPayload, input: CreateLeadIn
   return created;
 }
 
+export interface BulkImportLeadRow {
+  name: string;
+  phone: string;
+}
+
+export interface BulkImportLeadsInput {
+  subSource: string;
+  assignmentMode: "PROPERTY" | "AGENT";
+  propertyId?: string;
+  agentId?: string;
+  leads: BulkImportLeadRow[];
+}
+
+export interface BulkImportSkippedRow {
+  row: number; // 1-based spreadsheet row, header counted as row 1 so the first data row is row 2 — matches what the admin sees in Excel
+  reason: string;
+}
+
+/**
+ * Admin CRM Data Calling's bulk Excel upload (Name + Mobile Number only).
+ * Property mode distributes every row across that property's configured
+ * Round Robin/Percentage team via the same pickAgentForProperty used by
+ * every other lead-ingest path (sheet import, Meta webhook) — falling back
+ * to the first active admin as an UNASSIGNED lead when the property has no
+ * assignable pool, same convention as sheet-import. Agent mode skips that
+ * entirely and puts every row directly on the one agent the admin chose.
+ * A bad row (missing name, unparseable phone, duplicate phone) is skipped
+ * and reported, not a whole-batch failure — an admin's real spreadsheet
+ * always has a few messy rows.
+ */
+export async function bulkImportLeads(_caller: AccessTokenPayload, input: BulkImportLeadsInput) {
+  const fallbackAdminId = (await usersRepo.listActiveAdminIds())[0];
+
+  let created = 0;
+  let duplicates = 0;
+  const skipped: BulkImportSkippedRow[] = [];
+  const notifyCounts = new Map<string, number>();
+
+  for (let i = 0; i < input.leads.length; i++) {
+    const row = i + 2; // header is row 1
+    const name = input.leads[i].name?.trim();
+    const phone = repo.normalizeIndianMobile(input.leads[i].phone ?? "");
+
+    if (!name) {
+      skipped.push({ row, reason: "Name is required" });
+      continue;
+    }
+    if (!phone) {
+      skipped.push({ row, reason: "Phone did not normalize to a valid 10-digit Indian mobile" });
+      continue;
+    }
+
+    let assignedAgentId: string | undefined;
+    let statusCode: string;
+    if (input.assignmentMode === "AGENT") {
+      assignedAgentId = input.agentId;
+      statusCode = "NEW";
+    } else {
+      const autoAssignedAgentId = await pickAgentForProperty(input.propertyId!);
+      assignedAgentId = autoAssignedAgentId ?? fallbackAdminId;
+      statusCode = autoAssignedAgentId ? "NEW" : "UNASSIGNED";
+    }
+    if (!assignedAgentId) {
+      skipped.push({ row, reason: "No assignable agent for this property and no active admin to fall back to" });
+      continue;
+    }
+
+    let result;
+    try {
+      result = await repo.createBulkLead({
+        name,
+        phone,
+        source: "Bulk Upload",
+        subSource: input.subSource,
+        propertyId: input.assignmentMode === "PROPERTY" ? input.propertyId! : null,
+        assignedAgentId,
+        statusCode
+      });
+    } catch (err) {
+      if (isForeignKeyViolation(err)) {
+        throw ApiError.badRequest("Selected property or agent not found.");
+      }
+      throw err;
+    }
+
+    if (!result) {
+      duplicates++;
+      continue;
+    }
+    created++;
+    notifyCounts.set(assignedAgentId, (notifyCounts.get(assignedAgentId) ?? 0) + 1);
+  }
+
+  // One summary notification per agent rather than one per lead — a 500-row
+  // batch shouldn't flood an agent's notification feed the way a single
+  // real-time Meta/sheet lead does.
+  await Promise.all(
+    [...notifyCounts.entries()].map(([agentId, count]) =>
+      createNotification({
+        system: "CRM",
+        category: "NEW_LEAD",
+        title: "New Bulk Leads",
+        message: `${count} new lead${count > 1 ? "s" : ""} assigned to you from "${input.subSource}".`,
+        recipientUserId: agentId,
+        link: "/dashboard/crm/data-calling"
+      })
+    )
+  );
+
+  return { created, duplicates, skipped };
+}
+
 export async function updateLeadStatus(
   caller: AccessTokenPayload,
   leadId: string,

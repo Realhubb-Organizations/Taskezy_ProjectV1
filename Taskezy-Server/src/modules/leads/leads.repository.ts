@@ -1,5 +1,6 @@
 import { PoolClient } from "pg";
 import { pool, query } from "../../db/pool";
+import { isUniqueViolation } from "../users/users.repository";
 
 /** leads.phone is CHECK'd to a bare 10-digit Indian mobile — strip formatting/country code before insert. Shared by every external lead-ingest source (Meta webhook, sheet import). */
 export function normalizeIndianMobile(raw: string): string | undefined {
@@ -27,6 +28,19 @@ export interface LeadListRow {
   campaign: string | null;
   meta_page_name: string | null;
   meta_form_id: string | null;
+  // Real Meta ad id this lead's Lead Ad submission came from (written on
+  // ingest, see meta/meta.lead-ingest.ts) — exposed here so the frontend
+  // can compute real Qualified Leads per ad set/ad creative for Campaign
+  // Deep Dive by matching against meta_ads.id, the same way it already
+  // computes Qualified Leads per campaign, instead of duplicating that
+  // "what counts as qualified" status logic in backend SQL too.
+  meta_ad_id: string | null;
+  // Free-text batch label an admin types at bulk-upload time (e.g. "Kashmiri
+  // Data") — distinct from `source`, which is fixed to "Bulk Upload" for
+  // every lead created that way. Lets one upload batch be filtered,
+  // reassigned, and reshuffled as a group later. null for every other
+  // ingestion path (Meta, sheet import, manual Add Lead).
+  sub_source: string | null;
   logs: { message: string; timestamp: string; user: string }[];
 }
 
@@ -47,7 +61,7 @@ const LIST_SELECT = `
     u.first_name || COALESCE(' ' || u.last_name, '') AS assigned_agent_name,
     l.property_id, p.name AS property_name,
     l.assigned_at, l.first_response_at, l.created_at,
-    l.source, l.campaign, l.meta_page_name, l.meta_form_id,
+    l.source, l.sub_source, l.campaign, l.meta_page_name, l.meta_form_id, l.meta_ad_id,
     COALESCE(
       (SELECT json_agg(json_build_object('message', ll.message, 'timestamp', ll.created_at, 'user', ll.user_name_snapshot) ORDER BY ll.created_at)
        FROM lead_logs ll
@@ -135,6 +149,35 @@ export async function create(input: CreateLeadInput): Promise<LeadListRow> {
   );
   const created = await findById(rows[0].id);
   return created!;
+}
+
+export interface BulkCreateLeadInput {
+  name: string;
+  phone: string;
+  source: string;
+  subSource: string;
+  propertyId: string | null;
+  assignedAgentId: string;
+  /** Unlike create() (always 'NEW'), bulk import's Property-wise mode can fall
+   * back to 'UNASSIGNED' when the property has no assignable team, same
+   * convention as sheet-import. */
+  statusCode: string;
+}
+
+/** Returns undefined (not a thrown error) when the phone already belongs to another lead — bulk import treats that as a per-row "duplicate, skipped" outcome, not a failure of the whole batch. */
+export async function createBulkLead(input: BulkCreateLeadInput): Promise<{ id: string } | undefined> {
+  try {
+    const { rows } = await pool.query<{ id: string }>(
+      `INSERT INTO leads (name, phone, source, sub_source, property_id, assigned_agent_id, status_code, assigned_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+       RETURNING id`,
+      [input.name, input.phone, input.source, input.subSource, input.propertyId, input.assignedAgentId, input.statusCode]
+    );
+    return rows[0];
+  } catch (err) {
+    if (isUniqueViolation(err)) return undefined;
+    throw err;
+  }
 }
 
 /** Must run inside the same transaction as insertLeadLog (see leads.service.ts). */

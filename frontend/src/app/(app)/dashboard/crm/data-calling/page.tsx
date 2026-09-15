@@ -151,12 +151,20 @@ function analyticsLeadMatchesMetric(l: Lead, metric: AnalyticsChartMetric): bool
 }
 
 export default function DataCallingPage() {
-  const { leads, followupCalls, properties, users, activeRole, updateLeadStatus, reassignLead } = useApp();
+  const { leads, followupCalls, properties, users, activeRole, updateLeadStatus, reassignLead, bulkImportLeads } = useApp();
   // Bulk select + Assign/Reshuffle are an admin-only workflow — a sales
   // agent has no one to hand leads off to in that sense, so the checkbox
   // column and both toolbar buttons stay admin-only.
   const isAdmin = activeRole === "ADMIN";
   const propertiesList = properties.map(p => p.name);
+  // Bulk upload's own property/agent pickers need real ids (they drive
+  // server-side assignment), unlike propertiesList above which only ever
+  // feeds display/filter UI.
+  const bulkUploadPropertiesList = useMemo(() => properties.map(p => ({ id: p.id, name: p.name })), [properties]);
+  const bulkUploadAgentsList = useMemo(
+    () => users.filter(u => u.role === "AGENT" && u.status !== "INACTIVE").map(u => ({ id: u.id, name: u.name })),
+    [users]
+  );
 
   const [isUploadLeadsOpen, setIsUploadLeadsOpen] = useState(false);
   const [uploadSuccessMsg, setUploadSuccessMsg] = useState("");
@@ -488,6 +496,19 @@ export default function DataCallingPage() {
   const assignedBtnRef = useRef<HTMLButtonElement>(null);
   const assignedOptions = useMemo(() => Array.from(new Set(leads.map(l => l.assignedAgent).filter(Boolean))).sort(), [leads]);
 
+  // Data Call Source filter — bulk upload's per-batch sub-source (e.g.
+  // "Kashmiri Data") when set, else the ingestion source (Meta, Google Ads
+  // Sheet, Bulk Upload, etc.). This is what lets an admin pull up one bulk
+  // upload batch to filter → select all → Assign/Reshuffle as a group.
+  const [dataCallSourceFilters, setDataCallSourceFilters] = useState<string[]>([]);
+  const [dataCallSourceMenuOpen, setDataCallSourceMenuOpen] = useState(false);
+  const [dataCallSourceMenuPos, setDataCallSourceMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const dataCallSourceBtnRef = useRef<HTMLButtonElement>(null);
+  const dataCallSourceOptions = useMemo(
+    () => Array.from(new Set(leads.map(l => l.subSource || l.source).filter(Boolean) as string[])).sort(),
+    [leads]
+  );
+
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [visibleColumns, setVisibleColumns] = useState<Record<DataCallingColumnKey, boolean>>(DATA_CALLING_DEFAULT_VISIBLE_COLUMNS);
   const toggleColumn = (key: DataCallingColumnKey) => setVisibleColumns(prev => ({ ...prev, [key]: !prev[key] }));
@@ -656,7 +677,7 @@ export default function DataCallingPage() {
   // applied to the Campaigns page's dropdowns).
   useEffect(() => {
     const anyOpen = summaryDateMenuOpen || calendarPickerOpen || statusMenuOpen || assignedMenuOpen ||
-      propertyDropdownOpen || assigneeDropdownOpen || !!rowStatusMenuFor || !!rowAssignMenuFor ||
+      dataCallSourceMenuOpen || propertyDropdownOpen || assigneeDropdownOpen || !!rowStatusMenuFor || !!rowAssignMenuFor ||
       subSourceMenuOpen || chartSourceMenuOpen || chartMetricMenuOpen;
     if (!anyOpen) return;
     const closeAll = () => {
@@ -664,6 +685,7 @@ export default function DataCallingPage() {
       setCalendarPickerOpen(false);
       setStatusMenuOpen(false);
       setAssignedMenuOpen(false);
+      setDataCallSourceMenuOpen(false);
       setPropertyDropdownOpen(false);
       setAssigneeDropdownOpen(false);
       setRowStatusMenuFor(null);
@@ -674,7 +696,7 @@ export default function DataCallingPage() {
     };
     window.addEventListener("scroll", closeAll, true);
     return () => window.removeEventListener("scroll", closeAll, true);
-  }, [summaryDateMenuOpen, calendarPickerOpen, statusMenuOpen, assignedMenuOpen, propertyDropdownOpen, assigneeDropdownOpen, rowStatusMenuFor, rowAssignMenuFor, subSourceMenuOpen, chartSourceMenuOpen, chartMetricMenuOpen]);
+  }, [summaryDateMenuOpen, calendarPickerOpen, statusMenuOpen, assignedMenuOpen, dataCallSourceMenuOpen, propertyDropdownOpen, assigneeDropdownOpen, rowStatusMenuFor, rowAssignMenuFor, subSourceMenuOpen, chartSourceMenuOpen, chartMetricMenuOpen]);
 
   const latestLogMessage = (l: Lead): string => {
     if (!l.logs || l.logs.length === 0) return "No feedback yet";
@@ -699,6 +721,7 @@ export default function DataCallingPage() {
       const matchesSearch = !q || l.name.toLowerCase().includes(q);
       const matchesStatus = statusFilters.length === 0 || statusFilters.includes(l.status);
       const matchesAssigned = assignedFilters.length === 0 || assignedFilters.includes(l.assignedAgent);
+      const matchesDataCallSource = dataCallSourceFilters.length === 0 || dataCallSourceFilters.includes(l.subSource || l.source || "");
       const matchesDate = appliedCustomRange
         ? (() => {
             if (!l.createdAtStr) return false;
@@ -710,9 +733,9 @@ export default function DataCallingPage() {
             return d >= start && d <= end;
           })()
         : true;
-      return matchesSearch && matchesStatus && matchesAssigned && matchesDate;
+      return matchesSearch && matchesStatus && matchesAssigned && matchesDataCallSource && matchesDate;
     });
-  }, [leads, searchQuery, statusFilters, assignedFilters, appliedCustomRange]);
+  }, [leads, searchQuery, statusFilters, assignedFilters, dataCallSourceFilters, appliedCustomRange]);
 
   const totalPages = Math.max(1, Math.ceil(filteredLeads.length / rowsPerPage));
   const currentPageClamped = Math.min(currentPage, totalPages);
@@ -1645,7 +1668,55 @@ export default function DataCallingPage() {
                     {visibleColumns.notes && <th className="px-5 py-3.5 whitespace-nowrap">Notes</th>}
                     <th className="px-5 py-3.5 whitespace-nowrap">Next Call Date</th>
                     {visibleColumns.property && <th className="px-5 py-3.5 whitespace-nowrap">Property</th>}
-                    {visibleColumns.dataCallSource && <th className="px-5 py-3.5 whitespace-nowrap">Data Call Source</th>}
+                    {visibleColumns.dataCallSource && (
+                      <th className="px-5 py-3.5 whitespace-nowrap">
+                        <div className="relative inline-block">
+                          <button
+                            type="button"
+                            ref={dataCallSourceBtnRef}
+                            onClick={() => openPositionedMenu(dataCallSourceBtnRef, setDataCallSourceMenuPos, setDataCallSourceMenuOpen, "left", 200)}
+                            className="flex items-center gap-1 hover:text-blue-600 transition-colors"
+                          >
+                            <span>Data Call Source</span>
+                            <ChevronDown className={`h-3 w-3 text-slate-800 transition-transform ${dataCallSourceMenuOpen ? "rotate-180" : ""}`} />
+                          </button>
+                          {dataCallSourceMenuOpen && dataCallSourceMenuPos && createPortal(
+                            <>
+                              <div className="fixed inset-0 z-[60]" onClick={() => setDataCallSourceMenuOpen(false)} />
+                              <div
+                                className="fixed z-[70] w-56 max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 text-xs font-medium"
+                                style={{ top: dataCallSourceMenuPos.top, left: dataCallSourceMenuPos.left }}
+                              >
+                                <button
+                                  type="button"
+                                  onClick={() => setDataCallSourceFilters([])}
+                                  className="w-full flex items-center gap-1.5 text-left px-3 py-1.5 text-slate-500 font-bold hover:bg-slate-50 border-b border-slate-100 transition-colors"
+                                >
+                                  <Minus className="h-3 w-3" />
+                                  All Sources
+                                </button>
+                                {dataCallSourceOptions.length === 0 ? (
+                                  <p className="px-3 py-2 text-slate-400 italic font-normal">No sources yet</p>
+                                ) : (
+                                  dataCallSourceOptions.map(src => (
+                                    <label key={src} className="flex items-center gap-2 px-3 py-1.5 text-slate-700 font-semibold hover:bg-slate-50 cursor-pointer transition-colors">
+                                      <input
+                                        type="checkbox"
+                                        checked={dataCallSourceFilters.includes(src)}
+                                        onChange={() => setDataCallSourceFilters(prev => prev.includes(src) ? prev.filter(s => s !== src) : [...prev, src])}
+                                        className="h-3.5 w-3.5 rounded border-slate-300 text-[#0B1E6E] focus:ring-0 focus:ring-offset-0"
+                                      />
+                                      {src}
+                                    </label>
+                                  ))
+                                )}
+                              </div>
+                            </>,
+                            document.body
+                          )}
+                        </div>
+                      </th>
+                    )}
                     {visibleColumns.usageCount && <th className="px-5 py-3.5 whitespace-nowrap">Usage Count</th>}
                     {visibleColumns.qualifiedLeads && <th className="px-5 py-3.5 whitespace-nowrap">Qualified Leads</th>}
                     {visibleColumns.unqualifiedLeads && <th className="px-5 py-3.5 whitespace-nowrap">Unqualified Leads</th>}
@@ -1776,7 +1847,7 @@ export default function DataCallingPage() {
                         {visibleColumns.notes && <td className="px-5 py-3.5 truncate max-w-[200px]" title={latestLogMessage(l)}>{latestLogMessage(l)}</td>}
                         <td className="px-5 py-3.5 whitespace-nowrap">{nextCallDateFor(l.id)}</td>
                         {visibleColumns.property && <td className="px-5 py-3.5">{l.property || "—"}</td>}
-                        {visibleColumns.dataCallSource && <td className="px-5 py-3.5">{l.source || "—"}</td>}
+                        {visibleColumns.dataCallSource && <td className="px-5 py-3.5">{l.subSource || l.source || "—"}</td>}
                         {visibleColumns.usageCount && <td className="px-5 py-3.5">{l.logs ? l.logs.length : 0}</td>}
                         {visibleColumns.qualifiedLeads && <td className="px-5 py-3.5 text-slate-300" title="Not applicable — this is a per-lead row, not an aggregate">—</td>}
                         {visibleColumns.unqualifiedLeads && <td className="px-5 py-3.5 text-slate-300" title="Not applicable — this is a per-lead row, not an aggregate">—</td>}
@@ -2093,10 +2164,18 @@ export default function DataCallingPage() {
       <UploadLeadsModal
         isOpen={isUploadLeadsOpen}
         onClose={() => setIsUploadLeadsOpen(false)}
-        propertiesList={propertiesList}
-        onUpload={({ fileName }) => {
-          setUploadSuccessMsg(`Leads from "${fileName}" queued for import.`);
-          setTimeout(() => setUploadSuccessMsg(""), 4000);
+        propertiesList={bulkUploadPropertiesList}
+        agentsList={bulkUploadAgentsList}
+        onSubmit={async (input) => {
+          const result = await bulkImportLeads(input);
+          setUploadSuccessMsg(
+            `${result.created} lead${result.created === 1 ? "" : "s"} imported` +
+              (result.duplicates > 0 ? `, ${result.duplicates} duplicate${result.duplicates === 1 ? "" : "s"} skipped` : "") +
+              (result.skipped.length > 0 ? `, ${result.skipped.length} row${result.skipped.length === 1 ? "" : "s"} skipped` : "") +
+              "."
+          );
+          setTimeout(() => setUploadSuccessMsg(""), 5000);
+          return result;
         }}
       />
     </div>

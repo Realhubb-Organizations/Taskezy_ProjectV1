@@ -31,6 +31,11 @@ export async function editLeadHandler(req: Request, res: Response): Promise<void
   sendOk(res, lead);
 }
 
+export async function bulkImportLeadsHandler(req: Request, res: Response): Promise<void> {
+  const result = await leadsService.bulkImportLeads(req.user!, req.body);
+  sendOk(res, result, 201);
+}
+
 export async function reassignLeadHandler(req: Request, res: Response): Promise<void> {
   const lead = await leadsService.reassignLead(req.user!, req.params.id, req.body.newAgentId);
   sendOk(res, lead);
