@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Bell, UserPlus, AlarmClock, Briefcase, DollarSign, ChevronLeft, ChevronDown, Repeat, AlertTriangle } from "lucide-react";
-import { useApp, Notification, NotificationCategory, SystemType } from "@/context/AppContext";
+import { useApp, getAvailableSystems, Notification, NotificationCategory, SystemType } from "@/context/AppContext";
 
 function timeAgo(iso: string): string {
   const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
@@ -49,23 +49,39 @@ interface NotificationGroup {
 }
 
 export default function NotificationBell() {
-  const { notifications, activeSystem, markNotificationRead } = useApp();
+  const { notifications, currentUser, activeSystem, markNotificationRead } = useApp();
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [activeGroupKey, setActiveGroupKey] = useState<string>("");
 
-  // Admin users see every system's notifications in one bell — a "CRM /
-  // HRMS / Finance" scope picker keeps that from turning into one long row
-  // of tabs (5 systems' worth used to get crammed together and wrap). A
-  // scoped CRM/HRMS/Finance user has nothing to pick here, so this only
-  // renders — and only matters — when activeSystem is "ADMIN".
+  // Anyone whose account spans more than one system — admins (CRM/HRMS/
+  // Finance), and SALES agents/managers (CRM/HRMS) — gets a scope picker
+  // here instead of one long row of tabs. A user scoped to a single system
+  // (TECH/MARKETING → HRMS only, FINANCE dept → HRMS/Finance) sees no
+  // picker and the bell just shows their one system. Finance never appears
+  // for someone without Finance access, since getAvailableSystems already
+  // excludes it for them.
+  const availableScopes = useMemo(
+    () => getAvailableSystems(currentUser).filter((s): s is Exclude<SystemType, "ADMIN"> => s !== "ADMIN"),
+    [currentUser]
+  );
+  const showScopePicker = availableScopes.length > 1;
   const [systemScope, setSystemScope] = useState<Exclude<SystemType, "ADMIN">>("CRM");
   const [scopeDropdownOpen, setScopeDropdownOpen] = useState(false);
-  const effectiveScope: SystemType = activeSystem === "ADMIN" ? systemScope : activeSystem;
 
-  const scopedNotifications = activeSystem === "ADMIN"
-    ? notifications
-    : notifications.filter(n => n.system === activeSystem);
+  // Keep the picker's selection valid as the available scopes change (e.g. on login).
+  useEffect(() => {
+    if (availableScopes.length && !availableScopes.includes(systemScope)) {
+      setSystemScope(availableScopes[0]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [availableScopes]);
+
+  const effectiveScope: SystemType = showScopePicker ? systemScope : (availableScopes[0] || activeSystem);
+
+  const scopedNotifications = showScopePicker
+    ? notifications.filter(n => availableScopes.includes(n.system as Exclude<SystemType, "ADMIN">))
+    : notifications.filter(n => n.system === effectiveScope);
   const unreadCount = scopedNotifications.filter(n => !n.read).length;
 
   const newLeads = useMemo(
@@ -191,10 +207,11 @@ export default function NotificationBell() {
                 </button>
                 <h3 className="text-base font-extrabold text-slate-900 shrink-0">Notifications</h3>
               </div>
-              {/* System scope picker — only an admin (who sees every system
-                  in one bell) has anything to choose here. Sits where the
-                  old "Mark all read" action used to be. */}
-              {activeSystem === "ADMIN" && (
+              {/* System scope picker — anyone with more than one system
+                  (admins across CRM/HRMS/Finance, SALES agents/managers
+                  across CRM/HRMS) gets it here; a single-system user does
+                  not. Sits where the old "Mark all read" action used to be. */}
+              {showScopePicker && (
                 <div className="relative shrink-0">
                   <button
                     type="button"
@@ -208,7 +225,7 @@ export default function NotificationBell() {
                     <>
                       <div className="fixed inset-0 z-[105]" onClick={() => setScopeDropdownOpen(false)} />
                       <div className="absolute right-0 top-full mt-1.5 w-32 bg-white border border-slate-200 rounded-xl shadow-lg py-1 z-[110] overflow-hidden">
-                        {(["CRM", "HRMS", "FINANCE"] as const).map(s => (
+                        {availableScopes.map(s => (
                           <button
                             key={s}
                             type="button"
