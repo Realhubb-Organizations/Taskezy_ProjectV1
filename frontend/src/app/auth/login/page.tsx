@@ -63,11 +63,12 @@ export default function LoginPage() {
     setIsSubmitting(true);
     const result = await loginWithTempPassword(email, password).finally(() => setIsSubmitting(false));
     if (!result.user) {
-      setError(
-        result.errorType === "network"
-          ? "We couldn't reach the server. Please check your connection and try again in a moment."
-          : "Invalid email address or password. Please check your credentials."
-      );
+      const messages: Record<typeof result.errorType, string> = {
+        network: "We couldn't reach the server. Please check your connection and try again in a moment.",
+        rate_limited: "Too many login attempts. Please wait a few minutes before trying again.",
+        invalid_credentials: "Invalid email address or password. Please check your credentials."
+      };
+      setError(messages[result.errorType]);
       return;
     }
     const user = result.user;
