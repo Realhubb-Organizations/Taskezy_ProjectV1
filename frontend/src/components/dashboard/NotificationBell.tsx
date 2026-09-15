@@ -3,9 +3,8 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { Bell, UserPlus, AlarmClock, Briefcase, DollarSign, Check, ChevronLeft, ChevronDown, Repeat, AlertTriangle, Volume2, VolumeX } from "lucide-react";
+import { Bell, UserPlus, AlarmClock, Briefcase, DollarSign, ChevronLeft, ChevronDown, Repeat, AlertTriangle } from "lucide-react";
 import { useApp, Notification, NotificationCategory, SystemType } from "@/context/AppContext";
-import { isNotificationSoundMuted, setNotificationSoundMuted } from "@/lib/notificationSound";
 
 function timeAgo(iso: string): string {
   const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
@@ -54,7 +53,6 @@ export default function NotificationBell() {
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [activeGroupKey, setActiveGroupKey] = useState<string>("");
-  const [soundMuted, setSoundMuted] = useState(false);
 
   // Admin users see every system's notifications in one bell — a "CRM /
   // HRMS / Finance" scope picker keeps that from turning into one long row
@@ -64,17 +62,6 @@ export default function NotificationBell() {
   const [systemScope, setSystemScope] = useState<Exclude<SystemType, "ADMIN">>("CRM");
   const [scopeDropdownOpen, setScopeDropdownOpen] = useState(false);
   const effectiveScope: SystemType = activeSystem === "ADMIN" ? systemScope : activeSystem;
-
-  // Read from localStorage only after mount — avoids an SSR/client mismatch on first render.
-  useEffect(() => {
-    setSoundMuted(isNotificationSoundMuted());
-  }, []);
-
-  const toggleSound = () => {
-    const next = !soundMuted;
-    setSoundMuted(next);
-    setNotificationSoundMuted(next);
-  };
 
   const scopedNotifications = activeSystem === "ADMIN"
     ? notifications
@@ -239,17 +226,10 @@ export default function NotificationBell() {
               </div>
               <div className="flex items-center gap-3 shrink-0">
                 <button
-                  onClick={toggleSound}
-                  className="text-slate-400 hover:text-slate-600"
-                  title={soundMuted ? "Unmute notification sound" : "Mute notification sound"}
-                >
-                  {soundMuted ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
-                </button>
-                <button
                   onClick={() => markAllNotificationsRead(activeSystem === "ADMIN" ? undefined : activeSystem)}
-                  className="text-[10px] font-bold text-brand-600 hover:text-brand-700 flex items-center gap-1"
+                  className="text-[10px] font-bold text-brand-600 hover:text-brand-700"
                 >
-                  <Check className="h-3 w-3" /> Mark all read
+                  Mark all read
                 </button>
               </div>
             </div>
@@ -259,12 +239,12 @@ export default function NotificationBell() {
                 Calling page's tab bar, instead of a native select. */}
             {groups.length > 1 && (
               <div className="px-5 pt-3 pb-1 shrink-0">
-                <div className="bg-slate-200/70 p-1 rounded-xl flex items-center gap-1 flex-wrap">
+                <div className="bg-slate-200/70 p-1 rounded-xl flex items-center gap-1 overflow-x-auto">
                   {groups.map(g => (
                     <button
                       key={g.key}
                       onClick={() => setActiveGroupKey(g.key)}
-                      className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all ${
+                      className={`flex-1 px-2 py-1.5 rounded-lg text-[10px] font-semibold whitespace-nowrap transition-all ${
                         activeGroupKey === g.key ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-800"
                       }`}
                     >
