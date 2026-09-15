@@ -127,17 +127,84 @@ export default function DataCallingPage() {
   const [appliedCustomRange, setAppliedCustomRange] = useState<{ start: string; end: string } | null>(null);
   const dateRangePickerLabel = appliedCustomRange ? `${appliedCustomRange.start} to ${appliedCustomRange.end}` : todayStr;
 
+  // Each summary card's real underlying lead list — same predicates the
+  // numbers below use — so clicking a card can drill into exactly what it
+  // counted, same "open the respective card" pattern as the CRM Dashboard
+  // and Campaigns page. Every card here now respects Date Range (not just
+  // Total, like this page used to do) — same page-wide decision already
+  // applied to the Dashboard/Campaigns pages, so a lead outside the
+  // selected range no longer silently inflates RNR/Follow Ups/etc.
+  const categoryLeads: Record<string, Lead[]> = useMemo(() => ({
+    "Total Leads Assigned": leads.filter(l => !!l.assignedAgent),
+    "Calls Made": leads.filter(l => l.logs && l.logs.length > 0),
+    "Qualified Leads": leads.filter(l => QUALIFIED_LEAD_STATUSES.includes(l.status)),
+    "RNR": leads.filter(l => l.status === "RNR"),
+    "Follow Ups": leads.filter(l => FOLLOW_UP_LEAD_STATUSES.includes(l.status))
+  }), [leads]);
+
+  const categoryLeadsInRange = useMemo(() => {
+    const out: Record<string, Lead[]> = {};
+    Object.entries(categoryLeads).forEach(([key, list]) => {
+      out[key] = list.filter(leadInSelectedRange);
+    });
+    return out;
+  }, [categoryLeads, dateRange]);
+
   // Summary metrics — real, no hardcoded fallbacks.
-  const summaryMetrics = useMemo(() => {
-    const rangeLeads = leads.filter(leadInSelectedRange);
-    return {
-      totalAssigned: rangeLeads.filter(l => !!l.assignedAgent).length,
-      callsMade: leads.filter(l => l.logs && l.logs.length > 0).length,
-      qualifiedLeads: leads.filter(l => QUALIFIED_LEAD_STATUSES.includes(l.status)).length,
-      rnr: leads.filter(l => l.status === "RNR").length,
-      followUps: leads.filter(l => FOLLOW_UP_LEAD_STATUSES.includes(l.status)).length
-    };
-  }, [leads, dateRange]);
+  const summaryMetrics = useMemo(() => ({
+    totalAssigned: categoryLeadsInRange["Total Leads Assigned"].length,
+    callsMade: categoryLeadsInRange["Calls Made"].length,
+    qualifiedLeads: categoryLeadsInRange["Qualified Leads"].length,
+    rnr: categoryLeadsInRange["RNR"].length,
+    followUps: categoryLeadsInRange["Follow Ups"].length
+  }), [categoryLeadsInRange]);
+
+  // Stat-card drill-down — clicking a card shows the real leads it counted,
+  // same scroll-spy + synced-pagination pattern as the Campaigns page's
+  // drill-down: rows render continuously in a capped-height scroll
+  // container, scrolling past a page boundary advances drillPage, and the
+  // pagination arrows scroll that page's first row back to the top.
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [drillSearchQuery, setDrillSearchQuery] = useState("");
+  const [drillPage, setDrillPage] = useState(1);
+  const [drillRowsPerPage, setDrillRowsPerPage] = useState(8);
+  const drillScrollRef = useRef<HTMLDivElement>(null);
+  const drillPageRowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
+  const drillProgrammaticScroll = useRef(false);
+
+  const handleDrillScroll = () => {
+    if (drillProgrammaticScroll.current) return;
+    const container = drillScrollRef.current;
+    if (!container) return;
+    const scrollTop = container.scrollTop;
+    let current = 1;
+    for (let i = 0; i < drillPageRowRefs.current.length; i++) {
+      const row = drillPageRowRefs.current[i];
+      if (row && row.offsetTop - container.offsetTop <= scrollTop + 4) {
+        current = i + 1;
+      }
+    }
+    setDrillPage(prev => (prev !== current ? current : prev));
+  };
+
+  const goToDrillPage = (page: number, totalPages: number) => {
+    const clamped = Math.max(1, Math.min(totalPages, page));
+    setDrillPage(clamped);
+    const row = drillPageRowRefs.current[clamped - 1];
+    const container = drillScrollRef.current;
+    if (!row || !container) return;
+    drillProgrammaticScroll.current = true;
+    container.scrollTop = clamped === 1 ? 0 : row.offsetTop - container.offsetTop;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => { drillProgrammaticScroll.current = false; });
+    });
+  };
+
+  const toggleCategory = (label: string) => {
+    setSelectedCategory(prev => (prev === label ? null : label));
+    setDrillSearchQuery("");
+    setDrillPage(1);
+  };
 
   // Table filters
   const [searchOpen, setSearchOpen] = useState(false);
@@ -464,17 +531,140 @@ export default function DataCallingPage() {
             { label: "Qualified Leads", value: summaryMetrics.qualifiedLeads, color: "text-rose-600" },
             { label: "RNR", value: summaryMetrics.rnr, color: "text-amber-500" },
             { label: "Follow Ups", value: summaryMetrics.followUps, color: "text-blue-500" }
-          ] as const).map(s => (
-            <div key={s.label} className="p-3 flex items-center justify-between">
-              <div>
-                <span className="text-[11px] font-medium text-slate-500 block">{s.label}</span>
-                <span className={`text-lg font-extrabold mt-1.5 block ${s.color}`}>{s.value}</span>
-              </div>
-              <ChevronRight className="h-4 w-4 text-slate-300 shrink-0" />
-            </div>
-          ))}
+          ] as const).map(s => {
+            const isActive = selectedCategory === s.label;
+            return (
+              <button
+                key={s.label}
+                type="button"
+                onClick={() => toggleCategory(s.label)}
+                className={`p-3 flex items-center justify-between text-left group transition-colors ${
+                  isActive ? "bg-blue-50/70" : "hover:bg-slate-50/50"
+                }`}
+              >
+                <div>
+                  <span className="text-[11px] font-medium text-slate-500 block">{s.label}</span>
+                  <span className={`text-lg font-extrabold mt-1.5 block ${s.color}`}>{s.value}</span>
+                </div>
+                <ChevronRight className={`h-4 w-4 text-slate-300 shrink-0 transition-transform ${isActive ? "rotate-90 text-blue-500" : "group-hover:translate-x-0.5"}`} />
+              </button>
+            );
+          })}
         </div>
       </div>
+
+      {/* Stat-card drill-down — the real leads behind whichever card was
+          last clicked, same pattern as the Campaigns page's drill-down. */}
+      {selectedCategory && (() => {
+        const q = drillSearchQuery.trim().toLowerCase();
+        const shownLeads = (categoryLeadsInRange[selectedCategory] || []).filter(l =>
+          !q || l.name.toLowerCase().includes(q) || l.phone.includes(q) || (l.assignedAgent || "").toLowerCase().includes(q)
+        );
+        const shownCount = shownLeads.length;
+        const totalPages = Math.max(1, Math.ceil(shownCount / drillRowsPerPage));
+        const currentPage = Math.min(drillPage, totalPages);
+        const rangeStart = shownCount === 0 ? 0 : (currentPage - 1) * drillRowsPerPage + 1;
+        const rangeEnd = Math.min(currentPage * drillRowsPerPage, shownCount);
+
+        return (
+          <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden animate-fade-in">
+            <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-200/80 gap-3">
+              <h3 className="text-sm font-bold text-slate-900 whitespace-nowrap">
+                {selectedCategory}
+                <span className="text-slate-400 font-medium ml-1.5">({shownCount})</span>
+              </h3>
+              <div className="flex items-center gap-3 flex-1 justify-end">
+                <div className="relative w-full max-w-[220px]">
+                  <Search className="h-3.5 w-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    value={drillSearchQuery}
+                    onChange={(e) => { setDrillSearchQuery(e.target.value); setDrillPage(1); }}
+                    placeholder="Search name, phone, agent..."
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-8 pr-2.5 py-1.5 text-xs focus:outline-none focus:border-[#0B1E6E]"
+                  />
+                </div>
+                <button type="button" onClick={() => setSelectedCategory(null)} className="text-slate-400 hover:text-slate-700 shrink-0">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+            <div ref={drillScrollRef} onScroll={handleDrillScroll} className="max-h-80 overflow-y-auto">
+              <table className="w-full text-left border-collapse min-w-[600px]">
+                <thead className="sticky top-0 bg-white">
+                  <tr className="border-b border-slate-100 text-[11px] font-bold text-slate-500">
+                    <th className="px-5 py-2.5">Name</th>
+                    <th className="px-5 py-2.5">Phone</th>
+                    <th className="px-5 py-2.5">Status</th>
+                    <th className="px-5 py-2.5">Assigned To</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-[12px] text-slate-700">
+                  {shownLeads.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="px-5 py-6 text-center text-slate-400 italic">
+                        No leads found for this category.
+                      </td>
+                    </tr>
+                  ) : (
+                    (drillPageRowRefs.current = [], shownLeads.map((l, idx) => (
+                      <tr
+                        key={l.id}
+                        ref={idx % drillRowsPerPage === 0 ? (el) => { drillPageRowRefs.current[Math.floor(idx / drillRowsPerPage)] = el; } : undefined}
+                        className="hover:bg-slate-50/50 transition-colors"
+                      >
+                        <td className="px-5 py-2.5 font-semibold text-slate-900">{l.name}</td>
+                        <td className="px-5 py-2.5 font-mono">{l.phone}</td>
+                        <td className="px-5 py-2.5">{l.status}</td>
+                        <td className="px-5 py-2.5">{l.assignedAgent || "—"}</td>
+                      </tr>
+                    )))
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <div className="px-5 py-3 flex flex-wrap justify-between items-center gap-3 border-t border-slate-100 text-[11px] text-slate-500 font-semibold">
+              <span>{shownCount} Row{shownCount === 1 ? "" : "s"}</span>
+              <div className="flex items-center gap-4">
+                <span className="flex items-center gap-1.5">
+                  Rows per page
+                  <select
+                    value={drillRowsPerPage}
+                    onChange={(e) => {
+                      drillProgrammaticScroll.current = true;
+                      setDrillRowsPerPage(Number(e.target.value));
+                      setDrillPage(1);
+                      drillScrollRef.current?.scrollTo(0, 0);
+                      requestAnimationFrame(() => {
+                        requestAnimationFrame(() => { drillProgrammaticScroll.current = false; });
+                      });
+                    }}
+                    className="bg-slate-50 border border-slate-200 rounded px-1.5 py-1 font-bold text-slate-700 focus:outline-none"
+                  >
+                    {[8, 25, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </span>
+                <span>{rangeStart}-{rangeEnd} of {shownCount}</span>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => goToDrillPage(currentPage - 1, totalPages)}
+                    disabled={currentPage <= 1}
+                    className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    ‹
+                  </button>
+                  <button
+                    onClick={() => goToDrillPage(currentPage + 1, totalPages)}
+                    disabled={currentPage >= totalPages}
+                    className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    ›
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {activeTab === "Analytics" ? (
         <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
