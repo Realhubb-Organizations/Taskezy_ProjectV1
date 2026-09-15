@@ -68,7 +68,11 @@ const DATA_CALLING_DEFAULT_VISIBLE_COLUMNS: Record<DataCallingColumnKey, boolean
 };
 
 export default function DataCallingPage() {
-  const { leads, followupCalls, properties, users, updateLeadStatus, reassignLead } = useApp();
+  const { leads, followupCalls, properties, users, activeRole, updateLeadStatus, reassignLead } = useApp();
+  // Bulk select + Assign/Reshuffle are an admin-only workflow — a sales
+  // agent has no one to hand leads off to in that sense, so the checkbox
+  // column and both toolbar buttons stay admin-only.
+  const isAdmin = activeRole === "ADMIN";
 
   const [activeTab, setActiveTab] = useState<"DataCalling" | "Analytics">("DataCalling");
 
@@ -385,7 +389,7 @@ export default function DataCallingPage() {
     return next;
   });
 
-  const visibleColCount = 5 + DATA_CALLING_COLUMNS.filter(c => visibleColumns[c.key]).length;
+  const visibleColCount = (isAdmin ? 5 : 4) + DATA_CALLING_COLUMNS.filter(c => visibleColumns[c.key]).length;
 
   return (
     <div className="space-y-4 pb-8 animate-fade-in text-slate-800">
@@ -499,7 +503,7 @@ export default function DataCallingPage() {
         <>
           {/* Action Toolbar (Bulk Assign/Reshuffle, Date Picker Pill, Settings Button) */}
           <div className="flex flex-wrap items-center justify-end gap-2.5 pt-1">
-            {selectedUnassignedIds.length > 0 && (
+            {isAdmin && selectedUnassignedIds.length > 0 && (
               <button
                 type="button"
                 onClick={() => openAssignFlow("assign")}
@@ -509,7 +513,7 @@ export default function DataCallingPage() {
                 Assign
               </button>
             )}
-            {selectedAssignedIds.length > 0 && (
+            {isAdmin && selectedAssignedIds.length > 0 && (
               <button
                 type="button"
                 onClick={() => openAssignFlow("reshuffle")}
@@ -627,14 +631,16 @@ export default function DataCallingPage() {
               <table className="w-full text-left border-collapse table-auto min-w-[900px]">
                 <thead className="sticky top-0 z-10 bg-white">
                   <tr className="border-b border-slate-200/80 text-[12px] font-bold text-slate-900">
-                    <th className="px-4 py-3.5 w-10">
-                      <input
-                        type="checkbox"
-                        checked={allOnPageSelected}
-                        onChange={toggleSelectAllOnPage}
-                        className="h-3.5 w-3.5 rounded border-slate-300 text-[#0B1E6E] focus:ring-0 focus:ring-offset-0"
-                      />
-                    </th>
+                    {isAdmin && (
+                      <th className="px-4 py-3.5 w-10">
+                        <input
+                          type="checkbox"
+                          checked={allOnPageSelected}
+                          onChange={toggleSelectAllOnPage}
+                          className="h-3.5 w-3.5 rounded border-slate-300 text-[#0B1E6E] focus:ring-0 focus:ring-offset-0"
+                        />
+                      </th>
+                    )}
                     <th className="px-5 py-3.5 w-56">
                       {searchOpen ? (
                         <div className="flex items-center gap-1">
@@ -767,14 +773,16 @@ export default function DataCallingPage() {
                   ) : (
                     paginatedLeads.map(l => (
                       <tr key={l.id} className="hover:bg-slate-50/50 transition-colors">
-                        <td className="px-4 py-3.5">
-                          <input
-                            type="checkbox"
-                            checked={selectedIds.has(l.id)}
-                            onChange={() => toggleSelectRow(l.id)}
-                            className="h-3.5 w-3.5 rounded border-slate-300 text-[#0B1E6E] focus:ring-0 focus:ring-offset-0"
-                          />
-                        </td>
+                        {isAdmin && (
+                          <td className="px-4 py-3.5">
+                            <input
+                              type="checkbox"
+                              checked={selectedIds.has(l.id)}
+                              onChange={() => toggleSelectRow(l.id)}
+                              className="h-3.5 w-3.5 rounded border-slate-300 text-[#0B1E6E] focus:ring-0 focus:ring-offset-0"
+                            />
+                          </td>
+                        )}
                         <td className="px-5 py-3.5 max-w-[224px]">
                           <p className="text-slate-900 font-semibold truncate" title={l.name}>{l.name}</p>
                           {l.phone && (
@@ -988,7 +996,7 @@ export default function DataCallingPage() {
           modal's own confirm button stays disabled until both fields hold
           a value. Same modal for both flows; assignFlowMode picks the copy
           and the target lead set. */}
-      {assignFlowMode && createPortal(
+      {isAdmin && assignFlowMode && createPortal(
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
           <div className="fixed inset-0 bg-slate-900/40" onClick={closeAssignFlow} />
           <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md">
