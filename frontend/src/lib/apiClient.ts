@@ -717,6 +717,20 @@ export function apiListAdLevelSpend(): Promise<ApiAdLevelSpendRow[]> {
   return request<ApiAdLevelSpendRow[]>("/api/v1/ad-spend/ad-level");
 }
 
+// Wakes both platforms' ad-level sync jobs early instead of waiting for
+// their regular interval (Campaign Deep Dive's Sync button) — ADMIN only.
+// Starts the same real Meta/Google sync already running on a timer; does
+// not bypass either platform's own rate limits, so a run can still take a
+// while to land. { started: false } for a platform means one was already
+// in progress, not that the request failed.
+export interface ApiAdSpendSyncTriggerResult {
+  meta: { started: boolean };
+  google: { started: boolean };
+}
+export function apiTriggerAdSpendSync(): Promise<ApiAdSpendSyncTriggerResult> {
+  return request<ApiAdSpendSyncTriggerResult>("/api/v1/ad-spend/sync", { method: "POST" });
+}
+
 // --- Meta (Facebook/Instagram) Lead Ads connection — ADMIN only ---
 export interface ApiMetaConnection {
   id: string;
