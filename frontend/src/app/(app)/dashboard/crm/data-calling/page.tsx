@@ -3,7 +3,7 @@
 import React, { useState, useRef, useMemo, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useApp, Lead } from "@/context/AppContext";
-import { ChevronDown, ChevronRight, Calendar, Search, Sliders, Minus, X, Copy } from "lucide-react";
+import { ChevronDown, ChevronRight, Calendar, Search, Sliders, Minus, X, Copy, Users } from "lucide-react";
 
 const QUALIFIED_LEAD_STATUSES = ["Interested", "Connected", "Visit Schedule", "Site Visit", "Booking Done", "Booked"];
 const FOLLOW_UP_LEAD_STATUSES = ["Follow-ups", "Call Back"];
@@ -25,6 +25,14 @@ function formatDateTime(iso?: string): string {
   if (isNaN(d.getTime())) return iso;
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+// The backend gives every lead a real assigned_agent_name — leads with no
+// real agent yet are joined to a placeholder "Not Assigned" user row rather
+// than left null, so that sentinel string (not an empty/falsy value) is how
+// an unassigned lead shows up here.
+function isUnassignedLead(l: Lead): boolean {
+  return !l.assignedAgent || l.assignedAgent === "Not Assigned" || l.assignedAgent === "Unassigned";
 }
 
 // Togglable columns for the Data Calling table, driven by its own Filter
@@ -161,6 +169,30 @@ export default function DataCallingPage() {
     return next;
   });
 
+  // Bulk "Assign" toolbar button — only surfaces once the selection actually
+  // contains an unassigned lead (per product decision: it's for handing out
+  // fresh/unassigned leads, not for reassigning already-worked ones).
+  const selectedUnassignedIds = useMemo(
+    () => leads.filter(l => selectedIds.has(l.id) && isUnassignedLead(l)).map(l => l.id),
+    [leads, selectedIds]
+  );
+  const realAgentOptions = useMemo(
+    () => assignedOptions.filter(a => a && a !== "Not Assigned" && a !== "Unassigned"),
+    [assignedOptions]
+  );
+  const [assignMenuOpen, setAssignMenuOpen] = useState(false);
+  const [assignMenuPos, setAssignMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const assignBtnRef = useRef<HTMLButtonElement>(null);
+  const handleBulkAssign = (agent: string) => {
+    selectedUnassignedIds.forEach(id => reassignLead(id, agent));
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      selectedUnassignedIds.forEach(id => next.delete(id));
+      return next;
+    });
+    setAssignMenuOpen(false);
+  };
+
   // Per-row quick-edit dropdowns (Status, Assigned To) — same click-to-open-
   // portal pattern as the header filter menus, but keyed by lead id since a
   // table has many rows sharing one pair of open/pos state slots.
@@ -190,19 +222,20 @@ export default function DataCallingPage() {
   // if the page scrolls while open — close on scroll instead (same fix
   // applied to the Campaigns page's dropdowns).
   useEffect(() => {
-    const anyOpen = summaryDateMenuOpen || calendarPickerOpen || statusMenuOpen || assignedMenuOpen || !!rowStatusMenuFor || !!rowAssignMenuFor;
+    const anyOpen = summaryDateMenuOpen || calendarPickerOpen || statusMenuOpen || assignedMenuOpen || assignMenuOpen || !!rowStatusMenuFor || !!rowAssignMenuFor;
     if (!anyOpen) return;
     const closeAll = () => {
       setSummaryDateMenuOpen(false);
       setCalendarPickerOpen(false);
       setStatusMenuOpen(false);
       setAssignedMenuOpen(false);
+      setAssignMenuOpen(false);
       setRowStatusMenuFor(null);
       setRowAssignMenuFor(null);
     };
     window.addEventListener("scroll", closeAll, true);
     return () => window.removeEventListener("scroll", closeAll, true);
-  }, [summaryDateMenuOpen, calendarPickerOpen, statusMenuOpen, assignedMenuOpen, rowStatusMenuFor, rowAssignMenuFor]);
+  }, [summaryDateMenuOpen, calendarPickerOpen, statusMenuOpen, assignedMenuOpen, assignMenuOpen, rowStatusMenuFor, rowAssignMenuFor]);
 
   const latestLogMessage = (l: Lead): string => {
     if (!l.logs || l.logs.length === 0) return "No feedback yet";
@@ -366,8 +399,49 @@ export default function DataCallingPage() {
         </div>
       ) : (
         <>
-          {/* Action Toolbar (Date Picker Pill, Filter Button) */}
+          {/* Action Toolbar (Bulk Assign, Date Picker Pill, Settings Button) */}
           <div className="flex flex-wrap items-center justify-end gap-2.5 pt-1">
+            {selectedUnassignedIds.length > 0 && (
+              <div className="relative">
+                <button
+                  ref={assignBtnRef}
+                  type="button"
+                  onClick={() => openPositionedMenu(assignBtnRef, setAssignMenuPos, setAssignMenuOpen, "left", 192)}
+                  className="flex items-center gap-2 bg-white border border-slate-300/80 rounded-xl px-3.5 py-1.5 text-xs text-slate-700 font-semibold hover:bg-slate-50 shadow-2xs transition-colors"
+                >
+                  <Users className="h-3.5 w-3.5 text-blue-600" />
+                  Assign
+                </button>
+                {assignMenuOpen && assignMenuPos && createPortal(
+                  <>
+                    <div className="fixed inset-0 z-[60]" onClick={() => setAssignMenuOpen(false)} />
+                    <div
+                      className="fixed z-[70] w-48 max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 text-xs font-semibold"
+                      style={{ top: assignMenuPos.top, left: assignMenuPos.left }}
+                    >
+                      <div className="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase border-b border-slate-100">
+                        Assign {selectedUnassignedIds.length} lead{selectedUnassignedIds.length > 1 ? "s" : ""} to
+                      </div>
+                      {realAgentOptions.length === 0 ? (
+                        <div className="px-3 py-2 text-slate-400 italic font-normal">No agents available</div>
+                      ) : (
+                        realAgentOptions.map(agent => (
+                          <button
+                            key={agent}
+                            type="button"
+                            onClick={() => handleBulkAssign(agent)}
+                            className="w-full text-left px-3 py-1.5 text-slate-700 hover:bg-slate-50 transition-colors truncate"
+                          >
+                            {agent}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </>,
+                  document.body
+                )}
+              </div>
+            )}
             <div className="relative">
               <button
                 ref={calendarBtnRef}
