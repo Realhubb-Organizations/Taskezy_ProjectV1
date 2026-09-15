@@ -484,7 +484,7 @@ export default function DataCallingPage() {
                         className="h-3.5 w-3.5 rounded border-slate-300 text-[#0B1E6E] focus:ring-0 focus:ring-offset-0"
                       />
                     </th>
-                    <th className="px-5 py-3.5">
+                    <th className="px-5 py-3.5 w-56">
                       {searchOpen ? (
                         <div className="flex items-center gap-1">
                           <input
@@ -624,12 +624,12 @@ export default function DataCallingPage() {
                             className="h-3.5 w-3.5 rounded border-slate-300 text-[#0B1E6E] focus:ring-0 focus:ring-offset-0"
                           />
                         </td>
-                        <td className="px-5 py-3.5">
-                          <p className="text-slate-900 font-semibold">{l.name}</p>
+                        <td className="px-5 py-3.5 max-w-[224px]">
+                          <p className="text-slate-900 font-semibold truncate" title={l.name}>{l.name}</p>
                           {l.phone && (
                             <div className="flex items-center gap-1 mt-0.5 text-[10px] text-slate-400 font-medium">
-                              <span>{l.phone}</span>
-                              <button onClick={() => copyToClipboard(l.phone)} className="text-slate-300 hover:text-slate-500" title="Copy phone number">
+                              <span className="truncate">{l.phone}</span>
+                              <button onClick={() => copyToClipboard(l.phone)} className="text-slate-300 hover:text-slate-500 shrink-0" title="Copy phone number">
                                 <Copy className="h-2.5 w-2.5" />
                               </button>
                             </div>
