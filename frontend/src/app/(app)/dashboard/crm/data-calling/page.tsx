@@ -76,9 +76,8 @@ export default function DataCallingPage() {
 
   const [activeTab, setActiveTab] = useState<"DataCalling" | "Analytics">("DataCalling");
 
-  // Summary card date range — same intake-volume-only-for-"Total" convention
-  // as the Campaigns page: Total Leads Assigned respects the range; the
-  // other four are current pipeline-status snapshots, not date-scoped.
+  // Summary card date range — every one of the 5 cards below respects it
+  // (see categoryLeadsInRange), same as the CRM Dashboard/Campaigns pages.
   const [dateRange, setDateRange] = useState<"Today" | "Yesterday" | "This Week" | "This Month" | "All Time">("Today");
   const [summaryDateMenuOpen, setSummaryDateMenuOpen] = useState(false);
   const [summaryDateMenuPos, setSummaryDateMenuPos] = useState<{ top: number; left: number } | null>(null);
