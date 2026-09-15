@@ -690,7 +690,7 @@ export default function DataCallingPage() {
         </div>
       ) : (
         <>
-          {/* Action Toolbar (Bulk Assign/Reshuffle, Date Picker Pill, Settings Button) */}
+          {/* Action Toolbar (Bulk Assign/Reshuffle, Date Picker Pill, Filter Button) */}
           <div className="flex flex-wrap items-center justify-end gap-2.5 pt-1">
             {isAdmin && selectedUnassignedIds.length > 0 && (
               <button
@@ -810,7 +810,7 @@ export default function DataCallingPage() {
               className="flex items-center gap-2 border border-slate-300/80 bg-white rounded-xl px-3.5 py-1.5 text-xs text-slate-700 font-semibold hover:bg-slate-50 shadow-2xs transition-colors"
             >
               <Sliders className="h-3.5 w-3.5 text-blue-600" />
-              Settings
+              Filter
             </button>
           </div>
 
