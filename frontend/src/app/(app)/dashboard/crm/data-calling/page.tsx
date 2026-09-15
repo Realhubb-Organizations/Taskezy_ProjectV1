@@ -68,7 +68,7 @@ const DATA_CALLING_DEFAULT_VISIBLE_COLUMNS: Record<DataCallingColumnKey, boolean
 };
 
 export default function DataCallingPage() {
-  const { leads, followupCalls, updateLeadStatus, reassignLead } = useApp();
+  const { leads, followupCalls, properties, users, updateLeadStatus, reassignLead } = useApp();
 
   const [activeTab, setActiveTab] = useState<"DataCalling" | "Analytics">("DataCalling");
 
@@ -178,17 +178,91 @@ export default function DataCallingPage() {
     () => leads.filter(l => selectedIds.has(l.id) && isUnassignedLead(l)).map(l => l.id),
     [leads, selectedIds]
   );
-  const realAgentOptions = useMemo(
-    () => assignedOptions.filter(a => a && a !== "Not Assigned" && a !== "Unassigned"),
-    [assignedOptions]
+
+  // Assign Leads modal: a property must be picked first (it scopes which
+  // agents are even eligible — an agent "connected" to a property is one on
+  // that property's assignedTeam, same restriction the Properties page's
+  // CUSTOM_MEMBERS mode enforces; ALL_MEMBERS properties open it to every
+  // agent), then the Assignee field unlocks. Both fields need a value before
+  // the modal's own Assign button goes live.
+  const [assignModalOpen, setAssignModalOpen] = useState(false);
+  const [assignSelectedPropertyIds, setAssignSelectedPropertyIds] = useState<Set<string>>(new Set());
+  const [assignSelectedAssigneeId, setAssignSelectedAssigneeId] = useState<string>("");
+
+  const [propertyDropdownOpen, setPropertyDropdownOpen] = useState(false);
+  const [propertyDropdownPos, setPropertyDropdownPos] = useState<{ top: number; left: number } | null>(null);
+  const propertyBtnRef = useRef<HTMLButtonElement>(null);
+  const [propertySearch, setPropertySearch] = useState("");
+
+  const [assigneeDropdownOpen, setAssigneeDropdownOpen] = useState(false);
+  const [assigneeDropdownPos, setAssigneeDropdownPos] = useState<{ top: number; left: number } | null>(null);
+  const assigneeBtnRef = useRef<HTMLButtonElement>(null);
+  const [assigneeSearch, setAssigneeSearch] = useState("");
+
+  const filteredAssignProperties = useMemo(() => {
+    const q = propertySearch.trim().toLowerCase();
+    return properties.filter(p => !q || p.name.toLowerCase().includes(q));
+  }, [properties, propertySearch]);
+
+  const eligibleAssignees = useMemo(() => {
+    if (assignSelectedPropertyIds.size === 0) return [];
+    const selectedProps = properties.filter(p => assignSelectedPropertyIds.has(p.id));
+    let anyAllMembers = false;
+    const restrictedIds = new Set<string>();
+    selectedProps.forEach(p => {
+      if (p.teamAssignmentMode === "CUSTOM_MEMBERS" && p.assignedTeam && p.assignedTeam.length > 0) {
+        p.assignedTeam.forEach(m => restrictedIds.add(m.userId));
+      } else {
+        anyAllMembers = true;
+      }
+    });
+    const pool = anyAllMembers ? users.filter(u => u.role === "AGENT") : users.filter(u => restrictedIds.has(u.id));
+    const q = assigneeSearch.trim().toLowerCase();
+    return pool.filter(u => !q || u.name.toLowerCase().includes(q));
+  }, [assignSelectedPropertyIds, properties, users, assigneeSearch]);
+
+  const selectedPropertyLabel = useMemo(() => {
+    if (assignSelectedPropertyIds.size === 0) return "";
+    if (assignSelectedPropertyIds.size === 1) {
+      return properties.find(p => assignSelectedPropertyIds.has(p.id))?.name || "";
+    }
+    return `${assignSelectedPropertyIds.size} properties selected`;
+  }, [assignSelectedPropertyIds, properties]);
+  const selectedAssigneeName = useMemo(
+    () => users.find(u => u.id === assignSelectedAssigneeId)?.name || "",
+    [users, assignSelectedAssigneeId]
   );
-  const [assignMenuOpen, setAssignMenuOpen] = useState(false);
-  const [assignMenuPos, setAssignMenuPos] = useState<{ top: number; left: number } | null>(null);
-  const assignBtnRef = useRef<HTMLButtonElement>(null);
-  const handleBulkAssign = (agent: string) => {
+  const canConfirmAssign = assignSelectedPropertyIds.size > 0 && !!assignSelectedAssigneeId;
+
+  const openAssignModal = () => {
+    setAssignSelectedPropertyIds(new Set());
+    setAssignSelectedAssigneeId("");
+    setPropertySearch("");
+    setAssigneeSearch("");
+    setAssignModalOpen(true);
+  };
+  const closeAssignModal = () => {
+    setAssignModalOpen(false);
+    setPropertyDropdownOpen(false);
+    setAssigneeDropdownOpen(false);
+  };
+  const togglePropertySelection = (id: string) => {
+    setAssignSelectedPropertyIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+    // Property set changed — an assignee chosen under the old scope may no
+    // longer be eligible, so make the admin re-pick rather than silently
+    // keep a stale selection.
+    setAssignSelectedAssigneeId("");
+  };
+  const confirmBulkAssign = () => {
+    if (!canConfirmAssign) return;
+    const agentName = selectedAssigneeName;
     selectedUnassignedIds.forEach(id => {
       const lead = leads.find(l => l.id === id);
-      reassignLead(id, agent);
+      reassignLead(id, agentName);
       // Move it off the "Unassigned" pipeline state now that it actually has
       // someone on it — otherwise it'd stay eligible for this same button.
       if (lead?.status === "Unassigned") updateLeadStatus(id, "Assigned");
@@ -198,7 +272,7 @@ export default function DataCallingPage() {
       selectedUnassignedIds.forEach(id => next.delete(id));
       return next;
     });
-    setAssignMenuOpen(false);
+    closeAssignModal();
   };
 
   // Per-row quick-edit dropdowns (Status, Assigned To) — same click-to-open-
@@ -230,20 +304,22 @@ export default function DataCallingPage() {
   // if the page scrolls while open — close on scroll instead (same fix
   // applied to the Campaigns page's dropdowns).
   useEffect(() => {
-    const anyOpen = summaryDateMenuOpen || calendarPickerOpen || statusMenuOpen || assignedMenuOpen || assignMenuOpen || !!rowStatusMenuFor || !!rowAssignMenuFor;
+    const anyOpen = summaryDateMenuOpen || calendarPickerOpen || statusMenuOpen || assignedMenuOpen ||
+      propertyDropdownOpen || assigneeDropdownOpen || !!rowStatusMenuFor || !!rowAssignMenuFor;
     if (!anyOpen) return;
     const closeAll = () => {
       setSummaryDateMenuOpen(false);
       setCalendarPickerOpen(false);
       setStatusMenuOpen(false);
       setAssignedMenuOpen(false);
-      setAssignMenuOpen(false);
+      setPropertyDropdownOpen(false);
+      setAssigneeDropdownOpen(false);
       setRowStatusMenuFor(null);
       setRowAssignMenuFor(null);
     };
     window.addEventListener("scroll", closeAll, true);
     return () => window.removeEventListener("scroll", closeAll, true);
-  }, [summaryDateMenuOpen, calendarPickerOpen, statusMenuOpen, assignedMenuOpen, assignMenuOpen, rowStatusMenuFor, rowAssignMenuFor]);
+  }, [summaryDateMenuOpen, calendarPickerOpen, statusMenuOpen, assignedMenuOpen, propertyDropdownOpen, assigneeDropdownOpen, rowStatusMenuFor, rowAssignMenuFor]);
 
   const latestLogMessage = (l: Lead): string => {
     if (!l.logs || l.logs.length === 0) return "No feedback yet";
@@ -410,45 +486,14 @@ export default function DataCallingPage() {
           {/* Action Toolbar (Bulk Assign, Date Picker Pill, Settings Button) */}
           <div className="flex flex-wrap items-center justify-end gap-2.5 pt-1">
             {selectedUnassignedIds.length > 0 && (
-              <div className="relative">
-                <button
-                  ref={assignBtnRef}
-                  type="button"
-                  onClick={() => openPositionedMenu(assignBtnRef, setAssignMenuPos, setAssignMenuOpen, "left", 192)}
-                  className="flex items-center gap-2 bg-white border border-slate-300/80 rounded-xl px-3.5 py-1.5 text-xs text-slate-700 font-semibold hover:bg-slate-50 shadow-2xs transition-colors"
-                >
-                  <Users className="h-3.5 w-3.5 text-blue-600" />
-                  Assign
-                </button>
-                {assignMenuOpen && assignMenuPos && createPortal(
-                  <>
-                    <div className="fixed inset-0 z-[60]" onClick={() => setAssignMenuOpen(false)} />
-                    <div
-                      className="fixed z-[70] w-48 max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 text-xs font-semibold"
-                      style={{ top: assignMenuPos.top, left: assignMenuPos.left }}
-                    >
-                      <div className="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase border-b border-slate-100">
-                        Assign {selectedUnassignedIds.length} lead{selectedUnassignedIds.length > 1 ? "s" : ""} to
-                      </div>
-                      {realAgentOptions.length === 0 ? (
-                        <div className="px-3 py-2 text-slate-400 italic font-normal">No agents available</div>
-                      ) : (
-                        realAgentOptions.map(agent => (
-                          <button
-                            key={agent}
-                            type="button"
-                            onClick={() => handleBulkAssign(agent)}
-                            className="w-full text-left px-3 py-1.5 text-slate-700 hover:bg-slate-50 transition-colors truncate"
-                          >
-                            {agent}
-                          </button>
-                        ))
-                      )}
-                    </div>
-                  </>,
-                  document.body
-                )}
-              </div>
+              <button
+                type="button"
+                onClick={openAssignModal}
+                className="flex items-center gap-2 bg-white border border-slate-300/80 rounded-xl px-3.5 py-1.5 text-xs text-slate-700 font-semibold hover:bg-slate-50 shadow-2xs transition-colors"
+              >
+                <Users className="h-3.5 w-3.5 text-blue-600" />
+                Assign
+              </button>
             )}
             <div className="relative">
               <button
@@ -908,6 +953,159 @@ export default function DataCallingPage() {
                   );
                 })}
               </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Assign Leads modal — Property must be picked before Assignee
+          unlocks (it scopes the eligible agent list), and the modal's own
+          Assign button stays disabled until both fields hold a value. */}
+      {assignModalOpen && createPortal(
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-slate-900/40" onClick={closeAssignModal} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="px-6 pt-6 pb-4 border-b border-slate-100">
+              <h3 className="text-xl font-extrabold text-slate-900">Assign Leads</h3>
+            </div>
+            <div className="px-6 py-5 space-y-5">
+              <p className="text-xs text-slate-500">
+                Assigning {selectedUnassignedIds.length} unassigned lead{selectedUnassignedIds.length > 1 ? "s" : ""}.
+              </p>
+
+              {/* Select Property */}
+              <div className="space-y-1.5">
+                <label className="block text-sm font-bold text-slate-800">Select Property</label>
+                <button
+                  ref={propertyBtnRef}
+                  type="button"
+                  onClick={() => openPositionedMenu(propertyBtnRef, setPropertyDropdownPos, setPropertyDropdownOpen, "left", 400)}
+                  className="w-full flex items-center justify-between border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm text-left hover:bg-slate-50 transition-colors"
+                >
+                  <span className={`truncate ${selectedPropertyLabel ? "text-slate-800 font-semibold" : "text-slate-400"}`}>
+                    {selectedPropertyLabel || "Select property"}
+                  </span>
+                  <ChevronDown className={`h-4 w-4 text-slate-400 shrink-0 transition-transform ${propertyDropdownOpen ? "rotate-180" : ""}`} />
+                </button>
+                {propertyDropdownOpen && propertyDropdownPos && createPortal(
+                  <>
+                    <div className="fixed inset-0 z-[110]" onClick={() => setPropertyDropdownOpen(false)} />
+                    <div
+                      className="fixed z-[120] w-[400px] max-w-[calc(100vw-2rem)] bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden"
+                      style={{ top: propertyDropdownPos.top, left: propertyDropdownPos.left }}
+                    >
+                      <div className="flex items-center gap-2 px-3.5 py-2 border-b border-slate-100">
+                        <Search className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                        <input
+                          autoFocus
+                          value={propertySearch}
+                          onChange={(e) => setPropertySearch(e.target.value)}
+                          placeholder="Search property..."
+                          className="w-full text-sm focus:outline-none"
+                        />
+                      </div>
+                      <div className="max-h-56 overflow-y-auto py-1">
+                        {filteredAssignProperties.length === 0 ? (
+                          <div className="px-3.5 py-3 text-xs text-slate-400 italic">No properties found</div>
+                        ) : (
+                          filteredAssignProperties.map(p => (
+                            <label key={p.id} className="flex items-center gap-2.5 px-3.5 py-2 text-sm text-slate-700 font-medium hover:bg-slate-50 cursor-pointer transition-colors">
+                              <input
+                                type="checkbox"
+                                checked={assignSelectedPropertyIds.has(p.id)}
+                                onChange={() => togglePropertySelection(p.id)}
+                                className="h-3.5 w-3.5 rounded border-slate-300 text-[#0B1E6E] focus:ring-0 focus:ring-offset-0"
+                              />
+                              {p.name}
+                            </label>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </>,
+                  document.body
+                )}
+              </div>
+
+              {/* Select Assignee — locked until at least one property is picked */}
+              <div className="space-y-1.5">
+                <label className="block text-sm font-bold text-slate-800">Select Assignee</label>
+                <button
+                  ref={assigneeBtnRef}
+                  type="button"
+                  disabled={assignSelectedPropertyIds.size === 0}
+                  onClick={() => openPositionedMenu(assigneeBtnRef, setAssigneeDropdownPos, setAssigneeDropdownOpen, "left", 400)}
+                  className={`w-full flex items-center justify-between border rounded-xl px-3.5 py-2.5 text-sm text-left transition-colors ${
+                    assignSelectedPropertyIds.size === 0
+                      ? "border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed"
+                      : "border-slate-300 hover:bg-slate-50"
+                  }`}
+                >
+                  <span className={`truncate ${selectedAssigneeName ? "text-slate-800 font-semibold" : "text-slate-400"}`}>
+                    {selectedAssigneeName || "Select Member"}
+                  </span>
+                  <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${assigneeDropdownOpen ? "rotate-180" : ""} ${assignSelectedPropertyIds.size === 0 ? "text-slate-300" : "text-slate-400"}`} />
+                </button>
+                {assigneeDropdownOpen && assigneeDropdownPos && assignSelectedPropertyIds.size > 0 && createPortal(
+                  <>
+                    <div className="fixed inset-0 z-[110]" onClick={() => setAssigneeDropdownOpen(false)} />
+                    <div
+                      className="fixed z-[120] w-[400px] max-w-[calc(100vw-2rem)] bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden"
+                      style={{ top: assigneeDropdownPos.top, left: assigneeDropdownPos.left }}
+                    >
+                      <div className="flex items-center gap-2 px-3.5 py-2 border-b border-slate-100">
+                        <Search className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                        <input
+                          autoFocus
+                          value={assigneeSearch}
+                          onChange={(e) => setAssigneeSearch(e.target.value)}
+                          placeholder="Search assignee..."
+                          className="w-full text-sm focus:outline-none"
+                        />
+                      </div>
+                      <div className="max-h-56 overflow-y-auto py-1 text-sm font-semibold">
+                        {eligibleAssignees.length === 0 ? (
+                          <div className="px-3.5 py-3 text-xs text-slate-400 italic font-normal">No connected assignees found</div>
+                        ) : (
+                          eligibleAssignees.map(u => (
+                            <button
+                              key={u.id}
+                              type="button"
+                              onClick={() => { setAssignSelectedAssigneeId(u.id); setAssigneeDropdownOpen(false); }}
+                              className={`w-full text-left px-3.5 py-2 transition-colors truncate ${
+                                assignSelectedAssigneeId === u.id ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"
+                              }`}
+                            >
+                              {u.name}
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </>,
+                  document.body
+                )}
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={closeAssignModal}
+                className="px-5 py-2 rounded-xl border border-slate-300 font-bold text-slate-700 text-sm hover:bg-slate-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={!canConfirmAssign}
+                onClick={confirmBulkAssign}
+                className={`px-5 py-2 rounded-xl font-bold text-sm text-white transition-colors ${
+                  canConfirmAssign ? "bg-[#0B1E6E] hover:bg-[#081650]" : "bg-slate-300 cursor-not-allowed"
+                }`}
+              >
+                Assign
+              </button>
             </div>
           </div>
         </div>,
