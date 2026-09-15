@@ -4,17 +4,43 @@ import { logger } from "../../utils/logger";
 
 const GRAPH_BASE = `https://graph.facebook.com/${env.META_GRAPH_API_VERSION}`;
 
+// Ad-set/ad/creative sync makes one call per ad account, per campaign, and
+// per ad every cycle — with enough campaigns/ads that firing them back to
+// back blows through Meta's per-ad-account points-based rate limit (error
+// code 17, "User request limit reached") well before the loop finishes, so
+// only whichever campaigns happen to be iterated first ever get ad-level
+// data. A fixed pacing delay between calls plus a backoff-and-retry on code
+// 17 keeps every campaign's calls under budget instead of abandoning
+// whatever the loop hasn't reached yet for the rest of the cycle.
+const CALL_SPACING_MS = 250;
+const RATE_LIMIT_BACKOFFS_MS = [10_000, 30_000, 60_000, 120_000];
+const RATE_LIMIT_ERROR_CODE = 17;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 async function graphFetch<T>(path: string, params: Record<string, string>): Promise<T> {
   const url = new URL(`${GRAPH_BASE}${path}`);
   Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
 
-  const res = await fetch(url.toString());
-  const body = (await res.json()) as T & { error?: { message: string; type: string; code: number } };
-  if (!res.ok || body.error) {
-    logger.error({ path, metaError: body.error }, "Meta Graph API call failed");
-    throw new Error(body.error?.message ?? `Meta Graph API call to ${path} failed with status ${res.status}`);
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url.toString());
+    const body = (await res.json()) as T & { error?: { message: string; type: string; code: number } };
+    if (!res.ok || body.error) {
+      const isRateLimit = body.error?.code === RATE_LIMIT_ERROR_CODE;
+      if (isRateLimit && attempt < RATE_LIMIT_BACKOFFS_MS.length) {
+        const backoffMs = RATE_LIMIT_BACKOFFS_MS[attempt];
+        logger.warn({ path, attempt, backoffMs }, "Meta Graph API rate limit hit — backing off and retrying");
+        await sleep(backoffMs);
+        continue;
+      }
+      logger.error({ path, metaError: body.error }, "Meta Graph API call failed");
+      throw new Error(body.error?.message ?? `Meta Graph API call to ${path} failed with status ${res.status}`);
+    }
+    await sleep(CALL_SPACING_MS);
+    return body;
   }
-  return body;
 }
 
 const STATE_MAX_AGE_MS = 10 * 60 * 1000;
