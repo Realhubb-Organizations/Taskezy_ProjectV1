@@ -693,11 +693,18 @@ export function apiListAdSpend(): Promise<ApiAdSpendRow[]> {
 // Real per-ad, per-day spend/leads with each row's real ad set/ad/creative
 // name attached — un-aggregated (one row per ad per day), same grain as
 // ApiAdSpendRow, for Campaign Deep Dive's Ad Set Name/Ad creative Name
-// columns and a real per-ad-set/ad-creative CPL breakdown.
+// columns and a real per-ad-set/ad-creative CPL breakdown. Combines Meta
+// and Google rows under one shape (platform-tagged) — creative_name is a
+// real Meta-only field (Meta always has a distinct creative object);
+// ad_type is a real Google-only field (Google's honest fallback label when
+// ad.name is unset, common for Responsive Search Ads) — never both on the
+// same row, never invented for the platform that doesn't have one.
 export interface ApiAdLevelSpendRow {
-  meta_ad_id: string;
-  ad_name: string;
-  creative_name: string | null;
+  platform: "META" | "GOOGLE";
+  ad_id: string;
+  ad_name: string | null;
+  creative_name?: string | null;
+  ad_type?: string | null;
   ad_set_name: string;
   campaign_id: string;
   campaign_name: string;

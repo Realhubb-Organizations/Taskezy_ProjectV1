@@ -3,10 +3,39 @@
 import React, { useState, useRef, useMemo, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useApp, Lead } from "@/context/AppContext";
-import { ChevronDown, Calendar, Search, Sliders, Minus, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Calendar, Search, Sliders, Minus, X, Copy, Users } from "lucide-react";
 
 const QUALIFIED_LEAD_STATUSES = ["Interested", "Connected", "Visit Schedule", "Site Visit", "Booking Done", "Booked"];
 const FOLLOW_UP_LEAD_STATUSES = ["Follow-ups", "Call Back"];
+
+// Quick-edit options for the per-row Status dropdown — the calling-workflow
+// subset of LeadDetailDrawer's canonical status list. "Booked"/"Completed"
+// are excluded here: those require a deal-value form (updateLeadStatus
+// auto-generates a ₹0 invoice without one), so that transition stays gated
+// behind the full LeadDetailDrawer instead of this quick row menu.
+const ROW_STATUS_OPTIONS: Lead["status"][] = [
+  "New Lead", "Assigned", "Connected", "RNR", "Call Back", "Interested", "Follow-ups",
+  "Visit Schedule", "Site Visit", "Meeting Scheduled", "Meeting Done", "In Negotiation",
+  "Not Interested", "Low Budget", "Invalid", "Dead"
+];
+
+function formatDateTime(iso?: string): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+// leads.assigned_agent_id is NOT NULL at the DB level (leads.repository.ts
+// inner-joins users on it), so assignedAgent is always some real agent's
+// name even for a lead nobody has actually started working yet — that
+// pipeline state lives in the separate `status` field as "Unassigned"
+// instead. That's the real signal the bulk Assign button keys off; a
+// missing/placeholder assignedAgent is kept as a defensive fallback only.
+function isUnassignedLead(l: Lead): boolean {
+  return l.status === "Unassigned" || !l.assignedAgent || l.assignedAgent === "Not Assigned";
+}
 
 // Togglable columns for the Data Calling table, driven by its own Filter
 // drawer (same bordered-card pattern as the Campaigns page). Lead Name/
@@ -39,7 +68,7 @@ const DATA_CALLING_DEFAULT_VISIBLE_COLUMNS: Record<DataCallingColumnKey, boolean
 };
 
 export default function DataCallingPage() {
-  const { leads, followupCalls } = useApp();
+  const { leads, followupCalls, updateLeadStatus, reassignLead } = useApp();
 
   const [activeTab, setActiveTab] = useState<"DataCalling" | "Analytics">("DataCalling");
 
@@ -52,7 +81,7 @@ export default function DataCallingPage() {
   const summaryDateBtnRef = useRef<HTMLButtonElement>(null);
 
   const today = new Date();
-  const todayStr = today.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  const todayStr = today.toISOString().slice(0, 10);
 
   const mapDateRangeToKey = (dr: typeof dateRange): "today" | "yesterday" | "week" | "month" | "all" => {
     switch (dr) {
@@ -135,6 +164,55 @@ export default function DataCallingPage() {
   const [rowsPerPage, setRowsPerPage] = useState(100);
   const [currentPage, setCurrentPage] = useState(1);
 
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const toggleSelectRow = (id: string) => setSelectedIds(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+
+  // Bulk "Assign" toolbar button — only surfaces once the selection actually
+  // contains an unassigned lead (per product decision: it's for handing out
+  // fresh/unassigned leads, not for reassigning already-worked ones).
+  const selectedUnassignedIds = useMemo(
+    () => leads.filter(l => selectedIds.has(l.id) && isUnassignedLead(l)).map(l => l.id),
+    [leads, selectedIds]
+  );
+  const realAgentOptions = useMemo(
+    () => assignedOptions.filter(a => a && a !== "Not Assigned" && a !== "Unassigned"),
+    [assignedOptions]
+  );
+  const [assignMenuOpen, setAssignMenuOpen] = useState(false);
+  const [assignMenuPos, setAssignMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const assignBtnRef = useRef<HTMLButtonElement>(null);
+  const handleBulkAssign = (agent: string) => {
+    selectedUnassignedIds.forEach(id => {
+      const lead = leads.find(l => l.id === id);
+      reassignLead(id, agent);
+      // Move it off the "Unassigned" pipeline state now that it actually has
+      // someone on it — otherwise it'd stay eligible for this same button.
+      if (lead?.status === "Unassigned") updateLeadStatus(id, "Assigned");
+    });
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      selectedUnassignedIds.forEach(id => next.delete(id));
+      return next;
+    });
+    setAssignMenuOpen(false);
+  };
+
+  // Per-row quick-edit dropdowns (Status, Assigned To) — same click-to-open-
+  // portal pattern as the header filter menus, but keyed by lead id since a
+  // table has many rows sharing one pair of open/pos state slots.
+  const [rowStatusMenuFor, setRowStatusMenuFor] = useState<string | null>(null);
+  const [rowStatusMenuPos, setRowStatusMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const [rowAssignMenuFor, setRowAssignMenuFor] = useState<string | null>(null);
+  const [rowAssignMenuPos, setRowAssignMenuPos] = useState<{ top: number; left: number } | null>(null);
+
+  const copyToClipboard = (text: string) => {
+    if (text) navigator.clipboard?.writeText(text).catch(() => {});
+  };
+
   const openPositionedMenu = (
     ref: React.RefObject<HTMLButtonElement>,
     setPos: (p: { top: number; left: number } | null) => void,
@@ -152,17 +230,20 @@ export default function DataCallingPage() {
   // if the page scrolls while open — close on scroll instead (same fix
   // applied to the Campaigns page's dropdowns).
   useEffect(() => {
-    const anyOpen = summaryDateMenuOpen || calendarPickerOpen || statusMenuOpen || assignedMenuOpen;
+    const anyOpen = summaryDateMenuOpen || calendarPickerOpen || statusMenuOpen || assignedMenuOpen || assignMenuOpen || !!rowStatusMenuFor || !!rowAssignMenuFor;
     if (!anyOpen) return;
     const closeAll = () => {
       setSummaryDateMenuOpen(false);
       setCalendarPickerOpen(false);
       setStatusMenuOpen(false);
       setAssignedMenuOpen(false);
+      setAssignMenuOpen(false);
+      setRowStatusMenuFor(null);
+      setRowAssignMenuFor(null);
     };
     window.addEventListener("scroll", closeAll, true);
     return () => window.removeEventListener("scroll", closeAll, true);
-  }, [summaryDateMenuOpen, calendarPickerOpen, statusMenuOpen, assignedMenuOpen]);
+  }, [summaryDateMenuOpen, calendarPickerOpen, statusMenuOpen, assignedMenuOpen, assignMenuOpen, rowStatusMenuFor, rowAssignMenuFor]);
 
   const latestLogMessage = (l: Lead): string => {
     if (!l.logs || l.logs.length === 0) return "No feedback yet";
@@ -173,7 +254,12 @@ export default function DataCallingPage() {
     const upcoming = followupCalls
       .filter(f => f.leadId === leadId && f.status === "Upcoming")
       .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
-    return upcoming.length > 0 ? `${upcoming[0].date} ${upcoming[0].time}` : "—";
+    if (upcoming.length === 0) return "—";
+    const f = upcoming[0];
+    const parsed = new Date(`${f.date} ${f.time}`);
+    if (isNaN(parsed.getTime())) return `${f.date} ${f.time}`;
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${f.date} ${pad(parsed.getHours())}:${pad(parsed.getMinutes())}:00`;
   };
 
   const filteredLeads = useMemo(() => {
@@ -201,7 +287,15 @@ export default function DataCallingPage() {
   const currentPageClamped = Math.min(currentPage, totalPages);
   const paginatedLeads = filteredLeads.slice((currentPageClamped - 1) * rowsPerPage, currentPageClamped * rowsPerPage);
 
-  const visibleColCount = 4 + DATA_CALLING_COLUMNS.filter(c => visibleColumns[c.key]).length;
+  const allOnPageSelected = paginatedLeads.length > 0 && paginatedLeads.every(l => selectedIds.has(l.id));
+  const toggleSelectAllOnPage = () => setSelectedIds(prev => {
+    const next = new Set(prev);
+    if (allOnPageSelected) paginatedLeads.forEach(l => next.delete(l.id));
+    else paginatedLeads.forEach(l => next.add(l.id));
+    return next;
+  });
+
+  const visibleColCount = 5 + DATA_CALLING_COLUMNS.filter(c => visibleColumns[c.key]).length;
 
   return (
     <div className="space-y-4 pb-8 animate-fade-in text-slate-800">
@@ -282,6 +376,7 @@ export default function DataCallingPage() {
                 <span className="text-[11px] font-medium text-slate-500 block">{s.label}</span>
                 <span className={`text-lg font-extrabold mt-1.5 block ${s.color}`}>{s.value}</span>
               </div>
+              <ChevronRight className="h-4 w-4 text-slate-300 shrink-0" />
             </div>
           ))}
         </div>
@@ -312,8 +407,49 @@ export default function DataCallingPage() {
         </div>
       ) : (
         <>
-          {/* Action Toolbar (Date Picker Pill, Filter Button) */}
+          {/* Action Toolbar (Bulk Assign, Date Picker Pill, Settings Button) */}
           <div className="flex flex-wrap items-center justify-end gap-2.5 pt-1">
+            {selectedUnassignedIds.length > 0 && (
+              <div className="relative">
+                <button
+                  ref={assignBtnRef}
+                  type="button"
+                  onClick={() => openPositionedMenu(assignBtnRef, setAssignMenuPos, setAssignMenuOpen, "left", 192)}
+                  className="flex items-center gap-2 bg-white border border-slate-300/80 rounded-xl px-3.5 py-1.5 text-xs text-slate-700 font-semibold hover:bg-slate-50 shadow-2xs transition-colors"
+                >
+                  <Users className="h-3.5 w-3.5 text-blue-600" />
+                  Assign
+                </button>
+                {assignMenuOpen && assignMenuPos && createPortal(
+                  <>
+                    <div className="fixed inset-0 z-[60]" onClick={() => setAssignMenuOpen(false)} />
+                    <div
+                      className="fixed z-[70] w-48 max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 text-xs font-semibold"
+                      style={{ top: assignMenuPos.top, left: assignMenuPos.left }}
+                    >
+                      <div className="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase border-b border-slate-100">
+                        Assign {selectedUnassignedIds.length} lead{selectedUnassignedIds.length > 1 ? "s" : ""} to
+                      </div>
+                      {realAgentOptions.length === 0 ? (
+                        <div className="px-3 py-2 text-slate-400 italic font-normal">No agents available</div>
+                      ) : (
+                        realAgentOptions.map(agent => (
+                          <button
+                            key={agent}
+                            type="button"
+                            onClick={() => handleBulkAssign(agent)}
+                            className="w-full text-left px-3 py-1.5 text-slate-700 hover:bg-slate-50 transition-colors truncate"
+                          >
+                            {agent}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </>,
+                  document.body
+                )}
+              </div>
+            )}
             <div className="relative">
               <button
                 ref={calendarBtnRef}
@@ -412,7 +548,7 @@ export default function DataCallingPage() {
               className="flex items-center gap-2 border border-slate-300/80 bg-white rounded-xl px-3.5 py-1.5 text-xs text-slate-700 font-semibold hover:bg-slate-50 shadow-2xs transition-colors"
             >
               <Sliders className="h-3.5 w-3.5 text-blue-600" />
-              Filter
+              Settings
             </button>
           </div>
 
@@ -422,7 +558,15 @@ export default function DataCallingPage() {
               <table className="w-full text-left border-collapse table-auto min-w-[900px]">
                 <thead className="sticky top-0 z-10 bg-white">
                   <tr className="border-b border-slate-200/80 text-[12px] font-bold text-slate-900">
-                    <th className="px-5 py-3.5">
+                    <th className="px-4 py-3.5 w-10">
+                      <input
+                        type="checkbox"
+                        checked={allOnPageSelected}
+                        onChange={toggleSelectAllOnPage}
+                        className="h-3.5 w-3.5 rounded border-slate-300 text-[#0B1E6E] focus:ring-0 focus:ring-offset-0"
+                      />
+                    </th>
+                    <th className="px-5 py-3.5 w-56">
                       {searchOpen ? (
                         <div className="flex items-center gap-1">
                           <input
@@ -554,11 +698,116 @@ export default function DataCallingPage() {
                   ) : (
                     paginatedLeads.map(l => (
                       <tr key={l.id} className="hover:bg-slate-50/50 transition-colors">
-                        <td className="px-5 py-3.5 text-slate-900 font-semibold">{l.name}</td>
-                        <td className="px-5 py-3.5 truncate max-w-[160px]" title={l.email}>{l.email || "—"}</td>
-                        <td className="px-5 py-3.5 whitespace-nowrap">{l.status}</td>
-                        {visibleColumns.assignedTo && <td className="px-5 py-3.5">{l.assignedAgent || "—"}</td>}
-                        {visibleColumns.date && <td className="px-5 py-3.5 whitespace-nowrap">{l.createdAtStr || "—"}</td>}
+                        <td className="px-4 py-3.5">
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.has(l.id)}
+                            onChange={() => toggleSelectRow(l.id)}
+                            className="h-3.5 w-3.5 rounded border-slate-300 text-[#0B1E6E] focus:ring-0 focus:ring-offset-0"
+                          />
+                        </td>
+                        <td className="px-5 py-3.5 max-w-[224px]">
+                          <p className="text-slate-900 font-semibold truncate" title={l.name}>{l.name}</p>
+                          {l.phone && (
+                            <div className="flex items-center gap-1 mt-0.5 text-[10px] text-slate-400 font-medium">
+                              <span className="truncate">{l.phone}</span>
+                              <button onClick={() => copyToClipboard(l.phone)} className="text-slate-300 hover:text-slate-500 shrink-0" title="Copy phone number">
+                                <Copy className="h-2.5 w-2.5" />
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-5 py-3.5 max-w-[160px]">
+                          {l.email ? (
+                            <div className="flex items-center gap-1">
+                              <span className="truncate" title={l.email}>{l.email}</span>
+                              <button onClick={() => copyToClipboard(l.email)} className="text-slate-300 hover:text-slate-500 shrink-0" title="Copy email">
+                                <Copy className="h-2.5 w-2.5" />
+                              </button>
+                            </div>
+                          ) : "—"}
+                        </td>
+                        <td className="px-5 py-3.5 whitespace-nowrap">
+                          <div className="relative inline-block">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                setRowStatusMenuPos({ top: rect.bottom + 4, left: rect.left });
+                                setRowStatusMenuFor(prev => (prev === l.id ? null : l.id));
+                              }}
+                              className="flex items-center gap-1 font-bold text-slate-900 hover:text-blue-600 transition-colors"
+                            >
+                              <span>{l.status}</span>
+                              <ChevronDown className={`h-3 w-3 transition-transform ${rowStatusMenuFor === l.id ? "rotate-180" : ""}`} />
+                            </button>
+                            {rowStatusMenuFor === l.id && rowStatusMenuPos && createPortal(
+                              <>
+                                <div className="fixed inset-0 z-[60]" onClick={() => setRowStatusMenuFor(null)} />
+                                <div
+                                  className="fixed z-[70] w-44 max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 text-xs font-semibold"
+                                  style={{ top: rowStatusMenuPos.top, left: rowStatusMenuPos.left }}
+                                >
+                                  {ROW_STATUS_OPTIONS.map(st => (
+                                    <button
+                                      key={st}
+                                      type="button"
+                                      onClick={() => { updateLeadStatus(l.id, st); setRowStatusMenuFor(null); }}
+                                      className={`w-full text-left px-3 py-1.5 transition-colors ${
+                                        l.status === st ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"
+                                      }`}
+                                    >
+                                      {st}
+                                    </button>
+                                  ))}
+                                </div>
+                              </>,
+                              document.body
+                            )}
+                          </div>
+                        </td>
+                        {visibleColumns.assignedTo && (
+                          <td className="px-5 py-3.5">
+                            <div className="relative inline-block max-w-[140px]">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  const rect = e.currentTarget.getBoundingClientRect();
+                                  setRowAssignMenuPos({ top: rect.bottom + 4, left: rect.left });
+                                  setRowAssignMenuFor(prev => (prev === l.id ? null : l.id));
+                                }}
+                                className="flex items-center gap-1 font-semibold text-slate-700 hover:text-blue-600 transition-colors max-w-full"
+                              >
+                                <span className="truncate">{l.assignedAgent || "—"}</span>
+                                <ChevronDown className={`h-3 w-3 shrink-0 transition-transform ${rowAssignMenuFor === l.id ? "rotate-180" : ""}`} />
+                              </button>
+                              {rowAssignMenuFor === l.id && rowAssignMenuPos && createPortal(
+                                <>
+                                  <div className="fixed inset-0 z-[60]" onClick={() => setRowAssignMenuFor(null)} />
+                                  <div
+                                    className="fixed z-[70] w-44 max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 text-xs font-semibold"
+                                    style={{ top: rowAssignMenuPos.top, left: rowAssignMenuPos.left }}
+                                  >
+                                    {assignedOptions.map(agent => (
+                                      <button
+                                        key={agent}
+                                        type="button"
+                                        onClick={() => { reassignLead(l.id, agent); setRowAssignMenuFor(null); }}
+                                        className={`w-full text-left px-3 py-1.5 transition-colors truncate ${
+                                          l.assignedAgent === agent ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"
+                                        }`}
+                                      >
+                                        {agent}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </>,
+                                document.body
+                              )}
+                            </div>
+                          </td>
+                        )}
+                        {visibleColumns.date && <td className="px-5 py-3.5 whitespace-nowrap">{formatDateTime(l.createdAtStr)}</td>}
                         {visibleColumns.notes && <td className="px-5 py-3.5 truncate max-w-[200px]" title={latestLogMessage(l)}>{latestLogMessage(l)}</td>}
                         <td className="px-5 py-3.5 whitespace-nowrap">{nextCallDateFor(l.id)}</td>
                         {visibleColumns.property && <td className="px-5 py-3.5">{l.property || "—"}</td>}

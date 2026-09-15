@@ -203,7 +203,7 @@ export interface Lead {
   campaign?: string;
   metaPageName?: string; // which connected Meta Page this lead came in through
   metaFormId?: string; // which Lead Ad Form on that Page
-  metaAdId?: string; // which real Meta ad this lead's submission came from — matches AdLevelSpendRecord.metaAdId
+  metaAdId?: string; // which real Meta ad this lead's submission came from — matches AdLevelSpendRecord.adId for a "platform": "META" row. Google leads have no per-lead ad attribution at all (Sheets-import pipeline, not a webhook), so this stays undefined for them — a real gap, not a bug.
   property?: string;
   leadScore?: number;
 
@@ -228,11 +228,16 @@ export interface AdSpendRecord {
 // Real per-ad, per-day spend/leads with each row's real ad set/ad/creative
 // name attached — one level finer than AdSpendRecord (per ad instead of
 // per campaign), for Campaign Deep Dive's Ad Set Name/Ad creative Name
-// columns and a real per-ad-set/ad-creative CPL breakdown.
+// columns and a real per-ad-set/ad-creative CPL breakdown. Covers both
+// Meta and Google (platform-tagged) under one shape — creativeName is
+// real and Meta-only, adType is real and Google-only (its honest fallback
+// label when ad.name is unset), never both on the same row.
 export interface AdLevelSpendRecord {
-  metaAdId: string;
-  adName: string;
+  platform: "Meta" | "Google";
+  adId: string;
+  adName: string | null;
   creativeName?: string;
+  adType?: string;
   adSetName: string;
   campaignId: string;
   campaignName: string;
@@ -490,14 +495,16 @@ interface AppActions {
     managerId?: string | null
   ) => void;
   setCurrentUserPasswordActive: () => void;
-  // errorType distinguishes genuinely wrong credentials from the API being
-  // unreachable (network failure, CORS, or a 5xx — e.g. mid-deploy restart)
-  // so the login screen can show an accurate message instead of blaming
-  // the password for a server outage.
+  // errorType distinguishes genuinely wrong credentials (401/403) from the
+  // login endpoint's own rate limiter (429 — 10 attempts/15min, real and
+  // enforced server-side) from the API being unreachable entirely (network
+  // failure, CORS, or a 5xx — e.g. mid-deploy restart), so the login screen
+  // can show an accurate message for each instead of blaming the password
+  // for either a server outage or simply having tried too many times.
   loginWithTempPassword: (
     email: string,
     pass: string
-  ) => Promise<{ user: User } | { user: null; errorType: "invalid_credentials" | "network" }>;
+  ) => Promise<{ user: User } | { user: null; errorType: "invalid_credentials" | "rate_limited" | "network" }>;
   logout: () => void;
   switchUserRole: (role: Role, userId?: string) => void;
   setActiveSystem: (system: SystemType) => void;
@@ -848,9 +855,11 @@ function mapApiAdSpendToFrontend(row: ApiAdSpendRow): AdSpendRecord {
 
 function mapApiAdLevelSpendToFrontend(row: ApiAdLevelSpendRow): AdLevelSpendRecord {
   return {
-    metaAdId: row.meta_ad_id,
+    platform: row.platform === "META" ? "Meta" : "Google",
+    adId: row.ad_id,
     adName: row.ad_name,
     creativeName: row.creative_name || undefined,
+    adType: row.ad_type || undefined,
     adSetName: row.ad_set_name,
     campaignId: row.campaign_id,
     campaignName: row.campaign_name,
@@ -1223,7 +1232,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const loginWithTempPassword = async (
     email: string,
     pass: string
-  ): Promise<{ user: User } | { user: null; errorType: "invalid_credentials" | "network" }> => {
+  ): Promise<{ user: User } | { user: null; errorType: "invalid_credentials" | "rate_limited" | "network" }> => {
     try {
       const apiUser = await apiLogin(email, pass);
       const mapped = mapApiUserToFrontendUser(apiUser);
@@ -1234,18 +1243,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setShowLoginSplash(true);
       return { user: mapped };
     } catch (err) {
-      // A 401/403 from the API means the credentials really are wrong.
-      // Anything else — the fetch itself failing (network/CORS), or the API
-      // returning a 5xx — means the server was unreachable, not that the
-      // password was wrong. Collapsing both into "Invalid email or
-      // password" (the old behavior) was actively misleading right after a
-      // backend deploy/restart, when every login fails for a few seconds
-      // for a reason that has nothing to do with the credentials.
+      // A 401/403 from the API means the credentials really are wrong. A
+      // 429 means the login endpoint's own rate limiter (10 attempts/15min)
+      // kicked in — the server was reached and is fine, it's just refusing
+      // further attempts for a while; that's a real, separate condition
+      // from either "wrong password" or "server unreachable" and deserves
+      // its own message rather than collapsing into one of the other two
+      // (which is exactly what caused a rate-limited attempt to show
+      // "Invalid email or password" — misleading, since the password may
+      // well be correct). Anything else — the fetch itself failing
+      // (network/CORS), or the API returning a 5xx — means the server was
+      // unreachable, not that the password was wrong.
       const isBadCredentials = err instanceof ApiRequestError && (err.status === 401 || err.status === 403);
+      const isRateLimited = err instanceof ApiRequestError && err.status === 429;
       if (!(err instanceof ApiRequestError)) {
         console.error("Login request failed (is Taskezy-Server running?):", err);
       }
-      return { user: null, errorType: isBadCredentials ? "invalid_credentials" : "network" };
+      const errorType = isBadCredentials ? "invalid_credentials" : isRateLimited ? "rate_limited" : "network";
+      return { user: null, errorType };
     }
   };
 

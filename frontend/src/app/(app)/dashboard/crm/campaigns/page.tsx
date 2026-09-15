@@ -886,26 +886,36 @@ export default function AdminCampaignsPage() {
 
   // Real per-ad rows (real ad set name, real ad/creative name, real spend,
   // real platform-reported leads — see AdLevelSpendRecord), aggregated per
-  // ad and grouped by campaign name, scoped to the selected Date Range same
-  // as every other real number on this tab. Feeds both the compact Deep
-  // Dive card's Ad Set/Creative columns (the dominant real ad by spend) and
-  // the "adSetBreakdown" drill view's full real per-ad table.
+  // ad and grouped by campaign name. Deliberately ALL-TIME, not scoped to
+  // the selected Date Range — an ad set/creative's real name is a stable
+  // fact about the campaign's structure, not something that should
+  // disappear just because that specific ad didn't happen to spend on
+  // whichever single day is currently selected (ad-level reporting can lag
+  // same-day campaign-level totals by design on both platforms). Same
+  // "stable structural data stays all-time" precedent as campaignsListAllTime.
+  // Covers both Meta and Google — adId/platform are generic across both.
+  // Feeds both the compact Deep Dive card's Ad Set/Creative columns (the
+  // dominant real ad by spend) and the "adSetBreakdown" drill view's full
+  // real per-ad table (whose Spend/CPL/Qualified Leads are therefore also
+  // real all-time figures for that ad, not Date-Range-scoped).
   interface DeepDiveAdRow {
-    metaAdId: string;
+    adId: string;
+    platform: "Meta" | "Google";
     adSetName: string;
-    adName: string;
+    adName: string | null;
     creativeName?: string;
+    adType?: string;
     spend: number;
     platformReportedLeads: number;
   }
   const adRowsByCampaign = useMemo(() => {
     const byAd: Record<string, DeepDiveAdRow & { campaignName: string }> = {};
-    adLevelSpendRecords.filter(recordInSelectedRange).forEach(r => {
-      if (!byAd[r.metaAdId]) {
-        byAd[r.metaAdId] = { metaAdId: r.metaAdId, adSetName: r.adSetName, adName: r.adName, creativeName: r.creativeName, campaignName: r.campaignName, spend: 0, platformReportedLeads: 0 };
+    adLevelSpendRecords.forEach(r => {
+      if (!byAd[r.adId]) {
+        byAd[r.adId] = { adId: r.adId, platform: r.platform, adSetName: r.adSetName, adName: r.adName, creativeName: r.creativeName, adType: r.adType, campaignName: r.campaignName, spend: 0, platformReportedLeads: 0 };
       }
-      byAd[r.metaAdId].spend += r.spend;
-      byAd[r.metaAdId].platformReportedLeads += r.leadsGenerated;
+      byAd[r.adId].spend += r.spend;
+      byAd[r.adId].platformReportedLeads += r.leadsGenerated;
     });
     const out: Record<string, DeepDiveAdRow[]> = {};
     Object.values(byAd).forEach(({ campaignName, ...ad }) => {
@@ -915,16 +925,19 @@ export default function AdminCampaignsPage() {
     });
     Object.values(out).forEach(rows => rows.sort((a, b) => b.spend - a.spend));
     return out;
-  }, [adLevelSpendRecords, dateRange, appliedCustomRange, today]);
+  }, [adLevelSpendRecords]);
 
   // Real Qualified Leads / real total leads (for CPL) for one specific ad —
   // matches leads.metaAdId, same real per-lead field already used for
   // Qualified Leads per campaign, just scoped to a single ad instead of a
-  // whole campaign's worth of leads.
-  const qualifiedLeadsForAd = (metaAdId: string): number =>
-    leads.filter(l => l.metaAdId === metaAdId && QUALIFIED_LEAD_STATUSES.includes(l.status)).length;
+  // whole campaign's worth of leads. Google leads carry no per-lead ad
+  // attribution at all (Sheets-import pipeline, not a webhook), so this
+  // correctly — not a bug — always returns 0 for a Google ad's real id,
+  // same honest gap already documented on Lead.metaAdId.
+  const qualifiedLeadsForAd = (adId: string): number =>
+    leads.filter(l => l.metaAdId === adId && QUALIFIED_LEAD_STATUSES.includes(l.status)).length;
   const cplForAd = (ad: DeepDiveAdRow): number => {
-    const syncedLeads = leads.filter(l => l.metaAdId === ad.metaAdId).length;
+    const syncedLeads = leads.filter(l => l.metaAdId === ad.adId).length;
     const totalLeads = Math.max(ad.platformReportedLeads, syncedLeads);
     return totalLeads > 0 ? ad.spend / totalLeads : 0;
   };
@@ -1411,12 +1424,12 @@ export default function AdminCampaignsPage() {
                         </tr>
                       ) : (
                         adRows.map((ad, i) => (
-                          <tr key={ad.metaAdId}>
+                          <tr key={ad.adId}>
                             <td className="px-5 py-3 text-slate-900 font-semibold">{i === 0 ? analyticsDrillView.campaign.name : ""}</td>
                             <td className="px-5 py-3">{i === 0 && <PlatformIcon platform={analyticsDrillView.campaign.platform} />}</td>
                             <td className="px-5 py-3">{ad.adSetName}</td>
-                            <td className="px-5 py-3">{ad.creativeName || ad.adName}</td>
-                            <td className="px-5 py-3">{qualifiedLeadsForAd(ad.metaAdId)}</td>
+                            <td className="px-5 py-3">{ad.creativeName || ad.adType || ad.adName || "—"}</td>
+                            <td className="px-5 py-3">{qualifiedLeadsForAd(ad.adId)}</td>
                             <td className="px-5 py-3">{cplForAd(ad).toFixed(2)}</td>
                             <td className="px-5 py-3 font-semibold text-slate-800">{formatCurrency(ad.spend)}</td>
                           </tr>
@@ -1642,8 +1655,8 @@ export default function AdminCampaignsPage() {
                   <p className="text-xs text-slate-400 italic py-4 text-center">No data yet.</p>
                 ) : (
                   typeBreakdown.map(t => (
-                    <label key={t.type} className="grid grid-cols-[1fr_64px_112px] gap-x-4 items-center py-2 text-xs cursor-pointer">
-                      <span className="flex items-center gap-2 min-w-0">
+                    <label key={t.type} className="grid grid-cols-[1fr_64px_112px] gap-x-4 items-start py-2 text-xs cursor-pointer">
+                      <span className="flex items-center gap-2 min-w-0 pt-0.5">
                         <input
                           type="checkbox"
                           checked={isTypeChecked(t.type)}
@@ -1655,8 +1668,17 @@ export default function AdminCampaignsPage() {
                         )}
                         <span className="font-semibold text-slate-700 truncate">{t.type}</span>
                       </span>
-                      <span className="text-slate-600 text-right">{t.leads.toLocaleString("en-IN")}</span>
-                      <span className="text-slate-600 text-right">{formatCurrency(t.spend)}</span>
+                      {/* Platform-reported is the headline (matches the Total
+                          row below and the top summary bar), real synced
+                          count as a subtitle — so this type's own number and
+                          the grand Total always visibly reconcile, instead of
+                          a row showing a small synced-only figure that looks
+                          like it doesn't add up to a much bigger Total. */}
+                      <span className="text-slate-600 text-right">
+                        {t.platformLeads.toLocaleString("en-IN")}
+                        <span className="block text-right text-[9px] font-normal text-slate-400">{t.leads.toLocaleString("en-IN")} synced</span>
+                      </span>
+                      <span className="text-slate-600 text-right pt-0.5">{formatCurrency(t.spend)}</span>
                     </label>
                   ))
                 )}
@@ -2111,8 +2133,8 @@ export default function AdminCampaignsPage() {
                             <ChevronDown className="h-3.5 w-3.5 shrink-0" />
                           </button>
                         </td>
-                        <td className="px-5 py-3 truncate max-w-[160px]" title={topAd?.creativeName || topAd?.adName || undefined}>
-                          {topAd ? (topAd.creativeName || topAd.adName) : <span className="text-slate-300" title="No ad-creative data synced for this campaign yet">—</span>}
+                        <td className="px-5 py-3 truncate max-w-[160px]" title={topAd ? (topAd.creativeName || topAd.adType || topAd.adName || undefined) : undefined}>
+                          {topAd ? (topAd.creativeName || topAd.adType || topAd.adName || "—") : <span className="text-slate-300" title="No ad-creative data synced for this campaign yet">—</span>}
                         </td>
                         <td className="px-5 py-3">
                           <button
