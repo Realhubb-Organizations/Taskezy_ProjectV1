@@ -3,8 +3,8 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { Bell, UserPlus, AlarmClock, Briefcase, DollarSign, Check, ChevronLeft, Repeat, AlertTriangle, Volume2, VolumeX } from "lucide-react";
-import { useApp, Notification, NotificationCategory } from "@/context/AppContext";
+import { Bell, UserPlus, AlarmClock, Briefcase, DollarSign, Check, ChevronLeft, ChevronDown, Repeat, AlertTriangle, Volume2, VolumeX } from "lucide-react";
+import { useApp, Notification, NotificationCategory, SystemType } from "@/context/AppContext";
 import { isNotificationSoundMuted, setNotificationSoundMuted } from "@/lib/notificationSound";
 
 function timeAgo(iso: string): string {
@@ -56,6 +56,15 @@ export default function NotificationBell() {
   const [activeGroupKey, setActiveGroupKey] = useState<string>("");
   const [soundMuted, setSoundMuted] = useState(false);
 
+  // Admin users see every system's notifications in one bell — a "CRM /
+  // HRMS / Finance" scope picker keeps that from turning into one long row
+  // of tabs (5 systems' worth used to get crammed together and wrap). A
+  // scoped CRM/HRMS/Finance user has nothing to pick here, so this only
+  // renders — and only matters — when activeSystem is "ADMIN".
+  const [systemScope, setSystemScope] = useState<Exclude<SystemType, "ADMIN">>("CRM");
+  const [scopeDropdownOpen, setScopeDropdownOpen] = useState(false);
+  const effectiveScope: SystemType = activeSystem === "ADMIN" ? systemScope : activeSystem;
+
   // Read from localStorage only after mount — avoids an SSR/client mismatch on first render.
   useEffect(() => {
     setSoundMuted(isNotificationSoundMuted());
@@ -96,39 +105,31 @@ export default function NotificationBell() {
     [notifications]
   );
 
+  // Scoped to effectiveScope (the admin's CRM/HRMS/Finance picker, or the
+  // only system a non-admin user has) rather than raw activeSystem — CRM is
+  // the only scope with real sub-categories, so it's the only one that gets
+  // a second-level tab row; HRMS/Finance are a single flat list each.
   const groups: NotificationGroup[] = useMemo(() => {
-    if (activeSystem === "CRM") {
+    if (effectiveScope === "CRM") {
       return [
         { key: "new-leads", label: "New Leads", emptyText: "No new leads right now.", items: newLeads },
         { key: "reminders", label: "Reminder Alerts", emptyText: "No reminders scheduled.", items: reminders },
         { key: "activity", label: "Activity Alerts", emptyText: "No other alerts.", items: crmActivity }
       ];
     }
-    if (activeSystem === "ADMIN") {
-      return [
-        { key: "new-leads", label: "CRM · New Leads", emptyText: "No new leads.", items: newLeads },
-        { key: "reminders", label: "CRM · Reminder Alerts", emptyText: "No reminders.", items: reminders },
-        { key: "activity", label: "CRM · Activity Alerts", emptyText: "No other CRM alerts.", items: crmActivity },
-        { key: "hrms", label: "HRMS", emptyText: "No HRMS notifications.", items: hrmsNotifs },
-        { key: "finance", label: "Finance", emptyText: "No finance notifications.", items: financeNotifs }
-      ];
+    if (effectiveScope === "HRMS") {
+      return [{ key: "hrms", label: "HRMS", emptyText: "No HRMS notifications.", items: hrmsNotifs }];
     }
-    if (activeSystem === "HRMS") {
-      return [{ key: "hrms", label: "HRMS Alerts", emptyText: "No HRMS notifications.", items: hrmsNotifs }];
-    }
-    if (activeSystem === "FINANCE") {
-      return [{ key: "finance", label: "Finance Alerts", emptyText: "No finance notifications.", items: financeNotifs }];
-    }
-    return [];
-  }, [activeSystem, newLeads, reminders, crmActivity, hrmsNotifs, financeNotifs]);
+    return [{ key: "finance", label: "Finance", emptyText: "No finance notifications.", items: financeNotifs }];
+  }, [effectiveScope, newLeads, reminders, crmActivity, hrmsNotifs, financeNotifs]);
 
-  // Keep the selected dropdown group valid whenever the system context (or panel) changes
+  // Keep the selected sub-tab valid whenever the scope (or panel) changes
   useEffect(() => {
     if (!groups.some(g => g.key === activeGroupKey)) {
       setActiveGroupKey(groups[0]?.key || "");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeSystem, isOpen]);
+  }, [effectiveScope, isOpen]);
 
   const activeGroup = groups.find(g => g.key === activeGroupKey) || groups[0];
 
@@ -171,11 +172,7 @@ export default function NotificationBell() {
     );
   };
 
-  const panelTitle =
-    activeSystem === "CRM" ? "CRM Notifications" :
-    activeSystem === "HRMS" ? "HRMS Notifications" :
-    activeSystem === "FINANCE" ? "Finance Notifications" :
-    "Global Notification Center";
+  const scopeLabel = (s: SystemType) => (s === "FINANCE" ? "Finance" : s);
 
   return (
     <>
@@ -200,14 +197,47 @@ export default function NotificationBell() {
           <div className="fixed inset-0 bg-slate-900/20" onClick={() => setIsOpen(false)} />
           <div className="fixed inset-y-0 right-0 w-full max-w-sm bg-white border-l border-slate-200 shadow-2xl flex flex-col animate-slide-in">
             {/* Header */}
-            <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-slate-100 shrink-0">
-              <div className="flex items-center gap-1.5">
-                <button onClick={() => setIsOpen(false)} className="text-slate-500 hover:text-slate-800 -ml-1.5 p-1">
+            <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-slate-100 shrink-0 gap-2">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <button onClick={() => setIsOpen(false)} className="text-slate-500 hover:text-slate-800 -ml-1.5 p-1 shrink-0">
                   <ChevronLeft className="h-5 w-5" />
                 </button>
-                <h3 className="text-base font-extrabold text-slate-900">{panelTitle}</h3>
+                <h3 className="text-base font-extrabold text-slate-900 shrink-0">Notifications</h3>
+                {/* System scope picker — only an admin (who sees every
+                    system in one bell) has anything to choose here. */}
+                {activeSystem === "ADMIN" && (
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setScopeDropdownOpen(o => !o)}
+                      className="flex items-center gap-1 bg-slate-100 hover:bg-slate-200 rounded-lg pl-2 pr-1.5 py-1 text-[11px] font-bold text-slate-700 transition-colors"
+                    >
+                      {scopeLabel(systemScope)}
+                      <ChevronDown className={`h-3 w-3 text-slate-400 transition-transform ${scopeDropdownOpen ? "rotate-180" : ""}`} />
+                    </button>
+                    {scopeDropdownOpen && (
+                      <>
+                        <div className="fixed inset-0 z-[105]" onClick={() => setScopeDropdownOpen(false)} />
+                        <div className="absolute left-0 top-full mt-1.5 w-32 bg-white border border-slate-200 rounded-xl shadow-lg py-1 z-[110] overflow-hidden">
+                          {(["CRM", "HRMS", "FINANCE"] as const).map(s => (
+                            <button
+                              key={s}
+                              type="button"
+                              onClick={() => { setSystemScope(s); setScopeDropdownOpen(false); }}
+                              className={`w-full text-left px-3 py-1.5 text-xs font-bold transition-colors ${
+                                systemScope === s ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"
+                              }`}
+                            >
+                              {scopeLabel(s)}
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 shrink-0">
                 <button
                   onClick={toggleSound}
                   className="text-slate-400 hover:text-slate-600"
@@ -224,8 +254,9 @@ export default function NotificationBell() {
               </div>
             </div>
 
-            {/* Group filter — segmented pill tabs, same toggle-switcher style
-                as the Data Calling page's tab bar, instead of a native select. */}
+            {/* Sub-tab filter (CRM only, e.g. New Leads/Reminder/Activity) —
+                segmented pill tabs, same toggle-switcher style as the Data
+                Calling page's tab bar, instead of a native select. */}
             {groups.length > 1 && (
               <div className="px-5 pt-3 pb-1 shrink-0">
                 <div className="bg-slate-200/70 p-1 rounded-xl flex items-center gap-1 flex-wrap">
