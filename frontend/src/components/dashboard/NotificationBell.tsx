@@ -49,7 +49,7 @@ interface NotificationGroup {
 }
 
 export default function NotificationBell() {
-  const { notifications, activeSystem, markNotificationRead, markAllNotificationsRead } = useApp();
+  const { notifications, activeSystem, markNotificationRead } = useApp();
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [activeGroupKey, setActiveGroupKey] = useState<string>("");
@@ -190,48 +190,41 @@ export default function NotificationBell() {
                   <ChevronLeft className="h-5 w-5" />
                 </button>
                 <h3 className="text-base font-extrabold text-slate-900 shrink-0">Notifications</h3>
-                {/* System scope picker — only an admin (who sees every
-                    system in one bell) has anything to choose here. */}
-                {activeSystem === "ADMIN" && (
-                  <div className="relative">
-                    <button
-                      type="button"
-                      onClick={() => setScopeDropdownOpen(o => !o)}
-                      className="flex items-center gap-1 bg-slate-100 hover:bg-slate-200 rounded-lg pl-2 pr-1.5 py-1 text-[11px] font-bold text-slate-700 transition-colors"
-                    >
-                      {scopeLabel(systemScope)}
-                      <ChevronDown className={`h-3 w-3 text-slate-400 transition-transform ${scopeDropdownOpen ? "rotate-180" : ""}`} />
-                    </button>
-                    {scopeDropdownOpen && (
-                      <>
-                        <div className="fixed inset-0 z-[105]" onClick={() => setScopeDropdownOpen(false)} />
-                        <div className="absolute left-0 top-full mt-1.5 w-32 bg-white border border-slate-200 rounded-xl shadow-lg py-1 z-[110] overflow-hidden">
-                          {(["CRM", "HRMS", "FINANCE"] as const).map(s => (
-                            <button
-                              key={s}
-                              type="button"
-                              onClick={() => { setSystemScope(s); setScopeDropdownOpen(false); }}
-                              className={`w-full text-left px-3 py-1.5 text-xs font-bold transition-colors ${
-                                systemScope === s ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"
-                              }`}
-                            >
-                              {scopeLabel(s)}
-                            </button>
-                          ))}
-                        </div>
-                      </>
-                    )}
-                  </div>
-                )}
               </div>
-              <div className="flex items-center gap-3 shrink-0">
-                <button
-                  onClick={() => markAllNotificationsRead(activeSystem === "ADMIN" ? undefined : activeSystem)}
-                  className="text-[10px] font-bold text-brand-600 hover:text-brand-700"
-                >
-                  Mark all read
-                </button>
-              </div>
+              {/* System scope picker — only an admin (who sees every system
+                  in one bell) has anything to choose here. Sits where the
+                  old "Mark all read" action used to be. */}
+              {activeSystem === "ADMIN" && (
+                <div className="relative shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setScopeDropdownOpen(o => !o)}
+                    className="flex items-center gap-1 bg-slate-100 hover:bg-slate-200 rounded-lg pl-2 pr-1.5 py-1 text-[11px] font-bold text-slate-700 transition-colors"
+                  >
+                    {scopeLabel(systemScope)}
+                    <ChevronDown className={`h-3 w-3 text-slate-400 transition-transform ${scopeDropdownOpen ? "rotate-180" : ""}`} />
+                  </button>
+                  {scopeDropdownOpen && (
+                    <>
+                      <div className="fixed inset-0 z-[105]" onClick={() => setScopeDropdownOpen(false)} />
+                      <div className="absolute right-0 top-full mt-1.5 w-32 bg-white border border-slate-200 rounded-xl shadow-lg py-1 z-[110] overflow-hidden">
+                        {(["CRM", "HRMS", "FINANCE"] as const).map(s => (
+                          <button
+                            key={s}
+                            type="button"
+                            onClick={() => { setSystemScope(s); setScopeDropdownOpen(false); }}
+                            className={`w-full text-left px-3 py-1.5 text-xs font-bold transition-colors ${
+                              systemScope === s ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"
+                            }`}
+                          >
+                            {scopeLabel(s)}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Sub-tab filter (CRM only, e.g. New Leads/Reminder/Activity) —
@@ -239,12 +232,12 @@ export default function NotificationBell() {
                 Calling page's tab bar, instead of a native select. */}
             {groups.length > 1 && (
               <div className="px-5 pt-3 pb-1 shrink-0">
-                <div className="bg-slate-200/70 p-1 rounded-xl flex items-center gap-1 overflow-x-auto">
+                <div className="bg-slate-200/70 p-1 rounded-xl flex items-center gap-1">
                   {groups.map(g => (
                     <button
                       key={g.key}
                       onClick={() => setActiveGroupKey(g.key)}
-                      className={`flex-1 px-2 py-1.5 rounded-lg text-[10px] font-semibold whitespace-nowrap transition-all ${
+                      className={`flex-1 min-w-0 px-1.5 py-1.5 rounded-lg text-[9px] font-semibold whitespace-nowrap overflow-hidden text-ellipsis transition-all ${
                         activeGroupKey === g.key ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-800"
                       }`}
                     >
