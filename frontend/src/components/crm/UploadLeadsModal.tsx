@@ -2,7 +2,50 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { X, UploadCloud, Download, ChevronDown, Users, PackageOpen } from "lucide-react";
+import { X, UploadCloud, Download, ChevronDown } from "lucide-react";
+
+// Flat-illustration graphic (cloud upload + two people packing a box) —
+// purely decorative, hand-drawn to match the reference mockup's composition
+// and palette rather than pulled from an icon set, since no matching asset
+// existed in this codebase.
+function UploadLeadsIllustration({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 220 200" className={className} xmlns="http://www.w3.org/2000/svg">
+      <path
+        d="M72 58c0-13 10.5-23 23-23 9 0 16.5 5 20.5 12.5 3.5-2.5 8-4 12.5-4 13 0 23.5 10.5 23.5 23.5S141 90.5 128 90.5H94c-13 0-22-10-22-22.5z"
+        fill="#7EB2F5"
+      />
+      <path d="M110 49v27M99.5 60l10.5-11 10.5 11" stroke="#FFFFFF" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+
+      <path d="M53 125l32-16 32 16" stroke="#4472D6" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+      <rect x="53" y="125" width="64" height="44" rx="4" fill="#5B8CE8" />
+      <rect x="53" y="125" width="64" height="11" fill="#4472D6" />
+
+      <rect x="60" y="103" width="10" height="24" rx="2" fill="#3E9B5C" transform="rotate(-10 65 115)" />
+      <rect x="99" y="106" width="9" height="20" rx="2" fill="#2E3A66" transform="rotate(12 103 116)" />
+
+      <path d="M88 95l14-18 14 18-14 14z" fill="#EE5586" />
+      <circle cx="102" cy="95" r="4" fill="#C23A63" />
+      <path d="M102 109l-3 10 5-3 4 6" stroke="#EE5586" strokeWidth="2" strokeLinecap="round" fill="none" />
+
+      <circle cx="41" cy="83" r="9.5" fill="#D99A73" />
+      <path d="M31.5 95c0-6.5 4.5-11.5 9.5-11.5s9.5 5 9.5 11.5v20c0 4-3 7-7 7h-5c-4 0-7-3-7-7z" fill="#3E9B5C" />
+      <path d="M48 92l16-8" stroke="#3E9B5C" strokeWidth="7" strokeLinecap="round" />
+      <rect x="30" y="120" width="8" height="24" rx="3.5" fill="#F06AA0" />
+      <rect x="43" y="120" width="8" height="24" rx="3.5" fill="#F06AA0" />
+      <ellipse cx="34" cy="146" rx="5" ry="3" fill="#2E3A45" />
+      <ellipse cx="47" cy="146" rx="5" ry="3" fill="#2E3A45" />
+
+      <circle cx="152" cy="88" r="9.5" fill="#D99A73" />
+      <path d="M142.5 100c0-6.5 4.5-11.5 9.5-11.5s9.5 5 9.5 11.5v18c0 4-3 7-7 7h-5c-4 0-7-3-7-7z" fill="#E8447A" />
+      <path d="M144 106l-16 6" stroke="#E8447A" strokeWidth="7" strokeLinecap="round" />
+      <rect x="141" y="122" width="8" height="24" rx="3.5" fill="#6A3FA0" />
+      <rect x="154" y="122" width="8" height="24" rx="3.5" fill="#6A3FA0" />
+      <ellipse cx="145" cy="148" rx="5" ry="3" fill="#2E3A45" />
+      <ellipse cx="158" cy="148" rx="5" ry="3" fill="#2E3A45" />
+    </svg>
+  );
+}
 
 const SOURCE_HISTORY_KEY = "taskezy_data_calling_source_history";
 const DEFAULT_SOURCE_HISTORY = ["Kashmiri Data", "Amazon Data", "Real2gro Data", "Top prior Data"];
@@ -252,24 +295,21 @@ export default function UploadLeadsModal({ isOpen, onClose, onUpload, properties
                 )}
               </div>
 
-              <button
-                type="button"
-                onClick={triggerDownloadTemplate}
-                className="inline-flex items-center gap-1.5 text-[11px] font-extrabold text-[#0B1E6E] hover:underline"
-              >
-                <Download className="h-3.5 w-3.5" />
-                Download Template
-              </button>
+              <div className="flex justify-center">
+                <button
+                  type="button"
+                  onClick={triggerDownloadTemplate}
+                  className="inline-flex items-center gap-1.5 text-[11px] font-extrabold text-[#0B1E6E] hover:underline"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  Download Template
+                </button>
+              </div>
             </div>
 
             {/* Decorative illustration — purely visual, hidden on narrow screens */}
             <div className="hidden sm:flex items-center justify-center">
-              <div className="relative h-28 w-28 flex items-center justify-center">
-                <div className="absolute inset-0 rounded-full bg-blue-50" />
-                <UploadCloud className="h-12 w-12 text-blue-300 absolute -top-1" />
-                <PackageOpen className="h-9 w-9 text-indigo-400 absolute bottom-2 left-2" />
-                <Users className="h-7 w-7 text-pink-400 absolute bottom-3 right-2" />
-              </div>
+              <UploadLeadsIllustration className="h-36 w-36" />
             </div>
           </div>
 
