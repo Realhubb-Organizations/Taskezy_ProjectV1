@@ -3,7 +3,8 @@
 import React, { useState, useRef, useMemo, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useApp, Lead } from "@/context/AppContext";
-import { ChevronDown, ChevronRight, Calendar, Search, Sliders, Minus, X, Copy, Users } from "lucide-react";
+import { ChevronDown, ChevronRight, Calendar, Search, Sliders, Minus, X, Copy, Users, Plus, Check } from "lucide-react";
+import UploadLeadsModal from "@/components/crm/UploadLeadsModal";
 
 const QUALIFIED_LEAD_STATUSES = ["Interested", "Connected", "Visit Schedule", "Site Visit", "Booking Done", "Booked"];
 const FOLLOW_UP_LEAD_STATUSES = ["Follow-ups", "Call Back"];
@@ -73,6 +74,10 @@ export default function DataCallingPage() {
   // agent has no one to hand leads off to in that sense, so the checkbox
   // column and both toolbar buttons stay admin-only.
   const isAdmin = activeRole === "ADMIN";
+  const propertiesList = properties.map(p => p.name);
+
+  const [isUploadLeadsOpen, setIsUploadLeadsOpen] = useState(false);
+  const [uploadSuccessMsg, setUploadSuccessMsg] = useState("");
 
   const [activeTab, setActiveTab] = useState<"DataCalling" | "Analytics">("DataCalling");
 
@@ -460,7 +465,7 @@ export default function DataCallingPage() {
   return (
     <div className="space-y-4 pb-8 animate-fade-in text-slate-800">
       {/* Top Toggle Switcher: Data Calling vs Data Calling Analytics */}
-      <div className="flex items-center gap-1.5">
+      <div className="flex items-center justify-between gap-1.5">
         <div className="bg-slate-200/70 p-1 rounded-xl flex items-center gap-1">
           <button
             onClick={() => setActiveTab("DataCalling")}
@@ -479,7 +484,23 @@ export default function DataCallingPage() {
             Data Calling Analytics
           </button>
         </div>
+        {isAdmin && (
+          <button
+            onClick={() => setIsUploadLeadsOpen(true)}
+            className="inline-flex items-center gap-2 bg-[#0B1E6E] hover:bg-[#081650] text-white px-4 py-2.5 rounded-lg text-xs font-bold transition-all shadow-md cursor-pointer shrink-0"
+          >
+            <Plus className="h-4 w-4" />
+            Upload Leads
+          </button>
+        )}
       </div>
+
+      {uploadSuccessMsg && (
+        <div className="p-2.5 bg-emerald-50 border border-emerald-100 text-[11px] text-emerald-700 rounded-xl font-bold flex items-center gap-2 animate-fade-in shadow-sm">
+          <Check className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+          <span>{uploadSuccessMsg}</span>
+        </div>
+      )}
 
       {/* Date Filter & Metrics — same unified card pattern as the CRM
           Dashboard/Campaigns pages: a header bar (date range) sitting
@@ -1340,6 +1361,16 @@ export default function DataCallingPage() {
         </div>,
         document.body
       )}
+
+      <UploadLeadsModal
+        isOpen={isUploadLeadsOpen}
+        onClose={() => setIsUploadLeadsOpen(false)}
+        propertiesList={propertiesList}
+        onUpload={({ fileName }) => {
+          setUploadSuccessMsg(`Leads from "${fileName}" queued for import.`);
+          setTimeout(() => setUploadSuccessMsg(""), 4000);
+        }}
+      />
     </div>
   );
 }
