@@ -78,6 +78,18 @@ async function syncOnce(): Promise<void> {
       // the campaign-level insights above, so a failure here (e.g. an ad
       // account missing ads_management on some ad sets) never blocks the
       // campaign-level spend sync that already worked before this existed.
+      //
+      // An INACTIVE campaign's ad tree is permanent history once it's been
+      // backfilled once — re-fetching all of it (ad sets + ads + one
+      // insights call per ad) for every one of potentially 100+ ended
+      // campaigns on every 6h cycle is what exhausts Meta's per-ad-account
+      // rate limit before the still-ACTIVE campaigns (the ones that actually
+      // need fresh numbers) get a turn. So finished campaigns are synced
+      // once, then skipped; only ACTIVE campaigns are refreshed every cycle.
+      if (status === "INACTIVE" && (await metaRepo.hasAdSetsForCampaign(campaign.id))) {
+        continue;
+      }
+
       try {
         const adSets = await getAdSetsForCampaign(campaign.id, account.userToken);
         for (const adSet of adSets) {

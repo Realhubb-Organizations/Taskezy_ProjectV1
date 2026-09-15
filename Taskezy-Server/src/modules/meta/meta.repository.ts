@@ -164,6 +164,19 @@ export async function upsertSpendRecord(input: UpsertSpendInput): Promise<void> 
 // --- Ad sets / ads / per-ad spend (Campaign Deep Dive's real Ad Set Name /
 // Ad creative Name columns — see jobs/metaAdSpendSync.ts) ---
 
+/**
+ * A finished (INACTIVE) campaign's ad sets/ads/creative names and daily
+ * spend are permanent history — they don't change once the campaign stops
+ * running. Used to skip re-fetching them every sync cycle once backfilled
+ * once, since re-fetching all 127 campaigns' full ad trees every 6h is what
+ * was exhausting Meta's per-ad-account rate limit before any of the later,
+ * still-ACTIVE campaigns got a turn.
+ */
+export async function hasAdSetsForCampaign(campaignId: string): Promise<boolean> {
+  const result = await pool.query("SELECT 1 FROM meta_ad_sets WHERE campaign_id = $1 LIMIT 1", [campaignId]);
+  return (result.rowCount ?? 0) > 0;
+}
+
 export interface UpsertAdSetInput {
   id: string;
   campaignId: string;
