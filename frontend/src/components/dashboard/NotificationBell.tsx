@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { Bell, UserPlus, AlarmClock, Briefcase, DollarSign, Check, ChevronDown, Repeat, AlertTriangle, Volume2, VolumeX } from "lucide-react";
+import { Bell, UserPlus, AlarmClock, Briefcase, DollarSign, Check, ChevronLeft, Repeat, AlertTriangle, Volume2, VolumeX } from "lucide-react";
 import { useApp, Notification, NotificationCategory } from "@/context/AppContext";
 import { isNotificationSoundMuted, setNotificationSoundMuted } from "@/lib/notificationSound";
 
@@ -54,7 +55,6 @@ export default function NotificationBell() {
   const [isOpen, setIsOpen] = useState(false);
   const [activeGroupKey, setActiveGroupKey] = useState<string>("");
   const [soundMuted, setSoundMuted] = useState(false);
-  const panelRef = useRef<HTMLDivElement>(null);
 
   // Read from localStorage only after mount — avoids an SSR/client mismatch on first render.
   useEffect(() => {
@@ -66,16 +66,6 @@ export default function NotificationBell() {
     setSoundMuted(next);
     setNotificationSoundMuted(next);
   };
-
-  useEffect(() => {
-    function handleOutside(e: MouseEvent) {
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
-        setIsOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleOutside);
-    return () => document.removeEventListener("mousedown", handleOutside);
-  }, []);
 
   const scopedNotifications = activeSystem === "ADMIN"
     ? notifications
@@ -188,9 +178,9 @@ export default function NotificationBell() {
     "Global Notification Center";
 
   return (
-    <div className="relative" ref={panelRef}>
+    <>
       <button
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={() => setIsOpen(true)}
         className="relative p-2 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors"
         title="Notifications"
       >
@@ -202,63 +192,72 @@ export default function NotificationBell() {
         )}
       </button>
 
-      {/* Fixed + viewport-inset on mobile so a 320px-wide panel can never
-          overflow the screen edge regardless of where the bell sits in the
-          header; reverts to a normally-anchored dropdown from sm: up. */}
-      {isOpen && (
-        <div className="fixed left-3 right-3 top-14 sm:absolute sm:left-auto sm:right-0 sm:top-auto sm:mt-2 sm:w-96 bg-white border border-slate-200 rounded-2xl shadow-2xl z-50 overflow-hidden animate-fade-in">
-          {/* Header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 bg-slate-50/50">
-            <h3 className="text-xs font-extrabold text-slate-800">{panelTitle}</h3>
-            <div className="flex items-center gap-3">
-              <button
-                onClick={toggleSound}
-                className="text-slate-400 hover:text-slate-600"
-                title={soundMuted ? "Unmute notification sound" : "Mute notification sound"}
-              >
-                {soundMuted ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
-              </button>
-              <button
-                onClick={() => markAllNotificationsRead(activeSystem === "ADMIN" ? undefined : activeSystem)}
-                className="text-[10px] font-bold text-brand-600 hover:text-brand-700 flex items-center gap-1"
-              >
-                <Check className="h-3 w-3" /> Mark all read
-              </button>
-            </div>
-          </div>
-
-          {/* Group selector dropdown */}
-          {groups.length > 1 && (
-            <div className="px-4 py-2.5 border-b border-slate-100 bg-white">
-              <div className="relative">
-                <select
-                  value={activeGroupKey}
-                  onChange={(e) => setActiveGroupKey(e.target.value)}
-                  className="w-full appearance-none bg-slate-50 border border-slate-200 rounded-lg pl-3 pr-8 py-2 text-[11px] font-bold text-slate-700 focus:outline-none focus:border-brand-500"
+      {/* Full-height right-docked drawer — same createPortal + slide-in
+          pattern as the Filter drawer elsewhere in this app, instead of a
+          small anchored dropdown. */}
+      {isOpen && createPortal(
+        <div className="fixed inset-0 z-[100]">
+          <div className="fixed inset-0 bg-slate-900/20" onClick={() => setIsOpen(false)} />
+          <div className="fixed inset-y-0 right-0 w-full max-w-sm bg-white border-l border-slate-200 shadow-2xl flex flex-col animate-slide-in">
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-slate-100 shrink-0">
+              <div className="flex items-center gap-1.5">
+                <button onClick={() => setIsOpen(false)} className="text-slate-500 hover:text-slate-800 -ml-1.5 p-1">
+                  <ChevronLeft className="h-5 w-5" />
+                </button>
+                <h3 className="text-base font-extrabold text-slate-900">{panelTitle}</h3>
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={toggleSound}
+                  className="text-slate-400 hover:text-slate-600"
+                  title={soundMuted ? "Unmute notification sound" : "Mute notification sound"}
                 >
-                  {groups.map(g => (
-                    <option key={g.key} value={g.key}>
-                      {g.label} {g.items.length > 0 ? `(${g.items.length})` : ""}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown className="h-3.5 w-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  {soundMuted ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
+                </button>
+                <button
+                  onClick={() => markAllNotificationsRead(activeSystem === "ADMIN" ? undefined : activeSystem)}
+                  className="text-[10px] font-bold text-brand-600 hover:text-brand-700 flex items-center gap-1"
+                >
+                  <Check className="h-3 w-3" /> Mark all read
+                </button>
               </div>
             </div>
-          )}
 
-          {/* Active group content */}
-          <div className="max-h-[24rem] overflow-y-auto">
-            {!activeGroup || activeGroup.items.length === 0 ? (
-              <p className="px-4 py-6 text-center text-[11px] text-slate-400 italic">
-                {activeGroup?.emptyText || "No notifications."}
-              </p>
-            ) : (
-              activeGroup.items.map(renderItem)
+            {/* Group filter — segmented pill tabs, same toggle-switcher style
+                as the Data Calling page's tab bar, instead of a native select. */}
+            {groups.length > 1 && (
+              <div className="px-5 pt-3 pb-1 shrink-0">
+                <div className="bg-slate-200/70 p-1 rounded-xl flex items-center gap-1 flex-wrap">
+                  {groups.map(g => (
+                    <button
+                      key={g.key}
+                      onClick={() => setActiveGroupKey(g.key)}
+                      className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all ${
+                        activeGroupKey === g.key ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-800"
+                      }`}
+                    >
+                      {g.label}{g.items.length > 0 ? ` (${g.items.length})` : ""}
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
+
+            {/* Active group content */}
+            <div className="flex-1 overflow-y-auto">
+              {!activeGroup || activeGroup.items.length === 0 ? (
+                <p className="px-4 py-6 text-center text-[11px] text-slate-400 italic">
+                  {activeGroup?.emptyText || "No notifications."}
+                </p>
+              ) : (
+                activeGroup.items.map(renderItem)
+              )}
+            </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
-    </div>
+    </>
   );
 }
