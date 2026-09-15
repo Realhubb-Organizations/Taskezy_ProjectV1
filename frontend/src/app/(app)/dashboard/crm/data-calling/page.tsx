@@ -1245,85 +1245,84 @@ export default function DataCallingPage() {
               </div>
             </div>
 
-            {/* Source Performance */}
-            <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden">
-              <div className="px-5 py-3.5 border-b border-slate-200/80">
-                <h3 className="text-sm font-bold text-slate-900">Source Performance</h3>
-              </div>
+            {/* Source Performance — flat, borderless card: no header divider,
+                larger type throughout, generous row/column spacing. */}
+            <div className="bg-white rounded-2xl p-6">
+              <h3 className="text-xl font-bold text-slate-900 mb-6">Source Performance</h3>
               <div className="overflow-auto max-h-[55vh]">
                 <table className="w-full text-left border-collapse min-w-[900px]">
                   <thead className="sticky top-0 z-10 bg-white">
-                    <tr className="border-b border-slate-200/80 text-[12px] font-bold text-slate-900">
-                      <th className="px-5 py-3 w-48">
+                    <tr className="border-b border-slate-200 text-sm font-bold text-slate-900">
+                      <th className="pr-6 pb-4 w-48">
                         {sourceSearchOpen ? (
-                          <div className="flex items-center gap-1">
+                          <div className="flex items-center gap-1.5">
                             <input
                               autoFocus
                               value={sourceSearch}
                               onChange={(e) => setSourceSearch(e.target.value)}
                               placeholder="Filter source..."
-                              className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs font-normal focus:outline-none w-36"
+                              className="bg-slate-50 border border-blue-400 rounded px-2 py-1 text-sm font-normal focus:outline-none w-36"
                             />
                             <button onClick={() => { setSourceSearch(""); setSourceSearchOpen(false); }} className="text-slate-400 hover:text-slate-600">
-                              <X className="h-3.5 w-3.5" />
+                              <X className="h-4 w-4" />
                             </button>
                           </div>
                         ) : (
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-2">
                             <span>Sub-Source Name</span>
                             <button onClick={() => setSourceSearchOpen(true)} className="text-slate-400 hover:text-slate-700" title="Search sub-source">
-                              <Search className="h-3.5 w-3.5" />
+                              <Search className="h-4 w-4" />
                             </button>
                           </div>
                         )}
                       </th>
-                      <th className="px-5 py-3 whitespace-nowrap">Total Leads</th>
-                      <th className="px-5 py-3 whitespace-nowrap">Calls Made</th>
-                      <th className="px-5 py-3 whitespace-nowrap">Connected</th>
-                      <th className="px-5 py-3 whitespace-nowrap">RNR</th>
-                      <th className="px-5 py-3 whitespace-nowrap">Qualification Rate</th>
-                      {analyticsVisibleColumns.qualifiedLeads && <th className="px-5 py-3 whitespace-nowrap">Qualified Leads</th>}
-                      {analyticsVisibleColumns.unqualifiedLeads && <th className="px-5 py-3 whitespace-nowrap">Unqualified Leads</th>}
-                      {analyticsVisibleColumns.siteVisit && <th className="px-5 py-3 whitespace-nowrap">Site Visits</th>}
-                      {analyticsVisibleColumns.status && <th className="px-5 py-3 whitespace-nowrap">Status</th>}
-                      {analyticsVisibleColumns.cpl && <th className="px-5 py-3 whitespace-nowrap">CPL</th>}
-                      {analyticsVisibleColumns.qcpl && <th className="px-5 py-3 whitespace-nowrap">QCPL</th>}
-                      {analyticsVisibleColumns.ctr && <th className="px-5 py-3 whitespace-nowrap">CTR</th>}
-                      {analyticsVisibleColumns.clicks && <th className="px-5 py-3 whitespace-nowrap">Clicks</th>}
-                      {analyticsVisibleColumns.impressions && <th className="px-5 py-3 whitespace-nowrap">Impressions</th>}
-                      {analyticsVisibleColumns.adSetName && <th className="px-5 py-3 whitespace-nowrap">Ad set name</th>}
-                      {analyticsVisibleColumns.source && <th className="px-5 py-3 whitespace-nowrap">Source</th>}
-                      {analyticsVisibleColumns.date && <th className="px-5 py-3 whitespace-nowrap">Date</th>}
+                      <th className="px-6 pb-4 whitespace-nowrap">Total Leads</th>
+                      <th className="px-6 pb-4 whitespace-nowrap">Calls Made</th>
+                      <th className="px-6 pb-4 whitespace-nowrap">Connected</th>
+                      <th className="px-6 pb-4 whitespace-nowrap">Qualified Leads</th>
+                      <th className="px-6 pb-4 whitespace-nowrap">RNR</th>
+                      <th className="px-6 pb-4 whitespace-nowrap">Qualification Rate</th>
+                      {analyticsVisibleColumns.unqualifiedLeads && <th className="px-6 pb-4 whitespace-nowrap">Unqualified Leads</th>}
+                      {analyticsVisibleColumns.siteVisit && <th className="px-6 pb-4 whitespace-nowrap">Site Visits</th>}
+                      {analyticsVisibleColumns.status && <th className="px-6 pb-4 whitespace-nowrap">Status</th>}
+                      {analyticsVisibleColumns.cpl && <th className="px-6 pb-4 whitespace-nowrap">CPL</th>}
+                      {analyticsVisibleColumns.qcpl && <th className="px-6 pb-4 whitespace-nowrap">QCPL</th>}
+                      {analyticsVisibleColumns.ctr && <th className="px-6 pb-4 whitespace-nowrap">CTR</th>}
+                      {analyticsVisibleColumns.clicks && <th className="px-6 pb-4 whitespace-nowrap">Clicks</th>}
+                      {analyticsVisibleColumns.impressions && <th className="px-6 pb-4 whitespace-nowrap">Impressions</th>}
+                      {analyticsVisibleColumns.adSetName && <th className="px-6 pb-4 whitespace-nowrap">Ad set name</th>}
+                      {analyticsVisibleColumns.source && <th className="px-6 pb-4 whitespace-nowrap">Source</th>}
+                      {analyticsVisibleColumns.date && <th className="px-6 pb-4 whitespace-nowrap">Date</th>}
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100 text-[13px] text-slate-700">
+                  <tbody className="divide-y divide-slate-100 text-sm text-slate-700">
                     {filteredSourceRows.length === 0 ? (
                       <tr>
-                        <td colSpan={6 + ANALYTICS_COLUMNS.filter(c => analyticsVisibleColumns[c.key]).length} className="px-5 py-8 text-center text-slate-400 italic">
+                        <td colSpan={7 + ANALYTICS_COLUMNS.filter(c => c.key !== "qualifiedLeads" && analyticsVisibleColumns[c.key]).length} className="px-6 py-8 text-center text-slate-400 italic">
                           No data-call source activity found.
                         </td>
                       </tr>
                     ) : (
                       filteredSourceRows.map(r => (
                         <tr key={r.name} className="hover:bg-slate-50/50 transition-colors">
-                          <td className="px-5 py-3 font-semibold text-slate-900">{r.name}</td>
-                          <td className="px-5 py-3">{r.totalLeads}</td>
-                          <td className="px-5 py-3">{r.callsMade}</td>
-                          <td className="px-5 py-3">{r.connected}</td>
-                          <td className="px-5 py-3">{r.rnr}</td>
-                          <td className="px-5 py-3">{r.qualificationRate}</td>
-                          {analyticsVisibleColumns.qualifiedLeads && <td className="px-5 py-3">{r.qualifiedLeads}</td>}
-                          {analyticsVisibleColumns.unqualifiedLeads && <td className="px-5 py-3">{r.unqualifiedLeads}</td>}
-                          {analyticsVisibleColumns.siteVisit && <td className="px-5 py-3">{r.siteVisits}</td>}
-                          {analyticsVisibleColumns.status && <td className="px-5 py-3 text-slate-300" title="Not applicable — this is an aggregate row, not a single lead">—</td>}
-                          {analyticsVisibleColumns.cpl && <td className="px-5 py-3 text-slate-300" title="No spend tracking exists for data-call sources">—</td>}
-                          {analyticsVisibleColumns.qcpl && <td className="px-5 py-3 text-slate-300" title="No spend tracking exists for data-call sources">—</td>}
-                          {analyticsVisibleColumns.ctr && <td className="px-5 py-3 text-slate-300" title="No click/impression tracking exists for data-call sources">—</td>}
-                          {analyticsVisibleColumns.clicks && <td className="px-5 py-3 text-slate-300" title="No click tracking exists for data-call sources">—</td>}
-                          {analyticsVisibleColumns.impressions && <td className="px-5 py-3 text-slate-300" title="No impression tracking exists for data-call sources">—</td>}
-                          {analyticsVisibleColumns.adSetName && <td className="px-5 py-3 text-slate-300" title="No ad-set tracking exists for data-call sources">—</td>}
-                          {analyticsVisibleColumns.source && <td className="px-5 py-3">{r.name}</td>}
-                          {analyticsVisibleColumns.date && <td className="px-5 py-3 text-slate-300" title="Not applicable — this is an aggregate row, not a single lead">—</td>}
+                          <td className="pr-6 py-5 font-medium text-slate-900">{r.name}</td>
+                          <td className="px-6 py-5">{r.totalLeads.toLocaleString()}</td>
+                          <td className="px-6 py-5">{r.callsMade.toLocaleString()}</td>
+                          <td className="px-6 py-5">{r.connected.toLocaleString()}</td>
+                          <td className="px-6 py-5">{r.qualifiedLeads.toLocaleString()}</td>
+                          <td className="px-6 py-5">{r.rnr.toLocaleString()}</td>
+                          <td className="px-6 py-5">{r.qualificationRate}</td>
+                          {analyticsVisibleColumns.unqualifiedLeads && <td className="px-6 py-5">{r.unqualifiedLeads.toLocaleString()}</td>}
+                          {analyticsVisibleColumns.siteVisit && <td className="px-6 py-5">{r.siteVisits.toLocaleString()}</td>}
+                          {analyticsVisibleColumns.status && <td className="px-6 py-5 text-slate-300" title="Not applicable — this is an aggregate row, not a single lead">—</td>}
+                          {analyticsVisibleColumns.cpl && <td className="px-6 py-5 text-slate-300" title="No spend tracking exists for data-call sources">—</td>}
+                          {analyticsVisibleColumns.qcpl && <td className="px-6 py-5 text-slate-300" title="No spend tracking exists for data-call sources">—</td>}
+                          {analyticsVisibleColumns.ctr && <td className="px-6 py-5 text-slate-300" title="No click/impression tracking exists for data-call sources">—</td>}
+                          {analyticsVisibleColumns.clicks && <td className="px-6 py-5 text-slate-300" title="No click tracking exists for data-call sources">—</td>}
+                          {analyticsVisibleColumns.impressions && <td className="px-6 py-5 text-slate-300" title="No impression tracking exists for data-call sources">—</td>}
+                          {analyticsVisibleColumns.adSetName && <td className="px-6 py-5 text-slate-300" title="No ad-set tracking exists for data-call sources">—</td>}
+                          {analyticsVisibleColumns.source && <td className="px-6 py-5">{r.name}</td>}
+                          {analyticsVisibleColumns.date && <td className="px-6 py-5 text-slate-300" title="Not applicable — this is an aggregate row, not a single lead">—</td>}
                         </tr>
                       ))
                     )}
