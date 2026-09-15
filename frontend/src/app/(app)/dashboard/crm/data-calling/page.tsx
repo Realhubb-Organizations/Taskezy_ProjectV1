@@ -27,12 +27,14 @@ function formatDateTime(iso?: string): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-// The backend gives every lead a real assigned_agent_name — leads with no
-// real agent yet are joined to a placeholder "Not Assigned" user row rather
-// than left null, so that sentinel string (not an empty/falsy value) is how
-// an unassigned lead shows up here.
+// leads.assigned_agent_id is NOT NULL at the DB level (leads.repository.ts
+// inner-joins users on it), so assignedAgent is always some real agent's
+// name even for a lead nobody has actually started working yet — that
+// pipeline state lives in the separate `status` field as "Unassigned"
+// instead. That's the real signal the bulk Assign button keys off; a
+// missing/placeholder assignedAgent is kept as a defensive fallback only.
 function isUnassignedLead(l: Lead): boolean {
-  return !l.assignedAgent || l.assignedAgent === "Not Assigned" || l.assignedAgent === "Unassigned";
+  return l.status === "Unassigned" || !l.assignedAgent || l.assignedAgent === "Not Assigned";
 }
 
 // Togglable columns for the Data Calling table, driven by its own Filter
@@ -184,7 +186,13 @@ export default function DataCallingPage() {
   const [assignMenuPos, setAssignMenuPos] = useState<{ top: number; left: number } | null>(null);
   const assignBtnRef = useRef<HTMLButtonElement>(null);
   const handleBulkAssign = (agent: string) => {
-    selectedUnassignedIds.forEach(id => reassignLead(id, agent));
+    selectedUnassignedIds.forEach(id => {
+      const lead = leads.find(l => l.id === id);
+      reassignLead(id, agent);
+      // Move it off the "Unassigned" pipeline state now that it actually has
+      // someone on it — otherwise it'd stay eligible for this same button.
+      if (lead?.status === "Unassigned") updateLeadStatus(id, "Assigned");
+    });
     setSelectedIds(prev => {
       const next = new Set(prev);
       selectedUnassignedIds.forEach(id => next.delete(id));
