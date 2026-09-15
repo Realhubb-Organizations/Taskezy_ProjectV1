@@ -750,7 +750,7 @@ export default function DataCallingPage() {
             Data Calling Analytics
           </button>
         </div>
-        {isAdmin && (
+        {isAdmin && activeTab === "DataCalling" && (
           <button
             onClick={() => setIsUploadLeadsOpen(true)}
             className="inline-flex items-center gap-2 bg-[#0B1E6E] hover:bg-[#081650] text-white px-4 py-2.5 rounded-lg text-xs font-bold transition-all shadow-md cursor-pointer shrink-0"
