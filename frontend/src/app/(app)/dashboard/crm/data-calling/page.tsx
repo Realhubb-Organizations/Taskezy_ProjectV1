@@ -245,6 +245,51 @@ export default function DataCallingPage() {
   const [chartMetricMenuPos, setChartMetricMenuPos] = useState<{ top: number; left: number } | null>(null);
   const chartMetricBtnRef = useRef<HTMLButtonElement>(null);
 
+  // Analytics tab's own stat-card drill-down — same click-to-expand pattern
+  // as the Data Calling tab's cards above, kept as separate state so the two
+  // tabs' drill-downs don't fight over which category/page is open.
+  const [analyticsSelectedCategory, setAnalyticsSelectedCategory] = useState<string | null>(null);
+  const [analyticsDrillSearchQuery, setAnalyticsDrillSearchQuery] = useState("");
+  const [analyticsDrillPage, setAnalyticsDrillPage] = useState(1);
+  const [analyticsDrillRowsPerPage, setAnalyticsDrillRowsPerPage] = useState(8);
+  const analyticsDrillScrollRef = useRef<HTMLDivElement>(null);
+  const analyticsDrillPageRowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
+  const analyticsDrillProgrammaticScroll = useRef(false);
+
+  const handleAnalyticsDrillScroll = () => {
+    if (analyticsDrillProgrammaticScroll.current) return;
+    const container = analyticsDrillScrollRef.current;
+    if (!container) return;
+    const scrollTop = container.scrollTop;
+    let current = 1;
+    for (let i = 0; i < analyticsDrillPageRowRefs.current.length; i++) {
+      const row = analyticsDrillPageRowRefs.current[i];
+      if (row && row.offsetTop - container.offsetTop <= scrollTop + 4) {
+        current = i + 1;
+      }
+    }
+    setAnalyticsDrillPage(prev => (prev !== current ? current : prev));
+  };
+
+  const goToAnalyticsDrillPage = (page: number, totalPages: number) => {
+    const clamped = Math.max(1, Math.min(totalPages, page));
+    setAnalyticsDrillPage(clamped);
+    const row = analyticsDrillPageRowRefs.current[clamped - 1];
+    const container = analyticsDrillScrollRef.current;
+    if (!row || !container) return;
+    analyticsDrillProgrammaticScroll.current = true;
+    container.scrollTop = clamped === 1 ? 0 : row.offsetTop - container.offsetTop;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => { analyticsDrillProgrammaticScroll.current = false; });
+    });
+  };
+
+  const toggleAnalyticsCategory = (label: string) => {
+    setAnalyticsSelectedCategory(prev => (prev === label ? null : label));
+    setAnalyticsDrillSearchQuery("");
+    setAnalyticsDrillPage(1);
+  };
+
   // Each summary card's real underlying lead list — same predicates the
   // numbers below use — so clicking a card can drill into exactly what it
   // counted, same "open the respective card" pattern as the CRM Dashboard
@@ -315,6 +360,17 @@ export default function DataCallingPage() {
     qualifiedLeads: subSourceScopedLeads.filter(l => QUALIFIED_LEAD_STATUSES.includes(l.status)).length,
     rnr: subSourceScopedLeads.filter(l => l.status === "RNR").length,
     followUps: subSourceScopedLeads.filter(l => FOLLOW_UP_LEAD_STATUSES.includes(l.status)).length
+  }), [subSourceScopedLeads]);
+
+  // Real underlying lead list behind each Analytics stat card, keyed the
+  // same way as the Data Calling tab's own categoryLeadsInRange — so
+  // clicking a card here drills into exactly what it counted.
+  const analyticsCategoryLeads: Record<string, Lead[]> = useMemo(() => ({
+    "Total Leads Assigned": subSourceScopedLeads.filter(l => !!l.assignedAgent),
+    "Calls Made": subSourceScopedLeads.filter(l => l.logs && l.logs.length > 0),
+    "Qualified Leads": subSourceScopedLeads.filter(l => QUALIFIED_LEAD_STATUSES.includes(l.status)),
+    "RNR": subSourceScopedLeads.filter(l => l.status === "RNR"),
+    "Follow Ups": subSourceScopedLeads.filter(l => FOLLOW_UP_LEAD_STATUSES.includes(l.status))
   }), [subSourceScopedLeads]);
 
   const salespersonRows = useMemo(
@@ -836,18 +892,141 @@ export default function DataCallingPage() {
             { label: "Qualified Leads", value: analyticsSummaryMetrics.qualifiedLeads, color: "text-rose-600" },
             { label: "RNR", value: analyticsSummaryMetrics.rnr, color: "text-amber-500" },
             { label: "Follow Ups", value: analyticsSummaryMetrics.followUps, color: "text-blue-500" }
-          ] as const).map(s => (
-            <div key={s.label} className="p-3 flex items-center justify-between text-left">
-              <div>
-                <span className="text-[11px] font-medium text-slate-500 block">{s.label}</span>
-                <span className={`text-lg font-extrabold mt-1.5 block ${s.color}`}>{s.value}</span>
-              </div>
-              <ChevronRight className="h-4 w-4 text-slate-300 shrink-0" />
-            </div>
-          ))}
+          ] as const).map(s => {
+            const isActive = analyticsSelectedCategory === s.label;
+            return (
+              <button
+                key={s.label}
+                type="button"
+                onClick={() => toggleAnalyticsCategory(s.label)}
+                className={`p-3 flex items-center justify-between text-left group transition-colors ${
+                  isActive ? "bg-blue-50/70" : "hover:bg-slate-50/50"
+                }`}
+              >
+                <div>
+                  <span className="text-[11px] font-medium text-slate-500 block">{s.label}</span>
+                  <span className={`text-lg font-extrabold mt-1.5 block ${s.color}`}>{s.value}</span>
+                </div>
+                <ChevronRight className={`h-4 w-4 text-slate-300 shrink-0 transition-transform ${isActive ? "rotate-90 text-blue-500" : "group-hover:translate-x-0.5"}`} />
+              </button>
+            );
+          })}
         </div>
       </div>
       )}
+
+      {/* Analytics stat-card drill-down — same pattern as the Data Calling
+          tab's own drill-down, scoped to whichever Sub-Source is selected. */}
+      {activeTab === "Analytics" && analyticsSelectedCategory && (() => {
+        const q = analyticsDrillSearchQuery.trim().toLowerCase();
+        const shownLeads = (analyticsCategoryLeads[analyticsSelectedCategory] || []).filter(l =>
+          !q || l.name.toLowerCase().includes(q) || l.phone.includes(q) || (l.assignedAgent || "").toLowerCase().includes(q)
+        );
+        const shownCount = shownLeads.length;
+        const totalPages = Math.max(1, Math.ceil(shownCount / analyticsDrillRowsPerPage));
+        const currentPage = Math.min(analyticsDrillPage, totalPages);
+        const rangeStart = shownCount === 0 ? 0 : (currentPage - 1) * analyticsDrillRowsPerPage + 1;
+        const rangeEnd = Math.min(currentPage * analyticsDrillRowsPerPage, shownCount);
+
+        return (
+          <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden animate-fade-in">
+            <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-200/80 gap-3">
+              <h3 className="text-sm font-bold text-slate-900 whitespace-nowrap">
+                {analyticsSelectedCategory}
+                <span className="text-slate-400 font-medium ml-1.5">({shownCount})</span>
+              </h3>
+              <div className="flex items-center gap-3 flex-1 justify-end">
+                <div className="relative w-full max-w-[220px]">
+                  <Search className="h-3.5 w-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    value={analyticsDrillSearchQuery}
+                    onChange={(e) => { setAnalyticsDrillSearchQuery(e.target.value); setAnalyticsDrillPage(1); }}
+                    placeholder="Search name, phone, agent..."
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-8 pr-2.5 py-1.5 text-xs focus:outline-none focus:border-[#0B1E6E]"
+                  />
+                </div>
+                <button type="button" onClick={() => setAnalyticsSelectedCategory(null)} className="text-slate-400 hover:text-slate-700 shrink-0">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+            <div ref={analyticsDrillScrollRef} onScroll={handleAnalyticsDrillScroll} className="max-h-80 overflow-y-auto">
+              <table className="w-full text-left border-collapse min-w-[600px]">
+                <thead className="sticky top-0 bg-white">
+                  <tr className="border-b border-slate-100 text-[11px] font-bold text-slate-500">
+                    <th className="px-5 py-2.5">Name</th>
+                    <th className="px-5 py-2.5">Phone</th>
+                    <th className="px-5 py-2.5">Status</th>
+                    <th className="px-5 py-2.5">Assigned To</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-[12px] text-slate-700">
+                  {shownLeads.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="px-5 py-6 text-center text-slate-400 italic">
+                        No leads found for this category.
+                      </td>
+                    </tr>
+                  ) : (
+                    (analyticsDrillPageRowRefs.current = [], shownLeads.map((l, idx) => (
+                      <tr
+                        key={l.id}
+                        ref={idx % analyticsDrillRowsPerPage === 0 ? (el) => { analyticsDrillPageRowRefs.current[Math.floor(idx / analyticsDrillRowsPerPage)] = el; } : undefined}
+                        className="hover:bg-slate-50/50 transition-colors"
+                      >
+                        <td className="px-5 py-2.5 font-semibold text-slate-900">{l.name}</td>
+                        <td className="px-5 py-2.5 font-mono">{l.phone}</td>
+                        <td className="px-5 py-2.5">{l.status}</td>
+                        <td className="px-5 py-2.5">{l.assignedAgent || "—"}</td>
+                      </tr>
+                    )))
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <div className="px-5 py-3 flex flex-wrap justify-between items-center gap-3 border-t border-slate-100 text-[11px] text-slate-500 font-semibold">
+              <span>{shownCount} Row{shownCount === 1 ? "" : "s"}</span>
+              <div className="flex items-center gap-4">
+                <span className="flex items-center gap-1.5">
+                  Rows per page
+                  <select
+                    value={analyticsDrillRowsPerPage}
+                    onChange={(e) => {
+                      analyticsDrillProgrammaticScroll.current = true;
+                      setAnalyticsDrillRowsPerPage(Number(e.target.value));
+                      setAnalyticsDrillPage(1);
+                      analyticsDrillScrollRef.current?.scrollTo(0, 0);
+                      requestAnimationFrame(() => {
+                        requestAnimationFrame(() => { analyticsDrillProgrammaticScroll.current = false; });
+                      });
+                    }}
+                    className="bg-slate-50 border border-slate-200 rounded px-1.5 py-1 font-bold text-slate-700 focus:outline-none"
+                  >
+                    {[8, 25, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </span>
+                <span>{rangeStart}-{rangeEnd} of {shownCount}</span>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => goToAnalyticsDrillPage(currentPage - 1, totalPages)}
+                    disabled={currentPage <= 1}
+                    className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    ‹
+                  </button>
+                  <button
+                    onClick={() => goToAnalyticsDrillPage(currentPage + 1, totalPages)}
+                    disabled={currentPage >= totalPages}
+                    className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    ›
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Stat-card drill-down — the real leads behind whichever card was
           last clicked, same pattern as the Campaigns page's drill-down. */}
