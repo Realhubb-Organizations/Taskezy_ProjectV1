@@ -4,63 +4,8 @@ import React, { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { X, UploadCloud, Download, ChevronDown } from "lucide-react";
 
-// Flat-illustration graphic (cloud upload + two people packing a box) —
-// purely decorative, hand-drawn to match the reference mockup's composition
-// and palette rather than pulled from an icon set, since no matching asset
-// existed in this codebase.
 function UploadLeadsIllustration({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 220 200" className={className} xmlns="http://www.w3.org/2000/svg">
-      {/* cloud + upload arrow */}
-      <path
-        d="M72 58c0-13 10.5-23 23-23 9 0 16.5 5 20.5 12.5 3.5-2.5 8-4 12.5-4 13 0 23.5 10.5 23.5 23.5S141 90.5 128 90.5H94c-13 0-22-10-22-22.5z"
-        fill="#6FA8F0"
-      />
-      <path d="M110 49v27M99.5 60l10.5-11 10.5 11" stroke="#FFFFFF" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-
-      {/* box */}
-      <path d="M53 125l32-16 32 16" stroke="#4C7FDB" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-      <rect x="53" y="125" width="64" height="44" rx="4" fill="#8FB7F7" />
-      <rect x="53" y="125" width="64" height="11" fill="#6FA0EE" />
-
-      {/* items peeking from the box */}
-      <rect x="63" y="102" width="11" height="26" rx="2" fill="#4B2A63" transform="rotate(-8 68 115)" />
-      <rect x="80" y="104" width="22" height="22" rx="2" fill="#1F5C42" transform="rotate(5 91 115)" />
-      <circle cx="91" cy="115" r="4" fill="#F26FC0" />
-      <rect x="100" y="100" width="9" height="9" rx="1.5" fill="#E8531F" transform="rotate(-10 104 105)" />
-
-      {/* kite (white border + pink body, photo icon) */}
-      <path d="M97 88l19-19 19 19-17 22z" fill="#FFFFFF" />
-      <path d="M99 91l17-17 17 17-15 20z" fill="#F45FA0" />
-      <circle cx="108" cy="97" r="4.2" fill="#E8531F" />
-      <path d="M99 106l7-9 6 6 5-7 8 10z" fill="#E8531F" />
-
-      {/* left person: orange ponytail, green top, pink pants */}
-      <path d="M28 78c-4 4-5 10-2 14l6-2c-2-4-1-8 1-11z" fill="#E8622A" />
-      <circle cx="41" cy="83" r="9.5" fill="#F0B088" />
-      <path d="M31.5 78c0-6 4-11 9.5-11s9.5 5 9.5 11c-3-2-6-3-9.5-3s-6.5 1-9.5 3z" fill="#E8622A" />
-      <path d="M31.5 95c0-6.5 4.5-11.5 9.5-11.5s9.5 5 9.5 11.5v20c0 4-3 7-7 7h-5c-4 0-7-3-7-7z" fill="#1F5C42" />
-      <path d="M48 92l16-8" stroke="#F0B088" strokeWidth="7" strokeLinecap="round" />
-      <rect x="30" y="120" width="8" height="24" rx="3.5" fill="#F26FC0" />
-      <rect x="43" y="120" width="8" height="24" rx="3.5" fill="#F26FC0" />
-      <path d="M27 143h11l3 8H30z" fill="#6A2E8C" />
-      <path d="M40 143h11l3 8H43z" fill="#6A2E8C" />
-      <rect x="27" y="149" width="14" height="4" rx="2" fill="#F26FC0" />
-      <rect x="40" y="149" width="14" height="4" rx="2" fill="#F26FC0" />
-
-      {/* right person: dark hair, tan skin, pink top, purple pants */}
-      <circle cx="152" cy="88" r="9.5" fill="#C98356" />
-      <path d="M141.5 82c0-7 5-13 11-13 5.5 0 10 4 11 9.5-3.5-2-7-3-11-3-4 0-8 2-11 6.5z" fill="#2B2560" />
-      <path d="M142.5 100c0-6.5 4.5-11.5 9.5-11.5s9.5 5 9.5 11.5v18c0 4-3 7-7 7h-5c-4 0-7-3-7-7z" fill="#F477C0" />
-      <path d="M144 106l-16 6" stroke="#C98356" strokeWidth="7" strokeLinecap="round" />
-      <rect x="141" y="122" width="8" height="24" rx="3.5" fill="#4B1F63" />
-      <rect x="154" y="122" width="8" height="24" rx="3.5" fill="#4B1F63" />
-      <path d="M138 145h11l3 8h-14z" fill="#1F5C42" />
-      <path d="M151 145h11l3 8h-14z" fill="#1F5C42" />
-      <rect x="138" y="151" width="14" height="4" rx="2" fill="#F26FC0" />
-      <rect x="151" y="151" width="14" height="4" rx="2" fill="#F26FC0" />
-    </svg>
-  );
+  return <img src="/upload-leads-illustration.png" alt="" className={className} />;
 }
 
 const SOURCE_HISTORY_KEY = "taskezy_data_calling_source_history";
@@ -325,7 +270,7 @@ export default function UploadLeadsModal({ isOpen, onClose, onUpload, properties
 
             {/* Decorative illustration — purely visual, hidden on narrow screens */}
             <div className="hidden sm:flex items-center justify-center">
-              <UploadLeadsIllustration className="h-36 w-36" />
+              <UploadLeadsIllustration className="h-40 w-40 object-contain" />
             </div>
           </div>
 
