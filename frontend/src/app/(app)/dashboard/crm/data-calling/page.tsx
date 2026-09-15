@@ -174,18 +174,30 @@ export default function DataCallingPage() {
   // Bulk "Assign" toolbar button — only surfaces once the selection actually
   // contains an unassigned lead (per product decision: it's for handing out
   // fresh/unassigned leads, not for reassigning already-worked ones).
+  // "Reshuffle" is the mirror image — only surfaces once the selection
+  // contains a lead that's already assigned to someone, for handing an
+  // already-worked lead to a different agent.
   const selectedUnassignedIds = useMemo(
     () => leads.filter(l => selectedIds.has(l.id) && isUnassignedLead(l)).map(l => l.id),
     [leads, selectedIds]
   );
+  const selectedAssignedIds = useMemo(
+    () => leads.filter(l => selectedIds.has(l.id) && !isUnassignedLead(l)).map(l => l.id),
+    [leads, selectedIds]
+  );
 
-  // Assign Leads modal: a property must be picked first (it scopes which
-  // agents are even eligible — an agent "connected" to a property is one on
-  // that property's assignedTeam, same restriction the Properties page's
+  // Assign/Reshuffle share one modal — same two-field, property-scopes-
+  // assignee mechanics either way. `assignFlowMode` picks which of the two
+  // button clicks opened it, which in turn picks the target lead set, the
+  // modal's copy, and whether confirming also clears "Unassigned" status.
+  // A property must be picked first (it scopes which agents are even
+  // eligible — an agent "connected" to a property is one on that
+  // property's assignedTeam, same restriction the Properties page's
   // CUSTOM_MEMBERS mode enforces; ALL_MEMBERS properties open it to every
-  // agent), then the Assignee field unlocks. Both fields need a value before
-  // the modal's own Assign button goes live.
-  const [assignModalOpen, setAssignModalOpen] = useState(false);
+  // agent), then the Assignee field unlocks. Both fields need a value
+  // before the modal's own confirm button goes live.
+  const [assignFlowMode, setAssignFlowMode] = useState<"assign" | "reshuffle" | null>(null);
+  const flowTargetIds = assignFlowMode === "reshuffle" ? selectedAssignedIds : selectedUnassignedIds;
   const [assignSelectedPropertyIds, setAssignSelectedPropertyIds] = useState<Set<string>>(new Set());
   const [assignSelectedAssigneeId, setAssignSelectedAssigneeId] = useState<string>("");
 
@@ -234,15 +246,15 @@ export default function DataCallingPage() {
   );
   const canConfirmAssign = assignSelectedPropertyIds.size > 0 && !!assignSelectedAssigneeId;
 
-  const openAssignModal = () => {
+  const openAssignFlow = (mode: "assign" | "reshuffle") => {
     setAssignSelectedPropertyIds(new Set());
     setAssignSelectedAssigneeId("");
     setPropertySearch("");
     setAssigneeSearch("");
-    setAssignModalOpen(true);
+    setAssignFlowMode(mode);
   };
-  const closeAssignModal = () => {
-    setAssignModalOpen(false);
+  const closeAssignFlow = () => {
+    setAssignFlowMode(null);
     setPropertyDropdownOpen(false);
     setAssigneeDropdownOpen(false);
   };
@@ -258,21 +270,23 @@ export default function DataCallingPage() {
     setAssignSelectedAssigneeId("");
   };
   const confirmBulkAssign = () => {
-    if (!canConfirmAssign) return;
+    if (!canConfirmAssign || !assignFlowMode) return;
     const agentName = selectedAssigneeName;
-    selectedUnassignedIds.forEach(id => {
+    const targetIds = flowTargetIds;
+    targetIds.forEach(id => {
       const lead = leads.find(l => l.id === id);
       reassignLead(id, agentName);
       // Move it off the "Unassigned" pipeline state now that it actually has
-      // someone on it — otherwise it'd stay eligible for this same button.
-      if (lead?.status === "Unassigned") updateLeadStatus(id, "Assigned");
+      // someone on it — otherwise it'd stay eligible for the Assign button.
+      // Not relevant to Reshuffle: those leads already have a real status.
+      if (assignFlowMode === "assign" && lead?.status === "Unassigned") updateLeadStatus(id, "Assigned");
     });
     setSelectedIds(prev => {
       const next = new Set(prev);
-      selectedUnassignedIds.forEach(id => next.delete(id));
+      targetIds.forEach(id => next.delete(id));
       return next;
     });
-    closeAssignModal();
+    closeAssignFlow();
   };
 
   // Per-row quick-edit dropdowns (Status, Assigned To) — same click-to-open-
@@ -483,16 +497,26 @@ export default function DataCallingPage() {
         </div>
       ) : (
         <>
-          {/* Action Toolbar (Bulk Assign, Date Picker Pill, Settings Button) */}
+          {/* Action Toolbar (Bulk Assign/Reshuffle, Date Picker Pill, Settings Button) */}
           <div className="flex flex-wrap items-center justify-end gap-2.5 pt-1">
             {selectedUnassignedIds.length > 0 && (
               <button
                 type="button"
-                onClick={openAssignModal}
+                onClick={() => openAssignFlow("assign")}
                 className="flex items-center gap-2 bg-white border border-slate-300/80 rounded-xl px-3.5 py-1.5 text-xs text-slate-700 font-semibold hover:bg-slate-50 shadow-2xs transition-colors"
               >
                 <Users className="h-3.5 w-3.5 text-blue-600" />
                 Assign
+              </button>
+            )}
+            {selectedAssignedIds.length > 0 && (
+              <button
+                type="button"
+                onClick={() => openAssignFlow("reshuffle")}
+                className="flex items-center gap-2 bg-white border border-slate-300/80 rounded-xl px-3.5 py-1.5 text-xs text-slate-700 font-semibold hover:bg-slate-50 shadow-2xs transition-colors"
+              >
+                <Users className="h-3.5 w-3.5 text-blue-600" />
+                Reshuffle
               </button>
             )}
             <div className="relative">
@@ -959,19 +983,25 @@ export default function DataCallingPage() {
         document.body
       )}
 
-      {/* Assign Leads modal — Property must be picked before Assignee
-          unlocks (it scopes the eligible agent list), and the modal's own
-          Assign button stays disabled until both fields hold a value. */}
-      {assignModalOpen && createPortal(
+      {/* Assign/Reshuffle Leads modal — Property must be picked before
+          Assignee unlocks (it scopes the eligible agent list), and the
+          modal's own confirm button stays disabled until both fields hold
+          a value. Same modal for both flows; assignFlowMode picks the copy
+          and the target lead set. */}
+      {assignFlowMode && createPortal(
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-          <div className="fixed inset-0 bg-slate-900/40" onClick={closeAssignModal} />
+          <div className="fixed inset-0 bg-slate-900/40" onClick={closeAssignFlow} />
           <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md">
             <div className="px-6 pt-6 pb-4 border-b border-slate-100">
-              <h3 className="text-xl font-extrabold text-slate-900">Assign Leads</h3>
+              <h3 className="text-xl font-extrabold text-slate-900">
+                {assignFlowMode === "reshuffle" ? "Reshuffle Leads" : "Assign Leads"}
+              </h3>
             </div>
             <div className="px-6 py-5 space-y-5">
               <p className="text-xs text-slate-500">
-                Assigning {selectedUnassignedIds.length} unassigned lead{selectedUnassignedIds.length > 1 ? "s" : ""}.
+                {assignFlowMode === "reshuffle"
+                  ? `Reshuffling ${flowTargetIds.length} assigned lead${flowTargetIds.length > 1 ? "s" : ""}.`
+                  : `Assigning ${flowTargetIds.length} unassigned lead${flowTargetIds.length > 1 ? "s" : ""}.`}
               </p>
 
               {/* Select Property */}
@@ -1030,7 +1060,9 @@ export default function DataCallingPage() {
 
               {/* Select Assignee — locked until at least one property is picked */}
               <div className="space-y-1.5">
-                <label className="block text-sm font-bold text-slate-800">Select Assignee</label>
+                <label className="block text-sm font-bold text-slate-800">
+                  {assignFlowMode === "reshuffle" ? "Select Reshuffle Assignee" : "Select Assignee"}
+                </label>
                 <button
                   ref={assigneeBtnRef}
                   type="button"
@@ -1091,7 +1123,7 @@ export default function DataCallingPage() {
             <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100">
               <button
                 type="button"
-                onClick={closeAssignModal}
+                onClick={closeAssignFlow}
                 className="px-5 py-2 rounded-xl border border-slate-300 font-bold text-slate-700 text-sm hover:bg-slate-50 transition-colors"
               >
                 Cancel
@@ -1104,7 +1136,7 @@ export default function DataCallingPage() {
                   canConfirmAssign ? "bg-[#0B1E6E] hover:bg-[#081650]" : "bg-slate-300 cursor-not-allowed"
                 }`}
               >
-                Assign
+                {assignFlowMode === "reshuffle" ? "Reshuffle" : "Assign"}
               </button>
             </div>
           </div>
