@@ -27,11 +27,35 @@ import {
   TrendingUp,
   Users,
   MapPin,
-  Percent
+  Percent,
+  LayoutGrid,
+  CreditCard,
+  ChevronDown,
+  Sparkles
 } from "lucide-react";
 
 const TABS = ["Connected Apps", "Leads", "HRMS", "Finance", "Manage Users", "About"] as const;
 type Tab = (typeof TABS)[number];
+
+const TAB_ICONS: Record<Tab, React.ComponentType<{ className?: string }>> = {
+  "Connected Apps": LayoutGrid,
+  Leads: Users,
+  HRMS: CreditCard,
+  Finance: FileText,
+  "Manage Users": UserCog,
+  About: Info
+};
+
+// Brand tile for each still-unwired placeholder integration — a real logo
+// image isn't available for these (no partnership/asset), so a colored
+// initials badge stands in rather than a generic icon.
+const PLACEHOLDER_BADGE: Record<string, { bg: string; content: React.ReactNode }> = {
+  "99acres": { bg: "bg-blue-600", content: <span className="text-[10px] font-black text-white">99</span> },
+  LinkedIn: { bg: "bg-blue-700", content: <span className="text-xs font-black text-white">in</span> },
+  "Housing.com": { bg: "bg-amber-400", content: <span className="text-sm font-black text-slate-900">H</span> },
+  MagicBricks: { bg: "bg-red-600", content: <span className="text-[9px] font-black text-white">mb</span> },
+  NoBroker: { bg: "bg-rose-500", content: <Percent className="h-4 w-4 text-white" /> }
+};
 
 const DEPT_BADGE: Record<string, string> = {
   SALES: "bg-blue-50 text-blue-700 border-blue-100",
@@ -82,6 +106,15 @@ export default function SettingsPage() {
       }
       return item;
     }));
+  };
+
+  const [integrationSearch, setIntegrationSearch] = useState("");
+  const [integrationFilter, setIntegrationFilter] = useState<"all" | "active" | "inactive">("all");
+  const [integrationSort, setIntegrationSort] = useState<"popular" | "name" | "status">("popular");
+  const [integrationSortMenuOpen, setIntegrationSortMenuOpen] = useState(false);
+
+  const handleRequestIntegration = () => {
+    alert("Thanks — we don't have a request form wired up yet. Reach out to support with which platform you need and we'll take it from there.");
   };
 
   // --- Meta Ads: real OAuth connection ---
@@ -161,6 +194,32 @@ export default function SettingsPage() {
   }, [activeRole]);
 
   const activeGoogleAccounts = googleAccounts.filter(a => a.status === "ACTIVE");
+
+  // One normalized summary per integration (real Meta/Google connections
+  // plus the still-unwired placeholders) purely so the search box, filter
+  // pills, and sort dropdown above the card grid can work uniformly across
+  // both kinds — the actual card content/actions for each stays in its own
+  // render function below, since Meta/Google have real OAuth flows and the
+  // placeholders just toggle local state.
+  type IntegrationSummary = { key: string; name: string; active: boolean; kind: "meta" | "google" | "placeholder"; placeholderIdx?: number };
+  const integrationSummaries: IntegrationSummary[] = [
+    { key: "meta", name: "Meta Ads", active: activeMetaConnections.length > 0, kind: "meta" },
+    { key: "google", name: "Google Ads", active: activeGoogleAccounts.length > 0, kind: "google" },
+    ...integrations.map((it, idx): IntegrationSummary => ({ key: `placeholder-${idx}`, name: it.name, active: it.status.includes("Active"), kind: "placeholder", placeholderIdx: idx }))
+  ];
+  const integrationActiveCount = integrationSummaries.filter(s => s.active).length;
+  const integrationInactiveCount = integrationSummaries.length - integrationActiveCount;
+
+  const visibleIntegrations = useMemo(() => {
+    const q = integrationSearch.trim().toLowerCase();
+    let list = integrationSummaries.filter(s => !q || s.name.toLowerCase().includes(q));
+    if (integrationFilter === "active") list = list.filter(s => s.active);
+    if (integrationFilter === "inactive") list = list.filter(s => !s.active);
+    if (integrationSort === "name") list = [...list].sort((a, b) => a.name.localeCompare(b.name));
+    if (integrationSort === "status") list = [...list].sort((a, b) => Number(b.active) - Number(a.active));
+    return list;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [integrationSearch, integrationFilter, integrationSort, integrations, activeMetaConnections.length, activeGoogleAccounts.length]);
 
   // --- Leads source breakdown ---
   const leadSourceRows = useMemo(() => {
@@ -363,15 +422,28 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-6 pb-12">
-      {/* Title */}
-      <div>
-        <h2 className="text-xl font-bold text-brand-700 flex items-center gap-2">
-          <Settings className="h-5.5 w-5.5 text-brand-600" />
-          Settings &amp; Configuration
-        </h2>
-        <p className="text-xs text-slate-500 font-medium">
-          Connected ad portals, lead source telemetry, roster management, and account information.
-        </p>
+      {/* Banner */}
+      <div className="relative overflow-hidden rounded-2xl border border-brand-100 bg-gradient-to-r from-brand-50 via-indigo-50 to-blue-50 px-5 py-5 sm:px-6 flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-3.5">
+          <div className="h-11 w-11 rounded-xl bg-white shadow-sm border border-brand-100 flex items-center justify-center shrink-0">
+            <Settings className="h-5.5 w-5.5 text-brand-600" />
+          </div>
+          <div>
+            <h2 className="text-lg font-extrabold text-slate-900">Settings &amp; Configuration</h2>
+            <p className="text-xs text-slate-500 font-medium max-w-md mt-0.5">
+              Integrate your favorite tools, manage account preferences, and configure your CRM experience — all in one place.
+            </p>
+          </div>
+        </div>
+        <div className="hidden md:flex items-center gap-3 bg-white/70 border border-white rounded-xl px-4 py-2.5 shadow-sm">
+          <div className="h-8 w-8 rounded-lg bg-brand-600 text-white flex items-center justify-center shrink-0">
+            <Sparkles className="h-4 w-4" />
+          </div>
+          <div className="text-[11px]">
+            <p className="font-extrabold text-slate-800">Connect. Automate. Grow.</p>
+            <p className="text-slate-500 max-w-[220px] leading-snug">Bring all your leads, campaigns and properties into one powerful workspace.</p>
+          </div>
+        </div>
       </div>
 
       {successMsg && (
@@ -392,45 +464,59 @@ export default function SettingsPage() {
 
       {/* Tabs Menu — 6 tabs at this width need to scroll on narrow phones
           instead of overflowing the page horizontally. */}
-      <div className="border-b border-slate-200 mb-6 overflow-x-auto">
-        <div className="flex gap-6 text-xs font-bold text-slate-500 min-w-max">
-          {TABS.map((t) => (
-            <button
-              key={t}
-              onClick={() => setActiveTab(t)}
-              className={`pb-3 border-b-2 transition-all whitespace-nowrap ${
-                activeTab === t ? "border-brand-500 text-brand-700 font-black" : "border-transparent hover:text-slate-800"
-              }`}
-            >
-              {t}
-            </button>
-          ))}
+      <div className="bg-white border border-slate-200 rounded-2xl p-1.5 shadow-sm overflow-x-auto">
+        <div className="flex gap-1 min-w-max">
+          {TABS.map((t) => {
+            const Icon = TAB_ICONS[t];
+            return (
+              <button
+                key={t}
+                onClick={() => setActiveTab(t)}
+                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+                  activeTab === t ? "bg-brand-50 text-brand-700" : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                {t}
+              </button>
+            );
+          })}
         </div>
       </div>
 
       {/* 1. Connected Apps */}
-      {activeTab === "Connected Apps" && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-fade-in">
-          {/* Meta Ads — real OAuth connection, one card per connected Page */}
-          <div className="glass-card p-5 rounded-2xl flex flex-col justify-between border border-slate-200 md:col-span-2 lg:col-span-1">
-            <div className="space-y-2">
-              <div className="flex justify-between items-center">
-                <h4 className="text-sm font-bold text-slate-800">Meta Ads</h4>
-                <span className={`text-[9px] font-bold border px-1.5 py-0.5 rounded-full ${
-                  activeMetaConnections.length > 0
-                    ? "bg-emerald-50 text-emerald-700 border-emerald-150"
-                    : "bg-slate-100 text-slate-450 border-slate-200"
-                }`}>
-                  {activeMetaConnections.length > 0 ? `Active (${activeMetaConnections.length} Page${activeMetaConnections.length === 1 ? "" : "s"})` : "Inactive"}
-                </span>
+      {activeTab === "Connected Apps" && (() => {
+        const statusPill = (active: boolean, label?: string) => (
+          <span className={`inline-flex items-center gap-1 text-[9px] font-bold border px-2 py-0.5 rounded-full shrink-0 ${
+            active ? "bg-emerald-50 text-emerald-700 border-emerald-150" : "bg-slate-100 text-slate-450 border-slate-200"
+          }`}>
+            {active && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />}
+            {label ?? (active ? "Active" : "Inactive")}
+          </span>
+        );
+
+        const renderMetaCard = () => (
+          <div key="meta" className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col gap-3 shadow-sm hover:shadow-md transition-shadow">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="h-10 w-10 rounded-xl border border-slate-200 bg-white flex items-center justify-center shrink-0 p-1.5">
+                  <img src="https://img.icons8.com/?size=100&id=wA5rN96FVDtq&format=png&color=000000" alt="Meta" className="h-full w-full object-contain" />
+                </div>
+                <h4 className="text-sm font-extrabold text-slate-900 truncate">Meta Ads</h4>
               </div>
-              <p className="text-[11px] text-slate-500 leading-normal">
-                Capture leads from Facebook &amp; Instagram Lead Ads in real time via a webhook.
-              </p>
-              {activeMetaConnections.length > 0 && (
-                <div className="pt-1 space-y-1">
+              {statusPill(activeMetaConnections.length > 0)}
+            </div>
+            <p className="text-[11px] text-slate-500 leading-relaxed">
+              Capture leads from Facebook &amp; Instagram Lead Ads in real time via a webhook.
+            </p>
+            {activeMetaConnections.length > 0 ? (
+              <div className="bg-slate-50 border border-slate-150 rounded-xl px-3 py-2 space-y-1">
+                <p className="text-[10px] font-extrabold text-slate-700">
+                  {activeMetaConnections.length} Page{activeMetaConnections.length === 1 ? "" : "s"} Connected
+                </p>
+                <div className="space-y-1 max-h-24 overflow-y-auto">
                   {activeMetaConnections.map(c => (
-                    <div key={c.id} className="flex items-center justify-between text-[10px] bg-slate-50 border border-slate-150 rounded-lg px-2 py-1.5">
+                    <div key={c.id} className="flex items-center justify-between text-[10px] bg-white border border-slate-150 rounded-lg px-2 py-1">
                       <span className="font-bold text-slate-700 truncate">{c.page_name}</span>
                       {activeRole === "ADMIN" && (
                         <button
@@ -443,90 +529,241 @@ export default function SettingsPage() {
                     </div>
                   ))}
                 </div>
-              )}
-            </div>
-
-            <div className="pt-4 flex justify-end">
+              </div>
+            ) : (
+              <div className="bg-slate-50 border border-slate-150 rounded-xl px-3 py-2 flex items-start gap-2">
+                <Info className="h-3.5 w-3.5 text-slate-400 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-[10px] font-extrabold text-slate-600">Not connected yet</p>
+                  <p className="text-[10px] text-slate-400">Connect your Meta account to start capturing leads.</p>
+                </div>
+              </div>
+            )}
+            <div className="flex items-center justify-end pt-1 mt-auto">
               {activeRole === "ADMIN" ? (
                 <button
                   onClick={handleConnectMeta}
                   disabled={metaLoading}
-                  className="px-3 py-1 rounded text-[10px] font-bold border bg-brand-50 border-brand-200 text-brand-700 hover:bg-brand-700 hover:text-white transition-all disabled:opacity-50"
+                  className="px-3 py-1.5 rounded-lg text-[11px] font-bold border bg-brand-50 border-brand-200 text-brand-700 hover:bg-brand-700 hover:text-white transition-all disabled:opacity-50"
                 >
-                  {metaLoading ? "Redirecting…" : activeMetaConnections.length > 0 ? "Connect Another Page" : "Connect App"}
+                  {metaLoading ? "Redirecting…" : activeMetaConnections.length > 0 ? "Connect Another Page" : "Connect"}
                 </button>
               ) : (
                 <span className="text-[10px] text-slate-400 italic">Only an Admin can manage this connection.</span>
               )}
             </div>
           </div>
+        );
 
-          {/* Google Ads — read-only status, one server-level MCC credential auto-discovers every linked client account */}
-          <div className="glass-card p-5 rounded-2xl flex flex-col justify-between border border-slate-200 md:col-span-2 lg:col-span-1">
-            <div className="space-y-2">
-              <div className="flex justify-between items-center">
-                <h4 className="text-sm font-bold text-slate-800">Google Ads</h4>
-                <span className={`text-[9px] font-bold border px-1.5 py-0.5 rounded-full ${
-                  activeGoogleAccounts.length > 0
-                    ? "bg-emerald-50 text-emerald-700 border-emerald-150"
-                    : "bg-slate-100 text-slate-450 border-slate-200"
-                }`}>
-                  {activeGoogleAccounts.length > 0 ? `Active (${activeGoogleAccounts.length} account${activeGoogleAccounts.length === 1 ? "" : "s"})` : "Inactive"}
-                </span>
+        const renderGoogleCard = () => (
+          <div key="google" className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col gap-3 shadow-sm hover:shadow-md transition-shadow">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="h-10 w-10 rounded-xl border border-slate-200 bg-white flex items-center justify-center shrink-0 p-1.5">
+                  <img src="https://img.icons8.com/?size=100&id=4hR4Ih04Je2t&format=png&color=000000" alt="Google Ads" className="h-full w-full object-contain" />
+                </div>
+                <h4 className="text-sm font-extrabold text-slate-900 truncate">Google Ads</h4>
               </div>
-              <p className="text-[11px] text-slate-500 leading-normal">
-                Real campaign spend synced from every account linked under the connected Manager (MCC) account — no per-account login needed.
-              </p>
-              {activeGoogleAccounts.length > 0 && (
-                <div className="pt-1 space-y-1">
+              {statusPill(activeGoogleAccounts.length > 0)}
+            </div>
+            <p className="text-[11px] text-slate-500 leading-relaxed">
+              Sync campaign spend and leads from your Google Ads account (MCC supported).
+            </p>
+            {activeGoogleAccounts.length > 0 ? (
+              <div className="bg-slate-50 border border-slate-150 rounded-xl px-3 py-2 space-y-1">
+                <p className="text-[10px] font-extrabold text-slate-700">
+                  {activeGoogleAccounts.length} Account{activeGoogleAccounts.length === 1 ? "" : "s"} Connected
+                </p>
+                <div className="space-y-1 max-h-24 overflow-y-auto">
                   {activeGoogleAccounts.map(a => (
-                    <div key={a.id} className="flex items-center justify-between text-[10px] bg-slate-50 border border-slate-150 rounded-lg px-2 py-1.5">
+                    <div key={a.id} className="flex items-center justify-between text-[10px] bg-white border border-slate-150 rounded-lg px-2 py-1">
                       <span className="font-bold text-slate-700 truncate">{a.name}</span>
                     </div>
                   ))}
                 </div>
-              )}
-            </div>
-
-            <div className="pt-4 flex justify-end">
+              </div>
+            ) : (
+              <div className="bg-slate-50 border border-slate-150 rounded-xl px-3 py-2 flex items-start gap-2">
+                <Info className="h-3.5 w-3.5 text-slate-400 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-[10px] font-extrabold text-slate-600">Not connected yet</p>
+                  <p className="text-[10px] text-slate-400">Connect your Google Ads account to start capturing leads.</p>
+                </div>
+              </div>
+            )}
+            <div className="flex items-center justify-end pt-1 mt-auto">
               <span className="text-[10px] text-slate-400 italic">
                 {activeRole === "ADMIN" ? "New accounts linked under the MCC appear here automatically." : "Only an Admin can view this connection."}
               </span>
             </div>
           </div>
+        );
 
-          {integrations.map((item, idx) => (
-            <div key={idx} className="glass-card p-5 rounded-2xl flex flex-col justify-between border border-slate-200">
-              <div className="space-y-2">
-                <div className="flex justify-between items-center">
-                  <h4 className="text-sm font-bold text-slate-800">{item.name}</h4>
-                  <span className={`text-[9px] font-bold border px-1.5 py-0.5 rounded-full ${
-                    item.status.includes("Active")
-                      ? "bg-emerald-50 text-emerald-700 border-emerald-150"
-                      : "bg-slate-100 text-slate-450 border-slate-200"
-                  }`}>
-                    {item.status}
-                  </span>
+        const renderPlaceholderCard = (item: { name: string; status: string; description: string }, idx: number) => {
+          const active = item.status.includes("Active");
+          const badge = PLACEHOLDER_BADGE[item.name];
+          return (
+            <div key={idx} className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col gap-3 shadow-sm hover:shadow-md transition-shadow">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className={`h-10 w-10 rounded-xl flex items-center justify-center shrink-0 ${badge?.bg ?? "bg-slate-400"}`}>
+                    {badge?.content ?? <span className="text-xs font-black text-white">{item.name[0]}</span>}
+                  </div>
+                  <h4 className="text-sm font-extrabold text-slate-900 truncate">{item.name}</h4>
                 </div>
-                <p className="text-[11px] text-slate-500 leading-normal">{item.description}</p>
+                {statusPill(active)}
               </div>
-
-              <div className="pt-4 flex justify-end">
+              <p className="text-[11px] text-slate-500 leading-relaxed">{item.description}</p>
+              <div className="bg-slate-50 border border-slate-150 rounded-xl px-3 py-2 flex items-start gap-2">
+                <Info className="h-3.5 w-3.5 text-slate-400 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-[10px] font-extrabold text-slate-600">{active ? `Connected to ${item.name}` : "Not connected yet"}</p>
+                  <p className="text-[10px] text-slate-400">
+                    {active ? "Leads from this platform are being captured." : `Connect your ${item.name} account to start capturing leads.`}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center justify-end pt-1 mt-auto">
                 <button
                   onClick={() => handleToggleIntegration(item.name)}
-                  className={`px-3 py-1 rounded text-[10px] font-bold border transition-all ${
-                    item.status.includes("Active")
+                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-all ${
+                    active
                       ? "bg-red-50 border-red-200 text-red-700 hover:bg-red-100"
                       : "bg-brand-50 border-brand-200 text-brand-700 hover:bg-brand-700 hover:text-white"
                   }`}
                 >
-                  {item.status.includes("Active") ? "Disconnect" : "Connect App"}
+                  {active ? "Disconnect" : "Connect"}
                 </button>
               </div>
             </div>
-          ))}
-        </div>
-      )}
+          );
+        };
+
+        const FILTER_PILLS: { key: typeof integrationFilter; label: string; count: number }[] = [
+          { key: "all", label: "All", count: integrationSummaries.length },
+          { key: "active", label: "Active", count: integrationActiveCount },
+          { key: "inactive", label: "Inactive", count: integrationInactiveCount }
+        ];
+        const SORT_OPTIONS: { key: typeof integrationSort; label: string }[] = [
+          { key: "popular", label: "Most Popular" },
+          { key: "name", label: "Name (A–Z)" },
+          { key: "status", label: "Active First" }
+        ];
+
+        return (
+          <div className="space-y-4 animate-fade-in">
+            {/* Header: title + count, search + Add Integration */}
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base font-extrabold text-slate-900">Connected Apps</h3>
+                  <span className="bg-emerald-50 text-emerald-700 border border-emerald-100 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                    {integrationSummaries.length} integrations available
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 mt-1 max-w-lg">
+                  Integrate with your favorite platforms to capture leads automatically and keep your CRM updated in real time.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <Search className="h-3.5 w-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    value={integrationSearch}
+                    onChange={(e) => setIntegrationSearch(e.target.value)}
+                    placeholder="Search integrations..."
+                    className="bg-white border border-slate-200 rounded-lg pl-8 pr-3 py-2 text-xs font-semibold text-slate-700 w-48 focus:outline-none focus:border-brand-500"
+                  />
+                </div>
+                <button
+                  onClick={handleRequestIntegration}
+                  className="inline-flex items-center gap-1.5 bg-[#0B1E6E] hover:bg-[#081650] text-white px-3.5 py-2 rounded-lg text-xs font-bold transition-all shadow-sm"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Add Integration
+                </button>
+              </div>
+            </div>
+
+            {/* Filter pills + Sort */}
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                {FILTER_PILLS.map(p => (
+                  <button
+                    key={p.key}
+                    onClick={() => setIntegrationFilter(p.key)}
+                    className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-all ${
+                      integrationFilter === p.key
+                        ? "bg-brand-50 border-brand-200 text-brand-700"
+                        : "bg-white border-slate-200 text-slate-500 hover:text-slate-700"
+                    }`}
+                  >
+                    {p.label} ({p.count})
+                  </button>
+                ))}
+              </div>
+              <div className="relative">
+                <span className="text-[11px] text-slate-400 font-semibold mr-1.5">Sort by</span>
+                <button
+                  onClick={() => setIntegrationSortMenuOpen(o => !o)}
+                  className="inline-flex items-center gap-1.5 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-[11px] font-bold text-slate-700 hover:bg-slate-50"
+                >
+                  {SORT_OPTIONS.find(o => o.key === integrationSort)?.label}
+                  <ChevronDown className={`h-3 w-3 text-slate-400 transition-transform ${integrationSortMenuOpen ? "rotate-180" : ""}`} />
+                </button>
+                {integrationSortMenuOpen && (
+                  <>
+                    <div className="fixed inset-0 z-[60]" onClick={() => setIntegrationSortMenuOpen(false)} />
+                    <div className="absolute right-0 top-full mt-1 z-[70] w-40 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 overflow-hidden">
+                      {SORT_OPTIONS.map(o => (
+                        <button
+                          key={o.key}
+                          onClick={() => { setIntegrationSort(o.key); setIntegrationSortMenuOpen(false); }}
+                          className={`w-full text-left px-3 py-1.5 text-xs font-bold transition-colors ${
+                            integrationSort === o.key ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"
+                          }`}
+                        >
+                          {o.label}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Card grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {visibleIntegrations.length === 0 ? (
+                <p className="col-span-full text-center text-xs text-slate-400 italic py-8">No integrations match your search.</p>
+              ) : (
+                visibleIntegrations.map(s => {
+                  if (s.kind === "meta") return renderMetaCard();
+                  if (s.kind === "google") return renderGoogleCard();
+                  return renderPlaceholderCard(integrations[s.placeholderIdx!], s.placeholderIdx!);
+                })
+              )}
+
+              {/* Need another integration CTA */}
+              <div className="border-2 border-dashed border-slate-200 rounded-2xl p-5 flex flex-col items-center justify-center text-center gap-2">
+                <div className="h-9 w-9 rounded-full bg-slate-100 flex items-center justify-center">
+                  <Plus className="h-4.5 w-4.5 text-slate-500" />
+                </div>
+                <p className="text-xs font-extrabold text-slate-800">Need another integration?</p>
+                <p className="text-[11px] text-slate-500 max-w-[220px]">
+                  Tell us what you need. We&apos;re continuously adding new integrations based on your feedback.
+                </p>
+                <button
+                  onClick={handleRequestIntegration}
+                  className="mt-1 text-[11px] font-bold text-brand-700 hover:underline"
+                >
+                  Request Integration
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* 2. Leads: where our major leads come from */}
       {activeTab === "Leads" && (
