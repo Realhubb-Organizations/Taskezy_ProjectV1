@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useState, useEffect, useMemo } from "react";
 import {
   apiLogin,
   apiLogout,
@@ -460,7 +460,8 @@ interface AppState {
   setShowLoginSplash: (show: boolean) => void;
   
   // App Modules Data
-  leads: Lead[];
+  leads: Lead[]; // everything EXCEPT bulk-uploaded (Data Calling) leads — see dataCallingLeads
+  dataCallingLeads: Lead[]; // ONLY bulk-uploaded leads — the two are mutually exclusive
   properties: Property[];
   resaleUnits: ResaleUnit[];
   followupCalls: FollowupCall[];
@@ -902,7 +903,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Core Module States — all fetched from the real API now (see the
   // session-restore effect and loadAllRealData below). Empty until a real
   // session exists; nothing here falls back to mock data anymore.
-  const [leads, setLeads] = useState<Lead[]>([]);
+  // Raw state holds EVERY lead regardless of source — mutations (reassign,
+  // status update, KYC, create) must be able to find/update any lead no
+  // matter where it came from. The public `leads` and `dataCallingLeads`
+  // context values below are derived, mutually-exclusive views over this:
+  // Data Calling is a separate cold-outreach pipeline (bulk-uploaded
+  // contact lists) from the rest of the CRM's real, ad-driven leads, so a
+  // bulk-uploaded lead must show on Data Calling and NOWHERE else — not in
+  // the main Leads dashboard, not in Reports/Campaign Analytics totals.
+  const [allLeads, setAllLeads] = useState<Lead[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
   const [resaleUnits, setResaleUnits] = useState<ResaleUnit[]>([]);
   const [followupCalls, setFollowupCalls] = useState<FollowupCall[]>([]);
@@ -935,7 +944,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         apiListTimesheets(),
         apiGetTenantSettings()
       ]);
-      setLeads(apiLeads.map(mapApiLeadToFrontendLead));
+      setAllLeads(apiLeads.map(mapApiLeadToFrontendLead));
       setUsers(apiUsers.map(mapApiUserDirectoryEntryToFrontendUser));
       setProperties(apiProperties.map(mapApiPropertyToFrontend));
       setResaleUnits(apiResaleUnits.map(mapApiResaleUnitToFrontend));
@@ -985,7 +994,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const result = await apiBulkImportLeads(input);
     if (result.created > 0) {
       const apiLeads = await apiListAllLeads();
-      setLeads(apiLeads.map(mapApiLeadToFrontendLead));
+      setAllLeads(apiLeads.map(mapApiLeadToFrontendLead));
     }
     return result;
   };
@@ -1088,7 +1097,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         apiGetLead(notif.leadId)
           .then((leadRow) => {
             const mapped = mapApiLeadToFrontendLead(leadRow);
-            setLeads(prev => (prev.some(l => l.id === mapped.id) ? prev : [mapped, ...prev]));
+            setAllLeads(prev => (prev.some(l => l.id === mapped.id) ? prev : [mapped, ...prev]));
           })
           .catch((err) => console.warn("Could not fetch the new lead for live update:", err));
       }
@@ -1350,7 +1359,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return { success: false, error: "Validation Error: Lead must contain a valid 10-digit Indian mobile number." };
     }
 
-    const isDuplicate = leads.some(l => l.phone === leadData.phone);
+    const isDuplicate = allLeads.some(l => l.phone === leadData.phone);
     if (isDuplicate) {
       return { success: false, error: `Compliance Violation: Lead with phone number +91-${leadData.phone} already exists in database partition.` };
     }
@@ -1364,7 +1373,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       logs: [{ timestamp: new Date().toISOString(), message: `Lead added manually. Assigned to ${leadData.assignedAgent}`, user: currentUser?.name || "System" }]
     };
 
-    setLeads(prev => [newLead, ...prev]);
+    setAllLeads(prev => [newLead, ...prev]);
     addNotification({
       system: "CRM",
       category: "NEW_LEAD",
@@ -1393,7 +1402,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           .then((created) => {
             // Reconcile the optimistic mock id with the real database id so
             // later actions (status updates) on this lead can sync too.
-            setLeads(prev => prev.map(l => (l.id === newLead.id ? mapApiLeadToFrontendLead(created) : l)));
+            setAllLeads(prev => prev.map(l => (l.id === newLead.id ? mapApiLeadToFrontendLead(created) : l)));
           })
           .catch((err) => console.warn("Could not persist new lead to the database:", err));
       } else {
@@ -1406,7 +1415,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // CRM Directed Acyclic Graph Status Transition Checks
   const updateLeadStatus = (leadId: string, targetStatus: LeadStatus, dealValue?: number, kycDocName?: string) => {
-    const lead = leads.find(l => l.id === leadId);
+    const lead = allLeads.find(l => l.id === leadId);
     if (!lead) return { success: false, error: "Lead not found." };
 
     if (!lead.firstResponseAt) {
@@ -1471,7 +1480,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         leadId: lead.id
       });
     }
-    setLeads([...leads]);
+    setAllLeads([...allLeads]);
 
     // Best-effort background persist — only for leads that actually exist in
     // the real database (real UUID ids); locally-only mock leads are skipped.
@@ -1489,7 +1498,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Reassigns a lead to a new agent and restarts its SLA clock (used to correct missed leads)
   const reassignLead = (leadId: string, newAgent: string) => {
-    const lead = leads.find(l => l.id === leadId);
+    const lead = allLeads.find(l => l.id === leadId);
     if (!lead) return;
 
     const previousAgent = lead.assignedAgent;
@@ -1503,7 +1512,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       message: `Reassigned from ${previousAgent} to ${newAgent}`,
       user: currentUser?.name || "System"
     });
-    setLeads([...leads]);
+    setAllLeads([...allLeads]);
 
     addNotification({
       system: "CRM",
@@ -1765,8 +1774,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Finance actions
   const verifyKYC = (leadId: string) => {
-    setLeads(prev => prev.map(l => l.id === leadId ? { ...l, kycVerified: true } : l));
-    const lead = leads.find(l => l.id === leadId);
+    setAllLeads(prev => prev.map(l => l.id === leadId ? { ...l, kycVerified: true } : l));
+    const lead = allLeads.find(l => l.id === leadId);
     addNotification({
       system: "FINANCE",
       category: "KYC",
@@ -1782,7 +1791,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const addInvoice = (leadId: string, clientName: string, baseAmount: number, projectName?: string) => {
     // invoices.lead_id is NOT NULL in the schema — an invoice with no real lead can't be persisted.
-    if (!leads.some(l => l.id === leadId)) {
+    if (!allLeads.some(l => l.id === leadId)) {
       return { success: false, error: "Select a lead for this invoice." };
     }
 
@@ -1899,14 +1908,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteLead = (id: string) => {
-    setLeads(prev => prev.filter(l => l.id !== id));
+    setAllLeads(prev => prev.filter(l => l.id !== id));
     if (isApiSessionActive() && isRealLeadId(id)) {
       apiDeleteLead(id).catch((err) => console.warn("Could not delete lead from the database:", err));
     }
   };
 
   const editLead = (id: string, updatedFields: Partial<Lead>) => {
-    setLeads(prev => prev.map(l => l.id === id ? { ...l, ...updatedFields } : l));
+    setAllLeads(prev => prev.map(l => l.id === id ? { ...l, ...updatedFields } : l));
     if (isApiSessionActive() && isRealLeadId(id)) {
       apiEditLead(id, {
         name: updatedFields.name,
@@ -1993,6 +2002,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setIsSyncing(false);
   };
 
+  // Data Calling (bulk-uploaded cold-outreach contact lists) is a separate
+  // pipeline from the rest of the CRM's real, ad-driven leads — a
+  // bulk-uploaded lead shows ONLY on Data Calling, everywhere else
+  // (Leads dashboard, Reports, Campaign Analytics totals, etc.) shows
+  // everything BUT those, so the two never mix. Every other page in the
+  // app already just destructures `leads` from context, so this one split
+  // is the only place that needs to know about the distinction.
+  const leads = useMemo(() => allLeads.filter(l => l.source !== "Bulk Upload"), [allLeads]);
+  const dataCallingLeads = useMemo(() => allLeads.filter(l => l.source === "Bulk Upload"), [allLeads]);
+
   return (
     <AppContext.Provider
       value={{
@@ -2010,6 +2029,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setShowLoginSplash,
         setActiveSystem,
         leads,
+        dataCallingLeads,
         properties,
         resaleUnits,
         followupCalls,

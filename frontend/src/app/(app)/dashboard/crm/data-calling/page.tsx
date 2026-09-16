@@ -151,7 +151,12 @@ function analyticsLeadMatchesMetric(l: Lead, metric: AnalyticsChartMetric): bool
 }
 
 export default function DataCallingPage() {
-  const { leads, followupCalls, properties, users, activeRole, updateLeadStatus, reassignLead, bulkImportLeads } = useApp();
+  // Data Calling is the bulk-uploaded cold-outreach pipeline, kept separate
+  // from the rest of the CRM's real, ad-driven leads — dataCallingLeads is
+  // the ONLY-bulk-upload view AppContext derives for exactly this page (see
+  // AppContext.tsx), aliased to `leads` here so the rest of this large file
+  // needs no other changes.
+  const { dataCallingLeads: leads, followupCalls, properties, users, activeRole, updateLeadStatus, reassignLead, bulkImportLeads } = useApp();
   // Bulk select + Assign/Reshuffle are an admin-only workflow — a sales
   // agent has no one to hand leads off to in that sense, so the checkbox
   // column and both toolbar buttons stay admin-only.
