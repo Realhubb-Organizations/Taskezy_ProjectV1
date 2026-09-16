@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useApp, User, Role } from "@/context/AppContext";
 import { apiDisconnectMeta, apiGetMetaConnectUrl, apiListMetaConnections, ApiMetaConnection, apiListGoogleAdsAccounts, ApiGoogleAdsAccount } from "@/lib/apiClient";
+import { isNotificationSoundMuted, setNotificationSoundMuted } from "@/lib/notificationSound";
 import {
   Settings,
   Plus,
@@ -31,10 +32,11 @@ import {
   LayoutGrid,
   CreditCard,
   ChevronDown,
-  Sparkles
+  Sparkles,
+  MoreHorizontal
 } from "lucide-react";
 
-const TABS = ["Connected Apps", "Leads", "HRMS", "Finance", "Manage Users", "About"] as const;
+const TABS = ["Connected Apps", "Leads", "HRMS", "Finance", "Manage Users", "Preference", "About"] as const;
 type Tab = (typeof TABS)[number];
 
 const TAB_ICONS: Record<Tab, React.ComponentType<{ className?: string }>> = {
@@ -43,6 +45,7 @@ const TAB_ICONS: Record<Tab, React.ComponentType<{ className?: string }>> = {
   HRMS: CreditCard,
   Finance: FileText,
   "Manage Users": UserCog,
+  Preference: Settings,
   About: Info
 };
 
@@ -112,6 +115,20 @@ export default function SettingsPage() {
   const [integrationFilter, setIntegrationFilter] = useState<"all" | "active" | "inactive">("all");
   const [integrationSort, setIntegrationSort] = useState<"popular" | "name" | "status">("popular");
   const [integrationSortMenuOpen, setIntegrationSortMenuOpen] = useState(false);
+  const [integrationCardMenuOpen, setIntegrationCardMenuOpen] = useState<string | null>(null);
+
+  // --- Preference: only real, already-wired client-side preference today —
+  // notification sound mute (see lib/notificationSound.ts), which had no UI
+  // to actually toggle it before this tab.
+  const [soundMuted, setSoundMuted] = useState(false);
+  useEffect(() => {
+    setSoundMuted(isNotificationSoundMuted());
+  }, []);
+  const handleToggleSoundMuted = () => {
+    const next = !soundMuted;
+    setNotificationSoundMuted(next);
+    setSoundMuted(next);
+  };
 
   const handleRequestIntegration = () => {
     alert("Thanks — we don't have a request form wired up yet. Reach out to support with which platform you need and we'll take it from there.");
@@ -494,6 +511,71 @@ export default function SettingsPage() {
           return latest ? latest.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—";
         };
 
+        const AVATAR_COLORS = ["bg-blue-500", "bg-emerald-500", "bg-amber-500", "bg-violet-500", "bg-rose-500", "bg-cyan-500"];
+        const avatarColor = (name: string) => AVATAR_COLORS[Math.abs(name.split("").reduce((h, c) => h + c.charCodeAt(0), 0)) % AVATAR_COLORS.length];
+        const initialsOf = (name: string) => name.trim().split(/\s+/).map(w => w[0]).join("").slice(0, 2).toUpperCase() || "?";
+
+        // Small avatar-stack summary of connected Pages/Accounts — real names,
+        // capped visually with a "+N" overflow badge rather than listing all.
+        const avatarStack = (names: string[]) => {
+          const shown = names.slice(0, 3);
+          const overflow = names.length - shown.length;
+          return (
+            <div className="flex items-center -space-x-2">
+              {shown.map((n, i) => (
+                <div
+                  key={i}
+                  title={n}
+                  className={`h-6 w-6 rounded-full ring-2 ring-white flex items-center justify-center text-[9px] font-black text-white shrink-0 ${avatarColor(n)}`}
+                >
+                  {initialsOf(n)}
+                </div>
+              ))}
+              {overflow > 0 && (
+                <div className="h-6 w-6 rounded-full ring-2 ring-white bg-slate-200 flex items-center justify-center text-[9px] font-black text-slate-600 shrink-0">
+                  +{overflow}
+                </div>
+              )}
+            </div>
+          );
+        };
+
+        // Card-corner "..." overflow menu — real actions only (View Details,
+        // and Disconnect when there's something active to disconnect).
+        const cardMenu = (cardKey: string, detailsHref: string, onDisconnect?: () => void) => (
+          <div className="relative shrink-0">
+            <button
+              type="button"
+              onClick={() => setIntegrationCardMenuOpen(prev => (prev === cardKey ? null : cardKey))}
+              className="h-6 w-6 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+            >
+              <MoreHorizontal className="h-4 w-4" />
+            </button>
+            {integrationCardMenuOpen === cardKey && (
+              <>
+                <div className="fixed inset-0 z-[60]" onClick={() => setIntegrationCardMenuOpen(null)} />
+                <div className="absolute right-0 top-full mt-1 z-[70] w-40 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 overflow-hidden">
+                  <Link
+                    href={detailsHref}
+                    onClick={() => setIntegrationCardMenuOpen(null)}
+                    className="block px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50"
+                  >
+                    View Details
+                  </Link>
+                  {onDisconnect && (
+                    <button
+                      onClick={() => { setIntegrationCardMenuOpen(null); onDisconnect(); }}
+                      className="w-full text-left px-3 py-1.5 text-xs font-bold text-red-600 hover:bg-red-50"
+                    >
+                      Disconnect
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        );
+
         const statusPill = (active: boolean, label?: string) => (
           <span className={`inline-flex items-center gap-1 text-[9px] font-bold border px-2 py-0.5 rounded-full shrink-0 ${
             active ? "bg-emerald-50 text-emerald-700 border-emerald-150" : "bg-slate-100 text-slate-450 border-slate-200"
@@ -511,32 +593,25 @@ export default function SettingsPage() {
                   <img src="https://img.icons8.com/?size=100&id=wA5rN96FVDtq&format=png&color=000000" alt="Meta" className="h-full w-full object-contain" />
                 </div>
                 <h4 className="text-sm font-extrabold text-slate-900 truncate">Meta Ads</h4>
+                {statusPill(activeMetaConnections.length > 0)}
               </div>
-              {statusPill(activeMetaConnections.length > 0)}
+              {cardMenu(
+                "meta",
+                "/dashboard/settings/integrations?app=meta",
+                activeRole === "ADMIN" && activeMetaConnections.length === 1
+                  ? () => handleDisconnectMeta(activeMetaConnections[0].id, activeMetaConnections[0].page_name)
+                  : undefined
+              )}
             </div>
             <p className="text-[11px] text-slate-500 leading-relaxed">
               Capture leads from Facebook &amp; Instagram Lead Ads in real time via a webhook.
             </p>
             {activeMetaConnections.length > 0 ? (
-              <div className="bg-slate-50 border border-slate-150 rounded-xl px-3 py-2 space-y-1">
+              <div className="bg-slate-50 border border-slate-150 rounded-xl px-3 py-2 space-y-1.5">
                 <p className="text-[10px] font-extrabold text-slate-700">
                   {activeMetaConnections.length} Page{activeMetaConnections.length === 1 ? "" : "s"} Connected
                 </p>
-                <div className="space-y-1 max-h-24 overflow-y-auto">
-                  {activeMetaConnections.map(c => (
-                    <div key={c.id} className="flex items-center justify-between text-[10px] bg-white border border-slate-150 rounded-lg px-2 py-1">
-                      <span className="font-bold text-slate-700 truncate">{c.page_name}</span>
-                      {activeRole === "ADMIN" && (
-                        <button
-                          onClick={() => handleDisconnectMeta(c.id, c.page_name)}
-                          className="text-red-600 hover:text-red-700 font-bold shrink-0 ml-2"
-                        >
-                          Disconnect
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
+                {avatarStack(activeMetaConnections.map(c => c.page_name))}
               </div>
             ) : (
               <div className="bg-slate-50 border border-slate-150 rounded-xl px-3 py-2 flex items-start gap-2">
@@ -550,7 +625,7 @@ export default function SettingsPage() {
             {activeMetaConnections.length > 0 && (
               <p className="text-[10px] text-slate-400 flex items-center gap-1.5">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" />
-                Connected since {formatConnectedSince(activeMetaConnections.map(c => c.created_at))}
+                Last synced {formatConnectedSince(activeMetaConnections.map(c => c.created_at))}
               </p>
             )}
             <div className="flex items-center justify-between pt-1 mt-auto">
@@ -581,8 +656,9 @@ export default function SettingsPage() {
                   <img src="https://img.icons8.com/?size=100&id=4hR4Ih04Je2t&format=png&color=000000" alt="Google Ads" className="h-full w-full object-contain" />
                 </div>
                 <h4 className="text-sm font-extrabold text-slate-900 truncate">Google Ads</h4>
+                {statusPill(activeGoogleAccounts.length > 0)}
               </div>
-              {statusPill(activeGoogleAccounts.length > 0)}
+              {cardMenu("google", "/dashboard/settings/integrations?app=google")}
             </div>
             <p className="text-[11px] text-slate-500 leading-relaxed">
               Sync campaign spend and leads from your Google Ads account (MCC supported).
@@ -612,7 +688,7 @@ export default function SettingsPage() {
             {activeGoogleAccounts.length > 0 && (
               <p className="text-[10px] text-slate-400 flex items-center gap-1.5">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" />
-                Connected since {formatConnectedSince(activeGoogleAccounts.map(a => a.created_at))}
+                Last synced {formatConnectedSince(activeGoogleAccounts.map(a => a.created_at))}
               </p>
             )}
             <div className="flex items-center justify-between pt-1 mt-auto">
@@ -645,8 +721,9 @@ export default function SettingsPage() {
                     {badge?.content ?? <span className="text-xs font-black text-white">{item.name[0]}</span>}
                   </div>
                   <h4 className="text-sm font-extrabold text-slate-900 truncate">{item.name}</h4>
+                  {statusPill(active)}
                 </div>
-                {statusPill(active)}
+                {cardMenu(item.name, `/dashboard/settings/integrations?app=${encodeURIComponent(item.name)}`)}
               </div>
               <p className="text-[11px] text-slate-500 leading-relaxed">{item.description}</p>
               <div className="bg-slate-50 border border-slate-150 rounded-xl px-3 py-2 flex items-start gap-2">
@@ -658,7 +735,11 @@ export default function SettingsPage() {
                   </p>
                 </div>
               </div>
-              <div className="flex items-center justify-end pt-1 mt-auto">
+              <div className="flex items-center justify-between pt-1 mt-auto">
+                <Link href={`/dashboard/settings/integrations?app=${encodeURIComponent(item.name)}`} className="text-[11px] font-bold text-brand-700 hover:underline flex items-center gap-1">
+                  <FileText className="h-3 w-3" />
+                  View Details
+                </Link>
                 <button
                   onClick={() => handleToggleIntegration(item.name)}
                   className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-all ${
@@ -1117,7 +1198,30 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* 6. About */}
+      {/* 6. Preference */}
+      {activeTab === "Preference" && (
+        <div className="max-w-xl space-y-4 animate-fade-in">
+          <div className="glass-card p-6 rounded-2xl space-y-4">
+            <h3 className="text-sm font-extrabold text-slate-800">Notifications</h3>
+            <div className="flex items-center justify-between gap-4 bg-slate-50 border border-slate-150 rounded-xl px-4 py-3">
+              <div>
+                <p className="text-xs font-bold text-slate-700">Notification Sounds</p>
+                <p className="text-[11px] text-slate-500 mt-0.5">Play a sound for new leads and reminders in this browser.</p>
+              </div>
+              <button
+                type="button"
+                onClick={handleToggleSoundMuted}
+                className={`relative shrink-0 h-6 w-11 rounded-full transition-colors ${!soundMuted ? "bg-brand-600" : "bg-slate-300"}`}
+              >
+                <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${!soundMuted ? "translate-x-5" : "translate-x-0.5"}`} />
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-400 italic">More preferences will land here as they&apos;re built.</p>
+          </div>
+        </div>
+      )}
+
+      {/* 7. About */}
       {activeTab === "About" && (
         <div className="max-w-xl space-y-4 animate-fade-in">
           <div className="glass-card p-6 rounded-2xl space-y-4">

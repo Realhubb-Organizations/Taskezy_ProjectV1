@@ -29,6 +29,17 @@ const INTEGRATION_INFO: Record<IntegrationKey, { name: string; description: stri
   }
 };
 
+// The still-unwired Connected Apps placeholders (99acres, LinkedIn, etc.) —
+// their "View Details" link lands here too rather than skipping it, but with
+// an honest "no backend yet" message instead of borrowing Meta/Google's data.
+const PLACEHOLDER_DESCRIPTIONS: Record<string, string> = {
+  "99acres": "Capture leads from 99acres property listings automatically.",
+  LinkedIn: "Capture B2B leads from LinkedIn Lead Gen Forms.",
+  "Housing.com": "Capture leads from Housing.com property listings.",
+  MagicBricks: "Capture leads from MagicBricks property listings.",
+  NoBroker: "Capture leads from NoBroker property listings."
+};
+
 function formatDate(iso: string | undefined): string {
   if (!iso) return "—";
   const d = new Date(iso);
@@ -45,9 +56,50 @@ const statusPill = (active: boolean) => (
   </span>
 );
 
+function PlaceholderDetail({ name }: { name: string }) {
+  const description = PLACEHOLDER_DESCRIPTIONS[name] || `Capture leads from ${name}.`;
+  return (
+    <div className="space-y-5 pb-12">
+      <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
+        <Link href="/dashboard/settings" className="hover:text-brand-700">Settings</Link>
+        <ChevronRight className="h-3 w-3 text-slate-300" />
+        <Link href="/dashboard/settings" className="hover:text-brand-700">Connected Apps</Link>
+        <ChevronRight className="h-3 w-3 text-slate-300" />
+        <span className="text-slate-800 font-extrabold">{name}</span>
+      </div>
+      <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-3">
+        <div className="flex items-center gap-2">
+          <h2 className="text-lg font-extrabold text-slate-900">{name}</h2>
+          {statusPill(false)}
+        </div>
+        <p className="text-xs text-slate-500 max-w-md">{description}</p>
+        <div className="bg-slate-50 border border-slate-150 rounded-xl px-4 py-3 flex items-start gap-2.5">
+          <Info className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" />
+          <p className="text-xs text-slate-500">
+            This integration isn&apos;t connected to a real backend yet — there&apos;s nothing to show here beyond what&apos;s on the Connected Apps card.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Picks which detail view to mount based on ?app= — a plain branch here (not
+// an early return inside the real-integration view) so React always calls
+// that view's hooks in the same order; swapping between this and
+// PlaceholderDetail just mounts/unmounts a different component, which is
+// safe, versus an early return partway through one component's hooks.
 function IntegrationDetailContent() {
   const searchParams = useSearchParams();
   const keyParam = searchParams.get("app");
+  const isRealIntegration = keyParam === "meta" || keyParam === "google" || !keyParam;
+  if (!isRealIntegration) {
+    return <PlaceholderDetail name={keyParam!} />;
+  }
+  return <RealIntegrationDetail keyParam={keyParam} />;
+}
+
+function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
   const key: IntegrationKey = keyParam === "google" ? "google" : "meta";
   const info = INTEGRATION_INFO[key];
 
