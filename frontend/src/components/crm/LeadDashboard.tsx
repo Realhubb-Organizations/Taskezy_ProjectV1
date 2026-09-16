@@ -118,11 +118,17 @@ export default function LeadDashboard() {
 
   // Scoping check: is the current user a Sales Member?
   const isSalesMember = currentUser?.role_type === "Member" && currentUser?.role !== "ADMIN";
-  // Admin-only UI within the (now shared) Leads console — the Leads
-  // Analytics tab, the top Campaigns quick-filter, and the "View Detailed
-  // Analytics" link stay admin-exclusive; a Sales Member/Manager gets the
-  // same Leads table and stat bar without them.
+  // Admin-only UI within the (now shared) Leads console — the top Campaigns
+  // quick-filter stays admin-exclusive; a Sales Member gets the same Leads
+  // table and stat bar without it.
   const isAdmin = currentUser?.role === "ADMIN";
+  // The Leads Analytics tab (and its "View Detailed Analytics" links) is
+  // the one piece of this admin-only UI a Manager also gets — Managers
+  // already see the exact same unscoped, company-wide `scopedLeads` as
+  // Admin everywhere else on this page (see isSalesMember above), so
+  // showing them the same per-agent breakdown here exposes nothing they
+  // couldn't already see on the plain Leads tab.
+  const canViewLeadsAnalytics = isAdmin || currentUser?.role_type === "Manager";
 
   // Data scoping based on role
   const scopedLeads = leads.filter(l => {
@@ -287,18 +293,19 @@ export default function LeadDashboard() {
   // restricts a Sales Member to their own leads (see isSalesMember above),
   // so the same JSX/table is safe to render for anyone; there's no per-row
   // destructive/admin-only action in here to gate. The Leads Analytics tab,
-  // the top Campaigns quick-filter, and "View Detailed Analytics" stay
-  // admin-only (isAdmin, below).
+  // the top Campaigns quick-filter stays admin-only (isAdmin, below);
+  // Leads Analytics and "View Detailed Analytics" are canViewLeadsAnalytics
+  // (Admin or Manager).
   // ===========================================================================
 
   // Initialized from the URL's ?tab= param (if present) so a refresh/bookmark
   // while on Leads Analytics reopens on that tab, and kept in sync below so
   // the shared page header (getActiveTabName in the app layout) can show
-  // "Leads Analytics" instead of always "Leads". Only admins can ever reach
-  // "analytics" — a Sales Member/Manager stays pinned to "leads" even if an
+  // "Leads Analytics" instead of always "Leads". Only Admin/Manager can ever
+  // reach "analytics" — a Sales Member stays pinned to "leads" even if an
   // old ?tab=analytics link is opened.
   const [adminTab, setAdminTab] = useState<"leads" | "analytics">(
-    () => (isAdmin && searchParams.get("tab") === "analytics" ? "analytics" : "leads")
+    () => (canViewLeadsAnalytics && searchParams.get("tab") === "analytics" ? "analytics" : "leads")
   );
 
   useEffect(() => {
@@ -822,7 +829,7 @@ export default function LeadDashboard() {
   return (
     <div className="space-y-4 pb-12 animate-fade-in">
       <div className="flex flex-wrap justify-between items-center gap-3">
-          {isAdmin && (
+          {canViewLeadsAnalytics && (
           <div className="bg-slate-200/60 p-1 rounded-xl flex items-center gap-1">
             <button
               onClick={() => setAdminTab("leads")}
@@ -961,7 +968,7 @@ export default function LeadDashboard() {
           </div>
         )}
 
-        {!isAdmin || adminTab === "leads" ? (
+        {!canViewLeadsAnalytics || adminTab === "leads" ? (
           <>
             {/* Date Filter & Metrics — one unified card */}
             <div className="bg-slate-100/70 border border-slate-200/60 rounded-2xl overflow-hidden shadow-sm">
@@ -1001,7 +1008,7 @@ export default function LeadDashboard() {
                     )}
                   </div>
                 </div>
-                {isAdmin && (
+                {canViewLeadsAnalytics && (
                 <button
                   type="button"
                   onClick={() => setAdminTab("analytics")}

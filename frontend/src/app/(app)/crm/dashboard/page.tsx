@@ -139,18 +139,12 @@ export default function CrmDashboardPage() {
 
   const isSalesMember = currentUser?.role_type === "Member" && currentUser?.role !== "ADMIN";
 
-  // "View Detailed Analytics" — an ADMIN gets the full Reports page (its own
-  // default Marketing tab); a Manager or sales agent (Member) has no use for
-  // marketing spend/campaign data, so send them straight to the Reports tab
-  // that's actually about their own leads (mirrors reports/page.tsx's own
-  // visibleTabs scoping, which would otherwise silently swap a Manager's
-  // requested "marketing" tab for nothing since it's still visible to them).
-  const detailedAnalyticsHref =
-    currentUser?.role === "ADMIN"
-      ? "/dashboard/reports"
-      : currentUser?.role_type === "Manager"
-        ? "/dashboard/reports?tab=manager"
-        : "/dashboard/reports?tab=agent";
+  // "View Detailed Analytics" — links to the real Leads Analytics tab on the
+  // Leads page (LeadDashboard.tsx's canViewLeadsAnalytics, which is Admin or
+  // Manager). A sales agent (Member) has no lead-analytics page at all, so
+  // the link is hidden for them entirely rather than pointing somewhere
+  // that isn't actually theirs.
+  const canViewLeadAnalytics = currentUser?.role === "ADMIN" || currentUser?.role_type === "Manager";
 
   const scopedLeads = leads.filter(l => {
     if (isSalesMember) {
@@ -492,9 +486,11 @@ export default function CrmDashboardPage() {
               )}
             </div>
           </div>
-          <Link href={detailedAnalyticsHref} className="text-blue-600 font-extrabold hover:underline">
-            View Detailed Analytics
-          </Link>
+          {canViewLeadAnalytics && (
+            <Link href="/dashboard/crm?tab=analytics" className="text-blue-600 font-extrabold hover:underline">
+              View Detailed Analytics
+            </Link>
+          )}
         </div>
 
         {/* Stat columns — the CRM funnel snapshot for the selected date range.
