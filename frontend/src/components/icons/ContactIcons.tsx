@@ -42,13 +42,40 @@ export function GoogleIcon({ className }: { className?: string }) {
   return <img src="https://img.icons8.com/?size=100&id=4hR4Ih04Je2t&format=png&color=000000" alt="Google" className={className} />;
 }
 
+// Data Calling's bulk-uploaded leads (source "Bulk Upload"/"Data" — see
+// leads.service.ts's promotion rule) are sourced from an admin-uploaded
+// Excel file, so they get a spreadsheet glyph here the same way Meta/Google
+// leads get their platform logo. Inline SVG (like WhatsAppIcon/CallIcon
+// above) rather than an external CDN image: the specific Flaticon "Excel"
+// icon the request named (flaticon.com/free-icons/excel, by Driss Lebbat)
+// blocks automated fetching, so this is a hand-built equivalent in Excel's
+// own brand green rather than a guessed/fabricated asset URL — swap in the
+// real file here if you have it downloaded.
+export function ExcelIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 32 32" className={className} xmlns="http://www.w3.org/2000/svg">
+      <rect x="2" y="2" width="28" height="28" rx="6" fill="#207245" />
+      <rect x="9" y="8" width="18" height="16" rx="1.5" fill="#fff" fillOpacity="0.14" />
+      <path
+        fill="#fff"
+        d="M11.8 11l2.9 4.6-3.1 4.9h2.4l1.9-3.2 1.9 3.2h2.5l-3.1-4.9 2.9-4.6h-2.4l-1.8 3-1.8-3z"
+      />
+      <path fill="#fff" fillOpacity="0.85" d="M22 11h3.2v1.6H22zM22 14.6h3.2v1.6H22zM22 18.2h3.2v1.6H22z" />
+    </svg>
+  );
+}
+
 // Classifies a lead's source/campaign text into which ad platform icon to
 // show — null means "no icon, just show the text" (Referral Code, Offline
-// Event, a custom-added source, etc.).
-export function platformFromText(text: string | undefined | null): "Meta" | "Google" | null {
+// Event, a custom-added source, etc.). "Data" is Data Calling's promoted
+// (Connected+Qualified) leads and "Bulk Upload" is one still sitting in
+// Data Calling itself — both are the same Excel-uploaded origin, just
+// before/after promotion, so both get the same icon.
+export function platformFromText(text: string | undefined | null): "Meta" | "Google" | "Excel" | null {
   if (!text) return null;
   if (/meta|facebook|instagram/i.test(text)) return "Meta";
   if (/google/i.test(text)) return "Google";
+  if (/^(data|bulk upload)$/i.test(text.trim())) return "Excel";
   return null;
 }
 
@@ -76,6 +103,7 @@ export function PlatformLabel({
       <span className={`inline-flex items-center ${className || ""}`} title={text}>
         {platform === "Meta" && <MetaIcon className="h-4 w-4 shrink-0" />}
         {platform === "Google" && <GoogleIcon className="h-4 w-4 shrink-0" />}
+        {platform === "Excel" && <ExcelIcon className="h-4 w-4 shrink-0" />}
       </span>
     );
   }
@@ -83,6 +111,7 @@ export function PlatformLabel({
     <span className={`inline-flex items-center gap-1.5 min-w-0 ${className || ""}`}>
       {platform === "Meta" && <MetaIcon className="h-3.5 w-3.5 shrink-0" />}
       {platform === "Google" && <GoogleIcon className="h-3.5 w-3.5 shrink-0" />}
+      {platform === "Excel" && <ExcelIcon className="h-3.5 w-3.5 shrink-0" />}
       <span className="truncate">{text}</span>
     </span>
   );

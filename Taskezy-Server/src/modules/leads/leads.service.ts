@@ -316,6 +316,20 @@ export async function updateLeadStatus(
     await withTransaction(async (client) => {
       await repo.updateStatus(client, leadId, statusCode, dealValue, stampFirstResponse, normalizedSubStatus, promotedSource);
       await repo.insertLeadLog(client, leadId, caller.sub, caller.name, `Status changed to "${statusCode}"`);
+      // A second, explicit log entry for the promotion itself — distinct
+      // from the generic "Status changed" line above, so the Activity
+      // History timeline (both on the lead's real detail view and for
+      // anyone auditing later) shows plainly why this lead moved out of
+      // Data Calling, not just that its status happened to be Connected.
+      if (promotedSource) {
+        await repo.insertLeadLog(
+          client,
+          leadId,
+          caller.sub,
+          caller.name,
+          `Lead qualified and transferred to main leads (source changed from "Bulk Upload" to "${promotedSource}").`
+        );
+      }
       // The agent responded in time — this is what the follow-up SLA
       // scheduler (jobs/followupScheduler.ts) checks for before escalating
       // a missed reminder to admins, so it needs to land in the same

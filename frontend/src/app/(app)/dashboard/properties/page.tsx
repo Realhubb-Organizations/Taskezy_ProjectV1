@@ -109,7 +109,9 @@ export default function PropertiesPage() {
       .filter(l => l.property === propertyName)
       .forEach(l => {
         const platform = platformFromText(l.source || l.campaign);
-        if (platform) platforms.add(platform);
+        // Deliberately ad-platform-only here — Data Calling's Excel-sourced
+        // leads aren't a campaign, so they don't belong in this badge set.
+        if (platform === "Meta" || platform === "Google") platforms.add(platform);
       });
     return Array.from(platforms);
   };
