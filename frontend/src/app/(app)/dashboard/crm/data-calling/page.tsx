@@ -8,9 +8,6 @@ import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tool
 import UploadLeadsModal from "@/components/crm/UploadLeadsModal";
 import LeadDetailDrawer from "@/components/crm/LeadDetailDrawer";
 
-const QUALIFIED_LEAD_STATUSES = ["Interested", "Connected", "Visit Schedule", "Site Visit", "Booking Done", "Booked"];
-const FOLLOW_UP_LEAD_STATUSES = ["Follow-ups", "Call Back"];
-
 // Data Calling's whole status model is deliberately just these three — a
 // cold-outreach triage pipeline, not the full CRM pipeline: a fresh
 // bulk-uploaded row is New Lead; RNR (no answer) always requires picking a
@@ -102,7 +99,7 @@ const ANALYTICS_DEFAULT_VISIBLE_COLUMNS: Record<AnalyticsColumnKey, boolean> = {
   unqualifiedLeads: true, qualifiedLeads: true
 };
 
-const ANALYTICS_CHART_METRICS = ["Qualified", "RNR", "Calls Made", "Total Leads", "Follow Ups"] as const;
+const ANALYTICS_CHART_METRICS = ["Qualified", "RNR", "Calls Made", "Total Leads", "Not Qualified"] as const;
 type AnalyticsChartMetric = typeof ANALYTICS_CHART_METRICS[number];
 
 interface AnalyticsPerformanceRow {
@@ -126,7 +123,7 @@ function computeAnalyticsPerformanceRows(list: Lead[], groupBy: (l: Lead) => str
     groups.get(key)!.push(l);
   });
   return Array.from(groups.entries()).map(([name, group]) => {
-    const qualifiedLeads = group.filter(l => QUALIFIED_LEAD_STATUSES.includes(l.status)).length;
+    const qualifiedLeads = group.filter(l => l.subStatus === "Qualified").length;
     return {
       name,
       totalLeads: group.length,
@@ -143,11 +140,11 @@ function computeAnalyticsPerformanceRows(list: Lead[], groupBy: (l: Lead) => str
 
 function analyticsLeadMatchesMetric(l: Lead, metric: AnalyticsChartMetric): boolean {
   switch (metric) {
-    case "Qualified": return QUALIFIED_LEAD_STATUSES.includes(l.status);
+    case "Qualified": return l.subStatus === "Qualified";
     case "RNR": return l.status === "RNR";
     case "Calls Made": return !!(l.logs && l.logs.length > 0);
     case "Total Leads": return true;
-    case "Follow Ups": return FOLLOW_UP_LEAD_STATUSES.includes(l.status);
+    case "Not Qualified": return l.subStatus === "Not Qualified";
   }
 }
 
@@ -310,13 +307,16 @@ export default function DataCallingPage() {
   // and Campaigns page. Every card here now respects Date Range (not just
   // Total, like this page used to do) — same page-wide decision already
   // applied to the Dashboard/Campaigns pages, so a lead outside the
-  // selected range no longer silently inflates RNR/Follow Ups/etc.
+  // selected range no longer silently inflates RNR/Not Qualified/etc.
   const categoryLeads: Record<string, Lead[]> = useMemo(() => ({
     "Total Leads Assigned": leads.filter(l => !!l.assignedAgent),
     "Calls Made": leads.filter(l => l.logs && l.logs.length > 0),
-    "Qualified Leads": leads.filter(l => QUALIFIED_LEAD_STATUSES.includes(l.status)),
+    // Qualified/Not Qualified is Data Calling's own Connected sub-status
+    // (see updateLeadStatus), not a CRM-wide status list — a
+    // Connected+Not-Qualified lead must not also count as "qualified".
+    "Qualified Leads": leads.filter(l => l.subStatus === "Qualified"),
     "RNR": leads.filter(l => l.status === "RNR"),
-    "Follow Ups": leads.filter(l => FOLLOW_UP_LEAD_STATUSES.includes(l.status))
+    "Not Qualified": leads.filter(l => l.subStatus === "Not Qualified")
   }), [leads]);
 
   const categoryLeadsInRange = useMemo(() => {
@@ -333,7 +333,7 @@ export default function DataCallingPage() {
     callsMade: categoryLeadsInRange["Calls Made"].length,
     qualifiedLeads: categoryLeadsInRange["Qualified Leads"].length,
     rnr: categoryLeadsInRange["RNR"].length,
-    followUps: categoryLeadsInRange["Follow Ups"].length
+    notQualified: categoryLeadsInRange["Not Qualified"].length
   }), [categoryLeadsInRange]);
 
   // Analytics tab derived data — scoped by the page's shared calendar range
@@ -371,9 +371,9 @@ export default function DataCallingPage() {
   const analyticsSummaryMetrics = useMemo(() => ({
     totalAssigned: subSourceScopedLeads.filter(l => !!l.assignedAgent).length,
     callsMade: subSourceScopedLeads.filter(l => l.logs && l.logs.length > 0).length,
-    qualifiedLeads: subSourceScopedLeads.filter(l => QUALIFIED_LEAD_STATUSES.includes(l.status)).length,
+    qualifiedLeads: subSourceScopedLeads.filter(l => l.subStatus === "Qualified").length,
     rnr: subSourceScopedLeads.filter(l => l.status === "RNR").length,
-    followUps: subSourceScopedLeads.filter(l => FOLLOW_UP_LEAD_STATUSES.includes(l.status)).length
+    notQualified: subSourceScopedLeads.filter(l => l.subStatus === "Not Qualified").length
   }), [subSourceScopedLeads]);
 
   // Real underlying lead list behind each Analytics stat card, keyed the
@@ -382,9 +382,9 @@ export default function DataCallingPage() {
   const analyticsCategoryLeads: Record<string, Lead[]> = useMemo(() => ({
     "Total Leads Assigned": subSourceScopedLeads.filter(l => !!l.assignedAgent),
     "Calls Made": subSourceScopedLeads.filter(l => l.logs && l.logs.length > 0),
-    "Qualified Leads": subSourceScopedLeads.filter(l => QUALIFIED_LEAD_STATUSES.includes(l.status)),
+    "Qualified Leads": subSourceScopedLeads.filter(l => l.subStatus === "Qualified"),
     "RNR": subSourceScopedLeads.filter(l => l.status === "RNR"),
-    "Follow Ups": subSourceScopedLeads.filter(l => FOLLOW_UP_LEAD_STATUSES.includes(l.status))
+    "Not Qualified": subSourceScopedLeads.filter(l => l.subStatus === "Not Qualified")
   }), [subSourceScopedLeads]);
 
   const salespersonRows = useMemo(
@@ -933,7 +933,7 @@ export default function DataCallingPage() {
             { label: "Calls Made", value: summaryMetrics.callsMade, color: "text-slate-900" },
             { label: "Qualified Leads", value: summaryMetrics.qualifiedLeads, color: "text-rose-600" },
             { label: "RNR", value: summaryMetrics.rnr, color: "text-amber-500" },
-            { label: "Follow Ups", value: summaryMetrics.followUps, color: "text-blue-500" }
+            { label: "Not Qualified", value: summaryMetrics.notQualified, color: "text-red-500" }
           ] as const).map(s => {
             const isActive = selectedCategory === s.label;
             return (
@@ -1008,7 +1008,7 @@ export default function DataCallingPage() {
             { label: "Calls Made", value: analyticsSummaryMetrics.callsMade, color: "text-slate-900" },
             { label: "Qualified Leads", value: analyticsSummaryMetrics.qualifiedLeads, color: "text-rose-600" },
             { label: "RNR", value: analyticsSummaryMetrics.rnr, color: "text-amber-500" },
-            { label: "Follow Ups", value: analyticsSummaryMetrics.followUps, color: "text-blue-500" }
+            { label: "Not Qualified", value: analyticsSummaryMetrics.notQualified, color: "text-red-500" }
           ] as const).map(s => {
             const isActive = analyticsSelectedCategory === s.label;
             return (
