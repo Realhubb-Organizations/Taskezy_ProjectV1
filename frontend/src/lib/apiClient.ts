@@ -200,14 +200,14 @@ export function apiCreateLead(input: CreateLeadApiInput): Promise<ApiLeadRow> {
 
 // Admin CRM Data Calling's bulk Excel upload (Name + Mobile Number only) —
 // ADMIN-only. Property mode distributes rows across that property's
-// configured Round Robin/Percentage team; Agent mode puts every row
-// directly on one chosen agent. See Taskezy-Server/leads.service.ts's
+// configured Round Robin/Percentage team; Agent mode round-robins rows
+// evenly across every selected agent. See Taskezy-Server/leads.service.ts's
 // bulkImportLeads for the full assignment/fallback logic.
 export interface BulkImportLeadsApiInput {
   subSource: string;
   assignmentMode: "PROPERTY" | "AGENT";
   propertyId?: string;
-  agentId?: string;
+  agentIds?: string[];
   leads: { name: string; phone: string }[];
 }
 export interface BulkImportLeadsApiResult {

@@ -55,7 +55,10 @@ export const bulkImportLeadsSchema = z
     subSource: z.string().trim().min(1, "Sub-source is required").max(200),
     assignmentMode: z.enum(["PROPERTY", "AGENT"]),
     propertyId: z.string().uuid().optional(),
-    agentId: z.string().uuid().optional(),
+    // Agent mode round-robins rows evenly across every selected agent (see
+    // leads.service.ts's bulkImportLeads) rather than dumping the whole
+    // batch on one person.
+    agentIds: z.array(z.string().uuid()).optional(),
     leads: z
       .array(
         z.object({
@@ -70,7 +73,7 @@ export const bulkImportLeadsSchema = z
     message: "propertyId is required for Property assignment mode",
     path: ["propertyId"]
   })
-  .refine(d => d.assignmentMode !== "AGENT" || !!d.agentId, {
-    message: "agentId is required for Agent assignment mode",
-    path: ["agentId"]
+  .refine(d => d.assignmentMode !== "AGENT" || (!!d.agentIds && d.agentIds.length > 0), {
+    message: "At least one agentId is required for Agent assignment mode",
+    path: ["agentIds"]
   });

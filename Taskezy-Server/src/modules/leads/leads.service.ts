@@ -120,7 +120,7 @@ export interface BulkImportLeadsInput {
   subSource: string;
   assignmentMode: "PROPERTY" | "AGENT";
   propertyId?: string;
-  agentId?: string;
+  agentIds?: string[];
   leads: BulkImportLeadRow[];
 }
 
@@ -136,10 +136,11 @@ export interface BulkImportSkippedRow {
  * every other lead-ingest path (sheet import, Meta webhook) — falling back
  * to the first active admin as an UNASSIGNED lead when the property has no
  * assignable pool, same convention as sheet-import. Agent mode skips that
- * entirely and puts every row directly on the one agent the admin chose.
- * A bad row (missing name, unparseable phone, duplicate phone) is skipped
- * and reported, not a whole-batch failure — an admin's real spreadsheet
- * always has a few messy rows.
+ * entirely and round-robins every row evenly across whichever agents the
+ * admin picked (a single agent is just the n=1 case). A bad row (missing
+ * name, unparseable phone, duplicate phone) is skipped and reported, not a
+ * whole-batch failure — an admin's real spreadsheet always has a few messy
+ * rows.
  */
 export async function bulkImportLeads(_caller: AccessTokenPayload, input: BulkImportLeadsInput) {
   const fallbackAdminId = (await usersRepo.listActiveAdminIds())[0];
@@ -148,6 +149,7 @@ export async function bulkImportLeads(_caller: AccessTokenPayload, input: BulkIm
   let duplicates = 0;
   const skipped: BulkImportSkippedRow[] = [];
   const notifyCounts = new Map<string, number>();
+  let agentCursor = 0; // only advances on rows that actually reach assignment, so skipped rows earlier in the sheet don't skew the round-robin
 
   for (let i = 0; i < input.leads.length; i++) {
     const row = i + 2; // header is row 1
@@ -166,7 +168,9 @@ export async function bulkImportLeads(_caller: AccessTokenPayload, input: BulkIm
     let assignedAgentId: string | undefined;
     let statusCode: string;
     if (input.assignmentMode === "AGENT") {
-      assignedAgentId = input.agentId;
+      const agentIds = input.agentIds ?? [];
+      assignedAgentId = agentIds.length > 0 ? agentIds[agentCursor % agentIds.length] : undefined;
+      agentCursor++;
       statusCode = "NEW";
     } else {
       const autoAssignedAgentId = await pickAgentForProperty(input.propertyId!);
@@ -174,7 +178,12 @@ export async function bulkImportLeads(_caller: AccessTokenPayload, input: BulkIm
       statusCode = autoAssignedAgentId ? "NEW" : "UNASSIGNED";
     }
     if (!assignedAgentId) {
-      skipped.push({ row, reason: "No assignable agent for this property and no active admin to fall back to" });
+      skipped.push({
+        row,
+        reason: input.assignmentMode === "AGENT"
+          ? "No agent selected to assign this row to"
+          : "No assignable agent for this property and no active admin to fall back to"
+      });
       continue;
     }
 

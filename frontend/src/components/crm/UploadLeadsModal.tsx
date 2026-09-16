@@ -125,6 +125,89 @@ function SourceSearchSelect({ value, onChange }: { value: string; onChange: (v: 
   );
 }
 
+// Checkbox multi-select for Agent mode's assignees — rows get round-robined
+// evenly across whichever agents are checked (see leads.service.ts's
+// bulkImportLeads), so more than one agent is a normal, expected choice
+// here, not an edge case.
+function AgentMultiSelect({
+  agents,
+  selectedIds,
+  onChange
+}: {
+  agents: { id: string; name: string }[];
+  selectedIds: string[];
+  onChange: (ids: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const toggle = (id: string) => {
+    onChange(selectedIds.includes(id) ? selectedIds.filter(x => x !== id) : [...selectedIds, id]);
+  };
+
+  const label =
+    selectedIds.length === 0
+      ? "Select agent(s)"
+      : selectedIds.length === 1
+        ? agents.find(a => a.id === selectedIds[0])?.name || "1 agent selected"
+        : `${selectedIds.length} agents selected`;
+
+  const q = query.trim().toLowerCase();
+  const filtered = agents.filter(a => !q || a.name.toLowerCase().includes(q));
+
+  return (
+    <div className="relative" ref={wrapRef}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:outline-none focus:bg-white focus:border-[#0B1E6E] transition-all"
+      >
+        <span className={`truncate ${selectedIds.length === 0 ? "text-slate-400 font-semibold" : ""}`}>{label}</span>
+        <ChevronDown className={`h-3.5 w-3.5 text-slate-400 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {open && (
+        <div className="absolute z-20 mt-1.5 w-full bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 max-h-56 overflow-y-auto">
+          <div className="px-2 pb-1.5 sticky top-0 bg-white">
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search agents..."
+              className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none"
+            />
+          </div>
+          {filtered.length === 0 ? (
+            <p className="px-3.5 py-2 text-xs text-slate-400 italic font-normal">No agents found</p>
+          ) : (
+            filtered.map(a => (
+              <label key={a.id} className="flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={selectedIds.includes(a.id)}
+                  onChange={() => toggle(a.id)}
+                  className="h-3.5 w-3.5 rounded border-slate-300 text-[#0B1E6E] focus:ring-0"
+                />
+                {a.name}
+              </label>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export interface ParsedLeadRow {
   name: string;
   phone: string;
@@ -145,7 +228,7 @@ export interface BulkImportSubmitInput {
   subSource: string;
   assignmentMode: "PROPERTY" | "AGENT";
   propertyId?: string;
-  agentId?: string;
+  agentIds?: string[];
   leads: ParsedLeadRow[];
 }
 
@@ -216,7 +299,7 @@ async function parseLeadsFile(file: File): Promise<ParsedLeadRow[]> {
 export default function UploadLeadsModal({ isOpen, onClose, onSubmit, propertiesList, agentsList }: UploadLeadsModalProps) {
   const [assignmentMode, setAssignmentMode] = useState<"PROPERTY" | "AGENT">("PROPERTY");
   const [propertyId, setPropertyId] = useState("");
-  const [agentId, setAgentId] = useState("");
+  const [agentIds, setAgentIds] = useState<string[]>([]);
   const [subSource, setSubSource] = useState("");
   const [dragOver, setDragOver] = useState(false);
   const [file, setFile] = useState<File | null>(null);
@@ -238,7 +321,7 @@ export default function UploadLeadsModal({ isOpen, onClose, onSubmit, properties
     if (isOpen) return;
     setAssignmentMode("PROPERTY");
     setPropertyId("");
-    setAgentId("");
+    setAgentIds([]);
     setSubSource("");
     setFile(null);
     setIsSubmitting(false);
@@ -280,8 +363,8 @@ export default function UploadLeadsModal({ isOpen, onClose, onSubmit, properties
       setErrorMsg("Please select a property to assign these leads by.");
       return;
     }
-    if (assignmentMode === "AGENT" && !agentId) {
-      setErrorMsg("Please select an agent to assign these leads to.");
+    if (assignmentMode === "AGENT" && agentIds.length === 0) {
+      setErrorMsg("Please select at least one agent to assign these leads to.");
       return;
     }
 
@@ -297,7 +380,7 @@ export default function UploadLeadsModal({ isOpen, onClose, onSubmit, properties
         subSource: subSource.trim(),
         assignmentMode,
         propertyId: assignmentMode === "PROPERTY" ? propertyId : undefined,
-        agentId: assignmentMode === "AGENT" ? agentId : undefined,
+        agentIds: assignmentMode === "AGENT" ? agentIds : undefined,
         leads
       });
       setResult(submitResult);
@@ -377,7 +460,7 @@ export default function UploadLeadsModal({ isOpen, onClose, onSubmit, properties
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-1">
                     <label className="block text-xs font-bold text-slate-700">
-                      {assignmentMode === "PROPERTY" ? "Select Property" : "Select Agent"}
+                      {assignmentMode === "PROPERTY" ? "Select Property" : "Select Agent(s)"}
                     </label>
                     {assignmentMode === "PROPERTY" ? (
                       <select
@@ -391,16 +474,7 @@ export default function UploadLeadsModal({ isOpen, onClose, onSubmit, properties
                         ))}
                       </select>
                     ) : (
-                      <select
-                        value={agentId}
-                        onChange={(e) => setAgentId(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:outline-none focus:bg-white focus:border-[#0B1E6E] transition-all"
-                      >
-                        <option value="">Select agent</option>
-                        {agentsList.map(a => (
-                          <option key={a.id} value={a.id}>{a.name}</option>
-                        ))}
-                      </select>
+                      <AgentMultiSelect agents={agentsList} selectedIds={agentIds} onChange={setAgentIds} />
                     )}
                   </div>
                   <div className="space-y-1">
