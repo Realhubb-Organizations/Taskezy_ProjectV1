@@ -5,7 +5,13 @@
 FROM node:20-alpine AS build
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci
+# bcrypt (native addon, replacing the pure-JS bcryptjs — see utils/password.ts)
+# needs a C++ toolchain to build on Alpine/musl if no matching prebuilt
+# binary is published for it; installed as a virtual package and removed in
+# the same layer so it doesn't linger in this stage's image either.
+RUN apk add --no-cache --virtual .build-deps python3 make g++ \
+  && npm ci \
+  && apk del .build-deps
 COPY tsconfig.json ./
 COPY src ./src
 RUN npm run build
@@ -18,7 +24,11 @@ ENV NODE_ENV=production
 RUN addgroup -S taskezy && adduser -S taskezy -G taskezy
 
 COPY package*.json ./
-RUN npm ci --omit=dev
+# Same native-addon build toolchain as above, transient for this stage too —
+# the final image ends up with neither compiler present.
+RUN apk add --no-cache --virtual .build-deps python3 make g++ \
+  && npm ci --omit=dev \
+  && apk del .build-deps
 COPY --from=build /app/dist ./dist
 
 USER taskezy
