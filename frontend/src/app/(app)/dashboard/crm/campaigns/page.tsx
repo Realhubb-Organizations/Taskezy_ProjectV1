@@ -1796,6 +1796,7 @@ export default function AdminCampaignsPage() {
                     <>
                       <div className="fixed inset-0 z-[60]" onClick={() => setBreakdownCampaignMenuOpen(false)} />
                       <div
+                        data-scroll-panel="true"
                         className="fixed z-[70] w-56 max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 text-xs font-medium"
                         style={{ top: breakdownCampaignMenuPos.top, left: breakdownCampaignMenuPos.left }}
                       >

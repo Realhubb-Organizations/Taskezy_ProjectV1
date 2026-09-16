@@ -679,13 +679,23 @@ export default function DataCallingPage() {
   // Every button-anchored dropdown here snapshots its position once on
   // click and never re-measures, so it visually detaches from its button
   // if the page scrolls while open — close on scroll instead (same fix
-  // applied to the Campaigns page's dropdowns).
+  // applied to the Campaigns page's dropdowns). But a scroll event's target
+  // is the specific element being scrolled, and several of these dropdowns
+  // are themselves internally scrollable (long status/assignee lists) —
+  // without this check, scrolling *inside* the open panel bubbled up to
+  // this window-level capture listener and closed the panel on the very
+  // first scroll tick, before the user could see anything past the fold.
+  // Panels with internal scroll carry data-scroll-panel="true" precisely so
+  // this handler can tell "scrolled the panel" apart from "scrolled the page
+  // behind it" and only close on the latter.
   useEffect(() => {
     const anyOpen = summaryDateMenuOpen || calendarPickerOpen || statusMenuOpen || assignedMenuOpen ||
       dataCallSourceMenuOpen || propertyDropdownOpen || assigneeDropdownOpen || !!rowStatusMenuFor || !!rowAssignMenuFor ||
       subSourceMenuOpen || chartSourceMenuOpen || chartMetricMenuOpen;
     if (!anyOpen) return;
-    const closeAll = () => {
+    const closeAll = (e: Event) => {
+      const target = e.target;
+      if (target instanceof Element && target.closest('[data-scroll-panel="true"]')) return;
       setSummaryDateMenuOpen(false);
       setCalendarPickerOpen(false);
       setStatusMenuOpen(false);
@@ -891,6 +901,7 @@ export default function DataCallingPage() {
                 <>
                   <div className="fixed inset-0 z-[60]" onClick={() => setSubSourceMenuOpen(false)} />
                   <div
+                    data-scroll-panel="true"
                     className="fixed z-[70] w-40 max-h-64 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-lg py-1.5"
                     style={{ top: subSourceMenuPos.top, left: subSourceMenuPos.left }}
                   >
@@ -1379,6 +1390,7 @@ export default function DataCallingPage() {
                     <>
                       <div className="fixed inset-0 z-[60]" onClick={() => setChartSourceMenuOpen(false)} />
                       <div
+                        data-scroll-panel="true"
                         className="fixed z-[70] w-40 max-h-64 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-lg py-1.5"
                         style={{ top: chartSourceMenuPos.top, left: chartSourceMenuPos.left }}
                       >
@@ -1596,6 +1608,7 @@ export default function DataCallingPage() {
                           <>
                             <div className="fixed inset-0 z-[60]" onClick={() => setStatusMenuOpen(false)} />
                             <div
+                              data-scroll-panel="true"
                               className="fixed z-[70] w-48 max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 text-xs font-medium"
                               style={{ top: statusMenuPos.top, left: statusMenuPos.left }}
                             >
@@ -1640,6 +1653,7 @@ export default function DataCallingPage() {
                             <>
                               <div className="fixed inset-0 z-[60]" onClick={() => setAssignedMenuOpen(false)} />
                               <div
+                                data-scroll-panel="true"
                                 className="fixed z-[70] w-48 max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 text-xs font-medium"
                                 style={{ top: assignedMenuPos.top, left: assignedMenuPos.left }}
                               >
@@ -1689,6 +1703,7 @@ export default function DataCallingPage() {
                             <>
                               <div className="fixed inset-0 z-[60]" onClick={() => setDataCallSourceMenuOpen(false)} />
                               <div
+                                data-scroll-panel="true"
                                 className="fixed z-[70] w-56 max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 text-xs font-medium"
                                 style={{ top: dataCallSourceMenuPos.top, left: dataCallSourceMenuPos.left }}
                               >
@@ -1786,6 +1801,7 @@ export default function DataCallingPage() {
                               <>
                                 <div className="fixed inset-0 z-[60]" onClick={() => setRowStatusMenuFor(null)} />
                                 <div
+                                  data-scroll-panel="true"
                                   className="fixed z-[70] w-44 max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 text-xs font-semibold"
                                   style={{ top: rowStatusMenuPos.top, left: rowStatusMenuPos.left }}
                                 >
@@ -1826,6 +1842,7 @@ export default function DataCallingPage() {
                                 <>
                                   <div className="fixed inset-0 z-[60]" onClick={() => setRowAssignMenuFor(null)} />
                                   <div
+                                    data-scroll-panel="true"
                                     className="fixed z-[70] w-44 max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 text-xs font-semibold"
                                     style={{ top: rowAssignMenuPos.top, left: rowAssignMenuPos.left }}
                                   >
