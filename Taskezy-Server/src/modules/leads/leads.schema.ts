@@ -67,7 +67,11 @@ export const bulkImportLeadsSchema = z
         })
       )
       .min(1, "At least one lead row is required")
-      .max(5000, "A single upload is limited to 5000 rows")
+      // Real batches run to 100k+ rows — bulkImportLeads processes these in
+      // chunked bulk inserts (see leads.repository's createBulkLeadsChunk),
+      // not one row at a time, so this ceiling is a sanity bound against a
+      // malformed/absurd request, not a real throughput limit.
+      .max(200_000, "A single upload is limited to 200,000 rows")
   })
   .refine(d => d.assignmentMode !== "PROPERTY" || !!d.propertyId, {
     message: "propertyId is required for Property assignment mode",

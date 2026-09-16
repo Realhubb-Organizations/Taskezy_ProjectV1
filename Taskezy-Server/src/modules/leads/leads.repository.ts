@@ -1,6 +1,5 @@
 import { PoolClient } from "pg";
 import { pool, query } from "../../db/pool";
-import { isUniqueViolation } from "../users/users.repository";
 
 /** leads.phone is CHECK'd to a bare 10-digit Indian mobile — strip formatting/country code before insert. Shared by every external lead-ingest source (Meta webhook, sheet import). */
 export function normalizeIndianMobile(raw: string): string | undefined {
@@ -151,12 +150,9 @@ export async function create(input: CreateLeadInput): Promise<LeadListRow> {
   return created!;
 }
 
-export interface BulkCreateLeadInput {
+export interface BulkCreateLeadRow {
   name: string;
   phone: string;
-  source: string;
-  subSource: string;
-  propertyId: string | null;
   assignedAgentId: string;
   /** Unlike create() (always 'NEW'), bulk import's Property-wise mode can fall
    * back to 'UNASSIGNED' when the property has no assignable team, same
@@ -164,20 +160,39 @@ export interface BulkCreateLeadInput {
   statusCode: string;
 }
 
-/** Returns undefined (not a thrown error) when the phone already belongs to another lead — bulk import treats that as a per-row "duplicate, skipped" outcome, not a failure of the whole batch. */
-export async function createBulkLead(input: BulkCreateLeadInput): Promise<{ id: string } | undefined> {
-  try {
-    const { rows } = await pool.query<{ id: string }>(
-      `INSERT INTO leads (name, phone, source, sub_source, property_id, assigned_agent_id, status_code, assigned_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, now())
-       RETURNING id`,
-      [input.name, input.phone, input.source, input.subSource, input.propertyId, input.assignedAgentId, input.statusCode]
-    );
-    return rows[0];
-  } catch (err) {
-    if (isUniqueViolation(err)) return undefined;
-    throw err;
-  }
+/**
+ * Inserts up to a few thousand rows in ONE round trip via an unnest-backed
+ * multi-row INSERT, instead of one INSERT per row — a 100k-row bulk upload
+ * at one query per row would mean 100k sequential round trips to RDS (many
+ * minutes, almost certainly past any reasonable request timeout); chunked
+ * this way it's ~100k/chunkSize round trips. source/subSource/propertyId
+ * are the same for every row in one upload batch, passed once rather than
+ * repeated per row. The statement itself is atomic (Postgres guarantees
+ * this for any single SQL statement) and ON CONFLICT (phone) DO NOTHING
+ * skips both rows that already exist in the table AND duplicate phones
+ * within the same chunk in one pass — the caller diffs the returned phones
+ * against the attempted ones to know what didn't make it in, rather than
+ * needing a try/catch per row.
+ */
+export async function createBulkLeadsChunk(
+  rows: BulkCreateLeadRow[],
+  common: { source: string; subSource: string; propertyId: string | null }
+): Promise<Set<string>> {
+  if (rows.length === 0) return new Set();
+  const names = rows.map(r => r.name);
+  const phones = rows.map(r => r.phone);
+  const agentIds = rows.map(r => r.assignedAgentId);
+  const statusCodes = rows.map(r => r.statusCode);
+
+  const { rows: inserted } = await pool.query<{ phone: string }>(
+    `INSERT INTO leads (name, phone, source, sub_source, property_id, assigned_agent_id, status_code, assigned_at)
+     SELECT n, p, $1, $2, $3, a, s, now()
+     FROM unnest($4::text[], $5::text[], $6::uuid[], $7::text[]) AS t(n, p, a, s)
+     ON CONFLICT (phone) DO NOTHING
+     RETURNING phone`,
+    [common.source, common.subSource, common.propertyId, names, phones, agentIds, statusCodes]
+  );
+  return new Set(inserted.map(r => r.phone));
 }
 
 /** Must run inside the same transaction as insertLeadLog (see leads.service.ts). */

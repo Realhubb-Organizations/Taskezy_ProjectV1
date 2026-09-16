@@ -50,6 +50,13 @@ export function createApp(): Express {
     })
   );
   app.use(compression());
+  // Admin CRM Data Calling's bulk lead upload can carry 100k+ {name, phone}
+  // rows as JSON — tens of MB, well over the 1mb app-wide limit below. Scoped
+  // to just this one ADMIN-only route rather than raising the global limit
+  // (which stays tight as DoS mitigation for every other endpoint);
+  // body-parser skips re-parsing a body it's already parsed, so registering
+  // this first and the tighter one after doesn't double-parse or conflict.
+  app.use("/api/v1/leads/bulk-import", express.json({ limit: "25mb" }));
   app.use(
     express.json({
       limit: "1mb", // bounded body size — cheap DoS mitigation

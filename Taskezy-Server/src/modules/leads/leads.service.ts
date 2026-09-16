@@ -6,7 +6,7 @@ import { CreateLeadInput } from "./leads.repository";
 import * as usersRepo from "../users/users.repository";
 import { createNotification } from "../notifications/notifications.service";
 import { findPropertyIdBySheetSource } from "../properties/properties.repository";
-import { pickAgentForProperty } from "../properties/properties.assignment";
+import { pickAgentForProperty, createPropertyAgentPicker } from "../properties/properties.assignment";
 
 /**
  * Mirrors the frontend's isSalesMember scoping rule (AppContext.tsx /
@@ -129,27 +129,63 @@ export interface BulkImportSkippedRow {
   reason: string;
 }
 
+// How many rows go into one INSERT statement. Postgres/node-pg handle far
+// more than this per statement, but keeping chunks at this size bounds how
+// much a single query's parameter arrays/working memory grow, while still
+// cutting a 100k-row upload down to on the order of 100 round trips instead
+// of 100k.
+const BULK_IMPORT_CHUNK_SIZE = 1000;
+
 /**
- * Admin CRM Data Calling's bulk Excel upload (Name + Mobile Number only).
- * Property mode distributes every row across that property's configured
- * Round Robin/Percentage team via the same pickAgentForProperty used by
- * every other lead-ingest path (sheet import, Meta webhook) — falling back
- * to the first active admin as an UNASSIGNED lead when the property has no
- * assignable pool, same convention as sheet-import. Agent mode skips that
- * entirely and round-robins every row evenly across whichever agents the
- * admin picked (a single agent is just the n=1 case). A bad row (missing
- * name, unparseable phone, duplicate phone) is skipped and reported, not a
- * whole-batch failure — an admin's real spreadsheet always has a few messy
- * rows.
+ * Admin CRM Data Calling's bulk Excel upload — built for real scale (tens
+ * of thousands of rows, not a handful):
+ *  - Property mode's Round Robin/Percentage picker is set up ONCE (one or
+ *    two queries total, see createPropertyAgentPicker) instead of
+ *    re-querying every agent's current lead count on every row, which was
+ *    the previous per-row implementation. Agent mode's round-robin is
+ *    already pure in-memory index math, no DB calls either way.
+ *  - Every row's assignment is resolved in memory first; only the actual
+ *    inserts touch the database, batched BULK_IMPORT_CHUNK_SIZE rows at a
+ *    time via one multi-row INSERT per chunk (see
+ *    leads.repository.createBulkLeadsChunk) rather than one INSERT per
+ *    row — the difference between ~100 queries and 100,000 for a 100k-row
+ *    file.
+ *  - Each chunk's INSERT is a single SQL statement, which Postgres
+ *    executes atomically — either the whole chunk lands or (on a genuine
+ *    DB error, not an expected duplicate) none of it does. Whole-batch
+ *    atomicity is deliberately NOT used here: an admin's real spreadsheet
+ *    always has a few bad rows, and requiring the entire 100k-row file to
+ *    be perfect to import any of it would be worse, not more correct.
+ *  - ON CONFLICT (phone) DO NOTHING makes duplicate detection (both
+ *    against existing leads AND repeats within the same file) a single
+ *    set-based check instead of a per-row existence query, and the unique
+ *    constraint on leads.phone is what actually rules out redundant rows
+ *    at the source of truth, not application-side bookkeeping.
+ * A bad row (missing name, unparseable phone, duplicate phone) is skipped
+ * and reported by its real spreadsheet row number, not a whole-batch
+ * failure.
  */
 export async function bulkImportLeads(_caller: AccessTokenPayload, input: BulkImportLeadsInput) {
   const fallbackAdminId = (await usersRepo.listActiveAdminIds())[0];
 
-  let created = 0;
-  let duplicates = 0;
+  // Set up once, outside the per-row loop — see createPropertyAgentPicker.
+  const pickPropertyAgent =
+    input.assignmentMode === "PROPERTY" ? await createPropertyAgentPicker(input.propertyId!) : undefined;
+  const agentIds = input.assignmentMode === "AGENT" ? input.agentIds ?? [] : [];
+
   const skipped: BulkImportSkippedRow[] = [];
-  const notifyCounts = new Map<string, number>();
-  let agentCursor = 0; // only advances on rows that actually reach assignment, so skipped rows earlier in the sheet don't skew the round-robin
+  let duplicates = 0;
+  const seenPhones = new Set<string>();
+
+  interface Candidate {
+    row: number;
+    name: string;
+    phone: string;
+    assignedAgentId: string;
+    statusCode: string;
+  }
+  const candidates: Candidate[] = [];
+  let agentCursor = 0; // only advances on rows that reach assignment, so earlier skips don't skew the round-robin
 
   for (let i = 0; i < input.leads.length; i++) {
     const row = i + 2; // header is row 1
@@ -164,16 +200,19 @@ export async function bulkImportLeads(_caller: AccessTokenPayload, input: BulkIm
       skipped.push({ row, reason: "Phone did not normalize to a valid 10-digit Indian mobile" });
       continue;
     }
+    if (seenPhones.has(phone)) {
+      duplicates++;
+      continue;
+    }
 
     let assignedAgentId: string | undefined;
     let statusCode: string;
     if (input.assignmentMode === "AGENT") {
-      const agentIds = input.agentIds ?? [];
       assignedAgentId = agentIds.length > 0 ? agentIds[agentCursor % agentIds.length] : undefined;
       agentCursor++;
       statusCode = "NEW";
     } else {
-      const autoAssignedAgentId = await pickAgentForProperty(input.propertyId!);
+      const autoAssignedAgentId = pickPropertyAgent?.();
       assignedAgentId = autoAssignedAgentId ?? fallbackAdminId;
       statusCode = autoAssignedAgentId ? "NEW" : "UNASSIGNED";
     }
@@ -187,17 +226,26 @@ export async function bulkImportLeads(_caller: AccessTokenPayload, input: BulkIm
       continue;
     }
 
-    let result;
+    seenPhones.add(phone);
+    candidates.push({ row, name, phone, assignedAgentId, statusCode });
+  }
+
+  let created = 0;
+  const notifyCounts = new Map<string, number>();
+  const common = {
+    source: "Bulk Upload",
+    subSource: input.subSource,
+    propertyId: input.assignmentMode === "PROPERTY" ? input.propertyId! : null
+  };
+
+  for (let i = 0; i < candidates.length; i += BULK_IMPORT_CHUNK_SIZE) {
+    const chunk = candidates.slice(i, i + BULK_IMPORT_CHUNK_SIZE);
+    let insertedPhones: Set<string>;
     try {
-      result = await repo.createBulkLead({
-        name,
-        phone,
-        source: "Bulk Upload",
-        subSource: input.subSource,
-        propertyId: input.assignmentMode === "PROPERTY" ? input.propertyId! : null,
-        assignedAgentId,
-        statusCode
-      });
+      insertedPhones = await repo.createBulkLeadsChunk(
+        chunk.map(c => ({ name: c.name, phone: c.phone, assignedAgentId: c.assignedAgentId, statusCode: c.statusCode })),
+        common
+      );
     } catch (err) {
       if (isForeignKeyViolation(err)) {
         throw ApiError.badRequest("Selected property or agent not found.");
@@ -205,17 +253,22 @@ export async function bulkImportLeads(_caller: AccessTokenPayload, input: BulkIm
       throw err;
     }
 
-    if (!result) {
-      duplicates++;
-      continue;
+    for (const c of chunk) {
+      if (insertedPhones.has(c.phone)) {
+        created++;
+        notifyCounts.set(c.assignedAgentId, (notifyCounts.get(c.assignedAgentId) ?? 0) + 1);
+      } else {
+        // Only reachable if this exact phone already existed on another
+        // lead before this upload started — in-file repeats were already
+        // counted above via seenPhones.
+        duplicates++;
+      }
     }
-    created++;
-    notifyCounts.set(assignedAgentId, (notifyCounts.get(assignedAgentId) ?? 0) + 1);
   }
 
-  // One summary notification per agent rather than one per lead — a 500-row
-  // batch shouldn't flood an agent's notification feed the way a single
-  // real-time Meta/sheet lead does.
+  // One summary notification per agent rather than one per lead — a
+  // 100,000-row batch shouldn't flood an agent's notification feed the way
+  // a single real-time Meta/sheet lead does.
   await Promise.all(
     [...notifyCounts.entries()].map(([agentId, count]) =>
       createNotification({
