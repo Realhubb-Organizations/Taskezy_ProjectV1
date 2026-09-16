@@ -55,6 +55,40 @@ export const DB_CODE_TO_FRONTEND_STATUS: Record<string, LeadStatus> = {
 // status dropdown in the app so they all list the same options.
 export const STATUS_OPTIONS: LeadStatus[] = Array.from(new Set(Object.values(DB_CODE_TO_FRONTEND_STATUS)));
 
+// Badge color classes for a status pill — shared by every status badge/pill
+// in the app so the same status always reads the same color everywhere.
+export function statusBadgeClasses(status: LeadStatus): string {
+  switch (status) {
+    case "Booked":
+    case "Booking Done":
+    case "Booking Approved":
+    case "Completed":
+      return "bg-emerald-50 text-emerald-700 border-emerald-200";
+    case "New Lead":
+    case "New Leads":
+    case "New":
+      return "bg-blue-50 text-blue-700 border-blue-200";
+    case "Interested":
+    case "Connected":
+    case "EOI Customers":
+      return "bg-indigo-50 text-indigo-700 border-indigo-200";
+    case "Follow up":
+    case "Follow-ups":
+    case "Visit Schedule":
+    case "Site Visit Scheduled":
+    case "Meeting Scheduled":
+    case "Call Back":
+    case "RNR":
+      return "bg-amber-50 text-amber-700 border-amber-200";
+    case "Dead":
+    case "Invalid":
+    case "Finance Rejected":
+      return "bg-red-50 text-red-700 border-red-200";
+    default:
+      return "bg-slate-50 text-slate-700 border-slate-200";
+  }
+}
+
 export function frontendStatusToDbCode(status: LeadStatus): string | undefined {
   return FRONTEND_STATUS_TO_DB_CODE[status];
 }

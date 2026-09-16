@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { X, Phone, MessageSquare, Mail, Share2, Award, Calendar, Clock, ArrowRight, Activity, Bell, Repeat, ChevronDown, Search } from "lucide-react";
+import { X, Phone, MessageSquare, Mail, Share2, Calendar, ArrowRight, Bell, Repeat, ChevronDown, Search, Copy, Check, User } from "lucide-react";
 import { useApp, Lead, LeadStatus } from "@/context/AppContext";
-import { PlatformLabel } from "@/components/icons/ContactIcons";
-import { deriveActivityTimeline, STATUS_OPTIONS } from "@/lib/leadStatusMapping";
+import { deriveActivityTimeline, STATUS_OPTIONS, statusBadgeClasses } from "@/lib/leadStatusMapping";
 
 interface LeadDetailDrawerProps {
   lead: Lead | null;
@@ -27,6 +26,7 @@ export default function LeadDetailDrawer({
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [statusMenuPos, setStatusMenuPos] = useState<{ top: number; left: number } | null>(null);
   const [statusSearch, setStatusSearch] = useState("");
+  const [copiedField, setCopiedField] = useState<string | null>(null);
 
   // Who this lead can be handed to: ADMIN can reassign to anyone; a Manager
   // can only reassign within their own direct reports; a Member can only
@@ -52,6 +52,7 @@ export default function LeadDetailDrawer({
       setReminderTime("");
       setReminderSet(false);
       setStatusMenuOpen(false);
+      setCopiedField(null);
     }
   }, [lead]);
 
@@ -126,6 +127,21 @@ export default function LeadDetailDrawer({
     return d.toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true });
   };
 
+  // Most recent log entry's timestamp — falls back to when the lead was
+  // captured if it has no activity yet.
+  const lastActivityTime = (l: Lead): string => {
+    const sorted = [...(l.logs || [])].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    if (sorted.length > 0) return formatLogTimestamp(sorted[0].timestamp);
+    return l.createdAtStr ? formatLogTimestamp(l.createdAtStr) : "—";
+  };
+
+  const copyToClipboard = (field: string, value: string) => {
+    navigator.clipboard.writeText(value).then(() => {
+      setCopiedField(field);
+      setTimeout(() => setCopiedField(null), 1500);
+    });
+  };
+
   const shareLeadProfile = () => {
     // API Integration Point: Trigger Native Share API or Copy Link to Clipboard
     navigator.clipboard.writeText(`TaskEzy Lead Profile:\nName: ${lead.name}\nPhone: ${lead.phone}\nStatus: ${lead.status}`);
@@ -133,7 +149,7 @@ export default function LeadDetailDrawer({
   };
 
   // Status check to see if we render the Date & Time picker
-  const needsReminderPicker = 
+  const needsReminderPicker =
     localStatus === "Follow up" ||
     localStatus === "Follow-ups" ||
     localStatus === "Visit Schedule" ||
@@ -141,6 +157,33 @@ export default function LeadDetailDrawer({
     localStatus === "Meeting Scheduled" ||
     localStatus === "Site Visit Scheduled" ||
     localStatus === "Call Back";
+
+  // Assigned/Property/Reassigned/Captured grid, plus ad-footprint fields
+  // (Campaign/Meta Page/Lead Form ID) only when the lead actually carries
+  // them — no empty rows for manually-entered or non-Meta leads.
+  const metaFields: { label: string; value: React.ReactNode }[] = [
+    {
+      label: "Assigned To",
+      value: (
+        <span className="flex items-center gap-1">
+          <User className="h-3 w-3 text-slate-400" /> {lead.assignedAgent || "Unassigned"}
+        </span>
+      )
+    },
+    { label: "Property", value: lead.property || "Not set" },
+    {
+      label: "Reassigned To",
+      value: (
+        <span className="flex items-center gap-1">
+          {lead.previousAgent && <User className="h-3 w-3 text-slate-400" />} {lead.previousAgent || "—"}
+        </span>
+      )
+    },
+    { label: "Captured at", value: lead.createdAtStr ? formatLogTimestamp(lead.createdAtStr) : "—" },
+    ...(lead.campaign ? [{ label: "Campaign", value: lead.campaign as React.ReactNode }] : []),
+    ...(lead.metaPageName ? [{ label: "Meta Page", value: lead.metaPageName as React.ReactNode }] : []),
+    ...(lead.metaFormId ? [{ label: "Lead Form ID", value: lead.metaFormId as React.ReactNode }] : [])
+  ];
 
   // Rendered via a portal straight into <body> — the caller (the Leads page)
   // wraps its whole page in a div with the `animate-fade-in` utility, whose
@@ -156,317 +199,246 @@ export default function LeadDetailDrawer({
 
       {/* Drawer Panel (Right slide-out) */}
       <div className="fixed inset-y-0 right-0 w-full max-w-md bg-white border-l border-slate-200 shadow-2xl z-[60] flex flex-col animate-slide-in">
-        {/* Header Title Controls */}
-        <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 bg-slate-50/50">
-          <div>
-            <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider block">Lead ID: {lead.id}</span>
-            <h3 className="text-sm font-extrabold text-slate-805 truncate">{lead.name}</h3>
+        {/* Header — name, contact details (with copy), quick actions */}
+        <div className="px-5 pt-5 pb-4 border-b border-slate-100 shrink-0">
+          <div className="flex items-start justify-between gap-2">
+            <h3 className="text-base font-extrabold text-slate-900 truncate">{lead.name}</h3>
+            <button onClick={onClose} className="text-slate-400 hover:text-slate-700 -mt-1 shrink-0">
+              <X className="h-4.5 w-4.5" />
+            </button>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
-          >
-            <X className="h-4.5 w-4.5" />
-          </button>
-        </div>
-
-        {/* Action Toolbar */}
-        <div className="flex justify-between items-center px-6 py-3.5 bg-slate-50 border-b border-slate-100 text-xs">
-          <div className="flex gap-2">
-            <a
-              href={`tel:${lead.phone}`}
-              className="h-8 w-8 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-center text-slate-505 hover:text-brand-650 transition-colors shadow-sm"
-              title="Call Dialer"
-            >
-              <Phone className="h-4 w-4" />
-            </a>
+          <div className="mt-2 space-y-1">
+            <div className="flex items-center gap-1.5 text-xs text-slate-600">
+              <Phone className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+              <a href={`tel:${lead.phone}`} className="hover:text-brand-700">{lead.phone}</a>
+              <button onClick={() => copyToClipboard("phone", lead.phone)} className="text-slate-350 hover:text-brand-700" title="Copy phone">
+                {copiedField === "phone" ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
+              </button>
+            </div>
+            {lead.email && (
+              <div className="flex items-center gap-1.5 text-xs text-slate-600">
+                <Mail className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                <a href={`mailto:${lead.email}`} className="hover:text-brand-700 truncate">{lead.email}</a>
+                <button onClick={() => copyToClipboard("email", lead.email)} className="text-slate-350 hover:text-brand-700 shrink-0" title="Copy email">
+                  {copiedField === "email" ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
+                </button>
+              </div>
+            )}
+          </div>
+          <div className="flex items-center gap-2 mt-3">
             <a
               href={`https://wa.me/${lead.phone.replace(/[^0-9]/g, "")}`}
               target="_blank"
               rel="noreferrer"
-              className="h-8 w-8 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-center text-slate-505 hover:text-emerald-600 transition-colors shadow-sm"
+              className="h-7 w-7 bg-slate-50 hover:bg-emerald-50 border border-slate-200 rounded-lg flex items-center justify-center text-slate-500 hover:text-emerald-600 transition-colors"
               title="WhatsApp Message"
             >
-              <MessageSquare className="h-4 w-4" />
-            </a>
-            <a
-              href={`mailto:${lead.email}`}
-              className="h-8 w-8 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-center text-slate-550 hover:text-blue-600 transition-colors shadow-sm"
-              title="Send Email"
-            >
-              <Mail className="h-4 w-4" />
+              <MessageSquare className="h-3.5 w-3.5" />
             </a>
             <button
               onClick={shareLeadProfile}
-              className="h-8 w-8 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-center text-slate-505 hover:text-slate-700 transition-colors shadow-sm"
+              className="h-7 w-7 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg flex items-center justify-center text-slate-500 hover:text-slate-700 transition-colors"
               title="Copy Summary"
             >
-              <Share2 className="h-4 w-4" />
+              <Share2 className="h-3.5 w-3.5" />
             </button>
-          </div>
-
-          <div className="flex items-center gap-1.5 bg-brand-50 border border-brand-100 text-brand-700 px-3 py-1 rounded-xl font-bold shadow-sm">
-            <Award className="h-4 w-4 text-brand-600" />
-            <span>AI Match: {lead.leadScore || 85}%</span>
           </div>
         </div>
 
-        {/* Scrollable Details */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-thin">
-          {/* Section A: Contact Details & Property Interested */}
-          <div className="space-y-3">
-            <h4 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider border-b border-slate-100 pb-1.5">Section A: Contact Profile</h4>
-            <div className="grid grid-cols-2 gap-4 text-xs font-semibold text-slate-700 bg-slate-50 p-4 rounded-2xl border border-slate-200/60">
-              <div>
-                <span className="text-[8px] font-bold text-slate-400 uppercase block">Phone</span>
-                <span className="text-slate-800">{lead.phone}</span>
-              </div>
-              <div>
-                <span className="text-[8px] font-bold text-slate-400 uppercase block">Email</span>
-                <span className="text-slate-800 truncate block">{lead.email}</span>
-              </div>
-              <div className="mt-2">
-                <span className="text-[8px] font-bold text-slate-400 uppercase block">Property Interested</span>
-                <span className="text-slate-800 font-bold bg-brand-50/50 border border-brand-100 px-2 py-0.5 rounded-lg text-[10px] inline-block">{lead.property || "None"}</span>
-              </div>
-              <div className="mt-2">
-                <span className="text-[8px] font-bold text-slate-400 uppercase block">Acquisition Date</span>
-                <span className="text-slate-600 font-mono text-[10px]">
-                  {lead.createdAtStr
-                    ? new Date(lead.createdAtStr).toLocaleString("en-IN", {
-                        day: "2-digit",
-                        month: "short",
-                        year: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                        second: "2-digit",
-                        hour12: true
-                      })
-                    : "—"}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Section B: Lead Source / Ads Footprint — where this lead actually came from */}
-          <div className="space-y-3">
-            <h4 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider border-b border-slate-100 pb-1.5">Section B: Lead Source</h4>
-            <div className="text-xs font-semibold text-slate-700 bg-slate-50 p-4 rounded-2xl border border-slate-200/60 space-y-2">
-              <div className="flex justify-between items-center">
-                <span className="text-[9px] font-bold text-slate-400 uppercase">Source</span>
-                <span className="text-slate-800 bg-white border border-slate-200 px-2 py-0.5 rounded-lg font-bold">
-                  <PlatformLabel text={lead.source || "Manual Entry"} />
-                </span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-[9px] font-bold text-slate-400 uppercase">Campaign</span>
-                <span className="text-slate-655 font-mono truncate max-w-[220px]">{lead.campaign || "—"}</span>
-              </div>
-              {lead.metaPageName && (
-                <div className="flex justify-between items-center">
-                  <span className="text-[9px] font-bold text-slate-400 uppercase">Meta Page</span>
-                  <span className="text-slate-655 font-mono truncate max-w-[220px]">{lead.metaPageName}</span>
-                </div>
-              )}
-              {lead.metaFormId && (
-                <div className="flex justify-between items-center">
-                  <span className="text-[9px] font-bold text-slate-400 uppercase">Lead Form ID</span>
-                  <span className="text-slate-655 font-mono truncate max-w-[220px]">{lead.metaFormId}</span>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Section C: Status Update Action Area */}
-          <div className="space-y-3">
-            <h4 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider border-b border-slate-100 pb-1.5">Section C: Status &amp; Tasks Router</h4>
-            <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 space-y-4">
-              <div className="space-y-1">
-                <label className="block text-[9px] font-bold text-slate-400 uppercase">Select Current Status</label>
-                <div className="relative">
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      const rect = e.currentTarget.getBoundingClientRect();
-                      setStatusMenuPos({ top: rect.bottom + 4, left: rect.left });
-                      setStatusSearch("");
-                      setStatusMenuOpen(prev => !prev);
-                    }}
-                    className="w-full flex items-center justify-between gap-2 bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-bold text-slate-700 hover:border-slate-300 transition-colors focus:outline-none"
+        {/* Status + meta */}
+        <div className="px-5 py-3 border-b border-slate-100 shrink-0 space-y-1.5">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold text-slate-500">Current Status :</span>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={(e) => {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const panelWidth = 224;
+                  const left = Math.max(8, Math.min(rect.right - panelWidth, window.innerWidth - panelWidth - 8));
+                  setStatusMenuPos({ top: rect.bottom + 4, left });
+                  setStatusSearch("");
+                  setStatusMenuOpen(prev => !prev);
+                }}
+                className={`flex items-center gap-1.5 border rounded-lg px-2 py-0.5 text-[11px] font-bold transition-colors focus:outline-none ${statusBadgeClasses(localStatus)}`}
+              >
+                <span>{localStatus}</span>
+                <ChevronDown className={`h-3 w-3 shrink-0 transition-transform ${statusMenuOpen ? "rotate-180" : ""}`} />
+              </button>
+              {statusMenuOpen && statusMenuPos && createPortal(
+                <>
+                  <div className="fixed inset-0 z-[70]" onClick={() => setStatusMenuOpen(false)} />
+                  <div
+                    className="fixed z-[80] w-56 bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden"
+                    style={{ top: statusMenuPos.top, left: statusMenuPos.left }}
                   >
-                    <span className="truncate">{localStatus}</span>
-                    <ChevronDown className={`h-3.5 w-3.5 text-slate-400 shrink-0 transition-transform ${statusMenuOpen ? "rotate-180" : ""}`} />
-                  </button>
-                  {statusMenuOpen && statusMenuPos && createPortal(
-                    <>
-                      <div className="fixed inset-0 z-[70]" onClick={() => setStatusMenuOpen(false)} />
-                      <div
-                        className="fixed z-[80] w-64 bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden"
-                        style={{ top: statusMenuPos.top, left: statusMenuPos.left }}
-                      >
-                        <div className="p-1.5 border-b border-slate-100">
-                          <div className="relative">
-                            <Search className="h-3 w-3 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2" />
-                            <input
-                              autoFocus
-                              value={statusSearch}
-                              onChange={(e) => setStatusSearch(e.target.value)}
-                              placeholder="Search status..."
-                              className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-6 pr-2 py-1 text-[11px] font-semibold text-slate-700 focus:outline-none focus:border-brand-500"
-                            />
-                          </div>
-                        </div>
-                        <div className="max-h-56 overflow-y-auto py-1">
-                          {filteredStatusOptions.length === 0 ? (
-                            <p className="px-3 py-2 text-[11px] text-slate-400 italic">No matching status</p>
-                          ) : (
-                            filteredStatusOptions.map(st => (
-                              <button
-                                key={st}
-                                type="button"
-                                onClick={() => handleSelectStatus(st)}
-                                className={`w-full text-left px-3 py-1.5 text-xs font-semibold transition-colors ${
-                                  localStatus === st ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"
-                                }`}
-                              >
-                                {st}
-                              </button>
-                            ))
-                          )}
-                        </div>
+                    <div className="p-1.5 border-b border-slate-100">
+                      <div className="relative">
+                        <Search className="h-3 w-3 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2" />
+                        <input
+                          autoFocus
+                          value={statusSearch}
+                          onChange={(e) => setStatusSearch(e.target.value)}
+                          placeholder="Search status..."
+                          className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-6 pr-2 py-1 text-[11px] font-semibold text-slate-700 focus:outline-none focus:border-[#0B1E6E]"
+                        />
                       </div>
-                    </>,
-                    document.body
-                  )}
-                </div>
-              </div>
-
-              {/* DYNAMIC DATE & TIME PICKER FOR REMINDERS */}
-              {needsReminderPicker && (
-                <form onSubmit={handleSaveReminder} className="space-y-3 pt-3 border-t border-slate-200 animate-fade-in">
-                  <div className="flex items-center gap-1.5 text-[9px] font-extrabold text-brand-700 bg-brand-50 border border-brand-100 px-2.5 py-1 rounded-xl">
-                    <Bell className="h-3.5 w-3.5 text-brand-600 animate-bounce" />
-                    <span>Configure Calendar Callback Task</span>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <label className="block text-[8px] font-bold text-slate-400 uppercase">Callback Date</label>
-                      <input
-                        type="date"
-                        required
-                        value={reminderDate}
-                        onChange={(e) => setReminderDate(e.target.value)}
-                        className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-[10px] font-bold text-slate-700 focus:outline-none focus:border-brand-500"
-                      />
                     </div>
-                    <div className="space-y-1">
-                      <label className="block text-[8px] font-bold text-slate-400 uppercase">Callback Time</label>
-                      <input
-                        type="time"
-                        required
-                        value={reminderTime}
-                        onChange={(e) => setReminderTime(e.target.value)}
-                        className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-[10px] font-bold text-slate-700 focus:outline-none focus:border-brand-500"
-                      />
+                    <div className="max-h-56 overflow-y-auto py-1">
+                      {filteredStatusOptions.length === 0 ? (
+                        <p className="px-3 py-2 text-[11px] text-slate-400 italic">No matching status</p>
+                      ) : (
+                        filteredStatusOptions.map(st => (
+                          <button
+                            key={st}
+                            type="button"
+                            onClick={() => handleSelectStatus(st)}
+                            className={`w-full text-left px-3 py-1.5 text-xs font-semibold transition-colors ${
+                              localStatus === st ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"
+                            }`}
+                          >
+                            {st}
+                          </button>
+                        ))
+                      )}
                     </div>
                   </div>
-
-                  <button
-                    type="submit"
-                    className="w-full bg-slate-800 hover:bg-slate-900 text-white font-extrabold px-3 py-2 rounded-xl text-[10px] transition-all flex items-center justify-center gap-1.5 shadow-sm"
-                  >
-                    <Calendar className="h-3.5 w-3.5" />
-                    <span>Save Task Reminder</span>
-                  </button>
-                </form>
+                </>,
+                document.body
               )}
             </div>
           </div>
+          <div className="flex items-center justify-between text-[10px] text-slate-400 font-semibold">
+            <span>Last Updated : {lastActivityTime(lead)}</span>
+            <span>Source : {lead.source || lead.campaign || "Direct / Manual Entry"}</span>
+          </div>
+        </div>
 
-          {/* Section C.5: Reassign — scoped to who this caller is actually allowed to hand the lead to */}
-          <div className="space-y-3">
-            <h4 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider border-b border-slate-100 pb-1.5 flex items-center gap-1.5">
-              <Repeat className="h-3.5 w-3.5 text-slate-500" />
-              Reassign Lead
-            </h4>
-            <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 space-y-2.5">
-              <p className="text-[10px] text-slate-500">
-                Currently assigned to <span className="font-bold text-slate-700">{lead.assignedAgent}</span>
-              </p>
-              {reassignTargets.length === 0 ? (
-                <p className="text-[10px] text-slate-400 italic">No eligible teammates to reassign to.</p>
-              ) : (
-                <div className="flex gap-2">
-                  <select
-                    value={reassignTarget}
-                    onChange={(e) => setReassignTarget(e.target.value)}
-                    className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 focus:outline-none"
-                  >
-                    <option value="">Select a team member…</option>
-                    {reassignTargets.map(u => (
-                      <option key={u.id} value={u.name}>{u.name}</option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    onClick={handleReassign}
-                    disabled={!reassignTarget}
-                    className="shrink-0 bg-brand-700 hover:bg-brand-600 disabled:opacity-40 text-white font-bold px-4 py-2 rounded-xl text-xs transition-all"
-                  >
-                    Reassign
-                  </button>
+        {/* Assigned / Property / Reassigned / Captured (+ ad footprint, when present) */}
+        <div className="px-5 py-3 border-b border-slate-100 shrink-0 grid grid-cols-2 gap-x-3 gap-y-2.5 text-xs">
+          {metaFields.map(f => (
+            <div key={f.label}>
+              <span className="text-slate-400 font-bold text-[10px] block mb-0.5">{f.label} :</span>
+              <span className="text-slate-800 font-semibold truncate block">{f.value}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Reminder scheduler — only for statuses that need a follow-up task */}
+        {needsReminderPicker && (
+          <div className="px-5 py-3 border-b border-slate-100 shrink-0">
+            <form onSubmit={handleSaveReminder} className="bg-brand-50/40 border border-brand-100 rounded-2xl p-3.5 space-y-3">
+              <div className="flex items-center gap-1.5 text-[9px] font-extrabold text-brand-700">
+                <Bell className="h-3.5 w-3.5 text-brand-600 animate-bounce" />
+                <span>Configure Calendar Callback Task</span>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="block text-[8px] font-bold text-slate-400 uppercase">Callback Date</label>
+                  <input
+                    type="date"
+                    required
+                    value={reminderDate}
+                    onChange={(e) => setReminderDate(e.target.value)}
+                    className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-[10px] font-bold text-slate-700 focus:outline-none focus:border-brand-500"
+                  />
                 </div>
-              )}
-            </div>
+                <div className="space-y-1">
+                  <label className="block text-[8px] font-bold text-slate-400 uppercase">Callback Time</label>
+                  <input
+                    type="time"
+                    required
+                    value={reminderTime}
+                    onChange={(e) => setReminderTime(e.target.value)}
+                    className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-[10px] font-bold text-slate-700 focus:outline-none focus:border-brand-500"
+                  />
+                </div>
+              </div>
+              <button
+                type="submit"
+                className="w-full bg-slate-800 hover:bg-slate-900 text-white font-extrabold px-3 py-2 rounded-xl text-[10px] transition-all flex items-center justify-center gap-1.5 shadow-sm"
+              >
+                <Calendar className="h-3.5 w-3.5" />
+                <span>Save Task Reminder</span>
+              </button>
+            </form>
           </div>
+        )}
 
-          {/* Section D: Activity Logs — a real vertical timeline (connecting
-              line + node per entry, newest first) inside its own bordered,
-              independently-scrollable card. Transition labels (e.g.
-              "Call Back → Follow Up") are parsed from the lead's real log
-              messages via deriveActivityTimeline — never invented; see that
-              function's comment for exactly which formats it reads and how
-              it falls back when a message doesn't match one. */}
-          <div className="space-y-3">
-            <h4 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider border-b border-slate-100 pb-1.5 flex items-center gap-1.5">
-              <Activity className="h-3.5 w-3.5 text-slate-500" />
-              Section D: Audit logs timeline
-            </h4>
-            <div className="bg-[#F5F9FF] border border-slate-200 rounded-2xl shadow-sm max-h-60 overflow-y-auto p-4">
-              {lead.logs.length === 0 ? (
-                <p className="text-[10px] text-slate-400 font-semibold italic">No activity registered for this profile.</p>
-              ) : (
-                <div className="relative pl-5">
-                  <div className="absolute left-[5px] top-2 bottom-2 w-0.5 bg-blue-400" />
-                  {deriveActivityTimeline(lead.logs).map((entry, idx) => (
-                    <div key={idx} className="relative pb-4 last:pb-0">
-                      <span className="absolute -left-5 top-1.5 h-3 w-3 rounded-full bg-blue-100 border-2 border-blue-500 z-10" />
-                      <div className="inline-block bg-[#0B1E6E] text-white text-[10px] font-bold px-2.5 py-1 rounded-lg mb-1.5">
-                        {formatLogTimestamp(entry.log.timestamp)}
-                      </div>
-                      <div className="bg-[#EAF3FF] rounded-xl px-3 py-2.5">
-                        <p className="text-[10px] text-slate-700 leading-relaxed">{entry.log.message}</p>
-                        {entry.toLabel || entry.fromLabel ? (
-                          <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-blue-100 text-[9px]">
-                            <span className="text-slate-500 font-bold flex items-center gap-1">
-                              {entry.fromLabel && entry.toLabel && entry.fromLabel !== entry.toLabel ? (
-                                <>{entry.fromLabel} <ArrowRight className="h-2.5 w-2.5 shrink-0" /> {entry.toLabel}</>
-                              ) : (
-                                entry.toLabel || entry.fromLabel
-                              )}
-                            </span>
-                            <span className="text-slate-400 font-semibold shrink-0">{entry.log.user}</span>
-                          </div>
-                        ) : (
-                          <p className="text-[9px] text-slate-400 font-semibold mt-1.5 pt-1.5 border-t border-blue-100 text-right">by {entry.log.user}</p>
-                        )}
-                      </div>
+        {/* Reassign — scoped to who this caller is actually allowed to hand the lead to */}
+        <div className="px-5 py-3 border-b border-slate-100 shrink-0 space-y-2">
+          <span className="text-[11px] font-bold text-slate-500 flex items-center gap-1.5">
+            <Repeat className="h-3.5 w-3.5 text-slate-400" />
+            Reassign Lead
+          </span>
+          {reassignTargets.length === 0 ? (
+            <p className="text-[10px] text-slate-400 italic">No eligible teammates to reassign to.</p>
+          ) : (
+            <div className="flex gap-2">
+              <select
+                value={reassignTarget}
+                onChange={(e) => setReassignTarget(e.target.value)}
+                className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 focus:outline-none"
+              >
+                <option value="">Select a team member…</option>
+                {reassignTargets.map(u => (
+                  <option key={u.id} value={u.name}>{u.name}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={handleReassign}
+                disabled={!reassignTarget}
+                className="shrink-0 bg-brand-700 hover:bg-brand-600 disabled:opacity-40 text-white font-bold px-4 py-2 rounded-xl text-xs transition-all"
+              >
+                Reassign
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Activity History — a real vertical timeline (connecting line +
+            node per entry, newest first) inside its own bordered,
+            independently-scrollable card. Transition labels (e.g.
+            "Call Back → Follow Up") are parsed from the lead's real log
+            messages via deriveActivityTimeline — never invented; see that
+            function's comment for exactly which formats it reads and how
+            it falls back when a message doesn't match one. */}
+        <div className="px-5 py-3 flex-1 min-h-0 flex flex-col">
+          <span className="text-[11px] font-bold text-slate-500 block mb-2 shrink-0">Activity History :</span>
+          <div className="bg-[#F5F9FF] border border-slate-200 rounded-2xl shadow-sm flex-1 min-h-0 overflow-y-auto p-4">
+            {lead.logs.length === 0 ? (
+              <p className="text-[11px] text-slate-400 italic">No activity recorded yet.</p>
+            ) : (
+              <div className="relative pl-5">
+                <div className="absolute left-[5px] top-2 bottom-2 w-0.5 bg-blue-400" />
+                {deriveActivityTimeline(lead.logs).map((entry, idx) => (
+                  <div key={idx} className="relative pb-4 last:pb-0">
+                    <span className="absolute -left-5 top-1.5 h-3 w-3 rounded-full bg-blue-100 border-2 border-blue-500 z-10" />
+                    <div className="inline-block bg-[#0B1E6E] text-white text-[10px] font-bold px-2.5 py-1 rounded-lg mb-1.5">
+                      {formatLogTimestamp(entry.log.timestamp)}
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
+                    <div className="bg-[#EAF3FF] rounded-xl px-3 py-2.5">
+                      <p className="text-[11px] text-slate-700 leading-snug">{entry.log.message}</p>
+                      {entry.toLabel || entry.fromLabel ? (
+                        <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-blue-100 text-[9px]">
+                          <span className="text-slate-500 font-bold flex items-center gap-1">
+                            {entry.fromLabel && entry.toLabel && entry.fromLabel !== entry.toLabel ? (
+                              <>{entry.fromLabel} <ArrowRight className="h-2.5 w-2.5 shrink-0" /> {entry.toLabel}</>
+                            ) : (
+                              entry.toLabel || entry.fromLabel
+                            )}
+                          </span>
+                          <span className="text-slate-400 font-semibold shrink-0">{entry.log.user}</span>
+                        </div>
+                      ) : (
+                        <p className="text-[9px] text-slate-400 font-semibold mt-1.5 pt-1.5 border-t border-blue-100 text-right">by {entry.log.user}</p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>

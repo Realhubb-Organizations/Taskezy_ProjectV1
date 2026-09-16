@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useApp, Lead, LeadStatus } from "@/context/AppContext";
 import AddLeadModal from "@/components/crm/AddLeadModal";
 import PendingLeadsTable, { PendingRow } from "@/components/dashboard/PendingLeadsTable";
-import { deriveActivityTimeline, STATUS_OPTIONS } from "@/lib/leadStatusMapping";
+import { deriveActivityTimeline, STATUS_OPTIONS, statusBadgeClasses } from "@/lib/leadStatusMapping";
 import { computeLeadSummaryStats } from "@/lib/leadSummaryStats";
 import { WhatsAppIcon, CallIcon } from "@/components/icons/ContactIcons";
 import { ChevronDown, Plus, CheckCircle, Phone, Mail, X, Copy, Check, User, Search, ArrowRight } from "lucide-react";
@@ -90,38 +90,6 @@ export default function CrmDashboardPage() {
       setCopiedField(field);
       setTimeout(() => setCopiedField(null), 1500);
     });
-  };
-
-  const statusBadgeClasses = (status: LeadStatus) => {
-    switch (status) {
-      case "Booked":
-      case "Booking Done":
-      case "Booking Approved":
-      case "Completed":
-        return "bg-emerald-50 text-emerald-700 border-emerald-200";
-      case "New Lead":
-      case "New Leads":
-      case "New":
-        return "bg-blue-50 text-blue-700 border-blue-200";
-      case "Interested":
-      case "Connected":
-      case "EOI Customers":
-        return "bg-indigo-50 text-indigo-700 border-indigo-200";
-      case "Follow up":
-      case "Follow-ups":
-      case "Visit Schedule":
-      case "Site Visit Scheduled":
-      case "Meeting Scheduled":
-      case "Call Back":
-      case "RNR":
-        return "bg-amber-50 text-amber-700 border-amber-200";
-      case "Dead":
-      case "Invalid":
-      case "Finance Rejected":
-        return "bg-red-50 text-red-700 border-red-200";
-      default:
-        return "bg-slate-50 text-slate-700 border-slate-200";
-    }
   };
 
   const dateInRange = (dateStr: string | undefined, range: typeof dateRange, refNow: Date): boolean => {
