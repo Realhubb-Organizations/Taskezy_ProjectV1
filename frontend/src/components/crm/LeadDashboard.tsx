@@ -5,13 +5,11 @@ import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useApp, Lead, LeadStatus } from "@/context/AppContext";
 import { Sliders, Sparkles, Plus, Check, ChevronDown, Search, Calendar, X, Minus, Download, RotateCcw } from "lucide-react";
-import { DB_CODE_TO_FRONTEND_STATUS } from "@/lib/leadStatusMapping";
+import { STATUS_OPTIONS } from "@/lib/leadStatusMapping";
 import { computeLeadSummaryStats } from "@/lib/leadSummaryStats";
 import { WhatsAppIcon, CallIcon, PlatformLabel } from "@/components/icons/ContactIcons";
 import AddLeadModal from "./AddLeadModal";
 import LeadDetailDrawer from "./LeadDetailDrawer";
-
-const STATUS_OPTIONS = Array.from(new Set(Object.values(DB_CODE_TO_FRONTEND_STATUS)));
 
 // The admin leads table's togglable columns (beyond the always-shown Lead
 // Name/Email/Assigned To) — driven by the Filter panel's Settings modal.

@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { X, Phone, MessageSquare, Mail, Share2, Award, Calendar, Clock, ArrowRight, Activity, Bell, Repeat } from "lucide-react";
+import { X, Phone, MessageSquare, Mail, Share2, Award, Calendar, Clock, ArrowRight, Activity, Bell, Repeat, ChevronDown, Search } from "lucide-react";
 import { useApp, Lead, LeadStatus } from "@/context/AppContext";
 import { PlatformLabel } from "@/components/icons/ContactIcons";
-import { deriveActivityTimeline } from "@/lib/leadStatusMapping";
+import { deriveActivityTimeline, STATUS_OPTIONS } from "@/lib/leadStatusMapping";
 
 interface LeadDetailDrawerProps {
   lead: Lead | null;
@@ -24,6 +24,9 @@ export default function LeadDetailDrawer({
   const [reminderTime, setReminderTime] = useState("");
   const [reminderSet, setReminderSet] = useState(false);
   const [reassignTarget, setReassignTarget] = useState("");
+  const [statusMenuOpen, setStatusMenuOpen] = useState(false);
+  const [statusMenuPos, setStatusMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const [statusSearch, setStatusSearch] = useState("");
 
   // Who this lead can be handed to: ADMIN can reassign to anyone; a Manager
   // can only reassign within their own direct reports; a Member can only
@@ -48,16 +51,23 @@ export default function LeadDetailDrawer({
       setReminderDate("");
       setReminderTime("");
       setReminderSet(false);
+      setStatusMenuOpen(false);
     }
   }, [lead]);
 
   if (!isOpen || !lead) return null;
 
-  const handleStatusChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const nextStatus = e.target.value as LeadStatus;
+  const handleSelectStatus = (nextStatus: LeadStatus) => {
     setLocalStatus(nextStatus);
     onUpdateStatus(lead.id, nextStatus);
+    setStatusMenuOpen(false);
   };
+
+  const statusOptionsList = STATUS_OPTIONS.includes(localStatus) ? STATUS_OPTIONS : [localStatus, ...STATUS_OPTIONS];
+  const statusQuery = statusSearch.trim().toLowerCase();
+  const filteredStatusOptions = statusQuery
+    ? statusOptionsList.filter(s => s.toLowerCase().includes(statusQuery))
+    : statusOptionsList;
 
   const handleSaveReminder = (e: React.FormEvent) => {
     e.preventDefault();
@@ -273,30 +283,62 @@ export default function LeadDetailDrawer({
             <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 space-y-4">
               <div className="space-y-1">
                 <label className="block text-[9px] font-bold text-slate-400 uppercase">Select Current Status</label>
-                <select
-                  value={localStatus}
-                  onChange={handleStatusChange}
-                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-bold text-slate-700 focus:outline-none"
-                >
-                  <option value="New Lead">New Lead (Touchpoint)</option>
-                  <option value="Assigned">Assigned to Agent</option>
-                  <option value="Connected">Connected / Dialed</option>
-                  <option value="RNR">RNR (Ringing, No Response)</option>
-                  <option value="Call Back">Call Back Requested</option>
-                  <option value="Interested">Interested Client</option>
-                  <option value="Follow-ups">Follow-up Callback</option>
-                  <option value="Visit Schedule">Visit Scheduled</option>
-                  <option value="Site Visit">Site Visit Completed</option>
-                  <option value="Meeting Scheduled">Meeting Scheduled</option>
-                  <option value="Meeting Done">Meeting Done</option>
-                  <option value="In Negotiation">In Negotiation</option>
-                  <option value="Booked">Booked Contract</option>
-                  <option value="Completed">Completed Conversion</option>
-                  <option value="Not Interested">Not Interested</option>
-                  <option value="Low Budget">Low Budget</option>
-                  <option value="Invalid">Invalid Details</option>
-                  <option value="Dead">Dead Pipeline</option>
-                </select>
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      setStatusMenuPos({ top: rect.bottom + 4, left: rect.left });
+                      setStatusSearch("");
+                      setStatusMenuOpen(prev => !prev);
+                    }}
+                    className="w-full flex items-center justify-between gap-2 bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-bold text-slate-700 hover:border-slate-300 transition-colors focus:outline-none"
+                  >
+                    <span className="truncate">{localStatus}</span>
+                    <ChevronDown className={`h-3.5 w-3.5 text-slate-400 shrink-0 transition-transform ${statusMenuOpen ? "rotate-180" : ""}`} />
+                  </button>
+                  {statusMenuOpen && statusMenuPos && createPortal(
+                    <>
+                      <div className="fixed inset-0 z-[70]" onClick={() => setStatusMenuOpen(false)} />
+                      <div
+                        className="fixed z-[80] w-64 bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden"
+                        style={{ top: statusMenuPos.top, left: statusMenuPos.left }}
+                      >
+                        <div className="p-1.5 border-b border-slate-100">
+                          <div className="relative">
+                            <Search className="h-3 w-3 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2" />
+                            <input
+                              autoFocus
+                              value={statusSearch}
+                              onChange={(e) => setStatusSearch(e.target.value)}
+                              placeholder="Search status..."
+                              className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-6 pr-2 py-1 text-[11px] font-semibold text-slate-700 focus:outline-none focus:border-brand-500"
+                            />
+                          </div>
+                        </div>
+                        <div className="max-h-56 overflow-y-auto py-1">
+                          {filteredStatusOptions.length === 0 ? (
+                            <p className="px-3 py-2 text-[11px] text-slate-400 italic">No matching status</p>
+                          ) : (
+                            filteredStatusOptions.map(st => (
+                              <button
+                                key={st}
+                                type="button"
+                                onClick={() => handleSelectStatus(st)}
+                                className={`w-full text-left px-3 py-1.5 text-xs font-semibold transition-colors ${
+                                  localStatus === st ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"
+                                }`}
+                              >
+                                {st}
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    </>,
+                    document.body
+                  )}
+                </div>
               </div>
 
               {/* DYNAMIC DATE & TIME PICKER FOR REMINDERS */}

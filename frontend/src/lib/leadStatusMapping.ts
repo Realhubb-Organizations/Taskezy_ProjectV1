@@ -51,6 +51,10 @@ export const DB_CODE_TO_FRONTEND_STATUS: Record<string, LeadStatus> = {
   INVALID: "Invalid"
 };
 
+// Full set of selectable statuses, in canonical DB order — shared by every
+// status dropdown in the app so they all list the same options.
+export const STATUS_OPTIONS: LeadStatus[] = Array.from(new Set(Object.values(DB_CODE_TO_FRONTEND_STATUS)));
+
 export function frontendStatusToDbCode(status: LeadStatus): string | undefined {
   return FRONTEND_STATUS_TO_DB_CODE[status];
 }
