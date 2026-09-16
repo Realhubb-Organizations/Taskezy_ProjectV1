@@ -225,6 +225,61 @@ export function extractLeadCount(insight: MetaDailyInsight): number {
     .reduce((sum, a) => sum + (Number(a.value) || 0), 0);
 }
 
+export interface MetaAdSet {
+  id: string;
+  name: string;
+  status?: string;
+}
+
+/** Every ad set under one campaign — real names, for Campaign Deep Dive's Ad Set Name column. */
+export async function getAdSetsForCampaign(campaignId: string, longLivedUserToken: string): Promise<MetaAdSet[]> {
+  const data = await graphFetch<{ data: MetaAdSet[] }>(`/${campaignId}/adsets`, {
+    access_token: longLivedUserToken,
+    fields: "id,name,status",
+    limit: "200"
+  });
+  return data.data;
+}
+
+export interface MetaAdCreative {
+  id: string;
+  name?: string;
+}
+
+export interface MetaAd {
+  id: string;
+  name: string;
+  adset_id: string;
+  status?: string;
+  creative?: MetaAdCreative;
+}
+
+/** Every ad under one campaign, each with its own creative — real names for Campaign Deep Dive's Ad creative Name column, and the adset_id linking each ad back to its real ad set. */
+export async function getAdsForCampaign(campaignId: string, longLivedUserToken: string): Promise<MetaAd[]> {
+  const data = await graphFetch<{ data: MetaAd[] }>(`/${campaignId}/ads`, {
+    access_token: longLivedUserToken,
+    fields: "id,name,adset_id,status,creative{id,name}",
+    limit: "200"
+  });
+  return data.data;
+}
+
+/** Daily spend + lead counts for one individual ad — same shape/semantics as getCampaignDailyInsights, just one level finer, for a real per-ad-set/ad-creative CPL breakdown instead of just the campaign's own totals. */
+export async function getAdDailyInsights(adId: string, longLivedUserToken: string, since: string, until: string): Promise<MetaDailyInsight[]> {
+  const url = new URL(`${GRAPH_BASE}/${adId}/insights`);
+  url.searchParams.set("access_token", longLivedUserToken);
+  url.searchParams.set("fields", "spend,actions,date_start");
+  url.searchParams.set("time_range", JSON.stringify({ since, until }));
+  url.searchParams.set("time_increment", "1");
+  const res = await fetch(url.toString());
+  const body = (await res.json()) as { data?: MetaDailyInsight[]; error?: { message: string } };
+  if (!res.ok || body.error) {
+    logger.error({ adId, metaError: body.error }, "Meta ad insights call failed");
+    throw new Error(body.error?.message ?? `Insights call for ad ${adId} failed with status ${res.status}`);
+  }
+  return body.data ?? [];
+}
+
 /**
  * Verifies Meta's X-Hub-Signature-256 header against the raw request body
  * using our App Secret — the only proof a webhook POST actually came from

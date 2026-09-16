@@ -128,3 +128,68 @@ export async function getAccountDailyStats(customerId: string, since: string, un
     conversions: Math.round(r.metrics.conversions ?? 0)
   }));
 }
+
+export interface GoogleAdsAdGroupRow {
+  adGroup: { id: string; name: string; status: string };
+  campaign: { id: string };
+}
+
+/** Every ad group across every campaign in one account — Google's name for what Meta calls an "ad set". campaign.id comes along for free since campaign is ad_group's parent resource in GAQL's implicit join. */
+export async function listAdGroups(customerId: string): Promise<{ id: string; campaignId: string; name: string; status: string }[]> {
+  const rows = await gaqlSearch<GoogleAdsAdGroupRow>(
+    customerId,
+    `SELECT ad_group.id, ad_group.name, ad_group.status, campaign.id FROM ad_group`
+  );
+  return rows.map(r => ({ id: r.adGroup.id, campaignId: r.campaign.id, name: r.adGroup.name, status: r.adGroup.status }));
+}
+
+export interface GoogleAdsAdRow {
+  adGroupAd: { ad: { id: string; name?: string; type: string }; status: string };
+  adGroup: { id: string };
+  campaign: { id: string };
+}
+
+/** Every ad across every ad group in one account, with its own real ad.name (often unset for Responsive Search Ads — ad.type is kept as an honest fallback label, never invented). */
+export async function listAds(customerId: string): Promise<{ id: string; adGroupId: string; campaignId: string; name?: string; adType: string; status: string }[]> {
+  const rows = await gaqlSearch<GoogleAdsAdRow>(
+    customerId,
+    `SELECT ad_group_ad.ad.id, ad_group_ad.ad.name, ad_group_ad.ad.type, ad_group_ad.status, ad_group.id, campaign.id FROM ad_group_ad`
+  );
+  return rows.map(r => ({
+    id: r.adGroupAd.ad.id,
+    adGroupId: r.adGroup.id,
+    campaignId: r.campaign.id,
+    name: r.adGroupAd.ad.name,
+    adType: r.adGroupAd.ad.type,
+    status: r.adGroupAd.status
+  }));
+}
+
+export interface GoogleAdsAdDailyStatRow {
+  adGroupAd: { ad: { id: string } };
+  segments: { date: string };
+  metrics: { costMicros?: string; conversions?: number };
+}
+
+export interface GoogleAdsAdDailyStat {
+  adId: string;
+  date: string;
+  spend: number;
+  conversions: number;
+}
+
+/** One call per account covers every ad's daily spend/conversions for the window — same "one account-wide call" philosophy as getAccountDailyStats, just at ad_group_ad granularity for a real per-ad-group/ad-creative CPL breakdown. */
+export async function getAdDailyStats(customerId: string, since: string, until: string): Promise<GoogleAdsAdDailyStat[]> {
+  const rows = await gaqlSearch<GoogleAdsAdDailyStatRow>(
+    customerId,
+    `SELECT ad_group_ad.ad.id, segments.date, metrics.cost_micros, metrics.conversions
+     FROM ad_group_ad
+     WHERE segments.date BETWEEN '${since}' AND '${until}'`
+  );
+  return rows.map(r => ({
+    adId: r.adGroupAd.ad.id,
+    date: r.segments.date,
+    spend: Number(r.metrics.costMicros ?? 0) / 1_000_000,
+    conversions: Math.round(r.metrics.conversions ?? 0)
+  }));
+}
