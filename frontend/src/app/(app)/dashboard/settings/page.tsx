@@ -486,6 +486,14 @@ export default function SettingsPage() {
 
       {/* 1. Connected Apps */}
       {activeTab === "Connected Apps" && (() => {
+        // The most recent real connection's created_at — the closest honest
+        // stand-in for "connected since" (there's no separate sync-log table
+        // to draw a true last-synced timestamp from).
+        const formatConnectedSince = (timestamps: string[]): string => {
+          const latest = timestamps.map(t => new Date(t)).filter(d => !isNaN(d.getTime())).sort((a, b) => b.getTime() - a.getTime())[0];
+          return latest ? latest.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—";
+        };
+
         const statusPill = (active: boolean, label?: string) => (
           <span className={`inline-flex items-center gap-1 text-[9px] font-bold border px-2 py-0.5 rounded-full shrink-0 ${
             active ? "bg-emerald-50 text-emerald-700 border-emerald-150" : "bg-slate-100 text-slate-450 border-slate-200"
@@ -539,7 +547,17 @@ export default function SettingsPage() {
                 </div>
               </div>
             )}
-            <div className="flex items-center justify-end pt-1 mt-auto">
+            {activeMetaConnections.length > 0 && (
+              <p className="text-[10px] text-slate-400 flex items-center gap-1.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" />
+                Connected since {formatConnectedSince(activeMetaConnections.map(c => c.created_at))}
+              </p>
+            )}
+            <div className="flex items-center justify-between pt-1 mt-auto">
+              <Link href="/dashboard/settings/integrations?app=meta" className="text-[11px] font-bold text-brand-700 hover:underline flex items-center gap-1">
+                <FileText className="h-3 w-3" />
+                View Details
+              </Link>
               {activeRole === "ADMIN" ? (
                 <button
                   onClick={handleConnectMeta}
@@ -549,7 +567,7 @@ export default function SettingsPage() {
                   {metaLoading ? "Redirecting…" : activeMetaConnections.length > 0 ? "Connect Another Page" : "Connect"}
                 </button>
               ) : (
-                <span className="text-[10px] text-slate-400 italic">Only an Admin can manage this connection.</span>
+                <span className="text-[10px] text-slate-400 italic">Admin only</span>
               )}
             </div>
           </div>
@@ -591,10 +609,27 @@ export default function SettingsPage() {
                 </div>
               </div>
             )}
-            <div className="flex items-center justify-end pt-1 mt-auto">
-              <span className="text-[10px] text-slate-400 italic">
-                {activeRole === "ADMIN" ? "New accounts linked under the MCC appear here automatically." : "Only an Admin can view this connection."}
-              </span>
+            {activeGoogleAccounts.length > 0 && (
+              <p className="text-[10px] text-slate-400 flex items-center gap-1.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" />
+                Connected since {formatConnectedSince(activeGoogleAccounts.map(a => a.created_at))}
+              </p>
+            )}
+            <div className="flex items-center justify-between pt-1 mt-auto">
+              <Link href="/dashboard/settings/integrations?app=google" className="text-[11px] font-bold text-brand-700 hover:underline flex items-center gap-1">
+                <FileText className="h-3 w-3" />
+                View Details
+              </Link>
+              {activeRole === "ADMIN" ? (
+                <Link
+                  href="/dashboard/settings/integrations?app=google"
+                  className="px-3 py-1.5 rounded-lg text-[11px] font-bold border bg-brand-50 border-brand-200 text-brand-700 hover:bg-brand-700 hover:text-white transition-all"
+                >
+                  Manage
+                </Link>
+              ) : (
+                <span className="text-[10px] text-slate-400 italic">Admin only</span>
+              )}
             </div>
           </div>
         );
