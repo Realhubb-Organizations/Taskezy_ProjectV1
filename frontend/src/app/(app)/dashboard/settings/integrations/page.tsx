@@ -12,7 +12,7 @@ import {
   apiListGoogleAdsAccounts,
   ApiGoogleAdsAccount
 } from "@/lib/apiClient";
-import { ChevronRight, CheckCircle, AlertTriangle, Info, Search, HelpCircle, ArrowRight, Users, TrendingUp, LayoutGrid } from "lucide-react";
+import { ChevronRight, CheckCircle, AlertTriangle, Info, Search, HelpCircle, ArrowRight, Users, TrendingUp, LayoutGrid, Calendar, RefreshCw, Clock, Zap, ExternalLink, Mail, Hash, IndianRupee, ShieldCheck, Edit } from "lucide-react";
 
 type IntegrationKey = "meta" | "google";
 
@@ -32,7 +32,17 @@ const INTEGRATION_INFO: Record<IntegrationKey, { name: string; description: stri
 // The exact OAuth scopes this app requests when connecting Meta (see
 // Taskezy-Server meta-client.ts getOAuthDialogUrl) — real and fixed, not a
 // per-connection value, so shown once here rather than fabricated per Page.
-const META_PERMISSIONS = ["pages_show_list", "pages_manage_metadata", "pages_read_engagement", "leads_retrieval", "ads_management", "ads_read", "business_management"];
+// Mapped to short display labels (several raw scopes collapse to one chip)
+// so they read the same as the design reference's "Lead Ads / Pages / Ads
+// Read" pills, without inventing scopes the app doesn't actually request.
+const META_RAW_SCOPES = ["pages_show_list", "pages_manage_metadata", "pages_read_engagement", "leads_retrieval", "ads_management", "ads_read", "business_management"];
+const META_PERMISSION_LABELS: string[] = Array.from(new Set(META_RAW_SCOPES.map(scope => {
+  if (scope.startsWith("pages_")) return "Pages";
+  if (scope === "leads_retrieval") return "Lead Ads";
+  if (scope.startsWith("ads_")) return "Ads Read";
+  if (scope === "business_management") return "Business Management";
+  return scope;
+})));
 
 // What actually happens to an inbound Meta lead — mirrors
 // Taskezy-Server meta.lead-ingest.ts field-by-field, not invented.
@@ -83,17 +93,35 @@ const statusPill = (active: boolean) => (
 // same visual slot the reference fills with fabricated Sync Success
 // Rate/Average Sync Time, which have no meaning for a real-time webhook
 // integration (there's no batch "sync" to rate or time).
-function StatCard({ icon, label, value, changeLabel }: { icon: React.ReactNode; label: string; value: string; changeLabel?: string }) {
+// A real trend line — points are actual daily counts, not decorative filler.
+function Sparkline({ points }: { points: number[] }) {
+  if (points.length < 2) return null;
+  const max = Math.max(...points, 1);
+  const min = Math.min(...points, 0);
+  const range = max - min || 1;
+  const w = 64, h = 24;
+  const coords = points.map((v, i) => `${(i / (points.length - 1)) * w},${h - ((v - min) / range) * h}`).join(" ");
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl p-4 flex items-center gap-3">
-      <div className="h-9 w-9 rounded-xl bg-brand-50 border border-brand-100 flex items-center justify-center text-brand-600 shrink-0">
-        {icon}
+    <svg viewBox={`0 0 ${w} ${h}`} className="h-6 w-16 shrink-0" preserveAspectRatio="none">
+      <polyline points={coords} fill="none" stroke="currentColor" strokeWidth="1.5" className="text-emerald-500" />
+    </svg>
+  );
+}
+
+function StatCard({ icon, label, value, changeLabel, trend }: { icon: React.ReactNode; label: string; value: string; changeLabel?: string; trend?: number[] }) {
+  return (
+    <div className="bg-white border border-slate-200 rounded-2xl p-4 flex items-center justify-between gap-3">
+      <div className="flex items-center gap-3">
+        <div className="h-9 w-9 rounded-xl bg-brand-50 border border-brand-100 flex items-center justify-center text-brand-600 shrink-0">
+          {icon}
+        </div>
+        <div>
+          <p className="text-[10px] font-bold text-slate-400">{label}</p>
+          <p className="text-lg font-black text-slate-900">{value}</p>
+          {changeLabel && <p className="text-[10px] font-semibold text-slate-400 mt-0.5">{changeLabel}</p>}
+        </div>
       </div>
-      <div>
-        <p className="text-[10px] font-bold text-slate-400">{label}</p>
-        <p className="text-lg font-black text-slate-900">{value}</p>
-        {changeLabel && <p className="text-[10px] font-semibold text-slate-400 mt-0.5">{changeLabel}</p>}
-      </div>
+      {trend && <Sparkline points={trend} />}
     </div>
   );
 }
@@ -240,6 +268,22 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
   const monthChangePct = leadsLastMonth > 0 ? Math.round(((leadsThisMonth - leadsLastMonth) / leadsLastMonth) * 100) : null;
   const avgLeadsPerPage = activeMetaConnections.length > 0 ? Math.round(totalLeadsViaMeta / activeMetaConnections.length) : 0;
   const newPagesThisMonth = activeMetaConnections.filter(c => isSameMonth(c.created_at, now)).length;
+  // Real daily lead counts for the trailing 14 days — an actual trend line,
+  // not a decorative filler curve.
+  const dailyLeadTrend = useMemo(() => {
+    const days: number[] = [];
+    for (let i = 13; i >= 0; i--) {
+      const day = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+      const count = metaLeadsAll.filter(l => {
+        if (!l.createdAtStr) return false;
+        const d = new Date(l.createdAtStr);
+        return !isNaN(d.getTime()) && d.toDateString() === day.toDateString();
+      }).length;
+      days.push(count);
+    }
+    return days;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [metaLeadsAll]);
 
   const mostRecentMetaConnection = [...activeMetaConnections].sort(
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
@@ -405,6 +449,7 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
         label="Leads This Month"
         value={String(leadsThisMonth)}
         changeLabel={monthChangePct === null ? undefined : `${monthChangePct >= 0 ? "↑" : "↓"} ${Math.abs(monthChangePct)}% vs last month`}
+        trend={dailyLeadTrend}
       />
       <StatCard icon={<TrendingUp className="h-4.5 w-4.5" />} label="Avg Leads / Page" value={String(avgLeadsPerPage)} />
       <StatCard icon={<LayoutGrid className="h-4.5 w-4.5" />} label="New Pages This Month" value={String(newPagesThisMonth)} />
@@ -546,59 +591,112 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
                     </p>
                   </div>
                   {key === "meta" ? (
-                    <>
-                      {/* A blanket "Disconnect" only makes unambiguous sense
-                          when there's exactly one Page — with several, which
-                          one it means is unclear, so individual disconnects
-                          live in Connected Pages / Settings below instead. */}
-                      {activeMetaConnections.length === 1 && (
+                    active ? (
+                      <>
                         <button
-                          onClick={() => handleDisconnectMeta(activeMetaConnections[0].id, activeMetaConnections[0].page_name)}
+                          onClick={() => {
+                            if (!confirm(activeMetaConnections.length === 1
+                              ? `Disconnect "${activeMetaConnections[0].page_name}"? New leads from this Page will stop arriving until you reconnect it.`
+                              : `Disconnect all ${activeMetaConnections.length} connected Pages? New leads will stop arriving from every one of them until you reconnect.`)) return;
+                            Promise.all(activeMetaConnections.map(c => apiDisconnectMeta(c.id))).then(loadMetaConnections);
+                          }}
                           className="w-full px-3.5 py-2 rounded-lg text-xs font-bold border bg-red-50 border-red-200 text-red-700 hover:bg-red-100 transition-all"
                         >
                           Disconnect
                         </button>
-                      )}
+                        <div className="space-y-2.5 text-xs pt-1">
+                          <div className="flex items-center gap-2"><Calendar className="h-3.5 w-3.5 text-slate-400 shrink-0" /><span className="text-slate-400 font-semibold">Connected Since</span></div>
+                          <p className="font-bold text-slate-700 -mt-1.5 pl-5.5">{formatDate(mostRecentMetaConnection?.created_at)}</p>
+                          <div className="flex items-center gap-2"><RefreshCw className="h-3.5 w-3.5 text-slate-400 shrink-0" /><span className="text-slate-400 font-semibold">Last Synced</span></div>
+                          <p className="font-bold text-slate-700 -mt-1.5 pl-5.5">{formatDateTime(lastSyncedAt)}</p>
+                          <div className="flex items-center gap-2"><Clock className="h-3.5 w-3.5 text-slate-400 shrink-0" /><span className="text-slate-400 font-semibold">Next Sync</span></div>
+                          {/* Meta delivers leads via a real-time webhook, not a
+                              polling job — there's no "next run" to count down
+                              to, so this says that honestly instead of a fake
+                              countdown that would misrepresent how leads
+                              actually arrive. */}
+                          <p className="font-bold text-slate-700 -mt-1.5 pl-5.5">Real-time — no wait</p>
+                          <div className="flex items-center justify-between pt-1">
+                            <div className="flex items-center gap-2"><Zap className="h-3.5 w-3.5 text-slate-400 shrink-0" /><span className="text-slate-400 font-semibold">Auto Sync</span></div>
+                            <span className="relative inline-flex h-5 w-9 rounded-full bg-brand-600 shrink-0" title="Always on for a real-time integration">
+                              <span className="absolute top-0.5 right-0.5 h-4 w-4 rounded-full bg-white" />
+                            </span>
+                          </div>
+                          <p className="text-slate-400 -mt-1.5">New leads are delivered instantly — always on, can&apos;t be turned off for a webhook integration.</p>
+                        </div>
+                      </>
+                    ) : (
                       <button
                         onClick={handleConnectMeta}
                         disabled={metaLoading}
                         className="w-full px-3.5 py-2 rounded-lg text-xs font-bold border bg-brand-50 border-brand-200 text-brand-700 hover:bg-brand-700 hover:text-white transition-all disabled:opacity-50"
                       >
-                        {metaLoading ? "Redirecting…" : active ? "Connect Another Page" : "Connect Meta Ads"}
+                        {metaLoading ? "Redirecting…" : "Connect Meta Ads"}
                       </button>
-                      {active && (
-                        <div className="space-y-2 text-xs pt-1">
-                          <div className="flex justify-between"><span className="text-slate-400 font-semibold">Connected Since</span><span className="font-bold text-slate-700">{formatDate(mostRecentMetaConnection?.created_at)}</span></div>
-                          <div className="flex justify-between"><span className="text-slate-400 font-semibold">Last Synced</span><span className="font-bold text-slate-700">{formatDateTime(lastSyncedAt)}</span></div>
-                          <div className="flex justify-between"><span className="text-slate-400 font-semibold">Sync Method</span><span className="font-bold text-slate-700">Real-time (webhook)</span></div>
-                        </div>
-                      )}
-                      <div className="bg-slate-50 border border-slate-150 rounded-xl p-3 flex items-start gap-2.5">
-                        <HelpCircle className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" />
-                        <p className="text-[11px] text-slate-500">
-                          Need help setting up Meta Ads? Use <span className="font-bold text-slate-700">Contact Support</span> in the sidebar.
-                        </p>
-                      </div>
-                    </>
+                    )
                   ) : (
                     <p className="text-[11px] text-slate-400 italic">New accounts linked under the MCC appear here automatically — no manual connect action needed.</p>
                   )}
+                  <div className="bg-slate-50 border border-slate-150 rounded-xl p-3 flex items-start gap-2.5">
+                    <HelpCircle className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" />
+                    <div className="flex-1">
+                      <p className="text-[11px] font-bold text-slate-700">Need Help?</p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">Follow our step-by-step guide to set up {info.name} integration.</p>
+                      <button
+                        onClick={() => alert("A written setup guide isn't published yet — use Contact Support in the sidebar and we'll walk you through it.")}
+                        className="mt-2 inline-flex items-center gap-1.5 bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-[11px] font-bold text-slate-700 hover:bg-slate-50 transition-colors"
+                      >
+                        View Setup Guide <ExternalLink className="h-3 w-3" />
+                      </button>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-3">
-                  <h3 className="text-sm font-extrabold text-slate-900">Account Information</h3>
+                <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-extrabold text-slate-900">Account Information</h3>
+                    {key === "meta" && active && (
+                      <button
+                        onClick={handleConnectMeta}
+                        className="inline-flex items-center gap-1.5 bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-[11px] font-bold text-slate-700 hover:bg-slate-50 transition-colors"
+                        title="Re-run Meta login to connect a different account"
+                      >
+                        <Edit className="h-3 w-3" /> Edit Connection
+                      </button>
+                    )}
+                  </div>
                   {key === "meta" ? (
                     active ? (
-                      <div className="space-y-2 text-xs">
-                        <div className="flex justify-between"><span className="text-slate-400 font-semibold">Connected By</span><span className="font-bold text-slate-700">{metaConnectedByName || "—"}</span></div>
-                        {connectedByUser?.email && (
-                          <div className="flex justify-between"><span className="text-slate-400 font-semibold">Email</span><span className="font-bold text-slate-700 truncate max-w-[60%]">{connectedByUser.email}</span></div>
-                        )}
-                        <div className="flex justify-between"><span className="text-slate-400 font-semibold">Ad Account ID</span><span className="font-mono font-bold text-slate-700">{metaAdAccountId || "—"}</span></div>
-                        <div className="pt-2 border-t border-slate-100">
-                          <span className="text-slate-400 font-semibold block mb-1.5">Permissions</span>
-                          <div className="flex flex-wrap gap-1.5">
-                            {META_PERMISSIONS.map(p => (
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-4 text-xs">
+                        <div>
+                          <span className="text-slate-400 font-semibold flex items-center gap-1.5"><Users className="h-3.5 w-3.5" /> Account Name</span>
+                          <p className="font-bold text-slate-800 mt-1">{metaConnectedByName || "—"}</p>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 font-semibold flex items-center gap-1.5"><Mail className="h-3.5 w-3.5" /> Email</span>
+                          <p className="font-bold text-slate-800 mt-1 truncate">{connectedByUser?.email || "—"}</p>
+                        </div>
+                        <div>
+                          {/* This CRM only ever operates in one region — every
+                              date/currency in the app already formats as
+                              en-IN/₹ — so this is a fixed app-wide default,
+                              not a value fetched per Meta account (Meta
+                              doesn't return one for a Page connection). */}
+                          <span className="text-slate-400 font-semibold flex items-center gap-1.5"><Clock className="h-3.5 w-3.5" /> Time Zone</span>
+                          <p className="font-bold text-slate-800 mt-1">Asia/Kolkata (GMT +05:30)</p>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 font-semibold flex items-center gap-1.5"><Hash className="h-3.5 w-3.5" /> Account ID</span>
+                          <p className="font-mono font-bold text-slate-800 mt-1">{metaAdAccountId || "—"}</p>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 font-semibold flex items-center gap-1.5"><IndianRupee className="h-3.5 w-3.5" /> Currency</span>
+                          <p className="font-bold text-slate-800 mt-1">INR (₹)</p>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 font-semibold flex items-center gap-1.5"><ShieldCheck className="h-3.5 w-3.5" /> Permissions</span>
+                          <div className="flex flex-wrap gap-1.5 mt-1.5">
+                            {META_PERMISSION_LABELS.map(p => (
                               <span key={p} className="bg-slate-100 text-slate-600 text-[10px] font-bold px-2 py-0.5 rounded-full">{p}</span>
                             ))}
                           </div>
