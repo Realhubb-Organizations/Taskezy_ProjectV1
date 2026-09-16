@@ -6,20 +6,21 @@ import { useApp, Lead } from "@/context/AppContext";
 import { ChevronDown, ChevronRight, Calendar, Search, Sliders, Minus, X, Copy, Users, Plus, Check } from "lucide-react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine } from "recharts";
 import UploadLeadsModal from "@/components/crm/UploadLeadsModal";
+import LeadDetailDrawer from "@/components/crm/LeadDetailDrawer";
 
 const QUALIFIED_LEAD_STATUSES = ["Interested", "Connected", "Visit Schedule", "Site Visit", "Booking Done", "Booked"];
 const FOLLOW_UP_LEAD_STATUSES = ["Follow-ups", "Call Back"];
 
-// Quick-edit options for the per-row Status dropdown — the calling-workflow
-// subset of LeadDetailDrawer's canonical status list. "Booked"/"Completed"
-// are excluded here: those require a deal-value form (updateLeadStatus
-// auto-generates a ₹0 invoice without one), so that transition stays gated
-// behind the full LeadDetailDrawer instead of this quick row menu.
-const ROW_STATUS_OPTIONS: Lead["status"][] = [
-  "New Lead", "Assigned", "Connected", "RNR", "Call Back", "Interested", "Follow-ups",
-  "Visit Schedule", "Site Visit", "Meeting Scheduled", "Meeting Done", "In Negotiation",
-  "Not Interested", "Low Budget", "Invalid", "Dead"
-];
+// Data Calling's whole status model is deliberately just these three — a
+// cold-outreach triage pipeline, not the full CRM pipeline: a fresh
+// bulk-uploaded row is New Lead; RNR (no answer) always requires picking a
+// next-call date before it commits, same as Follow-up/Call Back does
+// elsewhere via the follow-up scheduling mechanism; Connected always
+// requires a Qualified/Not Qualified sub-status before it commits. Once
+// Connected + Qualified, the lead is promoted out of Data Calling entirely
+// (see updateLeadStatus's source flip), so there's nothing further to pick
+// here — the rest of its journey happens in the main CRM pipeline.
+const ROW_STATUS_OPTIONS: Lead["status"][] = ["New Lead", "RNR", "Connected"];
 
 function formatDateTime(iso?: string): string {
   if (!iso) return "—";
@@ -156,7 +157,7 @@ export default function DataCallingPage() {
   // the ONLY-bulk-upload view AppContext derives for exactly this page (see
   // AppContext.tsx), aliased to `leads` here so the rest of this large file
   // needs no other changes.
-  const { dataCallingLeads: leads, followupCalls, properties, users, activeRole, updateLeadStatus, reassignLead, bulkImportLeads } = useApp();
+  const { dataCallingLeads: leads, followupCalls, properties, users, activeRole, updateLeadStatus, reassignLead, bulkImportLeads, addFollowupCall } = useApp();
   // Bulk select + Assign/Reshuffle are an admin-only workflow — a sales
   // agent has no one to hand leads off to in that sense, so the checkbox
   // column and both toolbar buttons stay admin-only.
@@ -495,6 +496,20 @@ export default function DataCallingPage() {
   const statusBtnRef = useRef<HTMLButtonElement>(null);
   const statusOptions = useMemo(() => Array.from(new Set(leads.map(l => l.status))).sort(), [leads]);
 
+  // Sub-status filter — Qualified/Not Qualified, only ever set while a
+  // lead's status is Connected (see updateLeadStatus/backend). "—" covers
+  // every lead that either isn't Connected or hasn't been given a
+  // sub-status yet.
+  const [subStatusFilters, setSubStatusFilters] = useState<string[]>([]);
+  const [subStatusMenuOpen, setSubStatusMenuOpen] = useState(false);
+  const [subStatusMenuPos, setSubStatusMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const subStatusBtnRef = useRef<HTMLButtonElement>(null);
+  const SUB_STATUS_NONE = "—";
+  const subStatusOptions = useMemo(
+    () => Array.from(new Set(leads.map(l => l.subStatus || SUB_STATUS_NONE))).sort(),
+    [leads]
+  );
+
   const [assignedFilters, setAssignedFilters] = useState<string[]>([]);
   const [assignedMenuOpen, setAssignedMenuOpen] = useState(false);
   const [assignedMenuPos, setAssignedMenuPos] = useState<{ top: number; left: number } | null>(null);
@@ -641,8 +656,10 @@ export default function DataCallingPage() {
       reassignLead(id, agentName);
       // Move it off the "Unassigned" pipeline state now that it actually has
       // someone on it — otherwise it'd stay eligible for the Assign button.
-      // Not relevant to Reshuffle: those leads already have a real status.
-      if (assignFlowMode === "assign" && lead?.status === "Unassigned") updateLeadStatus(id, "Assigned");
+      // "New Lead" (not "Assigned") since Data Calling's status model is
+      // deliberately just New Lead/RNR/Connected. Not relevant to Reshuffle:
+      // those leads already have a real status.
+      if (assignFlowMode === "assign" && lead?.status === "Unassigned") updateLeadStatus(id, "New Lead");
     });
     setSelectedIds(prev => {
       const next = new Set(prev);
@@ -659,6 +676,64 @@ export default function DataCallingPage() {
   const [rowStatusMenuPos, setRowStatusMenuPos] = useState<{ top: number; left: number } | null>(null);
   const [rowAssignMenuFor, setRowAssignMenuFor] = useState<string | null>(null);
   const [rowAssignMenuPos, setRowAssignMenuPos] = useState<{ top: number; left: number } | null>(null);
+
+  // Individual lead view — same LeadDetailDrawer the main admin dashboard
+  // uses, opened by clicking a lead's name, but scoped to Data Calling's
+  // own restricted status model (see statusOptions/restrictedStatuses below).
+  const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+
+  // RNR and Connected can't commit as a bare status change — RNR always
+  // needs a next-call date (scheduled the same way Follow-up/Call Back
+  // does elsewhere, via addFollowupCall) and Connected always needs a
+  // Qualified/Not Qualified sub-status (see updateLeadStatus). Picking
+  // either from the row Status dropdown opens this modal instead of
+  // committing immediately; New Lead still commits straight away.
+  const [pendingStatusAction, setPendingStatusAction] = useState<{ leadId: string; leadName: string; status: "RNR" | "Connected" } | null>(null);
+  const [rnrDate, setRnrDate] = useState("");
+  const [rnrTime, setRnrTime] = useState("10:00");
+  const [pendingActionError, setPendingActionError] = useState<string | null>(null);
+
+  // Sub-status can also be changed on an already-Connected lead without
+  // re-picking the status itself (e.g. flipping Not Qualified -> Qualified
+  // once a second call actually confirms interest).
+  const [rowSubStatusMenuFor, setRowSubStatusMenuFor] = useState<string | null>(null);
+  const [rowSubStatusMenuPos, setRowSubStatusMenuPos] = useState<{ top: number; left: number } | null>(null);
+
+  const openStatusChange = (lead: Lead, status: Lead["status"]) => {
+    if (status === "RNR" || status === "Connected") {
+      setPendingActionError(null);
+      setRnrDate("");
+      setRnrTime("10:00");
+      setPendingStatusAction({ leadId: lead.id, leadName: lead.name, status });
+      return;
+    }
+    updateLeadStatus(lead.id, status);
+  };
+
+  const confirmRnr = () => {
+    if (!pendingStatusAction) return;
+    if (!rnrDate) {
+      setPendingActionError("Please select the next calling date.");
+      return;
+    }
+    const lead = leads.find(l => l.id === pendingStatusAction.leadId);
+    updateLeadStatus(pendingStatusAction.leadId, "RNR");
+    addFollowupCall({
+      scheduledAt: new Date(`${rnrDate}T${rnrTime}`).toISOString(),
+      leadId: pendingStatusAction.leadId,
+      leadName: pendingStatusAction.leadName,
+      phone: lead?.phone,
+      callType: "CALLBACK",
+      assignedToName: lead?.assignedAgent || ""
+    });
+    setPendingStatusAction(null);
+  };
+
+  const confirmConnected = (subStatus: "Qualified" | "Not Qualified") => {
+    if (!pendingStatusAction) return;
+    updateLeadStatus(pendingStatusAction.leadId, "Connected", undefined, undefined, subStatus);
+    setPendingStatusAction(null);
+  };
 
   const copyToClipboard = (text: string) => {
     if (text) navigator.clipboard?.writeText(text).catch(() => {});
@@ -690,8 +765,8 @@ export default function DataCallingPage() {
   // behind it" and only close on the latter.
   useEffect(() => {
     const anyOpen = summaryDateMenuOpen || calendarPickerOpen || statusMenuOpen || assignedMenuOpen ||
-      dataCallSourceMenuOpen || propertyDropdownOpen || assigneeDropdownOpen || !!rowStatusMenuFor || !!rowAssignMenuFor ||
-      subSourceMenuOpen || chartSourceMenuOpen || chartMetricMenuOpen;
+      dataCallSourceMenuOpen || subStatusMenuOpen || propertyDropdownOpen || assigneeDropdownOpen || !!rowStatusMenuFor || !!rowAssignMenuFor ||
+      !!rowSubStatusMenuFor || subSourceMenuOpen || chartSourceMenuOpen || chartMetricMenuOpen;
     if (!anyOpen) return;
     const closeAll = (e: Event) => {
       const target = e.target;
@@ -701,17 +776,19 @@ export default function DataCallingPage() {
       setStatusMenuOpen(false);
       setAssignedMenuOpen(false);
       setDataCallSourceMenuOpen(false);
+      setSubStatusMenuOpen(false);
       setPropertyDropdownOpen(false);
       setAssigneeDropdownOpen(false);
       setRowStatusMenuFor(null);
       setRowAssignMenuFor(null);
+      setRowSubStatusMenuFor(null);
       setSubSourceMenuOpen(false);
       setChartSourceMenuOpen(false);
       setChartMetricMenuOpen(false);
     };
     window.addEventListener("scroll", closeAll, true);
     return () => window.removeEventListener("scroll", closeAll, true);
-  }, [summaryDateMenuOpen, calendarPickerOpen, statusMenuOpen, assignedMenuOpen, dataCallSourceMenuOpen, propertyDropdownOpen, assigneeDropdownOpen, rowStatusMenuFor, rowAssignMenuFor, subSourceMenuOpen, chartSourceMenuOpen, chartMetricMenuOpen]);
+  }, [summaryDateMenuOpen, calendarPickerOpen, statusMenuOpen, assignedMenuOpen, dataCallSourceMenuOpen, subStatusMenuOpen, propertyDropdownOpen, assigneeDropdownOpen, rowStatusMenuFor, rowAssignMenuFor, rowSubStatusMenuFor, subSourceMenuOpen, chartSourceMenuOpen, chartMetricMenuOpen]);
 
   const latestLogMessage = (l: Lead): string => {
     if (!l.logs || l.logs.length === 0) return "No feedback yet";
@@ -737,6 +814,7 @@ export default function DataCallingPage() {
       const matchesStatus = statusFilters.length === 0 || statusFilters.includes(l.status);
       const matchesAssigned = assignedFilters.length === 0 || assignedFilters.includes(l.assignedAgent);
       const matchesDataCallSource = dataCallSourceFilters.length === 0 || dataCallSourceFilters.includes(l.subSource || l.source || "");
+      const matchesSubStatus = subStatusFilters.length === 0 || subStatusFilters.includes(l.subStatus || SUB_STATUS_NONE);
       const matchesDate = appliedCustomRange
         ? (() => {
             if (!l.createdAtStr) return false;
@@ -748,9 +826,9 @@ export default function DataCallingPage() {
             return d >= start && d <= end;
           })()
         : true;
-      return matchesSearch && matchesStatus && matchesAssigned && matchesDataCallSource && matchesDate;
+      return matchesSearch && matchesStatus && matchesAssigned && matchesDataCallSource && matchesSubStatus && matchesDate;
     });
-  }, [leads, searchQuery, statusFilters, assignedFilters, dataCallSourceFilters, appliedCustomRange]);
+  }, [leads, searchQuery, statusFilters, assignedFilters, dataCallSourceFilters, subStatusFilters, appliedCustomRange]);
 
   const totalPages = Math.max(1, Math.ceil(filteredLeads.length / rowsPerPage));
   const currentPageClamped = Math.min(currentPage, totalPages);
@@ -1637,6 +1715,49 @@ export default function DataCallingPage() {
                         )}
                       </div>
                     </th>
+                    <th className="px-5 py-3.5 whitespace-nowrap">
+                      <div className="relative inline-block">
+                        <button
+                          type="button"
+                          ref={subStatusBtnRef}
+                          onClick={() => openPositionedMenu(subStatusBtnRef, setSubStatusMenuPos, setSubStatusMenuOpen, "left", 180)}
+                          className="flex items-center gap-1 hover:text-blue-600 transition-colors"
+                        >
+                          <span>Sub-status</span>
+                          <ChevronDown className={`h-3 w-3 text-slate-800 transition-transform ${subStatusMenuOpen ? "rotate-180" : ""}`} />
+                        </button>
+                        {subStatusMenuOpen && subStatusMenuPos && createPortal(
+                          <>
+                            <div className="fixed inset-0 z-[60]" onClick={() => setSubStatusMenuOpen(false)} />
+                            <div
+                              className="fixed z-[70] w-48 max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 text-xs font-medium"
+                              style={{ top: subStatusMenuPos.top, left: subStatusMenuPos.left }}
+                            >
+                              <button
+                                type="button"
+                                onClick={() => setSubStatusFilters([])}
+                                className="w-full flex items-center gap-1.5 text-left px-3 py-1.5 text-slate-500 font-bold hover:bg-slate-50 border-b border-slate-100 transition-colors"
+                              >
+                                <Minus className="h-3 w-3" />
+                                All
+                              </button>
+                              {subStatusOptions.map(st => (
+                                <label key={st} className="flex items-center gap-2 px-3 py-1.5 text-slate-700 font-semibold hover:bg-slate-50 cursor-pointer transition-colors">
+                                  <input
+                                    type="checkbox"
+                                    checked={subStatusFilters.includes(st)}
+                                    onChange={() => setSubStatusFilters(prev => prev.includes(st) ? prev.filter(s => s !== st) : [...prev, st])}
+                                    className="h-3.5 w-3.5 rounded border-slate-300 text-[#0B1E6E] focus:ring-0 focus:ring-offset-0"
+                                  />
+                                  {st}
+                                </label>
+                              ))}
+                            </div>
+                          </>,
+                          document.body
+                        )}
+                      </div>
+                    </th>
                     {visibleColumns.assignedTo && (
                       <th className="px-5 py-3.5 whitespace-nowrap">
                         <div className="relative inline-block">
@@ -1763,7 +1884,13 @@ export default function DataCallingPage() {
                           </td>
                         )}
                         <td className="px-5 py-3.5 max-w-[224px]">
-                          <p className="text-slate-900 font-semibold truncate" title={l.name}>{l.name}</p>
+                          <button
+                            onClick={() => setSelectedLead(l)}
+                            className="font-semibold text-[#0B1E6E] hover:underline text-left truncate block max-w-full"
+                            title={l.name}
+                          >
+                            {l.name}
+                          </button>
                           {l.phone && (
                             <div className="flex items-center gap-1 mt-0.5 text-[10px] text-slate-400 font-medium">
                               <span className="truncate">{l.phone}</span>
@@ -1809,7 +1936,7 @@ export default function DataCallingPage() {
                                     <button
                                       key={st}
                                       type="button"
-                                      onClick={() => { updateLeadStatus(l.id, st); setRowStatusMenuFor(null); }}
+                                      onClick={() => { openStatusChange(l, st); setRowStatusMenuFor(null); }}
                                       className={`w-full text-left px-3 py-1.5 transition-colors ${
                                         l.status === st ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"
                                       }`}
@@ -1822,6 +1949,55 @@ export default function DataCallingPage() {
                               document.body
                             )}
                           </div>
+                        </td>
+                        <td className="px-5 py-3.5 whitespace-nowrap">
+                          {l.status === "Connected" ? (
+                            <div className="relative inline-block">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  const rect = e.currentTarget.getBoundingClientRect();
+                                  setRowSubStatusMenuPos({ top: rect.bottom + 4, left: rect.left });
+                                  setRowSubStatusMenuFor(prev => (prev === l.id ? null : l.id));
+                                }}
+                                className={`flex items-center gap-1 font-bold transition-colors ${
+                                  l.subStatus === "Qualified"
+                                    ? "text-emerald-600 hover:text-emerald-700"
+                                    : l.subStatus === "Not Qualified"
+                                      ? "text-red-500 hover:text-red-600"
+                                      : "text-slate-400 hover:text-blue-600"
+                                }`}
+                              >
+                                <span>{l.subStatus || "Set sub-status"}</span>
+                                <ChevronDown className={`h-3 w-3 transition-transform ${rowSubStatusMenuFor === l.id ? "rotate-180" : ""}`} />
+                              </button>
+                              {rowSubStatusMenuFor === l.id && rowSubStatusMenuPos && createPortal(
+                                <>
+                                  <div className="fixed inset-0 z-[60]" onClick={() => setRowSubStatusMenuFor(null)} />
+                                  <div
+                                    className="fixed z-[70] w-40 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 text-xs font-semibold"
+                                    style={{ top: rowSubStatusMenuPos.top, left: rowSubStatusMenuPos.left }}
+                                  >
+                                    {(["Qualified", "Not Qualified"] as const).map(sub => (
+                                      <button
+                                        key={sub}
+                                        type="button"
+                                        onClick={() => { updateLeadStatus(l.id, "Connected", undefined, undefined, sub); setRowSubStatusMenuFor(null); }}
+                                        className={`w-full text-left px-3 py-1.5 transition-colors ${
+                                          l.subStatus === sub ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"
+                                        }`}
+                                      >
+                                        {sub}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </>,
+                                document.body
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-slate-300">—</span>
+                          )}
                         </td>
                         {visibleColumns.assignedTo && (
                           <td className="px-5 py-3.5">
@@ -2180,6 +2356,120 @@ export default function DataCallingPage() {
             </div>
           </div>
         </div>,
+        document.body
+      )}
+
+      {/* Individual lead view — same drawer the main admin dashboard uses,
+          restricted to Data Calling's own status model. Picking RNR/Connected
+          from the drawer's own status dropdown hands off to the exact same
+          pending-action modal below (onRestrictedStatus), rather than
+          duplicating the date/sub-status UI inside the drawer. */}
+      <LeadDetailDrawer
+        lead={selectedLead}
+        isOpen={selectedLead !== null}
+        onClose={() => setSelectedLead(null)}
+        onUpdateStatus={updateLeadStatus}
+        statusOptions={ROW_STATUS_OPTIONS}
+        restrictedStatuses={["RNR", "Connected"]}
+        onRestrictedStatus={(leadId, leadName, status) => {
+          setPendingActionError(null);
+          setRnrDate("");
+          setRnrTime("10:00");
+          setPendingStatusAction({ leadId, leadName, status: status as "RNR" | "Connected" });
+        }}
+      />
+
+      {/* RNR needs a next-call date (scheduled via the same follow-up
+          mechanism Call Back/Follow-up use elsewhere) and Connected needs a
+          Qualified/Not Qualified sub-status — neither commits until this is
+          filled in, so the row Status dropdown opens this instead of
+          setting the status directly for those two. */}
+      {pendingStatusAction && createPortal(
+        <>
+          <div className="fixed inset-0 bg-slate-900/40 z-[80]" onClick={() => setPendingStatusAction(null)} />
+          <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
+            <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-slate-200 p-6">
+              <h3 className="text-sm font-extrabold text-slate-900">
+                {pendingStatusAction.status === "RNR" ? "Schedule Next Call" : "Mark as Connected"}
+              </h3>
+              <p className="text-xs text-slate-500 mt-1">{pendingStatusAction.leadName}</p>
+
+              {pendingStatusAction.status === "RNR" ? (
+                <div className="mt-4 space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="block text-[11px] font-bold text-slate-700">Next Call Date</label>
+                      <input
+                        type="date"
+                        value={rnrDate}
+                        min={new Date().toISOString().split("T")[0]}
+                        onChange={(e) => { setRnrDate(e.target.value); setPendingActionError(null); }}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:bg-white focus:border-[#0B1E6E]"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="block text-[11px] font-bold text-slate-700">Time</label>
+                      <input
+                        type="time"
+                        value={rnrTime}
+                        onChange={(e) => setRnrTime(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:bg-white focus:border-[#0B1E6E]"
+                      />
+                    </div>
+                  </div>
+                  {pendingActionError && <p className="text-[11px] text-red-600 font-semibold">{pendingActionError}</p>}
+                  <div className="flex justify-end gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setPendingStatusAction(null)}
+                      className="bg-slate-100 border border-slate-200 text-slate-700 font-bold px-4 py-2 rounded-xl text-xs hover:bg-slate-200 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={confirmRnr}
+                      className="bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold px-5 py-2 rounded-xl text-xs transition-colors"
+                    >
+                      Schedule
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-4 space-y-2">
+                  <p className="text-[11px] text-slate-500">
+                    A qualified lead moves into the main CRM pipeline; not qualified stays here on Data Calling.
+                  </p>
+                  <div className="grid grid-cols-2 gap-3 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => confirmConnected("Qualified")}
+                      className="border-2 border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-extrabold text-xs py-3 rounded-xl transition-colors"
+                    >
+                      Qualified
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => confirmConnected("Not Qualified")}
+                      className="border-2 border-red-200 bg-red-50 hover:bg-red-100 text-red-700 font-extrabold text-xs py-3 rounded-xl transition-colors"
+                    >
+                      Not Qualified
+                    </button>
+                  </div>
+                  <div className="flex justify-end pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setPendingStatusAction(null)}
+                      className="bg-slate-100 border border-slate-200 text-slate-700 font-bold px-4 py-2 rounded-xl text-xs hover:bg-slate-200 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </>,
         document.body
       )}
 

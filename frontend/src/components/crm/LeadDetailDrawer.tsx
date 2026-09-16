@@ -8,14 +8,30 @@ interface LeadDetailDrawerProps {
   lead: Lead | null;
   isOpen: boolean;
   onClose: () => void;
-  onUpdateStatus: (leadId: string, status: LeadStatus) => void;
+  onUpdateStatus: (leadId: string, status: LeadStatus, dealValue?: number, kycDocName?: string, subStatus?: "Qualified" | "Not Qualified") => void;
+  // Data Calling opens this same drawer for its own leads but with a
+  // deliberately narrower status model (New Lead/RNR/Connected) — when set,
+  // this replaces the full STATUS_OPTIONS list. Defaults to the full list
+  // for every other caller (main Leads dashboard).
+  statusOptions?: LeadStatus[];
+  // Statuses in `statusOptions` that need something more than a bare status
+  // change before they can commit (Data Calling's RNR needs a next-call
+  // date, Connected needs a Qualified/Not Qualified sub-status) — picking
+  // one of these calls onRestrictedStatus instead of onUpdateStatus,
+  // handing off to whatever flow the caller already has for it rather than
+  // duplicating that UI inside this shared drawer.
+  restrictedStatuses?: LeadStatus[];
+  onRestrictedStatus?: (leadId: string, leadName: string, status: LeadStatus) => void;
 }
 
 export default function LeadDetailDrawer({
   lead,
   isOpen,
   onClose,
-  onUpdateStatus
+  onUpdateStatus,
+  statusOptions,
+  restrictedStatuses,
+  onRestrictedStatus
 }: LeadDetailDrawerProps) {
   const { addNotification, addCalendarEvent, addFollowupCall, users, currentUser, activeRole, reassignLead } = useApp();
   const [localStatus, setLocalStatus] = useState<LeadStatus>("New Lead");
@@ -59,12 +75,18 @@ export default function LeadDetailDrawer({
   if (!isOpen || !lead) return null;
 
   const handleSelectStatus = (nextStatus: LeadStatus) => {
+    if (restrictedStatuses?.includes(nextStatus) && onRestrictedStatus) {
+      onRestrictedStatus(lead.id, lead.name, nextStatus);
+      setStatusMenuOpen(false);
+      return;
+    }
     setLocalStatus(nextStatus);
     onUpdateStatus(lead.id, nextStatus);
     setStatusMenuOpen(false);
   };
 
-  const statusOptionsList = STATUS_OPTIONS.includes(localStatus) ? STATUS_OPTIONS : [localStatus, ...STATUS_OPTIONS];
+  const baseStatusOptions = statusOptions ?? STATUS_OPTIONS;
+  const statusOptionsList = baseStatusOptions.includes(localStatus) ? baseStatusOptions : [localStatus, ...baseStatusOptions];
   const statusQuery = statusSearch.trim().toLowerCase();
   const filteredStatusOptions = statusQuery
     ? statusOptionsList.filter(s => s.toLowerCase().includes(statusQuery))
@@ -249,28 +271,40 @@ export default function LeadDetailDrawer({
         <div className="px-5 py-3 border-b border-slate-100 shrink-0 space-y-1.5">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold text-slate-500">Current Status :</span>
-            <div className="relative">
-              <button
-                type="button"
-                onClick={(e) => {
-                  const rect = e.currentTarget.getBoundingClientRect();
-                  const panelWidth = 224;
-                  const left = Math.max(8, Math.min(rect.right - panelWidth, window.innerWidth - panelWidth - 8));
-                  setStatusMenuPos({ top: rect.bottom + 4, left });
-                  setStatusSearch("");
-                  setStatusMenuOpen(prev => !prev);
-                }}
-                className={`flex items-center gap-1.5 border rounded-lg px-2 py-0.5 text-[11px] font-bold transition-colors focus:outline-none ${statusBadgeClasses(localStatus)}`}
-              >
-                <span>{localStatus}</span>
-                <ChevronDown className={`h-3 w-3 shrink-0 transition-transform ${statusMenuOpen ? "rotate-180" : ""}`} />
-              </button>
-              {statusMenuOpen && statusMenuPos && createPortal(
-                <>
-                  <div className="fixed inset-0 z-[70]" onClick={() => setStatusMenuOpen(false)} />
-                  <div
-                    className="fixed z-[80] w-56 bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden"
-                    style={{ top: statusMenuPos.top, left: statusMenuPos.left }}
+            <div className="flex items-center gap-1.5">
+              {lead.status === "Connected" && lead.subStatus && (
+                <span
+                  className={`text-[10px] font-extrabold px-2 py-0.5 rounded-lg border ${
+                    lead.subStatus === "Qualified"
+                      ? "text-emerald-700 bg-emerald-50 border-emerald-200"
+                      : "text-red-600 bg-red-50 border-red-200"
+                  }`}
+                >
+                  {lead.subStatus}
+                </span>
+              )}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const panelWidth = 224;
+                    const left = Math.max(8, Math.min(rect.right - panelWidth, window.innerWidth - panelWidth - 8));
+                    setStatusMenuPos({ top: rect.bottom + 4, left });
+                    setStatusSearch("");
+                    setStatusMenuOpen(prev => !prev);
+                  }}
+                  className={`flex items-center gap-1.5 border rounded-lg px-2 py-0.5 text-[11px] font-bold transition-colors focus:outline-none ${statusBadgeClasses(localStatus)}`}
+                >
+                  <span>{localStatus}</span>
+                  <ChevronDown className={`h-3 w-3 shrink-0 transition-transform ${statusMenuOpen ? "rotate-180" : ""}`} />
+                </button>
+                {statusMenuOpen && statusMenuPos && createPortal(
+                  <>
+                    <div className="fixed inset-0 z-[70]" onClick={() => setStatusMenuOpen(false)} />
+                    <div
+                      className="fixed z-[80] w-56 bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden"
+                      style={{ top: statusMenuPos.top, left: statusMenuPos.left }}
                   >
                     <div className="p-1.5 border-b border-slate-100">
                       <div className="relative">
@@ -306,6 +340,7 @@ export default function LeadDetailDrawer({
                 </>,
                 document.body
               )}
+              </div>
             </div>
           </div>
           <div className="flex items-center justify-between text-[10px] text-slate-400 font-semibold">

@@ -285,11 +285,17 @@ export async function bulkImportLeads(_caller: AccessTokenPayload, input: BulkIm
   return { created, duplicates, skipped };
 }
 
+// Data Calling: a Connected lead's sub-status is only meaningful while it's
+// actually Connected — any other status change clears it, so a lead can't
+// be left showing a stale "Qualified" from a prior Connected visit.
+const VALID_SUB_STATUSES = new Set(["Qualified", "Not Qualified"]);
+
 export async function updateLeadStatus(
   caller: AccessTokenPayload,
   leadId: string,
   statusCode: string,
-  dealValue: number | undefined
+  dealValue: number | undefined,
+  subStatus?: string
 ) {
   const scopedToAgentId = scopeForCaller(caller);
   const existing = await repo.findById(leadId, scopedToAgentId);
@@ -297,9 +303,18 @@ export async function updateLeadStatus(
 
   const stampFirstResponse = existing.status_code === "NEW"; // first-ever status change
 
+  const normalizedSubStatus = statusCode === "CONNECTED" && subStatus && VALID_SUB_STATUSES.has(subStatus) ? subStatus : null;
+  // Data Calling's promotion rule: a bulk-uploaded lead that reaches
+  // Connected + Qualified is a real, qualified prospect now — it graduates
+  // out of the cold-outreach pipeline into the main CRM leads list by
+  // losing its "Bulk Upload" source (sub_source, which records which
+  // purchased dataset it came from, is deliberately left untouched).
+  const promotedSource =
+    normalizedSubStatus === "Qualified" && existing.source === "Bulk Upload" ? "Data" : undefined;
+
   try {
     await withTransaction(async (client) => {
-      await repo.updateStatus(client, leadId, statusCode, dealValue, stampFirstResponse);
+      await repo.updateStatus(client, leadId, statusCode, dealValue, stampFirstResponse, normalizedSubStatus, promotedSource);
       await repo.insertLeadLog(client, leadId, caller.sub, caller.name, `Status changed to "${statusCode}"`);
       // The agent responded in time — this is what the follow-up SLA
       // scheduler (jobs/followupScheduler.ts) checks for before escalating

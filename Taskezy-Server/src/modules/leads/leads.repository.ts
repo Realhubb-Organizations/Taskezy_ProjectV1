@@ -40,6 +40,10 @@ export interface LeadListRow {
   // reassigned, and reshuffled as a group later. null for every other
   // ingestion path (Meta, sheet import, manual Add Lead).
   sub_source: string | null;
+  // Data Calling's Connected leads carry Qualified/Not Qualified alongside
+  // status_code — a second, narrower dimension, not a lead_statuses value.
+  // null for every lead that was never a Data Calling Connected lead.
+  sub_status: string | null;
   logs: { message: string; timestamp: string; user: string }[];
 }
 
@@ -60,7 +64,7 @@ const LIST_SELECT = `
     u.first_name || COALESCE(' ' || u.last_name, '') AS assigned_agent_name,
     l.property_id, p.name AS property_name,
     l.assigned_at, l.first_response_at, l.created_at,
-    l.source, l.sub_source, l.campaign, l.meta_page_name, l.meta_form_id, l.meta_ad_id,
+    l.source, l.sub_source, l.sub_status, l.campaign, l.meta_page_name, l.meta_form_id, l.meta_ad_id,
     COALESCE(
       (SELECT json_agg(json_build_object('message', ll.message, 'timestamp', ll.created_at, 'user', ll.user_name_snapshot) ORDER BY ll.created_at)
        FROM lead_logs ll
@@ -201,15 +205,28 @@ export async function updateStatus(
   leadId: string,
   statusCode: string,
   dealValue: number | undefined,
-  stampFirstResponse: boolean
+  stampFirstResponse: boolean,
+  // Data Calling's Connected sub-status (Qualified/Not Qualified) — always
+  // written alongside status_code (null when statusCode isn't CONNECTED,
+  // see leads.service.ts) so a lead can never be left with a stale
+  // sub-status from a status it's no longer in.
+  subStatus: string | null,
+  // Set only when this exact update is the Connected+Qualified promotion —
+  // flips source off "Bulk Upload" so the lead starts showing in the main
+  // CRM's leads list instead of Data Calling (see AppContext.tsx's
+  // leads/dataCallingLeads split). Left undefined for every ordinary status
+  // update, which leaves source untouched.
+  promotedSource: string | undefined
 ): Promise<void> {
   await client.query(
     `UPDATE leads
      SET status_code = $1,
          deal_value = COALESCE($2, deal_value),
-         first_response_at = CASE WHEN $3 AND first_response_at IS NULL THEN now() ELSE first_response_at END
-     WHERE id = $4`,
-    [statusCode, dealValue ?? null, stampFirstResponse, leadId]
+         first_response_at = CASE WHEN $3 AND first_response_at IS NULL THEN now() ELSE first_response_at END,
+         sub_status = $4,
+         source = COALESCE($5, source)
+     WHERE id = $6`,
+    [statusCode, dealValue ?? null, stampFirstResponse, subStatus, promotedSource ?? null, leadId]
   );
 }
 

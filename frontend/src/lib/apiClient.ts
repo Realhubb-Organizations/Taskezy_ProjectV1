@@ -154,6 +154,10 @@ export interface ApiLeadRow {
   // Free-text batch label set at bulk-upload time (e.g. "Kashmiri Data") —
   // null for every other ingestion path. See ApiBulkImportLeadsInput.
   sub_source: string | null;
+  // Data Calling's Connected sub-status ("Qualified" | "Not Qualified") —
+  // null whenever status_code isn't CONNECTED, or for any lead that was
+  // never a Data Calling lead.
+  sub_status: string | null;
   logs: { message: string; timestamp: string; user: string }[];
 }
 
@@ -219,10 +223,15 @@ export function apiBulkImportLeads(input: BulkImportLeadsApiInput): Promise<Bulk
   return request<BulkImportLeadsApiResult>("/api/v1/leads/bulk-import", { method: "POST", body: JSON.stringify(input) });
 }
 
-export function apiUpdateLeadStatus(leadId: string, statusCode: string, dealValue?: number): Promise<ApiLeadRow> {
+export function apiUpdateLeadStatus(
+  leadId: string,
+  statusCode: string,
+  dealValue?: number,
+  subStatus?: "Qualified" | "Not Qualified"
+): Promise<ApiLeadRow> {
   return request<ApiLeadRow>(`/api/v1/leads/${leadId}/status`, {
     method: "PATCH",
-    body: JSON.stringify({ statusCode, dealValue })
+    body: JSON.stringify({ statusCode, dealValue, subStatus })
   });
 }
 

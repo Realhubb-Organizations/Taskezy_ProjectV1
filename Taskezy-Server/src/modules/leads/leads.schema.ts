@@ -29,7 +29,12 @@ export const createLeadSchema = z.object({
 
 export const updateLeadStatusSchema = z.object({
   statusCode: z.string().min(1),
-  dealValue: z.number().nonnegative().optional()
+  dealValue: z.number().nonnegative().optional(),
+  // Data Calling's Connected sub-status — only persisted when statusCode is
+  // CONNECTED (see leads.service.ts), silently ignored otherwise rather
+  // than rejected, since callers that don't know about sub-status (every
+  // other status update in the app) never send it.
+  subStatus: z.enum(["Qualified", "Not Qualified"]).optional()
 });
 
 export const editLeadSchema = z.object({

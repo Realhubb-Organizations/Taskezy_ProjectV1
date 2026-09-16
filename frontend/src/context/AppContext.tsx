@@ -204,6 +204,7 @@ export interface Lead {
   logs: LeadLog[];
   source?: string;
   subSource?: string; // free-text batch label from bulk upload (e.g. "Kashmiri Data") — lets that batch be filtered/reassigned/reshuffled as a group. undefined for every other ingestion path.
+  subStatus?: "Qualified" | "Not Qualified"; // Data Calling's Connected sub-status — only meaningful while status is "Connected", cleared on any other status change.
   createdAtStr?: string;
   campaign?: string;
   metaPageName?: string; // which connected Meta Page this lead came in through
@@ -520,7 +521,13 @@ interface AppActions {
 
   // CRM actions
   addLead: (lead: Omit<Lead, "id" | "status" | "kycVerified" | "logs">) => { success: boolean; error?: string };
-  updateLeadStatus: (leadId: string, status: LeadStatus, dealValue?: number, kycDocName?: string) => { success: boolean; error?: string };
+  updateLeadStatus: (
+    leadId: string,
+    status: LeadStatus,
+    dealValue?: number,
+    kycDocName?: string,
+    subStatus?: "Qualified" | "Not Qualified"
+  ) => { success: boolean; error?: string };
   reassignLead: (leadId: string, newAgent: string) => void;
   connectMeta: () => Promise<void>;
   disconnectMeta: () => void;
@@ -609,6 +616,7 @@ function mapApiLeadToFrontendLead(row: ApiLeadRow): Lead {
     logs: row.logs.map(l => ({ message: l.message, timestamp: l.timestamp, user: l.user })),
     source: row.source || undefined,
     subSource: row.sub_source || undefined,
+    subStatus: row.sub_status === "Qualified" || row.sub_status === "Not Qualified" ? row.sub_status : undefined,
     campaign: row.campaign || undefined,
     metaPageName: row.meta_page_name || undefined,
     metaFormId: row.meta_form_id || undefined,
@@ -1414,7 +1422,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // CRM Directed Acyclic Graph Status Transition Checks
-  const updateLeadStatus = (leadId: string, targetStatus: LeadStatus, dealValue?: number, kycDocName?: string) => {
+  const updateLeadStatus = (
+    leadId: string,
+    targetStatus: LeadStatus,
+    dealValue?: number,
+    kycDocName?: string,
+    subStatus?: "Qualified" | "Not Qualified"
+  ) => {
     const lead = allLeads.find(l => l.id === leadId);
     if (!lead) return { success: false, error: "Lead not found." };
 
@@ -1428,6 +1442,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
 
     lead.status = targetStatus;
+    // Sub-status only means anything while Connected — matches the backend
+    // clearing it on any other status (leads.service.ts).
+    lead.subStatus = targetStatus === "Connected" ? subStatus : undefined;
+    // Data Calling's promotion rule: Connected + Qualified graduates a
+    // bulk-uploaded lead out of the cold-outreach pipeline — updating
+    // source here (not just on the server) makes it move immediately from
+    // dataCallingLeads into leads (see the useMemo split below), instead of
+    // waiting for the next full refetch.
+    if (targetStatus === "Connected" && subStatus === "Qualified" && lead.source === "Bulk Upload") {
+      lead.source = "Data";
+    }
     if (targetStatus === "Booking Done" || targetStatus === "Booking Approved") {
       lead.dealValue = dealValue;
       lead.kycDocName = kycDocName;
@@ -1487,7 +1512,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (isApiSessionActive() && isRealLeadId(leadId)) {
       const dbCode = frontendStatusToDbCode(targetStatus);
       if (dbCode) {
-        apiUpdateLeadStatus(leadId, dbCode, dealValue).catch((err) =>
+        apiUpdateLeadStatus(leadId, dbCode, dealValue, targetStatus === "Connected" ? subStatus : undefined).catch((err) =>
           console.warn("Could not persist status update to the database:", err)
         );
       }
