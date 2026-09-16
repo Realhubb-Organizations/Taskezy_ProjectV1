@@ -139,6 +139,19 @@ export default function CrmDashboardPage() {
 
   const isSalesMember = currentUser?.role_type === "Member" && currentUser?.role !== "ADMIN";
 
+  // "View Detailed Analytics" — an ADMIN gets the full Reports page (its own
+  // default Marketing tab); a Manager or sales agent (Member) has no use for
+  // marketing spend/campaign data, so send them straight to the Reports tab
+  // that's actually about their own leads (mirrors reports/page.tsx's own
+  // visibleTabs scoping, which would otherwise silently swap a Manager's
+  // requested "marketing" tab for nothing since it's still visible to them).
+  const detailedAnalyticsHref =
+    currentUser?.role === "ADMIN"
+      ? "/dashboard/reports"
+      : currentUser?.role_type === "Manager"
+        ? "/dashboard/reports?tab=manager"
+        : "/dashboard/reports?tab=agent";
+
   const scopedLeads = leads.filter(l => {
     if (isSalesMember) {
       return l.assignedAgent.toLowerCase() === currentUser?.name.toLowerCase();
@@ -479,7 +492,7 @@ export default function CrmDashboardPage() {
               )}
             </div>
           </div>
-          <Link href="/dashboard/reports" className="text-blue-600 font-extrabold hover:underline">
+          <Link href={detailedAnalyticsHref} className="text-blue-600 font-extrabold hover:underline">
             View Detailed Analytics
           </Link>
         </div>
