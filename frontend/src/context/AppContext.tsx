@@ -2028,14 +2028,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Data Calling (bulk-uploaded cold-outreach contact lists) is a separate
-  // pipeline from the rest of the CRM's real, ad-driven leads — a
-  // bulk-uploaded lead shows ONLY on Data Calling, everywhere else
-  // (Leads dashboard, Reports, Campaign Analytics totals, etc.) shows
-  // everything BUT those, so the two never mix. Every other page in the
-  // app already just destructures `leads` from context, so this one split
-  // is the only place that needs to know about the distinction.
+  // pipeline from the rest of the CRM's real, ad-driven leads. A lead still
+  // sitting untouched (source "Bulk Upload") shows ONLY on Data Calling —
+  // everywhere else (Leads dashboard, Reports, Campaign Analytics totals,
+  // etc.) shows everything BUT those. Once a Data Calling lead is promoted
+  // (Connected + Qualified — see leads.service.ts, source flips to "Data"),
+  // it starts showing in the main CRM's `leads` too, but it does NOT
+  // disappear from Data Calling's own Qualified Leads list — an admin
+  // working that page needs to see which of their uploads actually
+  // converted, drill into it, etc. `subSource` (the purchased-dataset
+  // label, e.g. "Kashmiri Data") is set once at upload time and never
+  // cleared, including through promotion, so "has a subSource" is the
+  // stable "this lead came from Data Calling" signal — unlike `source`,
+  // which is deliberately allowed to change. Every other page in the app
+  // already just destructures `leads` from context, so this one split is
+  // the only place that needs to know about any of this.
   const leads = useMemo(() => allLeads.filter(l => l.source !== "Bulk Upload"), [allLeads]);
-  const dataCallingLeads = useMemo(() => allLeads.filter(l => l.source === "Bulk Upload"), [allLeads]);
+  const dataCallingLeads = useMemo(() => allLeads.filter(l => !!l.subSource), [allLeads]);
 
   return (
     <AppContext.Provider
