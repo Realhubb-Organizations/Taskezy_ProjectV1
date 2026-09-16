@@ -107,16 +107,22 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
 
   // --- Meta ---
   const [metaConnections, setMetaConnections] = useState<ApiMetaConnection[]>([]);
+  const [metaConnectionsLoaded, setMetaConnectionsLoaded] = useState(false);
   const [metaLoading, setMetaLoading] = useState(false);
   const [metaBanner, setMetaBanner] = useState<{ kind: "success" | "error"; text: string } | null>(null);
   const [pageSearch, setPageSearch] = useState("");
 
   const loadMetaConnections = async () => {
-    if (activeRole !== "ADMIN") return;
+    if (activeRole !== "ADMIN") {
+      setMetaConnectionsLoaded(true);
+      return;
+    }
     try {
       setMetaConnections(await apiListMetaConnections());
     } catch (err) {
       console.warn("Could not load Meta connections:", err);
+    } finally {
+      setMetaConnectionsLoaded(true);
     }
   };
 
@@ -171,13 +177,20 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
 
   // --- Google ---
   const [googleAccounts, setGoogleAccounts] = useState<ApiGoogleAdsAccount[]>([]);
+  const [googleAccountsLoaded, setGoogleAccountsLoaded] = useState(false);
 
   useEffect(() => {
-    if (key !== "google" || activeRole !== "ADMIN") return;
+    if (key !== "google" || activeRole !== "ADMIN") {
+      setGoogleAccountsLoaded(true);
+      return;
+    }
     apiListGoogleAdsAccounts()
       .then(setGoogleAccounts)
-      .catch(err => console.warn("Could not load Google Ads accounts:", err));
+      .catch(err => console.warn("Could not load Google Ads accounts:", err))
+      .finally(() => setGoogleAccountsLoaded(true));
   }, [key, activeRole]);
+
+  const dataLoaded = key === "meta" ? metaConnectionsLoaded : googleAccountsLoaded;
 
   const activeGoogleAccounts = googleAccounts.filter(a => a.status === "ACTIVE");
   const filteredGoogleAccounts = activeGoogleAccounts.filter(a =>
@@ -201,6 +214,12 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
   const [tab, setTab] = useState<"overview" | "connected" | "webhooks">("overview");
   const active = key === "meta" ? activeMetaConnections.length > 0 : activeGoogleAccounts.length > 0;
   const connectedCount = key === "meta" ? activeMetaConnections.length : activeGoogleAccounts.length;
+  // Most recent connection's created_at, across whichever platform is
+  // active — the same real timestamp the Connected Apps card labels
+  // "Last synced" (there's no separate sync-log table for a true one).
+  const lastSyncedAt = [...(key === "meta" ? activeMetaConnections : activeGoogleAccounts)]
+    .map(c => c.created_at)
+    .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
 
   const webhookUrl = useMemo(() => {
     const base = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
@@ -231,6 +250,11 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
         <div className="bg-white border border-slate-200 rounded-2xl p-6 text-xs text-slate-500 italic">
           Only an Admin can view integration details.
         </div>
+      ) : !dataLoaded ? (
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 animate-pulse space-y-3">
+          <div className="h-4 w-40 bg-slate-200 rounded" />
+          <div className="h-3 w-72 bg-slate-200 rounded" />
+        </div>
       ) : (
         <>
           {/* Banner */}
@@ -245,27 +269,35 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
               </div>
               <p className="text-xs text-slate-500 mt-1 max-w-md">{info.description}</p>
             </div>
-            <div className="flex items-center gap-6 pl-2">
-              <div className="text-center">
+            <div className="flex items-center gap-5 pl-2 border-l border-slate-200/80">
+              <div className="text-center px-1">
                 <p className="text-xl font-black text-slate-900">{connectedCount}</p>
                 <p className="text-[10px] text-slate-500 font-bold whitespace-nowrap">{key === "meta" ? "Pages Connected" : "Accounts Connected"}</p>
               </div>
-              <div className="text-center">
+              <div className="text-center px-1 border-l border-slate-200/80 pl-5">
                 <p className="text-xl font-black text-slate-900">{key === "meta" ? totalLeadsViaMeta : `₹${totalGoogleSpend.toLocaleString("en-IN")}`}</p>
                 <p className="text-[10px] text-slate-500 font-bold whitespace-nowrap">{key === "meta" ? "Total Leads" : "Total Spend Synced"}</p>
               </div>
             </div>
+            {active && lastSyncedAt && (
+              <div className="w-full flex justify-end -mt-1">
+                <p className="text-[10px] text-slate-400 font-semibold flex items-center gap-1.5">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                  Last synced {formatDate(lastSyncedAt)}
+                </p>
+              </div>
+            )}
           </div>
 
-          {/* Tabs */}
-          <div className="bg-white border border-slate-200 rounded-2xl p-1.5 shadow-sm w-fit">
-            <div className="flex gap-1">
+          {/* Tabs — underline style */}
+          <div className="border-b border-slate-200">
+            <div className="flex gap-6 text-xs font-bold text-slate-500">
               {(["overview", "connected", ...(key === "meta" ? ["webhooks" as const] : [])] as const).map(t => (
                 <button
                   key={t}
                   onClick={() => setTab(t)}
-                  className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
-                    tab === t ? "bg-brand-50 text-brand-700" : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
+                  className={`pb-3 border-b-2 transition-all whitespace-nowrap ${
+                    tab === t ? "border-brand-500 text-brand-700 font-black" : "border-transparent hover:text-slate-800"
                   }`}
                 >
                   {t === "overview" ? "Overview" : t === "connected" ? (key === "meta" ? "Connected Pages" : "Connected Accounts") : "Webhooks"}

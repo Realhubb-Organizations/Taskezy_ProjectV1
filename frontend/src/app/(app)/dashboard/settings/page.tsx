@@ -32,7 +32,6 @@ import {
   LayoutGrid,
   CreditCard,
   ChevronDown,
-  Sparkles,
   MoreHorizontal
 } from "lucide-react";
 
@@ -136,15 +135,26 @@ export default function SettingsPage() {
 
   // --- Meta Ads: real OAuth connection ---
   const [metaConnections, setMetaConnections] = useState<ApiMetaConnection[]>([]);
+  // Distinct from metaLoading (the "redirecting to Meta OAuth" button state,
+  // below) — this tracks whether the initial connections fetch has resolved
+  // at all yet, so the card can show a neutral "Checking…" state instead of
+  // a false "Not connected yet" while the request is still in flight (that
+  // false-negative flash is exactly what looked like a broken connection).
+  const [metaConnectionsLoaded, setMetaConnectionsLoaded] = useState(false);
   const [metaLoading, setMetaLoading] = useState(false);
   const [metaBanner, setMetaBanner] = useState<{ kind: "success" | "error"; text: string } | null>(null);
 
   const loadMetaConnections = async () => {
-    if (activeRole !== "ADMIN") return;
+    if (activeRole !== "ADMIN") {
+      setMetaConnectionsLoaded(true);
+      return;
+    }
     try {
       setMetaConnections(await apiListMetaConnections());
     } catch (err) {
       console.warn("Could not load Meta connections:", err);
+    } finally {
+      setMetaConnectionsLoaded(true);
     }
   };
 
@@ -202,12 +212,17 @@ export default function SettingsPage() {
 
   // --- Google Ads: read-only status, auto-discovered by the sync job under one MCC credential ---
   const [googleAccounts, setGoogleAccounts] = useState<ApiGoogleAdsAccount[]>([]);
+  const [googleAccountsLoaded, setGoogleAccountsLoaded] = useState(false);
 
   useEffect(() => {
-    if (activeRole !== "ADMIN") return;
+    if (activeRole !== "ADMIN") {
+      setGoogleAccountsLoaded(true);
+      return;
+    }
     apiListGoogleAdsAccounts()
       .then(setGoogleAccounts)
-      .catch(err => console.warn("Could not load Google Ads accounts:", err));
+      .catch(err => console.warn("Could not load Google Ads accounts:", err))
+      .finally(() => setGoogleAccountsLoaded(true));
   }, [activeRole]);
 
   const activeGoogleAccounts = googleAccounts.filter(a => a.status === "ACTIVE");
@@ -452,9 +467,30 @@ export default function SettingsPage() {
             </p>
           </div>
         </div>
+
+        {/* Small scattered platform-icon cluster — purely decorative, same
+            spot/treatment as the reference design. Uses the app's own real
+            connected platforms (Meta, Google Ads) plus two things this CRM
+            actually manages (Campaigns, Properties) rather than inventing
+            unrelated logos. */}
+        <div className="hidden lg:flex items-center -space-x-3">
+          <div className="h-11 w-11 rounded-2xl bg-white border border-slate-200 shadow-md flex items-center justify-center -rotate-6 p-2.5">
+            <img src="https://img.icons8.com/?size=100&id=4hR4Ih04Je2t&format=png&color=000000" alt="Google Ads" className="h-full w-full object-contain" />
+          </div>
+          <div className="h-11 w-11 rounded-2xl bg-white border border-slate-200 shadow-md flex items-center justify-center rotate-3 -translate-y-2 p-2.5">
+            <img src="https://img.icons8.com/?size=100&id=wA5rN96FVDtq&format=png&color=000000" alt="Meta" className="h-full w-full object-contain" />
+          </div>
+          <div className="h-11 w-11 rounded-2xl bg-indigo-600 shadow-md flex items-center justify-center -rotate-3 translate-y-2 text-white">
+            <Megaphone className="h-5 w-5" />
+          </div>
+          <div className="h-11 w-11 rounded-2xl bg-emerald-600 shadow-md flex items-center justify-center rotate-6 text-white">
+            <MapPin className="h-5 w-5" />
+          </div>
+        </div>
+
         <div className="hidden md:flex items-center gap-3 bg-white/70 border border-white rounded-xl px-4 py-2.5 shadow-sm">
           <div className="h-8 w-8 rounded-lg bg-brand-600 text-white flex items-center justify-center shrink-0">
-            <Sparkles className="h-4 w-4" />
+            <FileText className="h-4 w-4" />
           </div>
           <div className="text-[11px]">
             <p className="font-extrabold text-slate-800">Connect. Automate. Grow.</p>
@@ -585,6 +621,24 @@ export default function SettingsPage() {
           </span>
         );
 
+        // Neutral state while the real connection status is still in
+        // flight — without this, the card briefly claimed "Inactive"/"Not
+        // connected yet" for an account that actually is connected, purely
+        // because metaConnections/googleAccounts start empty before their
+        // fetch resolves.
+        const loadingPill = () => (
+          <span className="inline-flex items-center gap-1 text-[9px] font-bold border px-2 py-0.5 rounded-full shrink-0 bg-slate-50 text-slate-400 border-slate-200">
+            <span className="h-1.5 w-1.5 rounded-full bg-slate-300 animate-pulse" />
+            Checking…
+          </span>
+        );
+        const loadingInfoBox = () => (
+          <div className="bg-slate-50 border border-slate-150 rounded-xl px-3 py-2.5 animate-pulse space-y-1.5">
+            <div className="h-2.5 w-28 bg-slate-200 rounded" />
+            <div className="h-2 w-40 bg-slate-200 rounded" />
+          </div>
+        );
+
         const renderMetaCard = () => (
           <div key="meta" className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col gap-3 shadow-sm hover:shadow-md transition-shadow">
             <div className="flex items-start justify-between gap-2">
@@ -593,7 +647,7 @@ export default function SettingsPage() {
                   <img src="https://img.icons8.com/?size=100&id=wA5rN96FVDtq&format=png&color=000000" alt="Meta" className="h-full w-full object-contain" />
                 </div>
                 <h4 className="text-sm font-extrabold text-slate-900 truncate">Meta Ads</h4>
-                {statusPill(activeMetaConnections.length > 0)}
+                {metaConnectionsLoaded ? statusPill(activeMetaConnections.length > 0) : loadingPill()}
               </div>
               {cardMenu(
                 "meta",
@@ -606,7 +660,9 @@ export default function SettingsPage() {
             <p className="text-[11px] text-slate-500 leading-relaxed">
               Capture leads from Facebook &amp; Instagram Lead Ads in real time via a webhook.
             </p>
-            {activeMetaConnections.length > 0 ? (
+            {!metaConnectionsLoaded ? (
+              loadingInfoBox()
+            ) : activeMetaConnections.length > 0 ? (
               <div className="bg-slate-50 border border-slate-150 rounded-xl px-3 py-2 space-y-1.5">
                 <p className="text-[10px] font-extrabold text-slate-700">
                   {activeMetaConnections.length} Page{activeMetaConnections.length === 1 ? "" : "s"} Connected
@@ -656,14 +712,16 @@ export default function SettingsPage() {
                   <img src="https://img.icons8.com/?size=100&id=4hR4Ih04Je2t&format=png&color=000000" alt="Google Ads" className="h-full w-full object-contain" />
                 </div>
                 <h4 className="text-sm font-extrabold text-slate-900 truncate">Google Ads</h4>
-                {statusPill(activeGoogleAccounts.length > 0)}
+                {googleAccountsLoaded ? statusPill(activeGoogleAccounts.length > 0) : loadingPill()}
               </div>
               {cardMenu("google", "/dashboard/settings/integrations?app=google")}
             </div>
             <p className="text-[11px] text-slate-500 leading-relaxed">
               Sync campaign spend and leads from your Google Ads account (MCC supported).
             </p>
-            {activeGoogleAccounts.length > 0 ? (
+            {!googleAccountsLoaded ? (
+              loadingInfoBox()
+            ) : activeGoogleAccounts.length > 0 ? (
               <div className="bg-slate-50 border border-slate-150 rounded-xl px-3 py-2 space-y-1">
                 <p className="text-[10px] font-extrabold text-slate-700">
                   {activeGoogleAccounts.length} Account{activeGoogleAccounts.length === 1 ? "" : "s"} Connected
