@@ -6,12 +6,10 @@ import Link from "next/link";
 import { useApp, Lead, LeadStatus } from "@/context/AppContext";
 import AddLeadModal from "@/components/crm/AddLeadModal";
 import PendingLeadsTable, { PendingRow } from "@/components/dashboard/PendingLeadsTable";
-import { DB_CODE_TO_FRONTEND_STATUS, deriveActivityTimeline } from "@/lib/leadStatusMapping";
+import { deriveActivityTimeline, STATUS_OPTIONS } from "@/lib/leadStatusMapping";
 import { computeLeadSummaryStats } from "@/lib/leadSummaryStats";
 import { WhatsAppIcon, CallIcon } from "@/components/icons/ContactIcons";
 import { ChevronDown, Plus, CheckCircle, Phone, Mail, X, Copy, Check, User, Search, ArrowRight } from "lucide-react";
-
-const STATUS_OPTIONS = Array.from(new Set(Object.values(DB_CODE_TO_FRONTEND_STATUS)));
 
 // CRM's own overview — moved out of the old bare /dashboard route (which
 // branched its content by department/activeSystem, so the same URL showed a
@@ -47,6 +45,12 @@ export default function CrmDashboardPage() {
   const drillAssignedBtnRef = useRef<HTMLButtonElement>(null);
   const [drillCampaignMenuPos, setDrillCampaignMenuPos] = useState<{ top: number; left: number } | null>(null);
   const drillCampaignBtnRef = useRef<HTMLButtonElement>(null);
+  const [rowStatusMenuFor, setRowStatusMenuFor] = useState<string | null>(null);
+  const [rowStatusMenuPos, setRowStatusMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const [rowStatusSearch, setRowStatusSearch] = useState("");
+  const [quickViewStatusMenuOpen, setQuickViewStatusMenuOpen] = useState(false);
+  const [quickViewStatusMenuPos, setQuickViewStatusMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const [quickViewStatusSearch, setQuickViewStatusSearch] = useState("");
 
   // The table's own horizontal-scroll wrapper (overflow-x-auto) and the
   // stat-cards card (overflow-hidden, for its rounded corners) both clip any
@@ -301,12 +305,88 @@ export default function CrmDashboardPage() {
     }
   };
 
+  // Drill-down table's per-row Status cell — a searchable portal dropdown
+  // matching the app's white-panel menus, in place of a plain native
+  // <select> (whose OS-default popup, e.g. dark on macOS/Chrome, clashed
+  // with the rest of the app). Same pattern as LeadDashboard's row status
+  // editor on the Leads page.
+  const renderRowStatusCell = (l: Lead) => {
+    const allOptions = STATUS_OPTIONS.includes(l.status) ? STATUS_OPTIONS : [l.status, ...STATUS_OPTIONS];
+    const query = rowStatusSearch.trim().toLowerCase();
+    const filteredOptions = query ? allOptions.filter(s => s.toLowerCase().includes(query)) : allOptions;
+    return (
+      <div className="relative inline-block">
+        <button
+          type="button"
+          onClick={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const panelWidth = 176;
+            const left = Math.max(8, Math.min(rect.left, window.innerWidth - panelWidth - 8));
+            setRowStatusMenuPos({ top: rect.bottom + 4, left });
+            setRowStatusSearch("");
+            setRowStatusMenuFor(prev => (prev === l.id ? null : l.id));
+          }}
+          className="w-full max-w-[110px] flex items-center justify-between gap-1 bg-slate-50 border border-slate-200 rounded-md px-1.5 py-0.5 text-[11px] font-bold text-slate-700 hover:border-slate-300 transition-colors"
+        >
+          <span className="truncate">{l.status}</span>
+          <ChevronDown className={`h-3 w-3 text-slate-400 shrink-0 transition-transform ${rowStatusMenuFor === l.id ? "rotate-180" : ""}`} />
+        </button>
+        {rowStatusMenuFor === l.id && rowStatusMenuPos && createPortal(
+          <>
+            <div className="fixed inset-0 z-[60]" onClick={() => setRowStatusMenuFor(null)} />
+            <div
+              className="fixed z-[70] w-44 bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden"
+              style={{ top: rowStatusMenuPos.top, left: rowStatusMenuPos.left }}
+            >
+              <div className="p-1.5 border-b border-slate-100">
+                <div className="relative">
+                  <Search className="h-3 w-3 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2" />
+                  <input
+                    autoFocus
+                    value={rowStatusSearch}
+                    onChange={(e) => setRowStatusSearch(e.target.value)}
+                    placeholder="Search status..."
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-6 pr-2 py-1 text-[11px] font-semibold text-slate-700 focus:outline-none focus:border-[#0B1E6E]"
+                  />
+                </div>
+              </div>
+              <div className="max-h-56 overflow-y-auto py-1">
+                {filteredOptions.length === 0 ? (
+                  <p className="px-3 py-2 text-[11px] text-slate-400 italic">No matching status</p>
+                ) : (
+                  filteredOptions.map(st => (
+                    <button
+                      key={st}
+                      type="button"
+                      onClick={() => { handleDrillStatusChange(l.id, st); setRowStatusMenuFor(null); }}
+                      className={`w-full text-left px-3 py-1.5 text-xs font-semibold transition-colors ${
+                        l.status === st ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"
+                      }`}
+                    >
+                      {st}
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          </>,
+          document.body
+        )}
+      </div>
+    );
+  };
+
   // Pending Follow ups/Call Backs rows only carry a summary shape
   // (PendingRow), not the full Lead the quick-view needs — look the real
   // record up by id from the same `leads` list everything else here reads.
   const openQuickView = (leadId: string) => {
     const found = leads.find(l => l.id === leadId);
     if (found) setQuickViewLead(found);
+  };
+
+  const closeQuickView = () => {
+    setQuickViewLead(null);
+    setQuickViewStatusMenuOpen(false);
   };
 
   const byMostRecentActivity = (a: Lead, b: Lead) => new Date(lastActivityIso(b) || 0).getTime() - new Date(lastActivityIso(a) || 0).getTime();
@@ -656,16 +736,7 @@ export default function CrmDashboardPage() {
                       </td>
                       <td className="px-4 py-3 text-slate-600 align-top truncate" title={l.email || "—"}>{l.email || "—"}</td>
                       <td className="px-4 py-3 align-top">
-                        <select
-                          value={l.status}
-                          onChange={(e) => handleDrillStatusChange(l.id, e.target.value as LeadStatus)}
-                          className="w-full max-w-[110px] bg-slate-50 border border-slate-200 rounded-md px-1.5 py-0.5 text-[11px] font-bold text-slate-700 focus:outline-none cursor-pointer"
-                        >
-                          {!STATUS_OPTIONS.includes(l.status) && <option value={l.status}>{l.status}</option>}
-                          {STATUS_OPTIONS.map((opt) => (
-                            <option key={opt} value={opt}>{opt}</option>
-                          ))}
-                        </select>
+                        {renderRowStatusCell(l)}
                       </td>
                       <td className="px-4 py-3 text-slate-700 font-medium align-top truncate" title={l.assignedAgent || "Unassigned"}>{l.assignedAgent || "Unassigned"}</td>
                       <td className="px-4 py-3 text-slate-500 align-top truncate">{formatDateTime(l.createdAtStr)}</td>
@@ -763,14 +834,14 @@ export default function CrmDashboardPage() {
       {quickViewLead && createPortal(
         <div className="fixed inset-0 z-50">
           {/* Invisible click-outside-to-close catcher — no dark backdrop, the rest of the page stays fully visible */}
-          <div className="fixed inset-0" onClick={() => setQuickViewLead(null)} />
+          <div className="fixed inset-0" onClick={closeQuickView} />
 
           <div className="fixed inset-y-0 right-0 w-full max-w-sm bg-white border-l border-slate-200 shadow-2xl flex flex-col animate-slide-in">
             {/* Header */}
             <div className="px-5 pt-5 pb-4 border-b border-slate-100 shrink-0">
               <div className="flex items-start justify-between">
                 <p className="text-base font-extrabold text-slate-900">{quickViewLead.name}</p>
-                <button onClick={() => setQuickViewLead(null)} className="text-slate-400 hover:text-slate-700 -mt-1">
+                <button onClick={closeQuickView} className="text-slate-400 hover:text-slate-700 -mt-1">
                   <X className="h-4.5 w-4.5" />
                 </button>
               </div>
@@ -798,20 +869,74 @@ export default function CrmDashboardPage() {
             <div className="px-5 py-3 border-b border-slate-100 shrink-0 space-y-1.5">
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-bold text-slate-500">Current Status :</span>
-                <select
-                  value={quickViewLead.status}
-                  onChange={(e) => {
-                    const nextStatus = e.target.value as LeadStatus;
-                    handleDrillStatusChange(quickViewLead.id, nextStatus);
-                    setQuickViewLead({ ...quickViewLead, status: nextStatus });
-                  }}
-                  className={`border rounded-lg px-2 py-0.5 text-[11px] font-bold focus:outline-none cursor-pointer ${statusBadgeClasses(quickViewLead.status)}`}
-                >
-                  {!STATUS_OPTIONS.includes(quickViewLead.status) && <option value={quickViewLead.status}>{quickViewLead.status}</option>}
-                  {STATUS_OPTIONS.map((opt) => (
-                    <option key={opt} value={opt}>{opt}</option>
-                  ))}
-                </select>
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      const panelWidth = 192;
+                      const left = Math.max(8, Math.min(rect.right - panelWidth, window.innerWidth - panelWidth - 8));
+                      setQuickViewStatusMenuPos({ top: rect.bottom + 4, left });
+                      setQuickViewStatusSearch("");
+                      setQuickViewStatusMenuOpen(prev => !prev);
+                    }}
+                    className={`flex items-center gap-1.5 border rounded-lg px-2 py-0.5 text-[11px] font-bold transition-colors focus:outline-none ${statusBadgeClasses(quickViewLead.status)}`}
+                  >
+                    <span>{quickViewLead.status}</span>
+                    <ChevronDown className={`h-3 w-3 shrink-0 transition-transform ${quickViewStatusMenuOpen ? "rotate-180" : ""}`} />
+                  </button>
+                  {quickViewStatusMenuOpen && quickViewStatusMenuPos && createPortal(
+                    <>
+                      <div className="fixed inset-0 z-[70]" onClick={() => setQuickViewStatusMenuOpen(false)} />
+                      <div
+                        className="fixed z-[80] w-48 bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden"
+                        style={{ top: quickViewStatusMenuPos.top, left: quickViewStatusMenuPos.left }}
+                      >
+                        <div className="p-1.5 border-b border-slate-100">
+                          <div className="relative">
+                            <Search className="h-3 w-3 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2" />
+                            <input
+                              autoFocus
+                              value={quickViewStatusSearch}
+                              onChange={(e) => setQuickViewStatusSearch(e.target.value)}
+                              placeholder="Search status..."
+                              className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-6 pr-2 py-1 text-[11px] font-semibold text-slate-700 focus:outline-none focus:border-[#0B1E6E]"
+                            />
+                          </div>
+                        </div>
+                        <div className="max-h-56 overflow-y-auto py-1">
+                          {(() => {
+                            const allOptions = STATUS_OPTIONS.includes(quickViewLead.status)
+                              ? STATUS_OPTIONS
+                              : [quickViewLead.status, ...STATUS_OPTIONS];
+                            const query = quickViewStatusSearch.trim().toLowerCase();
+                            const filtered = query ? allOptions.filter(s => s.toLowerCase().includes(query)) : allOptions;
+                            if (filtered.length === 0) {
+                              return <p className="px-3 py-2 text-[11px] text-slate-400 italic">No matching status</p>;
+                            }
+                            return filtered.map(st => (
+                              <button
+                                key={st}
+                                type="button"
+                                onClick={() => {
+                                  handleDrillStatusChange(quickViewLead.id, st);
+                                  setQuickViewLead({ ...quickViewLead, status: st });
+                                  setQuickViewStatusMenuOpen(false);
+                                }}
+                                className={`w-full text-left px-3 py-1.5 text-xs font-semibold transition-colors ${
+                                  quickViewLead.status === st ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"
+                                }`}
+                              >
+                                {st}
+                              </button>
+                            ));
+                          })()}
+                        </div>
+                      </div>
+                    </>,
+                    document.body
+                  )}
+                </div>
               </div>
               <div className="flex items-center justify-between text-[10px] text-slate-400 font-semibold">
                 <span>Last Updated : {lastActivityTime(quickViewLead)}</span>
