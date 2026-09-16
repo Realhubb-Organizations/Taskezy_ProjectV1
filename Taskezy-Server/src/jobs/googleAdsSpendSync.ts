@@ -23,7 +23,22 @@ function isoDateNDaysAgo(n: number): string {
  * same philosophy as the campaign-level daily stats above. Feeds Campaign
  * Deep Dive's Ad Set Name/Ad creative Name columns and a real per-ad CPL.
  */
+let isSyncing = false;
+
 async function syncOnce(): Promise<void> {
+  if (isSyncing) {
+    logger.info("Google Ads spend sync already in progress — skipping this trigger");
+    return;
+  }
+  isSyncing = true;
+  try {
+    await runSync();
+  } finally {
+    isSyncing = false;
+  }
+}
+
+async function runSync(): Promise<void> {
   let accounts;
   try {
     accounts = await listLinkedAccounts();
@@ -126,4 +141,11 @@ export function startGoogleAdsSpendSync(): void {
   }, POLL_INTERVAL_MS).unref();
 
   logger.info(`Google Ads spend sync scheduled (every ${POLL_INTERVAL_MS / 3600000}h, ${LOOKBACK_DAYS}-day lookback)`);
+}
+
+/** Mirrors metaAdSpendSync's triggerMetaAdSpendSyncNow — see its comment. */
+export function triggerGoogleAdsSpendSyncNow(): { started: boolean } {
+  if (isSyncing) return { started: false };
+  syncOnce().catch(err => logger.error({ err }, "Manually triggered Google Ads spend sync failed"));
+  return { started: true };
 }

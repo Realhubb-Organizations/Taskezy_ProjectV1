@@ -151,6 +151,9 @@ export interface ApiLeadRow {
   meta_page_name: string | null;
   meta_form_id: string | null;
   meta_ad_id: string | null;
+  // Free-text batch label set at bulk-upload time (e.g. "Kashmiri Data") —
+  // null for every other ingestion path. See ApiBulkImportLeadsInput.
+  sub_source: string | null;
   logs: { message: string; timestamp: string; user: string }[];
 }
 
@@ -193,6 +196,27 @@ export interface CreateLeadApiInput {
 
 export function apiCreateLead(input: CreateLeadApiInput): Promise<ApiLeadRow> {
   return request<ApiLeadRow>("/api/v1/leads", { method: "POST", body: JSON.stringify(input) });
+}
+
+// Admin CRM Data Calling's bulk Excel upload (Name + Mobile Number only) —
+// ADMIN-only. Property mode distributes rows across that property's
+// configured Round Robin/Percentage team; Agent mode round-robins rows
+// evenly across every selected agent. See Taskezy-Server/leads.service.ts's
+// bulkImportLeads for the full assignment/fallback logic.
+export interface BulkImportLeadsApiInput {
+  subSource: string;
+  assignmentMode: "PROPERTY" | "AGENT";
+  propertyId?: string;
+  agentIds?: string[];
+  leads: { name: string; phone: string }[];
+}
+export interface BulkImportLeadsApiResult {
+  created: number;
+  duplicates: number;
+  skipped: { row: number; reason: string }[];
+}
+export function apiBulkImportLeads(input: BulkImportLeadsApiInput): Promise<BulkImportLeadsApiResult> {
+  return request<BulkImportLeadsApiResult>("/api/v1/leads/bulk-import", { method: "POST", body: JSON.stringify(input) });
 }
 
 export function apiUpdateLeadStatus(leadId: string, statusCode: string, dealValue?: number): Promise<ApiLeadRow> {

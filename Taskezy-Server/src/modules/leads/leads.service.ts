@@ -6,7 +6,7 @@ import { CreateLeadInput } from "./leads.repository";
 import * as usersRepo from "../users/users.repository";
 import { createNotification } from "../notifications/notifications.service";
 import { findPropertyIdBySheetSource } from "../properties/properties.repository";
-import { pickAgentForProperty } from "../properties/properties.assignment";
+import { pickAgentForProperty, createPropertyAgentPicker } from "../properties/properties.assignment";
 
 /**
  * Mirrors the frontend's isSalesMember scoping rule (AppContext.tsx /
@@ -109,6 +109,180 @@ export async function createLead(caller: AccessTokenPayload, input: CreateLeadIn
   );
 
   return created;
+}
+
+export interface BulkImportLeadRow {
+  name: string;
+  phone: string;
+}
+
+export interface BulkImportLeadsInput {
+  subSource: string;
+  assignmentMode: "PROPERTY" | "AGENT";
+  propertyId?: string;
+  agentIds?: string[];
+  leads: BulkImportLeadRow[];
+}
+
+export interface BulkImportSkippedRow {
+  row: number; // 1-based spreadsheet row, header counted as row 1 so the first data row is row 2 — matches what the admin sees in Excel
+  reason: string;
+}
+
+// How many rows go into one INSERT statement. Postgres/node-pg handle far
+// more than this per statement, but keeping chunks at this size bounds how
+// much a single query's parameter arrays/working memory grow, while still
+// cutting a 100k-row upload down to on the order of 100 round trips instead
+// of 100k.
+const BULK_IMPORT_CHUNK_SIZE = 1000;
+
+/**
+ * Admin CRM Data Calling's bulk Excel upload — built for real scale (tens
+ * of thousands of rows, not a handful):
+ *  - Property mode's Round Robin/Percentage picker is set up ONCE (one or
+ *    two queries total, see createPropertyAgentPicker) instead of
+ *    re-querying every agent's current lead count on every row, which was
+ *    the previous per-row implementation. Agent mode's round-robin is
+ *    already pure in-memory index math, no DB calls either way.
+ *  - Every row's assignment is resolved in memory first; only the actual
+ *    inserts touch the database, batched BULK_IMPORT_CHUNK_SIZE rows at a
+ *    time via one multi-row INSERT per chunk (see
+ *    leads.repository.createBulkLeadsChunk) rather than one INSERT per
+ *    row — the difference between ~100 queries and 100,000 for a 100k-row
+ *    file.
+ *  - Each chunk's INSERT is a single SQL statement, which Postgres
+ *    executes atomically — either the whole chunk lands or (on a genuine
+ *    DB error, not an expected duplicate) none of it does. Whole-batch
+ *    atomicity is deliberately NOT used here: an admin's real spreadsheet
+ *    always has a few bad rows, and requiring the entire 100k-row file to
+ *    be perfect to import any of it would be worse, not more correct.
+ *  - ON CONFLICT (phone) DO NOTHING makes duplicate detection (both
+ *    against existing leads AND repeats within the same file) a single
+ *    set-based check instead of a per-row existence query, and the unique
+ *    constraint on leads.phone is what actually rules out redundant rows
+ *    at the source of truth, not application-side bookkeeping.
+ * A bad row (missing name, unparseable phone, duplicate phone) is skipped
+ * and reported by its real spreadsheet row number, not a whole-batch
+ * failure.
+ */
+export async function bulkImportLeads(_caller: AccessTokenPayload, input: BulkImportLeadsInput) {
+  const fallbackAdminId = (await usersRepo.listActiveAdminIds())[0];
+
+  // Set up once, outside the per-row loop — see createPropertyAgentPicker.
+  const pickPropertyAgent =
+    input.assignmentMode === "PROPERTY" ? await createPropertyAgentPicker(input.propertyId!) : undefined;
+  const agentIds = input.assignmentMode === "AGENT" ? input.agentIds ?? [] : [];
+
+  const skipped: BulkImportSkippedRow[] = [];
+  let duplicates = 0;
+  const seenPhones = new Set<string>();
+
+  interface Candidate {
+    row: number;
+    name: string;
+    phone: string;
+    assignedAgentId: string;
+    statusCode: string;
+  }
+  const candidates: Candidate[] = [];
+  let agentCursor = 0; // only advances on rows that reach assignment, so earlier skips don't skew the round-robin
+
+  for (let i = 0; i < input.leads.length; i++) {
+    const row = i + 2; // header is row 1
+    const name = input.leads[i].name?.trim();
+    const phone = repo.normalizeIndianMobile(input.leads[i].phone ?? "");
+
+    if (!name) {
+      skipped.push({ row, reason: "Name is required" });
+      continue;
+    }
+    if (!phone) {
+      skipped.push({ row, reason: "Phone did not normalize to a valid 10-digit Indian mobile" });
+      continue;
+    }
+    if (seenPhones.has(phone)) {
+      duplicates++;
+      continue;
+    }
+
+    let assignedAgentId: string | undefined;
+    let statusCode: string;
+    if (input.assignmentMode === "AGENT") {
+      assignedAgentId = agentIds.length > 0 ? agentIds[agentCursor % agentIds.length] : undefined;
+      agentCursor++;
+      statusCode = "NEW";
+    } else {
+      const autoAssignedAgentId = pickPropertyAgent?.();
+      assignedAgentId = autoAssignedAgentId ?? fallbackAdminId;
+      statusCode = autoAssignedAgentId ? "NEW" : "UNASSIGNED";
+    }
+    if (!assignedAgentId) {
+      skipped.push({
+        row,
+        reason: input.assignmentMode === "AGENT"
+          ? "No agent selected to assign this row to"
+          : "No assignable agent for this property and no active admin to fall back to"
+      });
+      continue;
+    }
+
+    seenPhones.add(phone);
+    candidates.push({ row, name, phone, assignedAgentId, statusCode });
+  }
+
+  let created = 0;
+  const notifyCounts = new Map<string, number>();
+  const common = {
+    source: "Bulk Upload",
+    subSource: input.subSource,
+    propertyId: input.assignmentMode === "PROPERTY" ? input.propertyId! : null
+  };
+
+  for (let i = 0; i < candidates.length; i += BULK_IMPORT_CHUNK_SIZE) {
+    const chunk = candidates.slice(i, i + BULK_IMPORT_CHUNK_SIZE);
+    let insertedPhones: Set<string>;
+    try {
+      insertedPhones = await repo.createBulkLeadsChunk(
+        chunk.map(c => ({ name: c.name, phone: c.phone, assignedAgentId: c.assignedAgentId, statusCode: c.statusCode })),
+        common
+      );
+    } catch (err) {
+      if (isForeignKeyViolation(err)) {
+        throw ApiError.badRequest("Selected property or agent not found.");
+      }
+      throw err;
+    }
+
+    for (const c of chunk) {
+      if (insertedPhones.has(c.phone)) {
+        created++;
+        notifyCounts.set(c.assignedAgentId, (notifyCounts.get(c.assignedAgentId) ?? 0) + 1);
+      } else {
+        // Only reachable if this exact phone already existed on another
+        // lead before this upload started — in-file repeats were already
+        // counted above via seenPhones.
+        duplicates++;
+      }
+    }
+  }
+
+  // One summary notification per agent rather than one per lead — a
+  // 100,000-row batch shouldn't flood an agent's notification feed the way
+  // a single real-time Meta/sheet lead does.
+  await Promise.all(
+    [...notifyCounts.entries()].map(([agentId, count]) =>
+      createNotification({
+        system: "CRM",
+        category: "NEW_LEAD",
+        title: "New Bulk Leads",
+        message: `${count} new lead${count > 1 ? "s" : ""} assigned to you from "${input.subSource}".`,
+        recipientUserId: agentId,
+        link: "/dashboard/crm/data-calling"
+      })
+    )
+  );
+
+  return { created, duplicates, skipped };
 }
 
 export async function updateLeadStatus(

@@ -44,3 +44,40 @@ export const editLeadSchema = z.object({
 export const reassignLeadSchema = z.object({
   newAgentId: z.string().uuid()
 });
+
+// Bulk upload rows are deliberately NOT phone-regex-validated here the way
+// createLeadSchema is — an admin's Excel sheet is messy (formatting,
+// +91 prefixes, stray spaces), so invalid rows are normalized/validated
+// per-row in the service layer and skipped with a reason instead of
+// rejecting the whole batch over one bad row.
+export const bulkImportLeadsSchema = z
+  .object({
+    subSource: z.string().trim().min(1, "Sub-source is required").max(200),
+    assignmentMode: z.enum(["PROPERTY", "AGENT"]),
+    propertyId: z.string().uuid().optional(),
+    // Agent mode round-robins rows evenly across every selected agent (see
+    // leads.service.ts's bulkImportLeads) rather than dumping the whole
+    // batch on one person.
+    agentIds: z.array(z.string().uuid()).optional(),
+    leads: z
+      .array(
+        z.object({
+          name: z.string().max(200).optional().default(""),
+          phone: z.string().max(30).optional().default("")
+        })
+      )
+      .min(1, "At least one lead row is required")
+      // Real batches run to 100k+ rows — bulkImportLeads processes these in
+      // chunked bulk inserts (see leads.repository's createBulkLeadsChunk),
+      // not one row at a time, so this ceiling is a sanity bound against a
+      // malformed/absurd request, not a real throughput limit.
+      .max(200_000, "A single upload is limited to 200,000 rows")
+  })
+  .refine(d => d.assignmentMode !== "PROPERTY" || !!d.propertyId, {
+    message: "propertyId is required for Property assignment mode",
+    path: ["propertyId"]
+  })
+  .refine(d => d.assignmentMode !== "AGENT" || (!!d.agentIds && d.agentIds.length > 0), {
+    message: "At least one agentId is required for Agent assignment mode",
+    path: ["agentIds"]
+  });

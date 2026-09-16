@@ -1,10 +1,12 @@
 import { Router } from "express";
-import { requireAuth } from "../../middleware/auth";
+import { requireAuth, requireRole } from "../../middleware/auth";
 import { asyncHandler } from "../../utils/asyncHandler";
 import { sendOk } from "../../utils/apiResponse";
 import { query } from "../../db/pool";
 import { listAdLevelSpend as listMetaAdLevelSpend } from "../meta/meta.repository";
 import { listAdLevelSpend as listGoogleAdLevelSpend } from "../google-ads/google-ads.repository";
+import { triggerMetaAdSpendSyncNow } from "../../jobs/metaAdSpendSync";
+import { triggerGoogleAdsSpendSyncNow } from "../../jobs/googleAdsSpendSync";
 
 export const adSpendRouter = Router();
 
@@ -40,5 +42,24 @@ adSpendRouter.get(
   asyncHandler(async (_req, res) => {
     const [metaRows, googleRows] = await Promise.all([listMetaAdLevelSpend(), listGoogleAdLevelSpend()]);
     sendOk(res, [...metaRows, ...googleRows]);
+  })
+);
+
+/**
+ * Manually wakes both platforms' ad-level sync jobs early instead of
+ * waiting for their 6h interval — Campaign Deep Dive's Sync button. Fires
+ * the same jobs with the same real rate-limit pacing/backoff already in
+ * place; it starts them sooner, it does not bypass Meta's or Google's
+ * actual rate limits, so a run can still take a while to fully land.
+ * Returns immediately — { started: false } for a platform means a sync
+ * for it was already in progress, not that this request failed.
+ */
+adSpendRouter.post(
+  "/sync",
+  requireRole("ADMIN"),
+  asyncHandler(async (_req, res) => {
+    const meta = triggerMetaAdSpendSyncNow();
+    const google = triggerGoogleAdsSpendSyncNow();
+    sendOk(res, { meta, google });
   })
 );

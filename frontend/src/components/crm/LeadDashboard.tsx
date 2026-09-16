@@ -171,6 +171,77 @@ export default function LeadDashboard() {
     setTimeout(() => setSuccessMsg(""), 3000);
   };
 
+  // Per-row Status editor cell — a searchable portal dropdown matching the
+  // rest of the app's white-panel menus, in place of a plain native <select>
+  // (whose OS-default popup, e.g. dark on macOS/Chrome, clashed with every
+  // other dropdown here). Shared by the main Leads table and the Analytics
+  // drilldown table, both of which used to render the same native select.
+  const renderStatusCell = (l: Lead) => {
+    const allOptions = STATUS_OPTIONS.includes(l.status) ? STATUS_OPTIONS : [l.status, ...STATUS_OPTIONS];
+    const query = rowStatusSearch.trim().toLowerCase();
+    const filteredOptions = query ? allOptions.filter(s => s.toLowerCase().includes(query)) : allOptions;
+    return (
+      <div className="relative inline-block">
+        <button
+          type="button"
+          onClick={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const panelWidth = 176;
+            const left = Math.max(8, Math.min(rect.left, window.innerWidth - panelWidth - 8));
+            setRowStatusMenuPos({ top: rect.bottom + 4, left });
+            setRowStatusSearch("");
+            setRowStatusMenuFor(prev => (prev === l.id ? null : l.id));
+          }}
+          className="w-full max-w-[110px] flex items-center justify-between gap-1 bg-slate-50 border border-slate-200 rounded-md px-1.5 py-0.5 text-[11px] font-bold text-slate-700 hover:border-slate-300 transition-colors"
+        >
+          <span className="truncate">{l.status}</span>
+          <ChevronDown className={`h-3 w-3 text-slate-400 shrink-0 transition-transform ${rowStatusMenuFor === l.id ? "rotate-180" : ""}`} />
+        </button>
+        {rowStatusMenuFor === l.id && rowStatusMenuPos && createPortal(
+          <>
+            <div className="fixed inset-0 z-[60]" onClick={() => setRowStatusMenuFor(null)} />
+            <div
+              className="fixed z-[70] w-44 bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden"
+              style={{ top: rowStatusMenuPos.top, left: rowStatusMenuPos.left }}
+            >
+              <div className="p-1.5 border-b border-slate-100">
+                <div className="relative">
+                  <Search className="h-3 w-3 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2" />
+                  <input
+                    autoFocus
+                    value={rowStatusSearch}
+                    onChange={(e) => setRowStatusSearch(e.target.value)}
+                    placeholder="Search status..."
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-6 pr-2 py-1 text-[11px] font-semibold text-slate-700 focus:outline-none focus:border-[#0B1E6E]"
+                  />
+                </div>
+              </div>
+              <div className="max-h-56 overflow-y-auto py-1">
+                {filteredOptions.length === 0 ? (
+                  <p className="px-3 py-2 text-[11px] text-slate-400 italic">No matching status</p>
+                ) : (
+                  filteredOptions.map(st => (
+                    <button
+                      key={st}
+                      type="button"
+                      onClick={() => { handleUpdateLeadStatus(l.id, st); setRowStatusMenuFor(null); }}
+                      className={`w-full text-left px-3 py-1.5 text-xs font-semibold transition-colors ${
+                        l.status === st ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"
+                      }`}
+                    >
+                      {st}
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          </>,
+          document.body
+        )}
+      </div>
+    );
+  };
+
   const handleAddManualLead = (data: {
     name: string;
     phone: string;
@@ -251,6 +322,13 @@ export default function LeadDashboard() {
   const [adminAssignedMenuOpen, setAdminAssignedMenuOpen] = useState(false);
   const [adminCampaignFilter, setAdminCampaignFilter] = useState<string[]>([]);
   const [adminCampaignMenuOpen, setAdminCampaignMenuOpen] = useState(false);
+  // Per-row Status editor — replaces a plain native <select> (which renders
+  // with jarring OS-default styling, e.g. a dark popup on macOS/Chrome) with
+  // the same white portal-panel look as the other row/column dropdowns here,
+  // plus a search box since the full status list runs ~18 options deep.
+  const [rowStatusMenuFor, setRowStatusMenuFor] = useState<string | null>(null);
+  const [rowStatusMenuPos, setRowStatusMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const [rowStatusSearch, setRowStatusSearch] = useState("");
   const [adminPage, setAdminPage] = useState(1);
   const [adminRowsPerPage, setAdminRowsPerPage] = useState(100);
   const [dateRangeMenuOpen, setDateRangeMenuOpen] = useState(false);
@@ -1345,16 +1423,7 @@ export default function LeadDashboard() {
                           )}
                           {adminVisibleColumns.status && (
                             <td className="px-4 py-3 align-top">
-                              <select
-                                value={l.status}
-                                onChange={(e) => handleUpdateLeadStatus(l.id, e.target.value as LeadStatus)}
-                                className="w-full max-w-[110px] bg-slate-50 border border-slate-200 rounded-md px-1.5 py-0.5 text-[11px] font-bold text-slate-700 focus:outline-none cursor-pointer"
-                              >
-                                {!STATUS_OPTIONS.includes(l.status) && <option value={l.status}>{l.status}</option>}
-                                {STATUS_OPTIONS.map((opt) => (
-                                  <option key={opt} value={opt}>{opt}</option>
-                                ))}
-                              </select>
+                              {renderStatusCell(l)}
                             </td>
                           )}
                           {adminVisibleColumns.nextCallDate && (
@@ -2065,16 +2134,7 @@ export default function LeadDashboard() {
                                 </td>
                                 <td className="px-4 py-3 text-slate-600 align-top truncate" title={l.email || "—"}>{l.email || "—"}</td>
                                 <td className="px-4 py-3 align-top">
-                                  <select
-                                    value={l.status}
-                                    onChange={(e) => handleUpdateLeadStatus(l.id, e.target.value as LeadStatus)}
-                                    className="w-full max-w-[110px] bg-slate-50 border border-slate-200 rounded-md px-1.5 py-0.5 text-[11px] font-bold text-slate-700 focus:outline-none cursor-pointer"
-                                  >
-                                    {!STATUS_OPTIONS.includes(l.status) && <option value={l.status}>{l.status}</option>}
-                                    {STATUS_OPTIONS.map((opt) => (
-                                      <option key={opt} value={opt}>{opt}</option>
-                                    ))}
-                                  </select>
+                                  {renderStatusCell(l)}
                                 </td>
                                 <td className="px-4 py-3 text-slate-700 font-medium align-top truncate" title={l.assignedAgent || "Unassigned"}>{l.assignedAgent || "Unassigned"}</td>
                                 <td className="px-4 py-3 text-slate-500 align-top truncate">{adminFormatDateTime(l.createdAtStr)}</td>

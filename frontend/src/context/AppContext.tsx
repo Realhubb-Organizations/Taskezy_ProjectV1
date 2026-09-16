@@ -8,6 +8,9 @@ import {
   apiListAllLeads,
   apiGetLead,
   apiCreateLead,
+  apiBulkImportLeads,
+  BulkImportLeadsApiInput,
+  BulkImportLeadsApiResult,
   apiUpdateLeadStatus,
   apiEditLead,
   apiReassignLead,
@@ -200,6 +203,7 @@ export interface Lead {
   assignedAgent: string;
   logs: LeadLog[];
   source?: string;
+  subSource?: string; // free-text batch label from bulk upload (e.g. "Kashmiri Data") — lets that batch be filtered/reassigned/reshuffled as a group. undefined for every other ingestion path.
   createdAtStr?: string;
   campaign?: string;
   metaPageName?: string; // which connected Meta Page this lead came in through
@@ -470,6 +474,7 @@ interface AppState {
   adLevelSpendRecords: AdLevelSpendRecord[];
   refetchAdLevelSpend: () => Promise<void>;
   triggerAdSpendSync: () => Promise<{ meta: { started: boolean }; google: { started: boolean } }>;
+  bulkImportLeads: (input: BulkImportLeadsApiInput) => Promise<BulkImportLeadsApiResult>;
 
   // System State
   isOnline: boolean;
@@ -602,6 +607,7 @@ function mapApiLeadToFrontendLead(row: ApiLeadRow): Lead {
     assignedAgent: row.assigned_agent_name,
     logs: row.logs.map(l => ({ message: l.message, timestamp: l.timestamp, user: l.user })),
     source: row.source || undefined,
+    subSource: row.sub_source || undefined,
     campaign: row.campaign || undefined,
     metaPageName: row.meta_page_name || undefined,
     metaFormId: row.meta_form_id || undefined,
@@ -967,6 +973,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const refetchAdLevelSpend = async () => {
     const apiAdLevelSpend = await apiListAdLevelSpend();
     setAdLevelSpendRecords(apiAdLevelSpend.map(mapApiAdLevelSpendToFrontend));
+  };
+
+  // Admin CRM Data Calling's bulk Excel upload. The API only returns counts
+  // (created/duplicates/skipped rows), not the created leads themselves, so
+  // a full leads refetch afterward is what actually brings the new rows
+  // into view — matches this file's optimistic-update-elsewhere/refetch-here
+  // split, since there's no local lead object to optimistically construct
+  // for rows the server assigned via Round Robin/Percentage.
+  const bulkImportLeads = async (input: BulkImportLeadsApiInput): Promise<BulkImportLeadsApiResult> => {
+    const result = await apiBulkImportLeads(input);
+    if (result.created > 0) {
+      const apiLeads = await apiListAllLeads();
+      setLeads(apiLeads.map(mapApiLeadToFrontendLead));
+    }
+    return result;
   };
 
   // Wakes the real Meta/Google ad-level sync jobs early (Campaign Deep
@@ -2002,6 +2023,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         adLevelSpendRecords,
         refetchAdLevelSpend,
         triggerAdSpendSync,
+        bulkImportLeads,
         isOnline,
         pendingSyncCount: pendingSyncQueue.length,
         isSyncing,

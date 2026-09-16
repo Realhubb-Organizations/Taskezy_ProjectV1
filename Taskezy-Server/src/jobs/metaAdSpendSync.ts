@@ -33,7 +33,22 @@ function isoDateNDaysAgo(n: number): string {
  * ad tree the way it does for campaign-level daily insights. Feeds Campaign
  * Deep Dive's Ad Set Name / Ad creative Name columns and a real per-ad CPL.
  */
+let isSyncing = false;
+
 async function syncOnce(): Promise<void> {
+  if (isSyncing) {
+    logger.info("Meta ad spend sync already in progress — skipping this trigger");
+    return;
+  }
+  isSyncing = true;
+  try {
+    await runSync();
+  } finally {
+    isSyncing = false;
+  }
+}
+
+async function runSync(): Promise<void> {
   const adAccounts = await metaRepo.listActiveAdAccounts();
   if (adAccounts.length === 0) {
     logger.info("Meta ad spend sync: no active ad accounts to sync — skipping this cycle");
@@ -142,4 +157,18 @@ export function startMetaAdSpendSync(): void {
   }, POLL_INTERVAL_MS).unref();
 
   logger.info(`Meta ad spend sync scheduled (every ${POLL_INTERVAL_MS / 3600000}h, ${LOOKBACK_DAYS}-day lookback)`);
+}
+
+/**
+ * Lets an admin wake the same sync early from the UI (Campaign Deep Dive's
+ * Sync button) instead of waiting for the next 6h interval. Fires the exact
+ * same job — same rate-limit pacing/backoff and same skip-already-backfilled
+ * logic — it does not and cannot bypass Meta's per-ad-account rate limit,
+ * it only starts checking for new data sooner. Returns immediately rather
+ * than waiting for the (potentially long, rate-limit-bound) run to finish.
+ */
+export function triggerMetaAdSpendSyncNow(): { started: boolean } {
+  if (isSyncing) return { started: false };
+  syncOnce().catch(err => logger.error({ err }, "Manually triggered Meta ad spend sync failed"));
+  return { started: true };
 }

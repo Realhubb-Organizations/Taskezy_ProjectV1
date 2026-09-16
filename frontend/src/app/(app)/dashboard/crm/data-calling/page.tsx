@@ -3,7 +3,9 @@
 import React, { useState, useRef, useMemo, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useApp, Lead } from "@/context/AppContext";
-import { ChevronDown, ChevronRight, Calendar, Search, Sliders, Minus, X, Copy, Users } from "lucide-react";
+import { ChevronDown, ChevronRight, Calendar, Search, Sliders, Minus, X, Copy, Users, Plus, Check } from "lucide-react";
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine } from "recharts";
+import UploadLeadsModal from "@/components/crm/UploadLeadsModal";
 
 const QUALIFIED_LEAD_STATUSES = ["Interested", "Connected", "Visit Schedule", "Site Visit", "Booking Done", "Booked"];
 const FOLLOW_UP_LEAD_STATUSES = ["Follow-ups", "Call Back"];
@@ -67,14 +69,110 @@ const DATA_CALLING_DEFAULT_VISIBLE_COLUMNS: Record<DataCallingColumnKey, boolean
   cpl: false, assignedTo: true, usageCount: false, notes: true, qualifiedPercent: false
 };
 
+// The Analytics tab's Source Performance table's extra togglable columns —
+// the exact same label set (and default on/off state) as the Campaigns
+// page's own Campaign Name table Filter drawer, reused here for visual and
+// interaction consistency across the app's ads/leads breakdown tables. Most
+// have no real backing field for a calling source (no ad spend, click, or
+// impression tracking exists at that level here), so they honestly render
+// "—" rather than a fabricated number, same convention as Campaigns.
+type AnalyticsColumnKey =
+  | "cpl" | "date" | "status" | "ctr" | "siteVisit" | "clicks"
+  | "adSetName" | "impressions" | "source" | "qcpl" | "unqualifiedLeads" | "qualifiedLeads";
+
+const ANALYTICS_COLUMNS: { key: AnalyticsColumnKey; label: string }[] = [
+  { key: "cpl", label: "CPL" },
+  { key: "date", label: "Date" },
+  { key: "status", label: "Status" },
+  { key: "ctr", label: "CTR" },
+  { key: "siteVisit", label: "Site Visits" },
+  { key: "clicks", label: "Clicks" },
+  { key: "adSetName", label: "Ad set name" },
+  { key: "impressions", label: "Impressions" },
+  { key: "source", label: "Source" },
+  { key: "qcpl", label: "QCPL" },
+  { key: "unqualifiedLeads", label: "Unqualified Leads" },
+  { key: "qualifiedLeads", label: "Qualified Leads" }
+];
+
+const ANALYTICS_DEFAULT_VISIBLE_COLUMNS: Record<AnalyticsColumnKey, boolean> = {
+  cpl: true, date: false, status: true, ctr: false, siteVisit: true, clicks: false,
+  adSetName: false, impressions: false, source: false, qcpl: false,
+  unqualifiedLeads: true, qualifiedLeads: true
+};
+
+const ANALYTICS_CHART_METRICS = ["Qualified", "RNR", "Calls Made", "Total Leads", "Follow Ups"] as const;
+type AnalyticsChartMetric = typeof ANALYTICS_CHART_METRICS[number];
+
+interface AnalyticsPerformanceRow {
+  name: string;
+  totalLeads: number;
+  callsMade: number;
+  connected: number;
+  qualifiedLeads: number;
+  unqualifiedLeads: number;
+  rnr: number;
+  siteVisits: number;
+  qualificationRate: string;
+}
+
+function computeAnalyticsPerformanceRows(list: Lead[], groupBy: (l: Lead) => string | undefined): AnalyticsPerformanceRow[] {
+  const groups = new Map<string, Lead[]>();
+  list.forEach(l => {
+    const key = groupBy(l);
+    if (!key) return;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(l);
+  });
+  return Array.from(groups.entries()).map(([name, group]) => {
+    const qualifiedLeads = group.filter(l => QUALIFIED_LEAD_STATUSES.includes(l.status)).length;
+    return {
+      name,
+      totalLeads: group.length,
+      callsMade: group.filter(l => l.logs && l.logs.length > 0).length,
+      connected: group.filter(l => l.status === "Connected").length,
+      qualifiedLeads,
+      unqualifiedLeads: group.length - qualifiedLeads,
+      rnr: group.filter(l => l.status === "RNR").length,
+      siteVisits: group.filter(l => l.status === "Visit Schedule" || l.status === "Site Visit").length,
+      qualificationRate: group.length > 0 ? `${((qualifiedLeads / group.length) * 100).toFixed(1)}%` : "0.0%"
+    };
+  }).sort((a, b) => b.totalLeads - a.totalLeads);
+}
+
+function analyticsLeadMatchesMetric(l: Lead, metric: AnalyticsChartMetric): boolean {
+  switch (metric) {
+    case "Qualified": return QUALIFIED_LEAD_STATUSES.includes(l.status);
+    case "RNR": return l.status === "RNR";
+    case "Calls Made": return !!(l.logs && l.logs.length > 0);
+    case "Total Leads": return true;
+    case "Follow Ups": return FOLLOW_UP_LEAD_STATUSES.includes(l.status);
+  }
+}
+
 export default function DataCallingPage() {
-  const { leads, followupCalls, properties, users, updateLeadStatus, reassignLead } = useApp();
+  const { leads, followupCalls, properties, users, activeRole, updateLeadStatus, reassignLead, bulkImportLeads } = useApp();
+  // Bulk select + Assign/Reshuffle are an admin-only workflow — a sales
+  // agent has no one to hand leads off to in that sense, so the checkbox
+  // column and both toolbar buttons stay admin-only.
+  const isAdmin = activeRole === "ADMIN";
+  const propertiesList = properties.map(p => p.name);
+  // Bulk upload's own property/agent pickers need real ids (they drive
+  // server-side assignment), unlike propertiesList above which only ever
+  // feeds display/filter UI.
+  const bulkUploadPropertiesList = useMemo(() => properties.map(p => ({ id: p.id, name: p.name })), [properties]);
+  const bulkUploadAgentsList = useMemo(
+    () => users.filter(u => u.role === "AGENT" && u.status !== "INACTIVE").map(u => ({ id: u.id, name: u.name })),
+    [users]
+  );
+
+  const [isUploadLeadsOpen, setIsUploadLeadsOpen] = useState(false);
+  const [uploadSuccessMsg, setUploadSuccessMsg] = useState("");
 
   const [activeTab, setActiveTab] = useState<"DataCalling" | "Analytics">("DataCalling");
 
-  // Summary card date range — same intake-volume-only-for-"Total" convention
-  // as the Campaigns page: Total Leads Assigned respects the range; the
-  // other four are current pipeline-status snapshots, not date-scoped.
+  // Summary card date range — every one of the 5 cards below respects it
+  // (see categoryLeadsInRange), same as the CRM Dashboard/Campaigns pages.
   const [dateRange, setDateRange] = useState<"Today" | "Yesterday" | "This Week" | "This Month" | "All Time">("Today");
   const [summaryDateMenuOpen, setSummaryDateMenuOpen] = useState(false);
   const [summaryDateMenuPos, setSummaryDateMenuPos] = useState<{ top: number; left: number } | null>(null);
@@ -123,17 +221,264 @@ export default function DataCallingPage() {
   const [appliedCustomRange, setAppliedCustomRange] = useState<{ start: string; end: string } | null>(null);
   const dateRangePickerLabel = appliedCustomRange ? `${appliedCustomRange.start} to ${appliedCustomRange.end}` : todayStr;
 
+  // Data Calling Analytics tab — its own Sub-Source scope, Filter drawer
+  // (Source Performance table's extra columns), and chart controls. Shares
+  // the page's existing calendar (appliedCustomRange, above) rather than
+  // keeping a second date filter, so both tabs stay in sync on "when".
+  const [analyticsSubSource, setAnalyticsSubSource] = useState<string>("All Sources");
+  const [subSourceMenuOpen, setSubSourceMenuOpen] = useState(false);
+  const [subSourceMenuPos, setSubSourceMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const subSourceBtnRef = useRef<HTMLButtonElement>(null);
+  const [chartSourceMenuOpen, setChartSourceMenuOpen] = useState(false);
+  const [chartSourceMenuPos, setChartSourceMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const chartSourceBtnRef = useRef<HTMLButtonElement>(null);
+
+  const [isAnalyticsFilterOpen, setIsAnalyticsFilterOpen] = useState(false);
+  const [analyticsVisibleColumns, setAnalyticsVisibleColumns] = useState<Record<AnalyticsColumnKey, boolean>>(ANALYTICS_DEFAULT_VISIBLE_COLUMNS);
+  const toggleAnalyticsColumn = (key: AnalyticsColumnKey) => setAnalyticsVisibleColumns(prev => ({ ...prev, [key]: !prev[key] }));
+  const toggleSelectAllAnalyticsColumns = () => {
+    const allOn = ANALYTICS_COLUMNS.every(c => analyticsVisibleColumns[c.key]);
+    const next: Record<AnalyticsColumnKey, boolean> = { ...analyticsVisibleColumns };
+    ANALYTICS_COLUMNS.forEach(c => { next[c.key] = !allOn; });
+    setAnalyticsVisibleColumns(next);
+  };
+
+  const [salespersonSearchOpen, setSalespersonSearchOpen] = useState(false);
+  const [salespersonSearch, setSalespersonSearch] = useState("");
+  const [sourceSearchOpen, setSourceSearchOpen] = useState(false);
+  const [sourceSearch, setSourceSearch] = useState("");
+
+  const [analyticsChartMetric, setAnalyticsChartMetric] = useState<AnalyticsChartMetric>("Qualified");
+  const [chartMetricMenuOpen, setChartMetricMenuOpen] = useState(false);
+  const [chartMetricMenuPos, setChartMetricMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const chartMetricBtnRef = useRef<HTMLButtonElement>(null);
+
+  // Analytics tab's own stat-card drill-down — same click-to-expand pattern
+  // as the Data Calling tab's cards above, kept as separate state so the two
+  // tabs' drill-downs don't fight over which category/page is open.
+  const [analyticsSelectedCategory, setAnalyticsSelectedCategory] = useState<string | null>(null);
+  const [analyticsDrillSearchQuery, setAnalyticsDrillSearchQuery] = useState("");
+  const [analyticsDrillPage, setAnalyticsDrillPage] = useState(1);
+  const [analyticsDrillRowsPerPage, setAnalyticsDrillRowsPerPage] = useState(8);
+  const analyticsDrillScrollRef = useRef<HTMLDivElement>(null);
+  const analyticsDrillPageRowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
+  const analyticsDrillProgrammaticScroll = useRef(false);
+
+  const handleAnalyticsDrillScroll = () => {
+    if (analyticsDrillProgrammaticScroll.current) return;
+    const container = analyticsDrillScrollRef.current;
+    if (!container) return;
+    const scrollTop = container.scrollTop;
+    let current = 1;
+    for (let i = 0; i < analyticsDrillPageRowRefs.current.length; i++) {
+      const row = analyticsDrillPageRowRefs.current[i];
+      if (row && row.offsetTop - container.offsetTop <= scrollTop + 4) {
+        current = i + 1;
+      }
+    }
+    setAnalyticsDrillPage(prev => (prev !== current ? current : prev));
+  };
+
+  const goToAnalyticsDrillPage = (page: number, totalPages: number) => {
+    const clamped = Math.max(1, Math.min(totalPages, page));
+    setAnalyticsDrillPage(clamped);
+    const row = analyticsDrillPageRowRefs.current[clamped - 1];
+    const container = analyticsDrillScrollRef.current;
+    if (!row || !container) return;
+    analyticsDrillProgrammaticScroll.current = true;
+    container.scrollTop = clamped === 1 ? 0 : row.offsetTop - container.offsetTop;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => { analyticsDrillProgrammaticScroll.current = false; });
+    });
+  };
+
+  const toggleAnalyticsCategory = (label: string) => {
+    setAnalyticsSelectedCategory(prev => (prev === label ? null : label));
+    setAnalyticsDrillSearchQuery("");
+    setAnalyticsDrillPage(1);
+  };
+
+  // Each summary card's real underlying lead list — same predicates the
+  // numbers below use — so clicking a card can drill into exactly what it
+  // counted, same "open the respective card" pattern as the CRM Dashboard
+  // and Campaigns page. Every card here now respects Date Range (not just
+  // Total, like this page used to do) — same page-wide decision already
+  // applied to the Dashboard/Campaigns pages, so a lead outside the
+  // selected range no longer silently inflates RNR/Follow Ups/etc.
+  const categoryLeads: Record<string, Lead[]> = useMemo(() => ({
+    "Total Leads Assigned": leads.filter(l => !!l.assignedAgent),
+    "Calls Made": leads.filter(l => l.logs && l.logs.length > 0),
+    "Qualified Leads": leads.filter(l => QUALIFIED_LEAD_STATUSES.includes(l.status)),
+    "RNR": leads.filter(l => l.status === "RNR"),
+    "Follow Ups": leads.filter(l => FOLLOW_UP_LEAD_STATUSES.includes(l.status))
+  }), [leads]);
+
+  const categoryLeadsInRange = useMemo(() => {
+    const out: Record<string, Lead[]> = {};
+    Object.entries(categoryLeads).forEach(([key, list]) => {
+      out[key] = list.filter(leadInSelectedRange);
+    });
+    return out;
+  }, [categoryLeads, dateRange]);
+
   // Summary metrics — real, no hardcoded fallbacks.
-  const summaryMetrics = useMemo(() => {
-    const rangeLeads = leads.filter(leadInSelectedRange);
-    return {
-      totalAssigned: rangeLeads.filter(l => !!l.assignedAgent).length,
-      callsMade: leads.filter(l => l.logs && l.logs.length > 0).length,
-      qualifiedLeads: leads.filter(l => QUALIFIED_LEAD_STATUSES.includes(l.status)).length,
-      rnr: leads.filter(l => l.status === "RNR").length,
-      followUps: leads.filter(l => FOLLOW_UP_LEAD_STATUSES.includes(l.status)).length
-    };
-  }, [leads, dateRange]);
+  const summaryMetrics = useMemo(() => ({
+    totalAssigned: categoryLeadsInRange["Total Leads Assigned"].length,
+    callsMade: categoryLeadsInRange["Calls Made"].length,
+    qualifiedLeads: categoryLeadsInRange["Qualified Leads"].length,
+    rnr: categoryLeadsInRange["RNR"].length,
+    followUps: categoryLeadsInRange["Follow Ups"].length
+  }), [categoryLeadsInRange]);
+
+  // Analytics tab derived data — scoped by the page's shared calendar range
+  // (appliedCustomRange) and, for everything except Source Performance, by
+  // whichever Sub-Source is selected up top. Source Performance deliberately
+  // stays unscoped by Sub-Source — it's the breakdown ACROSS every source.
+  const leadMatchesAppliedRange = (l: Lead): boolean => {
+    if (!appliedCustomRange) return true;
+    if (!l.createdAtStr) return false;
+    const d = new Date(l.createdAtStr);
+    if (isNaN(d.getTime())) return false;
+    const start = new Date(appliedCustomRange.start);
+    const end = new Date(appliedCustomRange.end);
+    end.setHours(23, 59, 59, 999);
+    return d >= start && d <= end;
+  };
+
+  const analyticsDateFilteredLeads = useMemo(
+    () => leads.filter(leadMatchesAppliedRange),
+    [leads, appliedCustomRange]
+  );
+
+  const dataCallSources = useMemo(
+    () => Array.from(new Set(leads.map(l => l.source).filter((s): s is string => !!s))).sort(),
+    [leads]
+  );
+
+  const subSourceScopedLeads = useMemo(
+    () => analyticsSubSource === "All Sources"
+      ? analyticsDateFilteredLeads
+      : analyticsDateFilteredLeads.filter(l => l.source === analyticsSubSource),
+    [analyticsDateFilteredLeads, analyticsSubSource]
+  );
+
+  const analyticsSummaryMetrics = useMemo(() => ({
+    totalAssigned: subSourceScopedLeads.filter(l => !!l.assignedAgent).length,
+    callsMade: subSourceScopedLeads.filter(l => l.logs && l.logs.length > 0).length,
+    qualifiedLeads: subSourceScopedLeads.filter(l => QUALIFIED_LEAD_STATUSES.includes(l.status)).length,
+    rnr: subSourceScopedLeads.filter(l => l.status === "RNR").length,
+    followUps: subSourceScopedLeads.filter(l => FOLLOW_UP_LEAD_STATUSES.includes(l.status)).length
+  }), [subSourceScopedLeads]);
+
+  // Real underlying lead list behind each Analytics stat card, keyed the
+  // same way as the Data Calling tab's own categoryLeadsInRange — so
+  // clicking a card here drills into exactly what it counted.
+  const analyticsCategoryLeads: Record<string, Lead[]> = useMemo(() => ({
+    "Total Leads Assigned": subSourceScopedLeads.filter(l => !!l.assignedAgent),
+    "Calls Made": subSourceScopedLeads.filter(l => l.logs && l.logs.length > 0),
+    "Qualified Leads": subSourceScopedLeads.filter(l => QUALIFIED_LEAD_STATUSES.includes(l.status)),
+    "RNR": subSourceScopedLeads.filter(l => l.status === "RNR"),
+    "Follow Ups": subSourceScopedLeads.filter(l => FOLLOW_UP_LEAD_STATUSES.includes(l.status))
+  }), [subSourceScopedLeads]);
+
+  const salespersonRows = useMemo(
+    () => computeAnalyticsPerformanceRows(subSourceScopedLeads, l => l.assignedAgent),
+    [subSourceScopedLeads]
+  );
+  const filteredSalespersonRows = useMemo(() => {
+    const q = salespersonSearch.trim().toLowerCase();
+    return q ? salespersonRows.filter(r => r.name.toLowerCase().includes(q)) : salespersonRows;
+  }, [salespersonRows, salespersonSearch]);
+
+  const sourceRows = useMemo(
+    () => computeAnalyticsPerformanceRows(analyticsDateFilteredLeads, l => l.source),
+    [analyticsDateFilteredLeads]
+  );
+  const filteredSourceRows = useMemo(() => {
+    const q = sourceSearch.trim().toLowerCase();
+    return q ? sourceRows.filter(r => r.name.toLowerCase().includes(q)) : sourceRows;
+  }, [sourceRows, sourceSearch]);
+
+  // Performance Line Graph — one point per real calendar day, either the
+  // last 7 days (default) or the applied custom range (capped at 31 points
+  // so a huge range doesn't render an unreadable chart).
+  const chartDays = useMemo(() => {
+    const end = appliedCustomRange ? new Date(appliedCustomRange.end) : new Date();
+    const start = appliedCustomRange
+      ? new Date(appliedCustomRange.start)
+      : new Date(end.getFullYear(), end.getMonth(), end.getDate() - 6);
+    const days: Date[] = [];
+    const cursor = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+    const last = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+    while (cursor <= last && days.length < 31) {
+      days.push(new Date(cursor));
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return days;
+  }, [appliedCustomRange]);
+
+  const chartData = useMemo(() => {
+    return chartDays.map(day => {
+      const dayStr = day.toDateString();
+      const dayLeads = subSourceScopedLeads.filter(l => l.createdAtStr && new Date(l.createdAtStr).toDateString() === dayStr);
+      const value = dayLeads.filter(l => analyticsLeadMatchesMetric(l, analyticsChartMetric)).length;
+      return {
+        label: day.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }),
+        value
+      };
+    });
+  }, [chartDays, subSourceScopedLeads, analyticsChartMetric]);
+
+  const chartAverage = chartData.length > 0
+    ? chartData.reduce((sum, d) => sum + d.value, 0) / chartData.length
+    : 0;
+
+  // Stat-card drill-down — clicking a card shows the real leads it counted,
+  // same scroll-spy + synced-pagination pattern as the Campaigns page's
+  // drill-down: rows render continuously in a capped-height scroll
+  // container, scrolling past a page boundary advances drillPage, and the
+  // pagination arrows scroll that page's first row back to the top.
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [drillSearchQuery, setDrillSearchQuery] = useState("");
+  const [drillPage, setDrillPage] = useState(1);
+  const [drillRowsPerPage, setDrillRowsPerPage] = useState(8);
+  const drillScrollRef = useRef<HTMLDivElement>(null);
+  const drillPageRowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
+  const drillProgrammaticScroll = useRef(false);
+
+  const handleDrillScroll = () => {
+    if (drillProgrammaticScroll.current) return;
+    const container = drillScrollRef.current;
+    if (!container) return;
+    const scrollTop = container.scrollTop;
+    let current = 1;
+    for (let i = 0; i < drillPageRowRefs.current.length; i++) {
+      const row = drillPageRowRefs.current[i];
+      if (row && row.offsetTop - container.offsetTop <= scrollTop + 4) {
+        current = i + 1;
+      }
+    }
+    setDrillPage(prev => (prev !== current ? current : prev));
+  };
+
+  const goToDrillPage = (page: number, totalPages: number) => {
+    const clamped = Math.max(1, Math.min(totalPages, page));
+    setDrillPage(clamped);
+    const row = drillPageRowRefs.current[clamped - 1];
+    const container = drillScrollRef.current;
+    if (!row || !container) return;
+    drillProgrammaticScroll.current = true;
+    container.scrollTop = clamped === 1 ? 0 : row.offsetTop - container.offsetTop;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => { drillProgrammaticScroll.current = false; });
+    });
+  };
+
+  const toggleCategory = (label: string) => {
+    setSelectedCategory(prev => (prev === label ? null : label));
+    setDrillSearchQuery("");
+    setDrillPage(1);
+  };
 
   // Table filters
   const [searchOpen, setSearchOpen] = useState(false);
@@ -150,6 +495,19 @@ export default function DataCallingPage() {
   const [assignedMenuPos, setAssignedMenuPos] = useState<{ top: number; left: number } | null>(null);
   const assignedBtnRef = useRef<HTMLButtonElement>(null);
   const assignedOptions = useMemo(() => Array.from(new Set(leads.map(l => l.assignedAgent).filter(Boolean))).sort(), [leads]);
+
+  // Data Call Source filter — bulk upload's per-batch sub-source (e.g.
+  // "Kashmiri Data") when set, else the ingestion source (Meta, Google Ads
+  // Sheet, Bulk Upload, etc.). This is what lets an admin pull up one bulk
+  // upload batch to filter → select all → Assign/Reshuffle as a group.
+  const [dataCallSourceFilters, setDataCallSourceFilters] = useState<string[]>([]);
+  const [dataCallSourceMenuOpen, setDataCallSourceMenuOpen] = useState(false);
+  const [dataCallSourceMenuPos, setDataCallSourceMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const dataCallSourceBtnRef = useRef<HTMLButtonElement>(null);
+  const dataCallSourceOptions = useMemo(
+    () => Array.from(new Set(leads.map(l => l.subSource || l.source).filter(Boolean) as string[])).sort(),
+    [leads]
+  );
 
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [visibleColumns, setVisibleColumns] = useState<Record<DataCallingColumnKey, boolean>>(DATA_CALLING_DEFAULT_VISIBLE_COLUMNS);
@@ -319,21 +677,26 @@ export default function DataCallingPage() {
   // applied to the Campaigns page's dropdowns).
   useEffect(() => {
     const anyOpen = summaryDateMenuOpen || calendarPickerOpen || statusMenuOpen || assignedMenuOpen ||
-      propertyDropdownOpen || assigneeDropdownOpen || !!rowStatusMenuFor || !!rowAssignMenuFor;
+      dataCallSourceMenuOpen || propertyDropdownOpen || assigneeDropdownOpen || !!rowStatusMenuFor || !!rowAssignMenuFor ||
+      subSourceMenuOpen || chartSourceMenuOpen || chartMetricMenuOpen;
     if (!anyOpen) return;
     const closeAll = () => {
       setSummaryDateMenuOpen(false);
       setCalendarPickerOpen(false);
       setStatusMenuOpen(false);
       setAssignedMenuOpen(false);
+      setDataCallSourceMenuOpen(false);
       setPropertyDropdownOpen(false);
       setAssigneeDropdownOpen(false);
       setRowStatusMenuFor(null);
       setRowAssignMenuFor(null);
+      setSubSourceMenuOpen(false);
+      setChartSourceMenuOpen(false);
+      setChartMetricMenuOpen(false);
     };
     window.addEventListener("scroll", closeAll, true);
     return () => window.removeEventListener("scroll", closeAll, true);
-  }, [summaryDateMenuOpen, calendarPickerOpen, statusMenuOpen, assignedMenuOpen, propertyDropdownOpen, assigneeDropdownOpen, rowStatusMenuFor, rowAssignMenuFor]);
+  }, [summaryDateMenuOpen, calendarPickerOpen, statusMenuOpen, assignedMenuOpen, dataCallSourceMenuOpen, propertyDropdownOpen, assigneeDropdownOpen, rowStatusMenuFor, rowAssignMenuFor, subSourceMenuOpen, chartSourceMenuOpen, chartMetricMenuOpen]);
 
   const latestLogMessage = (l: Lead): string => {
     if (!l.logs || l.logs.length === 0) return "No feedback yet";
@@ -358,6 +721,7 @@ export default function DataCallingPage() {
       const matchesSearch = !q || l.name.toLowerCase().includes(q);
       const matchesStatus = statusFilters.length === 0 || statusFilters.includes(l.status);
       const matchesAssigned = assignedFilters.length === 0 || assignedFilters.includes(l.assignedAgent);
+      const matchesDataCallSource = dataCallSourceFilters.length === 0 || dataCallSourceFilters.includes(l.subSource || l.source || "");
       const matchesDate = appliedCustomRange
         ? (() => {
             if (!l.createdAtStr) return false;
@@ -369,9 +733,9 @@ export default function DataCallingPage() {
             return d >= start && d <= end;
           })()
         : true;
-      return matchesSearch && matchesStatus && matchesAssigned && matchesDate;
+      return matchesSearch && matchesStatus && matchesAssigned && matchesDataCallSource && matchesDate;
     });
-  }, [leads, searchQuery, statusFilters, assignedFilters, appliedCustomRange]);
+  }, [leads, searchQuery, statusFilters, assignedFilters, dataCallSourceFilters, appliedCustomRange]);
 
   const totalPages = Math.max(1, Math.ceil(filteredLeads.length / rowsPerPage));
   const currentPageClamped = Math.min(currentPage, totalPages);
@@ -385,12 +749,12 @@ export default function DataCallingPage() {
     return next;
   });
 
-  const visibleColCount = 5 + DATA_CALLING_COLUMNS.filter(c => visibleColumns[c.key]).length;
+  const visibleColCount = (isAdmin ? 5 : 4) + DATA_CALLING_COLUMNS.filter(c => visibleColumns[c.key]).length;
 
   return (
     <div className="space-y-4 pb-8 animate-fade-in text-slate-800">
       {/* Top Toggle Switcher: Data Calling vs Data Calling Analytics */}
-      <div className="flex items-center gap-1.5">
+      <div className="flex items-center justify-between gap-1.5">
         <div className="bg-slate-200/70 p-1 rounded-xl flex items-center gap-1">
           <button
             onClick={() => setActiveTab("DataCalling")}
@@ -409,11 +773,28 @@ export default function DataCallingPage() {
             Data Calling Analytics
           </button>
         </div>
+        {isAdmin && activeTab === "DataCalling" && (
+          <button
+            onClick={() => setIsUploadLeadsOpen(true)}
+            className="inline-flex items-center gap-2 bg-[#0B1E6E] hover:bg-[#081650] text-white px-4 py-2.5 rounded-lg text-xs font-bold transition-all shadow-md cursor-pointer shrink-0"
+          >
+            <Plus className="h-4 w-4" />
+            Upload Leads
+          </button>
+        )}
       </div>
+
+      {uploadSuccessMsg && (
+        <div className="p-2.5 bg-emerald-50 border border-emerald-100 text-[11px] text-emerald-700 rounded-xl font-bold flex items-center gap-2 animate-fade-in shadow-sm">
+          <Check className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+          <span>{uploadSuccessMsg}</span>
+        </div>
+      )}
 
       {/* Date Filter & Metrics — same unified card pattern as the CRM
           Dashboard/Campaigns pages: a header bar (date range) sitting
           directly on the stat columns, no separate padded/shadowed cards. */}
+      {activeTab === "DataCalling" && (
       <div className="bg-slate-100/70 border border-slate-200/60 rounded-2xl overflow-hidden shadow-sm">
         <div className="flex items-center px-4 py-2.5 text-[11px] border-b border-slate-200/60">
           <div className="flex items-center gap-1.5 font-bold text-slate-700">
@@ -460,46 +841,335 @@ export default function DataCallingPage() {
             { label: "Qualified Leads", value: summaryMetrics.qualifiedLeads, color: "text-rose-600" },
             { label: "RNR", value: summaryMetrics.rnr, color: "text-amber-500" },
             { label: "Follow Ups", value: summaryMetrics.followUps, color: "text-blue-500" }
-          ] as const).map(s => (
-            <div key={s.label} className="p-3 flex items-center justify-between">
-              <div>
-                <span className="text-[11px] font-medium text-slate-500 block">{s.label}</span>
-                <span className={`text-lg font-extrabold mt-1.5 block ${s.color}`}>{s.value}</span>
-              </div>
-              <ChevronRight className="h-4 w-4 text-slate-300 shrink-0" />
-            </div>
-          ))}
+          ] as const).map(s => {
+            const isActive = selectedCategory === s.label;
+            return (
+              <button
+                key={s.label}
+                type="button"
+                onClick={() => toggleCategory(s.label)}
+                className={`p-3 flex items-center justify-between text-left group transition-colors ${
+                  isActive ? "bg-blue-50/70" : "hover:bg-slate-50/50"
+                }`}
+              >
+                <div>
+                  <span className="text-[11px] font-medium text-slate-500 block">{s.label}</span>
+                  <span className={`text-lg font-extrabold mt-1.5 block ${s.color}`}>{s.value}</span>
+                </div>
+                <ChevronRight className={`h-4 w-4 text-slate-300 shrink-0 transition-transform ${isActive ? "rotate-90 text-blue-500" : "group-hover:translate-x-0.5"}`} />
+              </button>
+            );
+          })}
         </div>
       </div>
+      )}
 
-      {activeTab === "Analytics" ? (
-        <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
-          <h3 className="text-sm font-bold text-slate-800 mb-1">Data Calling Analytics</h3>
-          <p className="text-xs text-slate-500 mb-4">A deeper breakdown (charts, per-agent/property performance) can be built out here, same as Campaigns Analytics — let me know what you want first.</p>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
-              <span className="text-xs text-slate-400 font-medium">Leads Contacted</span>
-              <p className="text-xl font-bold text-slate-800 mt-1">{summaryMetrics.callsMade}</p>
-            </div>
-            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
-              <span className="text-xs text-slate-400 font-medium">Qualified Rate</span>
-              <p className="text-xl font-bold text-emerald-600 mt-1">
-                {leads.length > 0 ? ((summaryMetrics.qualifiedLeads / leads.length) * 100).toFixed(1) : "0.0"}%
-              </p>
-            </div>
-            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
-              <span className="text-xs text-slate-400 font-medium">RNR Rate</span>
-              <p className="text-xl font-bold text-rose-600 mt-1">
-                {leads.length > 0 ? ((summaryMetrics.rnr / leads.length) * 100).toFixed(1) : "0.0"}%
-              </p>
+      {/* Sub-Source scope bar + summary cards — the Analytics tab's
+          equivalent of the Data Calling tab's own Date Range bar above,
+          scoped by data-call source instead of a date preset (the shared
+          calendar in the toolbar below covers the "when"). */}
+      {activeTab === "Analytics" && (
+      <div className="bg-slate-100/70 border border-slate-200/60 rounded-2xl overflow-hidden shadow-sm">
+        <div className="flex items-center px-4 py-2.5 text-[11px] border-b border-slate-200/60">
+          <div className="flex items-center gap-1.5 font-bold text-slate-700">
+            <span className="font-normal text-slate-500">Sub-Source</span>
+            <div className="relative">
+              <button
+                ref={subSourceBtnRef}
+                onClick={() => openPositionedMenu(subSourceBtnRef, setSubSourceMenuPos, setSubSourceMenuOpen, "left", 160)}
+                className="flex items-center gap-1.5 bg-white border border-slate-300/80 rounded-md px-2 py-0.5 font-black text-slate-800 text-[11px] hover:bg-slate-50 transition-colors"
+              >
+                {analyticsSubSource}
+                <ChevronDown className={`h-3 w-3 text-slate-400 transition-transform ${subSourceMenuOpen ? "rotate-180" : ""}`} />
+              </button>
+              {subSourceMenuOpen && subSourceMenuPos && createPortal(
+                <>
+                  <div className="fixed inset-0 z-[60]" onClick={() => setSubSourceMenuOpen(false)} />
+                  <div
+                    className="fixed z-[70] w-40 max-h-64 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-lg py-1.5"
+                    style={{ top: subSourceMenuPos.top, left: subSourceMenuPos.left }}
+                  >
+                    {["All Sources", ...dataCallSources].map(opt => (
+                      <button
+                        key={opt}
+                        onClick={() => { setAnalyticsSubSource(opt); setSubSourceMenuOpen(false); }}
+                        className={`w-full text-left px-3 py-1.5 text-xs font-bold truncate transition-colors ${
+                          analyticsSubSource === opt ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"
+                        }`}
+                      >
+                        {opt}
+                      </button>
+                    ))}
+                  </div>
+                </>,
+                document.body
+              )}
             </div>
           </div>
         </div>
-      ) : (
-        <>
-          {/* Action Toolbar (Bulk Assign/Reshuffle, Date Picker Pill, Settings Button) */}
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 bg-white divide-y sm:divide-y-0 sm:divide-x divide-slate-100">
+          {([
+            { label: "Total Leads Assigned", value: analyticsSummaryMetrics.totalAssigned, color: "text-slate-900" },
+            { label: "Calls Made", value: analyticsSummaryMetrics.callsMade, color: "text-slate-900" },
+            { label: "Qualified Leads", value: analyticsSummaryMetrics.qualifiedLeads, color: "text-rose-600" },
+            { label: "RNR", value: analyticsSummaryMetrics.rnr, color: "text-amber-500" },
+            { label: "Follow Ups", value: analyticsSummaryMetrics.followUps, color: "text-blue-500" }
+          ] as const).map(s => {
+            const isActive = analyticsSelectedCategory === s.label;
+            return (
+              <button
+                key={s.label}
+                type="button"
+                onClick={() => toggleAnalyticsCategory(s.label)}
+                className={`p-3 flex items-center justify-between text-left group transition-colors ${
+                  isActive ? "bg-blue-50/70" : "hover:bg-slate-50/50"
+                }`}
+              >
+                <div>
+                  <span className="text-[11px] font-medium text-slate-500 block">{s.label}</span>
+                  <span className={`text-lg font-extrabold mt-1.5 block ${s.color}`}>{s.value}</span>
+                </div>
+                <ChevronRight className={`h-4 w-4 text-slate-300 shrink-0 transition-transform ${isActive ? "rotate-90 text-blue-500" : "group-hover:translate-x-0.5"}`} />
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      )}
+
+      {/* Analytics stat-card drill-down — same pattern as the Data Calling
+          tab's own drill-down, scoped to whichever Sub-Source is selected. */}
+      {activeTab === "Analytics" && analyticsSelectedCategory && (() => {
+        const q = analyticsDrillSearchQuery.trim().toLowerCase();
+        const shownLeads = (analyticsCategoryLeads[analyticsSelectedCategory] || []).filter(l =>
+          !q || l.name.toLowerCase().includes(q) || l.phone.includes(q) || (l.assignedAgent || "").toLowerCase().includes(q)
+        );
+        const shownCount = shownLeads.length;
+        const totalPages = Math.max(1, Math.ceil(shownCount / analyticsDrillRowsPerPage));
+        const currentPage = Math.min(analyticsDrillPage, totalPages);
+        const rangeStart = shownCount === 0 ? 0 : (currentPage - 1) * analyticsDrillRowsPerPage + 1;
+        const rangeEnd = Math.min(currentPage * analyticsDrillRowsPerPage, shownCount);
+
+        return (
+          <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden animate-fade-in">
+            <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-200/80 gap-3">
+              <h3 className="text-sm font-bold text-slate-900 whitespace-nowrap">
+                {analyticsSelectedCategory}
+                <span className="text-slate-400 font-medium ml-1.5">({shownCount})</span>
+              </h3>
+              <div className="flex items-center gap-3 flex-1 justify-end">
+                <div className="relative w-full max-w-[220px]">
+                  <Search className="h-3.5 w-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    value={analyticsDrillSearchQuery}
+                    onChange={(e) => { setAnalyticsDrillSearchQuery(e.target.value); setAnalyticsDrillPage(1); }}
+                    placeholder="Search name, phone, agent..."
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-8 pr-2.5 py-1.5 text-xs focus:outline-none focus:border-[#0B1E6E]"
+                  />
+                </div>
+                <button type="button" onClick={() => setAnalyticsSelectedCategory(null)} className="text-slate-400 hover:text-slate-700 shrink-0">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+            <div ref={analyticsDrillScrollRef} onScroll={handleAnalyticsDrillScroll} className="max-h-80 overflow-y-auto">
+              <table className="w-full text-left border-collapse min-w-[600px]">
+                <thead className="sticky top-0 bg-white">
+                  <tr className="border-b border-slate-100 text-[11px] font-bold text-slate-500">
+                    <th className="px-5 py-2.5">Name</th>
+                    <th className="px-5 py-2.5">Phone</th>
+                    <th className="px-5 py-2.5">Status</th>
+                    <th className="px-5 py-2.5">Assigned To</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-[12px] text-slate-700">
+                  {shownLeads.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="px-5 py-6 text-center text-slate-400 italic">
+                        No leads found for this category.
+                      </td>
+                    </tr>
+                  ) : (
+                    (analyticsDrillPageRowRefs.current = [], shownLeads.map((l, idx) => (
+                      <tr
+                        key={l.id}
+                        ref={idx % analyticsDrillRowsPerPage === 0 ? (el) => { analyticsDrillPageRowRefs.current[Math.floor(idx / analyticsDrillRowsPerPage)] = el; } : undefined}
+                        className="hover:bg-slate-50/50 transition-colors"
+                      >
+                        <td className="px-5 py-2.5 font-semibold text-slate-900">{l.name}</td>
+                        <td className="px-5 py-2.5 font-mono">{l.phone}</td>
+                        <td className="px-5 py-2.5">{l.status}</td>
+                        <td className="px-5 py-2.5">{l.assignedAgent || "—"}</td>
+                      </tr>
+                    )))
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <div className="px-5 py-3 flex flex-wrap justify-between items-center gap-3 border-t border-slate-100 text-[11px] text-slate-500 font-semibold">
+              <span>{shownCount} Row{shownCount === 1 ? "" : "s"}</span>
+              <div className="flex items-center gap-4">
+                <span className="flex items-center gap-1.5">
+                  Rows per page
+                  <select
+                    value={analyticsDrillRowsPerPage}
+                    onChange={(e) => {
+                      analyticsDrillProgrammaticScroll.current = true;
+                      setAnalyticsDrillRowsPerPage(Number(e.target.value));
+                      setAnalyticsDrillPage(1);
+                      analyticsDrillScrollRef.current?.scrollTo(0, 0);
+                      requestAnimationFrame(() => {
+                        requestAnimationFrame(() => { analyticsDrillProgrammaticScroll.current = false; });
+                      });
+                    }}
+                    className="bg-slate-50 border border-slate-200 rounded px-1.5 py-1 font-bold text-slate-700 focus:outline-none"
+                  >
+                    {[8, 25, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </span>
+                <span>{rangeStart}-{rangeEnd} of {shownCount}</span>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => goToAnalyticsDrillPage(currentPage - 1, totalPages)}
+                    disabled={currentPage <= 1}
+                    className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    ‹
+                  </button>
+                  <button
+                    onClick={() => goToAnalyticsDrillPage(currentPage + 1, totalPages)}
+                    disabled={currentPage >= totalPages}
+                    className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    ›
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Stat-card drill-down — the real leads behind whichever card was
+          last clicked, same pattern as the Campaigns page's drill-down. */}
+      {activeTab === "DataCalling" && selectedCategory && (() => {
+        const q = drillSearchQuery.trim().toLowerCase();
+        const shownLeads = (categoryLeadsInRange[selectedCategory] || []).filter(l =>
+          !q || l.name.toLowerCase().includes(q) || l.phone.includes(q) || (l.assignedAgent || "").toLowerCase().includes(q)
+        );
+        const shownCount = shownLeads.length;
+        const totalPages = Math.max(1, Math.ceil(shownCount / drillRowsPerPage));
+        const currentPage = Math.min(drillPage, totalPages);
+        const rangeStart = shownCount === 0 ? 0 : (currentPage - 1) * drillRowsPerPage + 1;
+        const rangeEnd = Math.min(currentPage * drillRowsPerPage, shownCount);
+
+        return (
+          <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden animate-fade-in">
+            <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-200/80 gap-3">
+              <h3 className="text-sm font-bold text-slate-900 whitespace-nowrap">
+                {selectedCategory}
+                <span className="text-slate-400 font-medium ml-1.5">({shownCount})</span>
+              </h3>
+              <div className="flex items-center gap-3 flex-1 justify-end">
+                <div className="relative w-full max-w-[220px]">
+                  <Search className="h-3.5 w-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    value={drillSearchQuery}
+                    onChange={(e) => { setDrillSearchQuery(e.target.value); setDrillPage(1); }}
+                    placeholder="Search name, phone, agent..."
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-8 pr-2.5 py-1.5 text-xs focus:outline-none focus:border-[#0B1E6E]"
+                  />
+                </div>
+                <button type="button" onClick={() => setSelectedCategory(null)} className="text-slate-400 hover:text-slate-700 shrink-0">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+            <div ref={drillScrollRef} onScroll={handleDrillScroll} className="max-h-80 overflow-y-auto">
+              <table className="w-full text-left border-collapse min-w-[600px]">
+                <thead className="sticky top-0 bg-white">
+                  <tr className="border-b border-slate-100 text-[11px] font-bold text-slate-500">
+                    <th className="px-5 py-2.5">Name</th>
+                    <th className="px-5 py-2.5">Phone</th>
+                    <th className="px-5 py-2.5">Status</th>
+                    <th className="px-5 py-2.5">Assigned To</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-[12px] text-slate-700">
+                  {shownLeads.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="px-5 py-6 text-center text-slate-400 italic">
+                        No leads found for this category.
+                      </td>
+                    </tr>
+                  ) : (
+                    (drillPageRowRefs.current = [], shownLeads.map((l, idx) => (
+                      <tr
+                        key={l.id}
+                        ref={idx % drillRowsPerPage === 0 ? (el) => { drillPageRowRefs.current[Math.floor(idx / drillRowsPerPage)] = el; } : undefined}
+                        className="hover:bg-slate-50/50 transition-colors"
+                      >
+                        <td className="px-5 py-2.5 font-semibold text-slate-900">{l.name}</td>
+                        <td className="px-5 py-2.5 font-mono">{l.phone}</td>
+                        <td className="px-5 py-2.5">{l.status}</td>
+                        <td className="px-5 py-2.5">{l.assignedAgent || "—"}</td>
+                      </tr>
+                    )))
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <div className="px-5 py-3 flex flex-wrap justify-between items-center gap-3 border-t border-slate-100 text-[11px] text-slate-500 font-semibold">
+              <span>{shownCount} Row{shownCount === 1 ? "" : "s"}</span>
+              <div className="flex items-center gap-4">
+                <span className="flex items-center gap-1.5">
+                  Rows per page
+                  <select
+                    value={drillRowsPerPage}
+                    onChange={(e) => {
+                      drillProgrammaticScroll.current = true;
+                      setDrillRowsPerPage(Number(e.target.value));
+                      setDrillPage(1);
+                      drillScrollRef.current?.scrollTo(0, 0);
+                      requestAnimationFrame(() => {
+                        requestAnimationFrame(() => { drillProgrammaticScroll.current = false; });
+                      });
+                    }}
+                    className="bg-slate-50 border border-slate-200 rounded px-1.5 py-1 font-bold text-slate-700 focus:outline-none"
+                  >
+                    {[8, 25, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </span>
+                <span>{rangeStart}-{rangeEnd} of {shownCount}</span>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => goToDrillPage(currentPage - 1, totalPages)}
+                    disabled={currentPage <= 1}
+                    className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    ‹
+                  </button>
+                  <button
+                    onClick={() => goToDrillPage(currentPage + 1, totalPages)}
+                    disabled={currentPage >= totalPages}
+                    className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    ›
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Action Toolbar (Bulk Assign/Reshuffle, Date Picker Pill, Filter Button) —
+              shared by both tabs; the Filter button targets whichever tab's own
+              column drawer is relevant, and the calendar always drives the
+              same appliedCustomRange so both tabs agree on "when". */}
           <div className="flex flex-wrap items-center justify-end gap-2.5 pt-1">
-            {selectedUnassignedIds.length > 0 && (
+            {activeTab === "DataCalling" && isAdmin && selectedUnassignedIds.length > 0 && (
               <button
                 type="button"
                 onClick={() => openAssignFlow("assign")}
@@ -509,7 +1179,7 @@ export default function DataCallingPage() {
                 Assign
               </button>
             )}
-            {selectedAssignedIds.length > 0 && (
+            {activeTab === "DataCalling" && isAdmin && selectedAssignedIds.length > 0 && (
               <button
                 type="button"
                 onClick={() => openAssignFlow("reshuffle")}
@@ -613,28 +1283,275 @@ export default function DataCallingPage() {
 
             <button
               type="button"
-              onClick={() => setIsFilterOpen(true)}
+              onClick={() => (activeTab === "DataCalling" ? setIsFilterOpen(true) : setIsAnalyticsFilterOpen(true))}
               className="flex items-center gap-2 border border-slate-300/80 bg-white rounded-xl px-3.5 py-1.5 text-xs text-slate-700 font-semibold hover:bg-slate-50 shadow-2xs transition-colors"
             >
               <Sliders className="h-3.5 w-3.5 text-blue-600" />
-              Settings
+              Filter
             </button>
           </div>
 
+          {activeTab === "Analytics" ? (
+          <div className="space-y-4">
+            {/* Salesperson Performance */}
+            <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden">
+              <div className="px-5 py-3.5 border-b border-slate-200/80">
+                <h3 className="text-sm font-bold text-slate-900">Salesperson Performance</h3>
+              </div>
+              <div className="overflow-auto max-h-[55vh]">
+                <table className="w-full text-left border-collapse min-w-[720px]">
+                  <thead className="sticky top-0 z-10 bg-white">
+                    <tr className="border-b border-slate-200/80 text-[12px] font-bold text-slate-900">
+                      <th className="px-5 py-3 w-48">
+                        {salespersonSearchOpen ? (
+                          <div className="flex items-center gap-1">
+                            <input
+                              autoFocus
+                              value={salespersonSearch}
+                              onChange={(e) => setSalespersonSearch(e.target.value)}
+                              placeholder="Filter salesperson..."
+                              className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs font-normal focus:outline-none w-36"
+                            />
+                            <button onClick={() => { setSalespersonSearch(""); setSalespersonSearchOpen(false); }} className="text-slate-400 hover:text-slate-600">
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1.5">
+                            <span>Salesperson Name</span>
+                            <button onClick={() => setSalespersonSearchOpen(true)} className="text-slate-400 hover:text-slate-700" title="Search salesperson">
+                              <Search className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        )}
+                      </th>
+                      <th className="px-5 py-3 whitespace-nowrap">Leads Assgned</th>
+                      <th className="px-5 py-3 whitespace-nowrap">Calls Made</th>
+                      <th className="px-5 py-3 whitespace-nowrap">Connected</th>
+                      <th className="px-5 py-3 whitespace-nowrap">Qualified Leads</th>
+                      <th className="px-5 py-3 whitespace-nowrap">RNR</th>
+                      <th className="px-5 py-3 whitespace-nowrap">Qualification Rate</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-[13px] text-slate-700">
+                    {filteredSalespersonRows.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="px-5 py-8 text-center text-slate-400 italic">No salesperson activity found for this scope.</td>
+                      </tr>
+                    ) : (
+                      filteredSalespersonRows.map(r => (
+                        <tr key={r.name} className="hover:bg-slate-50/50 transition-colors">
+                          <td className="px-5 py-3 font-semibold text-slate-900">{r.name}</td>
+                          <td className="px-5 py-3">{r.totalLeads}</td>
+                          <td className="px-5 py-3">{r.callsMade}</td>
+                          <td className="px-5 py-3">{r.connected}</td>
+                          <td className="px-5 py-3">{r.qualifiedLeads}</td>
+                          <td className="px-5 py-3">{r.rnr}</td>
+                          <td className="px-5 py-3">{r.qualificationRate}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Performance Line Graph */}
+            <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm p-5">
+              <div className="flex items-center justify-between mb-3 gap-2">
+                <h3 className="text-sm font-bold text-slate-900">Performance Line Graph</h3>
+                <div className="relative">
+                  <button
+                    type="button"
+                    ref={chartSourceBtnRef}
+                    onClick={() => openPositionedMenu(chartSourceBtnRef, setChartSourceMenuPos, setChartSourceMenuOpen, "right", 160)}
+                    className="flex items-center gap-1.5 bg-white border border-slate-300/80 rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+                  >
+                    {analyticsSubSource}
+                    <ChevronDown className={`h-3 w-3 text-slate-400 transition-transform ${chartSourceMenuOpen ? "rotate-180" : ""}`} />
+                  </button>
+                  {chartSourceMenuOpen && chartSourceMenuPos && createPortal(
+                    <>
+                      <div className="fixed inset-0 z-[60]" onClick={() => setChartSourceMenuOpen(false)} />
+                      <div
+                        className="fixed z-[70] w-40 max-h-64 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-lg py-1.5"
+                        style={{ top: chartSourceMenuPos.top, left: chartSourceMenuPos.left }}
+                      >
+                        {["All Sources", ...dataCallSources].map(opt => (
+                          <button
+                            key={opt}
+                            onClick={() => { setAnalyticsSubSource(opt); setChartSourceMenuOpen(false); }}
+                            className={`w-full text-left px-3 py-1.5 text-xs font-bold truncate transition-colors ${
+                              analyticsSubSource === opt ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"
+                            }`}
+                          >
+                            {opt}
+                          </button>
+                        ))}
+                      </div>
+                    </>,
+                    document.body
+                  )}
+                </div>
+              </div>
+              {chartData.length === 0 ? (
+                <div className="h-[260px] flex items-center justify-center text-xs text-slate-400 italic">No data yet.</div>
+              ) : (
+                <ResponsiveContainer width="100%" height={260}>
+                  <LineChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                    <CartesianGrid vertical={false} stroke="#e2e8f0" />
+                    <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} allowDecimals={false} />
+                    <Tooltip
+                      formatter={(v) => [Number(v), analyticsChartMetric]}
+                      labelStyle={{ fontSize: 11, fontWeight: 600 }}
+                      contentStyle={{ fontSize: 11, borderRadius: 8, borderColor: "#e2e8f0" }}
+                    />
+                    <ReferenceLine y={chartAverage} stroke="#6366f1" strokeDasharray="4 4" />
+                    <Line type="monotone" dataKey="value" name={analyticsChartMetric} stroke="#6366f1" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
+              <div className="relative mt-2 inline-block">
+                <button
+                  type="button"
+                  ref={chartMetricBtnRef}
+                  onClick={() => openPositionedMenu(chartMetricBtnRef, setChartMetricMenuPos, setChartMetricMenuOpen, "left", 140)}
+                  className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors"
+                >
+                  {analyticsChartMetric}
+                  <ChevronDown className={`h-3 w-3 text-slate-400 transition-transform ${chartMetricMenuOpen ? "rotate-180" : ""}`} />
+                </button>
+                {chartMetricMenuOpen && chartMetricMenuPos && createPortal(
+                  <>
+                    <div className="fixed inset-0 z-[60]" onClick={() => setChartMetricMenuOpen(false)} />
+                    <div
+                      className="fixed z-[70] w-36 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 overflow-hidden"
+                      style={{ top: chartMetricMenuPos.top, left: chartMetricMenuPos.left }}
+                    >
+                      {ANALYTICS_CHART_METRICS.map(opt => (
+                        <button
+                          key={opt}
+                          onClick={() => { setAnalyticsChartMetric(opt); setChartMetricMenuOpen(false); }}
+                          className={`w-full text-left px-3 py-1.5 text-xs font-bold transition-colors ${
+                            analyticsChartMetric === opt ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"
+                          }`}
+                        >
+                          {opt}
+                        </button>
+                      ))}
+                    </div>
+                  </>,
+                  document.body
+                )}
+              </div>
+            </div>
+
+            {/* Source Performance — flat, borderless card, sized to match
+                the Salesperson Performance/Performance Line Graph cards
+                above rather than standing out oversized. */}
+            <div className="bg-white rounded-2xl p-5">
+              <h3 className="text-sm font-bold text-slate-900 mb-4">Source Performance</h3>
+              <div className="overflow-auto max-h-[55vh]">
+                <table className="w-full text-left border-collapse min-w-[900px]">
+                  <thead className="sticky top-0 z-10 bg-white">
+                    <tr className="border-b border-slate-200 text-[12px] font-bold text-slate-900">
+                      <th className="pr-5 pb-3 w-48">
+                        {sourceSearchOpen ? (
+                          <div className="flex items-center gap-1">
+                            <input
+                              autoFocus
+                              value={sourceSearch}
+                              onChange={(e) => setSourceSearch(e.target.value)}
+                              placeholder="Filter source..."
+                              className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs font-normal focus:outline-none w-36"
+                            />
+                            <button onClick={() => { setSourceSearch(""); setSourceSearchOpen(false); }} className="text-slate-400 hover:text-slate-600">
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1.5">
+                            <span>Sub-Source Name</span>
+                            <button onClick={() => setSourceSearchOpen(true)} className="text-slate-400 hover:text-slate-700" title="Search sub-source">
+                              <Search className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        )}
+                      </th>
+                      <th className="px-5 pb-3 whitespace-nowrap">Total Leads</th>
+                      <th className="px-5 pb-3 whitespace-nowrap">Calls Made</th>
+                      <th className="px-5 pb-3 whitespace-nowrap">Connected</th>
+                      <th className="px-5 pb-3 whitespace-nowrap">Qualified Leads</th>
+                      <th className="px-5 pb-3 whitespace-nowrap">RNR</th>
+                      <th className="px-5 pb-3 whitespace-nowrap">Qualification Rate</th>
+                      {analyticsVisibleColumns.unqualifiedLeads && <th className="px-5 pb-3 whitespace-nowrap">Unqualified Leads</th>}
+                      {analyticsVisibleColumns.siteVisit && <th className="px-5 pb-3 whitespace-nowrap">Site Visits</th>}
+                      {analyticsVisibleColumns.status && <th className="px-5 pb-3 whitespace-nowrap">Status</th>}
+                      {analyticsVisibleColumns.cpl && <th className="px-5 pb-3 whitespace-nowrap">CPL</th>}
+                      {analyticsVisibleColumns.qcpl && <th className="px-5 pb-3 whitespace-nowrap">QCPL</th>}
+                      {analyticsVisibleColumns.ctr && <th className="px-5 pb-3 whitespace-nowrap">CTR</th>}
+                      {analyticsVisibleColumns.clicks && <th className="px-5 pb-3 whitespace-nowrap">Clicks</th>}
+                      {analyticsVisibleColumns.impressions && <th className="px-5 pb-3 whitespace-nowrap">Impressions</th>}
+                      {analyticsVisibleColumns.adSetName && <th className="px-5 pb-3 whitespace-nowrap">Ad set name</th>}
+                      {analyticsVisibleColumns.source && <th className="px-5 pb-3 whitespace-nowrap">Source</th>}
+                      {analyticsVisibleColumns.date && <th className="px-5 pb-3 whitespace-nowrap">Date</th>}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-[13px] text-slate-700">
+                    {filteredSourceRows.length === 0 ? (
+                      <tr>
+                        <td colSpan={7 + ANALYTICS_COLUMNS.filter(c => c.key !== "qualifiedLeads" && analyticsVisibleColumns[c.key]).length} className="px-5 py-8 text-center text-slate-400 italic">
+                          No data-call source activity found.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredSourceRows.map(r => (
+                        <tr key={r.name} className="hover:bg-slate-50/50 transition-colors">
+                          <td className="pr-5 py-3 font-medium text-slate-900">{r.name}</td>
+                          <td className="px-5 py-3">{r.totalLeads.toLocaleString()}</td>
+                          <td className="px-5 py-3">{r.callsMade.toLocaleString()}</td>
+                          <td className="px-5 py-3">{r.connected.toLocaleString()}</td>
+                          <td className="px-5 py-3">{r.qualifiedLeads.toLocaleString()}</td>
+                          <td className="px-5 py-3">{r.rnr.toLocaleString()}</td>
+                          <td className="px-5 py-3">{r.qualificationRate}</td>
+                          {analyticsVisibleColumns.unqualifiedLeads && <td className="px-5 py-3">{r.unqualifiedLeads.toLocaleString()}</td>}
+                          {analyticsVisibleColumns.siteVisit && <td className="px-5 py-3">{r.siteVisits.toLocaleString()}</td>}
+                          {analyticsVisibleColumns.status && <td className="px-5 py-3 text-slate-300" title="Not applicable — this is an aggregate row, not a single lead">—</td>}
+                          {analyticsVisibleColumns.cpl && <td className="px-5 py-3 text-slate-300" title="No spend tracking exists for data-call sources">—</td>}
+                          {analyticsVisibleColumns.qcpl && <td className="px-5 py-3 text-slate-300" title="No spend tracking exists for data-call sources">—</td>}
+                          {analyticsVisibleColumns.ctr && <td className="px-5 py-3 text-slate-300" title="No click/impression tracking exists for data-call sources">—</td>}
+                          {analyticsVisibleColumns.clicks && <td className="px-5 py-3 text-slate-300" title="No click tracking exists for data-call sources">—</td>}
+                          {analyticsVisibleColumns.impressions && <td className="px-5 py-3 text-slate-300" title="No impression tracking exists for data-call sources">—</td>}
+                          {analyticsVisibleColumns.adSetName && <td className="px-5 py-3 text-slate-300" title="No ad-set tracking exists for data-call sources">—</td>}
+                          {analyticsVisibleColumns.source && <td className="px-5 py-3">{r.name}</td>}
+                          {analyticsVisibleColumns.date && <td className="px-5 py-3 text-slate-300" title="Not applicable — this is an aggregate row, not a single lead">—</td>}
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+          ) : (
+          <>
           {/* Main Data Calling Table */}
           <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden">
             <div className="overflow-auto max-h-[55vh]">
               <table className="w-full text-left border-collapse table-auto min-w-[900px]">
                 <thead className="sticky top-0 z-10 bg-white">
                   <tr className="border-b border-slate-200/80 text-[12px] font-bold text-slate-900">
-                    <th className="px-4 py-3.5 w-10">
-                      <input
-                        type="checkbox"
-                        checked={allOnPageSelected}
-                        onChange={toggleSelectAllOnPage}
-                        className="h-3.5 w-3.5 rounded border-slate-300 text-[#0B1E6E] focus:ring-0 focus:ring-offset-0"
-                      />
-                    </th>
+                    {isAdmin && (
+                      <th className="px-4 py-3.5 w-10">
+                        <input
+                          type="checkbox"
+                          checked={allOnPageSelected}
+                          onChange={toggleSelectAllOnPage}
+                          className="h-3.5 w-3.5 rounded border-slate-300 text-[#0B1E6E] focus:ring-0 focus:ring-offset-0"
+                        />
+                      </th>
+                    )}
                     <th className="px-5 py-3.5 w-56">
                       {searchOpen ? (
                         <div className="flex items-center gap-1">
@@ -751,7 +1668,55 @@ export default function DataCallingPage() {
                     {visibleColumns.notes && <th className="px-5 py-3.5 whitespace-nowrap">Notes</th>}
                     <th className="px-5 py-3.5 whitespace-nowrap">Next Call Date</th>
                     {visibleColumns.property && <th className="px-5 py-3.5 whitespace-nowrap">Property</th>}
-                    {visibleColumns.dataCallSource && <th className="px-5 py-3.5 whitespace-nowrap">Data Call Source</th>}
+                    {visibleColumns.dataCallSource && (
+                      <th className="px-5 py-3.5 whitespace-nowrap">
+                        <div className="relative inline-block">
+                          <button
+                            type="button"
+                            ref={dataCallSourceBtnRef}
+                            onClick={() => openPositionedMenu(dataCallSourceBtnRef, setDataCallSourceMenuPos, setDataCallSourceMenuOpen, "left", 200)}
+                            className="flex items-center gap-1 hover:text-blue-600 transition-colors"
+                          >
+                            <span>Data Call Source</span>
+                            <ChevronDown className={`h-3 w-3 text-slate-800 transition-transform ${dataCallSourceMenuOpen ? "rotate-180" : ""}`} />
+                          </button>
+                          {dataCallSourceMenuOpen && dataCallSourceMenuPos && createPortal(
+                            <>
+                              <div className="fixed inset-0 z-[60]" onClick={() => setDataCallSourceMenuOpen(false)} />
+                              <div
+                                className="fixed z-[70] w-56 max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 text-xs font-medium"
+                                style={{ top: dataCallSourceMenuPos.top, left: dataCallSourceMenuPos.left }}
+                              >
+                                <button
+                                  type="button"
+                                  onClick={() => setDataCallSourceFilters([])}
+                                  className="w-full flex items-center gap-1.5 text-left px-3 py-1.5 text-slate-500 font-bold hover:bg-slate-50 border-b border-slate-100 transition-colors"
+                                >
+                                  <Minus className="h-3 w-3" />
+                                  All Sources
+                                </button>
+                                {dataCallSourceOptions.length === 0 ? (
+                                  <p className="px-3 py-2 text-slate-400 italic font-normal">No sources yet</p>
+                                ) : (
+                                  dataCallSourceOptions.map(src => (
+                                    <label key={src} className="flex items-center gap-2 px-3 py-1.5 text-slate-700 font-semibold hover:bg-slate-50 cursor-pointer transition-colors">
+                                      <input
+                                        type="checkbox"
+                                        checked={dataCallSourceFilters.includes(src)}
+                                        onChange={() => setDataCallSourceFilters(prev => prev.includes(src) ? prev.filter(s => s !== src) : [...prev, src])}
+                                        className="h-3.5 w-3.5 rounded border-slate-300 text-[#0B1E6E] focus:ring-0 focus:ring-offset-0"
+                                      />
+                                      {src}
+                                    </label>
+                                  ))
+                                )}
+                              </div>
+                            </>,
+                            document.body
+                          )}
+                        </div>
+                      </th>
+                    )}
                     {visibleColumns.usageCount && <th className="px-5 py-3.5 whitespace-nowrap">Usage Count</th>}
                     {visibleColumns.qualifiedLeads && <th className="px-5 py-3.5 whitespace-nowrap">Qualified Leads</th>}
                     {visibleColumns.unqualifiedLeads && <th className="px-5 py-3.5 whitespace-nowrap">Unqualified Leads</th>}
@@ -767,14 +1732,16 @@ export default function DataCallingPage() {
                   ) : (
                     paginatedLeads.map(l => (
                       <tr key={l.id} className="hover:bg-slate-50/50 transition-colors">
-                        <td className="px-4 py-3.5">
-                          <input
-                            type="checkbox"
-                            checked={selectedIds.has(l.id)}
-                            onChange={() => toggleSelectRow(l.id)}
-                            className="h-3.5 w-3.5 rounded border-slate-300 text-[#0B1E6E] focus:ring-0 focus:ring-offset-0"
-                          />
-                        </td>
+                        {isAdmin && (
+                          <td className="px-4 py-3.5">
+                            <input
+                              type="checkbox"
+                              checked={selectedIds.has(l.id)}
+                              onChange={() => toggleSelectRow(l.id)}
+                              className="h-3.5 w-3.5 rounded border-slate-300 text-[#0B1E6E] focus:ring-0 focus:ring-offset-0"
+                            />
+                          </td>
+                        )}
                         <td className="px-5 py-3.5 max-w-[224px]">
                           <p className="text-slate-900 font-semibold truncate" title={l.name}>{l.name}</p>
                           {l.phone && (
@@ -880,7 +1847,7 @@ export default function DataCallingPage() {
                         {visibleColumns.notes && <td className="px-5 py-3.5 truncate max-w-[200px]" title={latestLogMessage(l)}>{latestLogMessage(l)}</td>}
                         <td className="px-5 py-3.5 whitespace-nowrap">{nextCallDateFor(l.id)}</td>
                         {visibleColumns.property && <td className="px-5 py-3.5">{l.property || "—"}</td>}
-                        {visibleColumns.dataCallSource && <td className="px-5 py-3.5">{l.source || "—"}</td>}
+                        {visibleColumns.dataCallSource && <td className="px-5 py-3.5">{l.subSource || l.source || "—"}</td>}
                         {visibleColumns.usageCount && <td className="px-5 py-3.5">{l.logs ? l.logs.length : 0}</td>}
                         {visibleColumns.qualifiedLeads && <td className="px-5 py-3.5 text-slate-300" title="Not applicable — this is a per-lead row, not an aggregate">—</td>}
                         {visibleColumns.unqualifiedLeads && <td className="px-5 py-3.5 text-slate-300" title="Not applicable — this is a per-lead row, not an aggregate">—</td>}
@@ -983,12 +1950,62 @@ export default function DataCallingPage() {
         document.body
       )}
 
+      {/* Analytics tab's own Filter drawer — extra optional columns for the
+          Source Performance table, same exact label set/pattern as the
+          Campaigns page's Campaign Name table Filter drawer. */}
+      {isAnalyticsFilterOpen && createPortal(
+        <div className="fixed inset-0 z-[100]">
+          <div className="fixed inset-0" onClick={() => setIsAnalyticsFilterOpen(false)} />
+          <div className="fixed inset-y-0 right-0 w-full max-w-sm bg-white border-l border-slate-200 shadow-2xl flex flex-col animate-slide-in">
+            <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-slate-100 shrink-0">
+              <h3 className="text-base font-extrabold text-slate-900">Filter</h3>
+              <button onClick={() => setIsAnalyticsFilterOpen(false)} className="text-slate-400 hover:text-slate-700">
+                <X className="h-4.5 w-4.5" />
+              </button>
+            </div>
+            <div className="px-5 py-5 flex-1 overflow-y-auto">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-extrabold text-slate-800">Columns</span>
+                <button
+                  type="button"
+                  onClick={toggleSelectAllAnalyticsColumns}
+                  className="flex items-center gap-1 text-[11px] font-bold text-slate-500 hover:text-[#0B1E6E]"
+                >
+                  <Minus className="h-3 w-3" />
+                  Select All
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                {ANALYTICS_COLUMNS.map(c => {
+                  const isOn = analyticsVisibleColumns[c.key];
+                  return (
+                    <button
+                      key={c.key}
+                      type="button"
+                      onClick={() => toggleAnalyticsColumn(c.key)}
+                      className={`text-left pl-3 pr-2.5 py-2.5 text-xs rounded-lg border transition-colors truncate ${
+                        isOn
+                          ? "border-slate-200 border-l-[3px] border-l-[#0B1E6E] font-extrabold text-slate-900"
+                          : "border-slate-200 font-semibold text-slate-400 hover:text-slate-600 hover:bg-slate-50"
+                      }`}
+                    >
+                      {c.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
       {/* Assign/Reshuffle Leads modal — Property must be picked before
           Assignee unlocks (it scopes the eligible agent list), and the
           modal's own confirm button stays disabled until both fields hold
           a value. Same modal for both flows; assignFlowMode picks the copy
           and the target lead set. */}
-      {assignFlowMode && createPortal(
+      {isAdmin && assignFlowMode && createPortal(
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
           <div className="fixed inset-0 bg-slate-900/40" onClick={closeAssignFlow} />
           <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md">
@@ -1143,6 +2160,24 @@ export default function DataCallingPage() {
         </div>,
         document.body
       )}
+
+      <UploadLeadsModal
+        isOpen={isUploadLeadsOpen}
+        onClose={() => setIsUploadLeadsOpen(false)}
+        propertiesList={bulkUploadPropertiesList}
+        agentsList={bulkUploadAgentsList}
+        onSubmit={async (input) => {
+          const result = await bulkImportLeads(input);
+          setUploadSuccessMsg(
+            `${result.created} lead${result.created === 1 ? "" : "s"} imported` +
+              (result.duplicates > 0 ? `, ${result.duplicates} duplicate${result.duplicates === 1 ? "" : "s"} skipped` : "") +
+              (result.skipped.length > 0 ? `, ${result.skipped.length} row${result.skipped.length === 1 ? "" : "s"} skipped` : "") +
+              "."
+          );
+          setTimeout(() => setUploadSuccessMsg(""), 5000);
+          return result;
+        }}
+      />
     </div>
   );
 }
