@@ -7,7 +7,14 @@ const phoneRegex = /^[6-9][0-9]{9}$/;
 
 export const listLeadsQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
-  pageSize: z.coerce.number().int().positive().max(100).default(25),
+  // 500 (was 100) — apiListAllLeads() pages through this endpoint to
+  // reconstruct the full leads list for the frontend, and 100 meant ~91
+  // sequential round trips at the ~9k leads this system already has (and
+  // growing, with 100k+-row bulk uploads now possible). Still a real,
+  // bounded cap against an abusive/malformed request, not "return
+  // everything in one query" — just sized to cut that round-trip count by
+  // 5x for the common "fetch everything" case.
+  pageSize: z.coerce.number().int().positive().max(500).default(25),
   status: z.string().optional(),
   assignedAgentId: z.string().uuid().optional(),
   search: z.string().trim().max(200).optional()

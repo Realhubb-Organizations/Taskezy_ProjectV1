@@ -455,6 +455,13 @@ interface AppState {
   // True until the initial session-restore check (stored token -> /auth/me) completes.
   // Use this to avoid redirecting to /auth/login before that check has had a chance to run.
   authLoading: boolean;
+  // True from session start until every domain list (leads, users,
+  // properties, ...) has loaded at least once in the background — login/
+  // session-restore no longer block on this, so a page can be showing
+  // empty lists for a moment after either. Read this to tell "still
+  // loading" apart from "genuinely empty" instead of flashing a false
+  // empty state.
+  isDataLoading: boolean;
   activeRole: Role; // For easy switcher
   activeSystem: SystemType;
   showLoginSplash: boolean;
@@ -932,9 +939,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [adSpendRecords, setAdSpendRecords] = useState<AdSpendRecord[]>([]);
   const [adLevelSpendRecords, setAdLevelSpendRecords] = useState<AdLevelSpendRecord[]>([]);
 
+  // True from the moment a session starts (fresh login or a restored one)
+  // until loadAllRealData's first pass for it finishes. Login/session-restore
+  // no longer block navigation on this (see loginWithTempPassword and the
+  // mount effect below) — they set authLoading false and let the user into
+  // the app as soon as their identity is known, with every domain list
+  // still empty for a moment while it loads in the background. Pages can
+  // read this to tell "still loading" apart from "genuinely no leads yet"
+  // instead of flashing an empty state — real skeleton loading UI is the
+  // next piece of work, this flag is what it hooks into.
+  const [isDataLoading, setIsDataLoading] = useState(true);
+
   // Real backend integration (Taskezy-Server) — every domain below is fetched
   // from the real database. Nothing in this file falls back to mock data.
   const loadAllRealData = async (role?: Role) => {
+    setIsDataLoading(true);
     try {
       const [apiLeads, apiUsers, apiProperties, apiResaleUnits, apiFollowups, apiAttendance, apiReimbursements, apiInvoices, apiNotifications, apiCalendarEvents, apiAdSpend, apiAdLevelSpend, apiTimesheets, apiTenantSettings] = await Promise.all([
         apiListAllLeads(),
@@ -981,6 +1000,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // Server unreachable or session invalid. Nothing to fall back to
       // anymore — surfaced as empty lists in the UI, not fake data.
       console.warn("Could not load real data from the API:", err);
+    } finally {
+      setIsDataLoading(false);
     }
   };
 
@@ -1025,15 +1046,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return;
     }
     apiGetMe()
-      .then(async (apiUser) => {
+      .then((apiUser) => {
         const mapped = mapApiUserToFrontendUser(apiUser);
         setCurrentUser(mapped);
         setActiveRole(mapped.role);
         setActiveSystem(getDefaultSystem(mapped));
-        await loadAllRealData(mapped.role);
+        // authLoading gates RequireAuth's redirect-to-login check, not the
+        // page's own data — clear it as soon as identity is confirmed so a
+        // page refresh doesn't re-block the whole app behind the same full
+        // fetch loadAllRealData does (that was the other place, besides
+        // fresh login, this app-wide stall was coming from). The fetch
+        // itself still runs, just in the background — see isDataLoading.
+        setAuthLoading(false);
+        loadAllRealData(mapped.role);
       })
-      .catch(() => clearApiSession())
-      .finally(() => setAuthLoading(false));
+      .catch(() => {
+        clearApiSession();
+        setAuthLoading(false);
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1297,7 +1327,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setCurrentUser(mapped);
       setActiveRole(mapped.role);
       setActiveSystem(getDefaultSystem(mapped));
-      await loadAllRealData(mapped.role);
+      // Deliberately not awaited — the actual login (auth check + issuing a
+      // token) is fast; it was this full fetch of every domain (leads,
+      // users, properties, invoices, ...) that made "login" feel like it
+      // took several seconds. The dashboard can render the moment identity
+      // is known and hydrate as this resolves in the background instead of
+      // blocking navigation on it (see isDataLoading above).
+      loadAllRealData(mapped.role);
       setShowLoginSplash(true);
       return { user: mapped };
     } catch (err) {
@@ -2057,6 +2093,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         users,
         currentUser,
         authLoading,
+        isDataLoading,
         activeRole,
         activeSystem,
         showLoginSplash,

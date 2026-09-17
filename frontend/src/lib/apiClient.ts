@@ -165,11 +165,15 @@ export interface ApiLeadRow {
 // frontend's filter/search UI (which currently assumes the full dataset is in
 // memory) is reworked for real server-side pagination — see Taskezy-Server/README.md
 // and the 2026-07-21+ IMPLEMENTATIONS.md entry for why. The server deliberately
-// caps pageSize at 100 (see leads.schema.ts) — that's a real safety limit, not
+// caps pageSize at 500 (see leads.schema.ts) — that's a real safety limit, not
 // something to raise just to fetch everything in one request, so this loops
-// instead. Fine at current data volume; revisit (build real pagination UI) once
-// the lead count grows large enough that "fetch everything" stops being viable.
-const MAX_PAGE_SIZE = 100;
+// instead; 500 (not the old 100) keeps that loop to a reasonable handful of
+// round trips at this system's current ~9k leads instead of ~90+. Now runs
+// in the background after login/session-restore rather than blocking either
+// (see AppContext's isDataLoading) — revisit (build real per-page
+// server-side pagination) once the lead count grows enough that even a
+// background "fetch everything" stops being viable.
+const MAX_PAGE_SIZE = 500;
 
 export async function apiListAllLeads(): Promise<ApiLeadRow[]> {
   const all: ApiLeadRow[] = [];
