@@ -15,6 +15,7 @@ import {
   computeROIMultiple,
   formatCurrency
 } from "@/lib/reportMetrics";
+import { LineSkeleton, TableRowsSkeleton } from "@/components/ui/Skeletons";
 
 const SUB_TABS = ["By Ad Account", "Overall", "Property-wise"] as const;
 type SubTab = (typeof SUB_TABS)[number];
@@ -23,7 +24,7 @@ const CAMPAIGN_FILTERS = ["All", "Active", "Inactive"] as const;
 type CampaignFilter = (typeof CAMPAIGN_FILTERS)[number];
 
 export default function MarketingReports({ dateRange }: { dateRange: DateRange }) {
-  const { leads, adSpendRecords, properties } = useApp();
+  const { leads, adSpendRecords, properties, isDataLoading } = useApp();
   const [subTab, setSubTab] = useState<SubTab>("Overall");
   // Active/Inactive/All — records with no linked Meta campaign (legacy/manual
   // rows, or any campaign the sync job hasn't reached yet) always count as
@@ -124,7 +125,7 @@ export default function MarketingReports({ dateRange }: { dateRange: DateRange }
           <div className="p-4 flex items-center justify-between gap-2">
             <div className="space-y-1">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total Ad Spend</span>
-              <p className="text-xl font-black text-slate-800">{formatCurrency(totalSpend)}</p>
+              {isDataLoading ? <LineSkeleton width={70} height={24} /> : <p className="text-xl font-black text-slate-800">{formatCurrency(totalSpend)}</p>}
             </div>
             <div className="h-9 w-9 rounded-lg bg-brand-50 border border-brand-100 flex items-center justify-center text-brand-600 shrink-0">
               <DollarSign className="h-4.5 w-4.5" />
@@ -134,7 +135,7 @@ export default function MarketingReports({ dateRange }: { dateRange: DateRange }
           <div className="p-4 flex items-center justify-between gap-2">
             <div className="space-y-1">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">CPL (Cost per Lead)</span>
-              <p className="text-xl font-black text-slate-800">{formatCurrency(cpl)}</p>
+              {isDataLoading ? <LineSkeleton width={60} height={24} /> : <p className="text-xl font-black text-slate-800">{formatCurrency(cpl)}</p>}
               <span className="text-[9px] text-slate-450">{totalPlatformLeads} platform-reported leads</span>
             </div>
             <div className="h-9 w-9 rounded-lg bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 shrink-0">
@@ -145,7 +146,7 @@ export default function MarketingReports({ dateRange }: { dateRange: DateRange }
           <div className="p-4 flex items-center justify-between gap-2">
             <div className="space-y-1">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Lead Quality</span>
-              <p className="text-xl font-black text-slate-800">{quality.qualityPercent.toFixed(1)}%</p>
+              {isDataLoading ? <LineSkeleton width={50} height={24} /> : <p className="text-xl font-black text-slate-800">{quality.qualityPercent.toFixed(1)}%</p>}
               <span className="text-[9px] text-slate-450">{quality.buyerCount} buyer-avg vs {quality.nonBuyerCount} non-buyer</span>
             </div>
             <div className="h-9 w-9 rounded-lg bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 shrink-0">
@@ -156,7 +157,7 @@ export default function MarketingReports({ dateRange }: { dateRange: DateRange }
           <div className="p-4 flex items-center justify-between gap-2">
             <div className="space-y-1">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Booking-Based ROI</span>
-              <p className="text-xl font-black text-slate-800">{roi.toFixed(1)}x</p>
+              {isDataLoading ? <LineSkeleton width={50} height={24} /> : <p className="text-xl font-black text-slate-800">{roi.toFixed(1)}x</p>}
               <span className="text-[9px] text-slate-450">{bookingCount} bookings • {formatCurrency(bookingValue)}</span>
             </div>
             <div className="h-9 w-9 rounded-lg bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-650 shrink-0">
@@ -167,7 +168,7 @@ export default function MarketingReports({ dateRange }: { dateRange: DateRange }
           <div className="p-4 flex items-center justify-between gap-2">
             <div className="space-y-1">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Visit/Meeting Conversion</span>
-              <p className="text-xl font-black text-slate-800">{visitConversion.conversionPercent.toFixed(1)}%</p>
+              {isDataLoading ? <LineSkeleton width={50} height={24} /> : <p className="text-xl font-black text-slate-800">{visitConversion.conversionPercent.toFixed(1)}%</p>}
               <span className="text-[9px] text-slate-450">{visitConversion.convertedCount} of {rangeLeads.length} leads</span>
             </div>
             <div className="h-9 w-9 rounded-lg bg-pink-50 border border-pink-100 flex items-center justify-center text-pink-600 shrink-0">
@@ -209,7 +210,9 @@ export default function MarketingReports({ dateRange }: { dateRange: DateRange }
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {accountRows.length === 0 ? (
+                {isDataLoading && accountRows.length === 0 ? (
+                  <TableRowsSkeleton rows={6} columns={7} />
+                ) : accountRows.length === 0 ? (
                   <tr><td colSpan={7} className="p-6 text-center text-slate-400 italic font-semibold">No ad spend recorded in this date range.</td></tr>
                 ) : (
                   accountRows.map(acc => (
@@ -274,11 +277,11 @@ export default function MarketingReports({ dateRange }: { dateRange: DateRange }
             <h3 className="text-xs font-bold text-slate-700">Lead Quality Breakdown</h3>
             <div className="flex items-end gap-6">
               <div>
-                <p className="text-3xl font-black text-emerald-600">{quality.buyerCount}</p>
+                {isDataLoading ? <LineSkeleton width={36} height={30} /> : <p className="text-3xl font-black text-emerald-600">{quality.buyerCount}</p>}
                 <span className="text-[10px] text-slate-450 font-bold uppercase">Buyer-avg leads</span>
               </div>
               <div>
-                <p className="text-3xl font-black text-red-500">{quality.nonBuyerCount}</p>
+                {isDataLoading ? <LineSkeleton width={36} height={30} /> : <p className="text-3xl font-black text-red-500">{quality.nonBuyerCount}</p>}
                 <span className="text-[10px] text-slate-450 font-bold uppercase">Non-buyer leads</span>
               </div>
             </div>
@@ -313,7 +316,9 @@ export default function MarketingReports({ dateRange }: { dateRange: DateRange }
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {propertyRows.length === 0 ? (
+                {isDataLoading && propertyRows.length === 0 ? (
+                  <TableRowsSkeleton rows={6} columns={7} />
+                ) : propertyRows.length === 0 ? (
                   <tr><td colSpan={7} className="p-6 text-center text-slate-400 italic font-semibold">No property-linked activity in this date range.</td></tr>
                 ) : (
                   propertyRows.map(row => (

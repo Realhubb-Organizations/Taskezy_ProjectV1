@@ -4,6 +4,7 @@ import React from "react";
 import Link from "next/link";
 import { useApp } from "@/context/AppContext";
 import { Activity, Users, TrendingUp, ArrowRight } from "lucide-react";
+import { LineSkeleton } from "@/components/ui/Skeletons";
 
 // The universal post-login landing page — a lightweight, module-summary
 // front door (CRM/HRMS/Finance), distinct from each module's own dashboard
@@ -13,8 +14,18 @@ import { Activity, Users, TrendingUp, ArrowRight } from "lucide-react";
 // runtime state — confusing both as a URL and in the sidebar (that route
 // was also registered as CRM's own "Dashboard" nav item, so it force-
 // expanded the CRM group even when this generic view was what rendered).
+// Every number on this page comes from data that's now loaded in the
+// background after login (see AppContext's isDataLoading) rather than
+// blocking navigation on it — this stands in for one of those values with
+// a same-sized skeleton line instead of flashing "0" while it's still on
+// its way, which would otherwise look like a real (and alarming) zero.
+function Metric({ loading, className, children }: { loading: boolean; className: string; children: React.ReactNode }) {
+  if (loading) return <LineSkeleton width={44} height={16} />;
+  return <p className={className}>{children}</p>;
+}
+
 export default function HomePage() {
-  const { leads, followupCalls, currentUser, invoices, reimbursements, timesheets, adSpendRecords } = useApp();
+  const { leads, followupCalls, currentUser, invoices, reimbursements, timesheets, adSpendRecords, isDataLoading } = useApp();
 
   const now = new Date();
   const sevenDaysAgo = new Date(now);
@@ -71,21 +82,21 @@ export default function HomePage() {
             </h3>
             <div>
               <p className="text-xs text-slate-450">Leads in last 7 days</p>
-              <p className="text-xl font-black text-slate-900 mt-0.5">{leadsLast7Days}</p>
-              <p className="text-xs font-bold text-[#006AFF] mt-0.5">{activeCampaignsCount} Active Campaigns</p>
+              <Metric loading={isDataLoading} className="text-xl font-black text-slate-900 mt-0.5">{leadsLast7Days}</Metric>
+              <Metric loading={isDataLoading} className="text-xs font-bold text-[#006AFF] mt-0.5">{activeCampaignsCount} Active Campaigns</Metric>
             </div>
             <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-100">
               <div>
                 <p className="text-[10px] text-slate-450">Spends</p>
-                <p className="text-sm font-bold text-slate-900">{spendLast7Days >= 1000 ? `${(spendLast7Days / 1000).toFixed(1)}K` : spendLast7Days.toFixed(0)}</p>
+                <Metric loading={isDataLoading} className="text-sm font-bold text-slate-900">{spendLast7Days >= 1000 ? `${(spendLast7Days / 1000).toFixed(1)}K` : spendLast7Days.toFixed(0)}</Metric>
               </div>
               <div>
                 <p className="text-[10px] text-slate-450">Avg CPL</p>
-                <p className="text-sm font-bold text-slate-900">{avgCplLast7Days.toFixed(2)}</p>
+                <Metric loading={isDataLoading} className="text-sm font-bold text-slate-900">{avgCplLast7Days.toFixed(2)}</Metric>
               </div>
               <div>
                 <p className="text-[10px] text-slate-450">Follow Ups</p>
-                <p className="text-sm font-bold text-slate-900">{pendingFollowUps}</p>
+                <Metric loading={isDataLoading} className="text-sm font-bold text-slate-900">{pendingFollowUps}</Metric>
               </div>
             </div>
           </div>
@@ -109,11 +120,11 @@ export default function HomePage() {
             <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-100">
               <div>
                 <p className="text-[10px] text-slate-450">Present</p>
-                <p className="text-sm font-bold text-slate-900">{presentTodayCount}</p>
+                <Metric loading={isDataLoading} className="text-sm font-bold text-slate-900">{presentTodayCount}</Metric>
               </div>
               <div>
                 <p className="text-[10px] text-slate-450">Pending Info</p>
-                <p className="text-sm font-bold text-red-600">{pendingRegularizations}</p>
+                <Metric loading={isDataLoading} className="text-sm font-bold text-red-600">{pendingRegularizations}</Metric>
               </div>
               <div>
                 <p className="text-[10px] text-slate-450">WFH</p>
@@ -135,21 +146,21 @@ export default function HomePage() {
             </h3>
             <div>
               <p className="text-xs text-slate-450">Raised Invoices in last 7 days</p>
-              <p className="text-xl font-black text-slate-900 mt-0.5">{invoicesLast7Days.length}</p>
-              <p className="text-xs font-bold text-[#006AFF] mt-0.5">{propertiesInvoicedLast7Days} Properties Included</p>
+              <Metric loading={isDataLoading} className="text-xl font-black text-slate-900 mt-0.5">{invoicesLast7Days.length}</Metric>
+              <Metric loading={isDataLoading} className="text-xs font-bold text-[#006AFF] mt-0.5">{propertiesInvoicedLast7Days} Properties Included</Metric>
             </div>
             <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-100">
               <div>
                 <p className="text-[10px] text-slate-450">Bookings</p>
-                <p className="text-sm font-bold text-slate-900">{bookingsCount}</p>
+                <Metric loading={isDataLoading} className="text-sm font-bold text-slate-900">{bookingsCount}</Metric>
               </div>
               <div>
                 <p className="text-[10px] text-slate-450">Transactions</p>
-                <p className="text-sm font-bold text-slate-900">{invoices.length}</p>
+                <Metric loading={isDataLoading} className="text-sm font-bold text-slate-900">{invoices.length}</Metric>
               </div>
               <div>
                 <p className="text-[10px] text-slate-450">Reimbursements</p>
-                <p className="text-sm font-bold text-slate-900">{reimbursements.length}</p>
+                <Metric loading={isDataLoading} className="text-sm font-bold text-slate-900">{reimbursements.length}</Metric>
               </div>
             </div>
           </div>

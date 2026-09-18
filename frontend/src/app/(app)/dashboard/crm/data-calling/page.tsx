@@ -7,6 +7,7 @@ import { ChevronDown, ChevronRight, Calendar, Search, Sliders, Minus, X, Copy, U
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine } from "recharts";
 import UploadLeadsModal from "@/components/crm/UploadLeadsModal";
 import LeadDetailDrawer from "@/components/crm/LeadDetailDrawer";
+import { LineSkeleton, TableRowsSkeleton } from "@/components/ui/Skeletons";
 
 // Data Calling's whole status model is deliberately just these three — a
 // cold-outreach triage pipeline, not the full CRM pipeline: a fresh
@@ -154,7 +155,7 @@ export default function DataCallingPage() {
   // the ONLY-bulk-upload view AppContext derives for exactly this page (see
   // AppContext.tsx), aliased to `leads` here so the rest of this large file
   // needs no other changes.
-  const { dataCallingLeads: leads, followupCalls, properties, users, activeRole, updateLeadStatus, reassignLead, bulkImportLeads, addFollowupCall } = useApp();
+  const { dataCallingLeads: leads, followupCalls, properties, users, activeRole, updateLeadStatus, reassignLead, bulkImportLeads, addFollowupCall, isDataLoading } = useApp();
   // Bulk select + Assign/Reshuffle are an admin-only workflow — a sales
   // agent has no one to hand leads off to in that sense, so the checkbox
   // column and both toolbar buttons stay admin-only.
@@ -947,7 +948,9 @@ export default function DataCallingPage() {
               >
                 <div>
                   <span className="text-[11px] font-medium text-slate-500 block">{s.label}</span>
-                  <span className={`text-lg font-extrabold mt-1.5 block ${s.color}`}>{s.value}</span>
+                  <span className={`text-lg font-extrabold mt-1.5 block ${s.color}`}>
+                    {isDataLoading ? <LineSkeleton width={32} height={18} /> : s.value}
+                  </span>
                 </div>
                 <ChevronRight className={`h-4 w-4 text-slate-300 shrink-0 transition-transform ${isActive ? "rotate-90 text-blue-500" : "group-hover:translate-x-0.5"}`} />
               </button>
@@ -1022,7 +1025,9 @@ export default function DataCallingPage() {
               >
                 <div>
                   <span className="text-[11px] font-medium text-slate-500 block">{s.label}</span>
-                  <span className={`text-lg font-extrabold mt-1.5 block ${s.color}`}>{s.value}</span>
+                  <span className={`text-lg font-extrabold mt-1.5 block ${s.color}`}>
+                    {isDataLoading ? <LineSkeleton width={32} height={18} /> : s.value}
+                  </span>
                 </div>
                 <ChevronRight className={`h-4 w-4 text-slate-300 shrink-0 transition-transform ${isActive ? "rotate-90 text-blue-500" : "group-hover:translate-x-0.5"}`} />
               </button>
@@ -1078,7 +1083,9 @@ export default function DataCallingPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-[12px] text-slate-700">
-                  {shownLeads.length === 0 ? (
+                  {isDataLoading && shownLeads.length === 0 ? (
+                    <TableRowsSkeleton rows={6} columns={4} />
+                  ) : shownLeads.length === 0 ? (
                     <tr>
                       <td colSpan={4} className="px-5 py-6 text-center text-slate-400 italic">
                         No leads found for this category.
@@ -1191,7 +1198,9 @@ export default function DataCallingPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-[12px] text-slate-700">
-                  {shownLeads.length === 0 ? (
+                  {isDataLoading && shownLeads.length === 0 ? (
+                    <TableRowsSkeleton rows={6} columns={4} />
+                  ) : shownLeads.length === 0 ? (
                     <tr>
                       <td colSpan={4} className="px-5 py-6 text-center text-slate-400 italic">
                         No leads found for this category.
@@ -1428,7 +1437,9 @@ export default function DataCallingPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-[13px] text-slate-700">
-                    {filteredSalespersonRows.length === 0 ? (
+                    {isDataLoading && filteredSalespersonRows.length === 0 ? (
+                      <TableRowsSkeleton rows={6} columns={7} />
+                    ) : filteredSalespersonRows.length === 0 ? (
                       <tr>
                         <td colSpan={7} className="px-5 py-8 text-center text-slate-400 italic">No salesperson activity found for this scope.</td>
                       </tr>
@@ -1594,7 +1605,9 @@ export default function DataCallingPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-[13px] text-slate-700">
-                    {filteredSourceRows.length === 0 ? (
+                    {isDataLoading && filteredSourceRows.length === 0 ? (
+                      <TableRowsSkeleton rows={6} columns={7 + ANALYTICS_COLUMNS.filter(c => c.key !== "qualifiedLeads" && analyticsVisibleColumns[c.key]).length} />
+                    ) : filteredSourceRows.length === 0 ? (
                       <tr>
                         <td colSpan={7 + ANALYTICS_COLUMNS.filter(c => c.key !== "qualifiedLeads" && analyticsVisibleColumns[c.key]).length} className="px-5 py-8 text-center text-slate-400 italic">
                           No data-call source activity found.
@@ -1866,7 +1879,9 @@ export default function DataCallingPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-[12px] font-medium text-slate-700">
-                  {paginatedLeads.length === 0 ? (
+                  {isDataLoading && paginatedLeads.length === 0 ? (
+                    <TableRowsSkeleton rows={8} columns={visibleColCount} />
+                  ) : paginatedLeads.length === 0 ? (
                     <tr>
                       <td colSpan={visibleColCount} className="px-5 py-8 text-center text-slate-400 italic">No leads found matching filter.</td>
                     </tr>

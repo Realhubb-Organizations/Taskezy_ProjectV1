@@ -3,9 +3,10 @@
 import React, { useState } from "react";
 import { useApp, ResaleUnit } from "@/context/AppContext";
 import { Plus, X, Search, Landmark, PhoneCall, Link2, CheckCircle } from "lucide-react";
+import { TableRowsSkeleton } from "@/components/ui/Skeletons";
 
 export default function ResalePage() {
-  const { resaleUnits, addResaleUnit, leads } = useApp();
+  const { resaleUnits, addResaleUnit, leads, isDataLoading } = useApp();
 
   // Filters state
   const [searchQuery, setSearchQuery] = useState("");
@@ -138,7 +139,10 @@ export default function ResalePage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredUnits.map((u) => (
+                {isDataLoading && filteredUnits.length === 0 ? (
+                  <TableRowsSkeleton rows={6} columns={6} />
+                ) : (
+                  filteredUnits.map((u) => (
                   <tr key={u.id} className="hover:bg-slate-50/50 transition-colors">
                     <td className="p-4">
                       <p className="font-bold text-slate-800">{u.property}</p>
@@ -165,7 +169,8 @@ export default function ResalePage() {
                       </div>
                     </td>
                   </tr>
-                ))}
+                  ))
+                )}
               </tbody>
             </table>
           </div>

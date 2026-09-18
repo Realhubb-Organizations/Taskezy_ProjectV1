@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Bell, UserPlus, AlarmClock, Briefcase, DollarSign, ChevronLeft, ChevronDown, Repeat, AlertTriangle } from "lucide-react";
 import { useApp, getAvailableSystems, Notification, NotificationCategory, SystemType } from "@/context/AppContext";
+import { CardListSkeleton } from "@/components/ui/Skeletons";
 
 function timeAgo(iso: string): string {
   const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
@@ -49,7 +50,7 @@ interface NotificationGroup {
 }
 
 export default function NotificationBell() {
-  const { notifications, currentUser, activeSystem, markNotificationRead } = useApp();
+  const { notifications, currentUser, activeSystem, markNotificationRead, isDataLoading } = useApp();
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [activeGroupKey, setActiveGroupKey] = useState<string>("");
@@ -267,7 +268,11 @@ export default function NotificationBell() {
 
             {/* Active group content */}
             <div className="flex-1 overflow-y-auto">
-              {!activeGroup || activeGroup.items.length === 0 ? (
+              {isDataLoading && (!activeGroup || activeGroup.items.length === 0) ? (
+                <div className="px-4 py-3">
+                  <CardListSkeleton count={4} />
+                </div>
+              ) : !activeGroup || activeGroup.items.length === 0 ? (
                 <p className="px-4 py-6 text-center text-[11px] text-slate-400 italic">
                   {activeGroup?.emptyText || "No notifications."}
                 </p>

@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { useApp, Property, LeadAssignmentMode, PropertyTeamAssignmentMode, PropertyTeamMember } from "@/context/AppContext";
+import { CardListSkeleton } from "@/components/ui/Skeletons";
 
 interface AddPropertyModalProps {
   isOpen: boolean;
@@ -40,7 +41,7 @@ function Field({
 const REQUIRED_FIELDS = ["name", "developer", "propertyType", "location"] as const;
 
 export default function AddPropertyModal({ isOpen, onClose, onSuccess, duplicateFrom }: AddPropertyModalProps) {
-  const { users, addProperty } = useApp();
+  const { users, addProperty, isDataLoading } = useApp();
 
   const [activeTab, setActiveTab] = useState<"details" | "team">("details");
 
@@ -326,7 +327,11 @@ export default function AddPropertyModal({ isOpen, onClose, onSuccess, duplicate
                       />
 
                       <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-48 overflow-y-auto bg-white">
-                        {visibleTeam.length === 0 ? (
+                        {isDataLoading && visibleTeam.length === 0 ? (
+                          <div className="p-2">
+                            <CardListSkeleton count={3} />
+                          </div>
+                        ) : visibleTeam.length === 0 ? (
                           <p className="text-[10px] text-slate-400 italic p-3">No matching team members.</p>
                         ) : (
                           visibleTeam.map(member => {

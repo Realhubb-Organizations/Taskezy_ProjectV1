@@ -4,13 +4,14 @@ import React from "react";
 import Link from "next/link";
 import { useApp } from "@/context/AppContext";
 import { Cpu, Server, Users, Globe } from "lucide-react";
+import { LineSkeleton, TableRowsSkeleton, CardListSkeleton } from "@/components/ui/Skeletons";
 
 // HRMS's own overview — moved out of the old bare /dashboard route (which
 // branched its content by department/activeSystem, so the same URL showed a
 // different page depending on runtime state) into its own real path,
 // alongside /crm/dashboard and /finance/dashboard.
 export default function HrmsDashboardPage() {
-  const { users, currentUser, timesheets, attendanceRecords, adSpendRecords, metaConnected, adminSeats, financeSeats, agentSeats } = useApp();
+  const { users, currentUser, timesheets, attendanceRecords, adSpendRecords, metaConnected, adminSeats, financeSeats, agentSeats, isDataLoading } = useApp();
 
   const userDept = currentUser?.department || "TECH";
 
@@ -36,11 +37,13 @@ export default function HrmsDashboardPage() {
 
           <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Active Corporate Seats</span>
-            <p className="text-base font-black text-slate-800 mt-1">
-              {users.length} users / {adminSeats + financeSeats + agentSeats} licensed
-            </p>
+            {isDataLoading ? <LineSkeleton width={140} height={16} /> : (
+              <p className="text-base font-black text-slate-800 mt-1">
+                {users.length} users / {adminSeats + financeSeats + agentSeats} licensed
+              </p>
+            )}
             <span className="text-[9px] text-brand-600 font-bold mt-2">
-              Utilization: {Math.round((users.length / Math.max(1, adminSeats + financeSeats + agentSeats)) * 100)}%
+              {isDataLoading ? <LineSkeleton width={90} height={11} /> : `Utilization: ${Math.round((users.length / Math.max(1, adminSeats + financeSeats + agentSeats)) * 100)}%`}
             </span>
           </div>
 
@@ -71,15 +74,19 @@ export default function HrmsDashboardPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
-                  {users.map((u, idx) => (
-                    <tr key={idx} className="hover:bg-slate-50/50">
-                      <td className="p-3 font-bold text-slate-800">{u.name}</td>
-                      <td className="p-3 text-slate-500 font-mono">{u.email}</td>
-                      <td className="p-3 text-slate-550">{u.department}</td>
-                      <td className="p-3 text-slate-500">{u.designation}</td>
-                      <td className="p-3 text-right text-brand-700 font-bold">{u.role}</td>
-                    </tr>
-                  ))}
+                  {isDataLoading && users.length === 0 ? (
+                    <TableRowsSkeleton rows={6} columns={5} />
+                  ) : (
+                    users.map((u, idx) => (
+                      <tr key={idx} className="hover:bg-slate-50/50">
+                        <td className="p-3 font-bold text-slate-800">{u.name}</td>
+                        <td className="p-3 text-slate-500 font-mono">{u.email}</td>
+                        <td className="p-3 text-slate-550">{u.department}</td>
+                        <td className="p-3 text-slate-500">{u.designation}</td>
+                        <td className="p-3 text-right text-brand-700 font-bold">{u.role}</td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
@@ -128,15 +135,21 @@ export default function HrmsDashboardPage() {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-center text-xs bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
           <div>
             <span className="text-slate-400 block font-semibold mb-0.5">Total Spend</span>
-            <span className="text-base font-black text-brand-700 font-mono">₹{totalSpend.toLocaleString("en-IN")}</span>
+            <span className="text-base font-black text-brand-700 font-mono">
+              {isDataLoading ? <LineSkeleton width={70} height={16} /> : `₹${totalSpend.toLocaleString("en-IN")}`}
+            </span>
           </div>
           <div className="sm:border-l border-slate-200">
             <span className="text-slate-400 block font-semibold mb-0.5">Ingested Leads</span>
-            <span className="text-base font-black text-slate-850">{totalLeadsGenerated}</span>
+            <span className="text-base font-black text-slate-850">
+              {isDataLoading ? <LineSkeleton width={40} height={16} /> : totalLeadsGenerated}
+            </span>
           </div>
           <div className="sm:border-l border-slate-200">
             <span className="text-slate-400 block font-semibold mb-0.5">Avg CPL</span>
-            <span className="text-base font-black text-brand-700 font-mono">₹{avgCPL.toFixed(0)}</span>
+            <span className="text-base font-black text-brand-700 font-mono">
+              {isDataLoading ? <LineSkeleton width={50} height={16} /> : `₹${avgCPL.toFixed(0)}`}
+            </span>
           </div>
         </div>
 
@@ -156,7 +169,9 @@ export default function HrmsDashboardPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
-                  {accountBreakdown.length === 0 ? (
+                  {isDataLoading && accountBreakdown.length === 0 ? (
+                    <TableRowsSkeleton rows={5} columns={5} />
+                  ) : accountBreakdown.length === 0 ? (
                     <tr>
                       <td colSpan={5} className="p-4 text-center text-slate-400 font-semibold italic">
                         No ad accounts reporting spend yet.
@@ -201,33 +216,33 @@ export default function HrmsDashboardPage() {
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
         <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm text-center flex flex-col justify-between">
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Employees</span>
-          <p className="text-lg font-black text-slate-800 mt-1">{users.length}</p>
+          {isDataLoading ? <LineSkeleton width={30} height={18} /> : <p className="text-lg font-black text-slate-800 mt-1">{users.length}</p>}
           <span className="text-[9px] text-slate-450 mt-2 block">Active roster accounts</span>
         </div>
         <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm text-center flex flex-col justify-between">
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Present Today</span>
-          <p className="text-lg font-black text-brand-700 mt-1">{presentTodayCount}</p>
+          {isDataLoading ? <LineSkeleton width={30} height={18} /> : <p className="text-lg font-black text-brand-700 mt-1">{presentTodayCount}</p>}
           <span className="text-[9px] text-slate-455 mt-2 block">
-            Attendance rate: {users.length > 0 ? Math.round((presentTodayCount / users.length) * 100) : 0}%
+            {isDataLoading ? <LineSkeleton width={80} height={11} /> : `Attendance rate: ${users.length > 0 ? Math.round((presentTodayCount / users.length) * 100) : 0}%`}
           </span>
         </div>
         <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm text-center flex flex-col justify-between">
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Late Clock-Ins</span>
           <p className="text-lg font-black text-amber-600 mt-1">
-            {attendanceRecords.reduce((sum, r) => sum + r.late, 0)}
+            {isDataLoading ? <LineSkeleton width={30} height={18} /> : attendanceRecords.reduce((sum, r) => sum + r.late, 0)}
           </p>
           <span className="text-[9px] text-slate-450 mt-2 block">Requires correction checks</span>
         </div>
         <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm text-center flex flex-col justify-between">
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Pending Corrections</span>
           <p className="text-lg font-black text-slate-800 mt-1">
-            {timesheets.filter(ts => ts.status === "Regularization Pending").length}
+            {isDataLoading ? <LineSkeleton width={30} height={18} /> : timesheets.filter(ts => ts.status === "Regularization Pending").length}
           </p>
           <span className="text-[9px] text-slate-450 mt-2 block">Awaiting audit approval</span>
         </div>
         <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm text-center flex flex-col justify-between">
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Avg On-Time Rate</span>
-          <p className="text-lg font-black text-emerald-650 mt-1">{avgOnTimeRate}%</p>
+          {isDataLoading ? <LineSkeleton width={40} height={18} /> : <p className="text-lg font-black text-emerald-650 mt-1">{avgOnTimeRate}%</p>}
           <span className="text-[9px] text-slate-450 mt-2 block">All geofenced logs</span>
         </div>
       </div>
@@ -237,20 +252,24 @@ export default function HrmsDashboardPage() {
         <div className="glass-card p-4 rounded-2xl space-y-4">
           <h3 className="text-xs font-bold text-slate-705 border-b border-slate-100 pb-3">Corporate Roster Snapshot</h3>
           <div className="divide-y divide-slate-100 max-h-60 overflow-y-auto pr-1 text-xs">
-            {users.slice(0, 5).map((member, idx) => (
-              <div key={idx} className="py-2.5 flex justify-between items-center font-medium">
-                <div>
-                  <p className="font-bold text-slate-850">{member.name}</p>
-                  <p className="text-[9px] text-slate-400 font-mono mt-0.5">{member.email}</p>
+            {isDataLoading && users.length === 0 ? (
+              <CardListSkeleton count={5} />
+            ) : (
+              users.slice(0, 5).map((member, idx) => (
+                <div key={idx} className="py-2.5 flex justify-between items-center font-medium">
+                  <div>
+                    <p className="font-bold text-slate-850">{member.name}</p>
+                    <p className="text-[9px] text-slate-400 font-mono mt-0.5">{member.email}</p>
+                  </div>
+                  <div className="text-right">
+                    <span className="bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded text-[9px] text-slate-600 font-bold block">
+                      {member.department}
+                    </span>
+                    <span className="text-[9px] text-slate-400 mt-1 block">{member.designation}</span>
+                  </div>
                 </div>
-                <div className="text-right">
-                  <span className="bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded text-[9px] text-slate-600 font-bold block">
-                    {member.department}
-                  </span>
-                  <span className="text-[9px] text-slate-400 mt-1 block">{member.designation}</span>
-                </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </div>
 

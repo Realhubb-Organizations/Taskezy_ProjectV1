@@ -17,9 +17,10 @@ import {
   formatMinutes,
   SLA_MINUTES
 } from "@/lib/reportMetrics";
+import { LineSkeleton, TableRowsSkeleton, CardListSkeleton } from "@/components/ui/Skeletons";
 
 export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
-  const { leads, adSpendRecords, followupCalls, users, currentUser, activeRole, reassignLead } = useApp();
+  const { leads, adSpendRecords, followupCalls, users, currentUser, activeRole, reassignLead, isDataLoading } = useApp();
 
   const rangeLeads = useMemo(() => filterLeadsByRange(leads, dateRange.from, dateRange.to), [leads, dateRange]);
   const rangeSpend = useMemo(() => filterAdSpendByRange(adSpendRecords, dateRange.from, dateRange.to), [adSpendRecords, dateRange]);
@@ -96,7 +97,9 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
           <div className="lg:col-span-3 bg-white border border-slate-100 rounded-2xl shadow-sm p-4 space-y-2">
             <h3 className="text-[10px] uppercase font-extrabold text-slate-400 tracking-wider px-1">Sales Agents</h3>
             <div className="space-y-1 max-h-[28rem] overflow-y-auto pr-1">
-              {agentNames.length === 0 ? (
+              {isDataLoading && agentNames.length === 0 ? (
+                <CardListSkeleton count={4} />
+              ) : agentNames.length === 0 ? (
                 <p className="text-[11px] text-slate-400 italic px-1">No agents with lead activity in range.</p>
               ) : (
                 agentNames.map(name => {
@@ -155,35 +158,55 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 bg-white divide-y sm:divide-y-0 sm:divide-x divide-slate-100">
                   <div className="p-4">
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Leads Assigned</span>
-                    <p className="text-xl font-black text-slate-800 mt-1">{agentLeads.length}</p>
+                    {isDataLoading ? (
+                      <LineSkeleton width={40} height={24} />
+                    ) : (
+                      <p className="text-xl font-black text-slate-800 mt-1">{agentLeads.length}</p>
+                    )}
                   </div>
                   <div className="p-4">
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Allocated Spend</span>
-                    <p className="text-xl font-black text-slate-800 mt-1 flex items-center gap-1">
-                      <DollarSign className="h-4 w-4 text-slate-400" />
-                      {formatCurrency(allocatedSpend)}
-                    </p>
+                    {isDataLoading ? (
+                      <LineSkeleton width={70} height={24} />
+                    ) : (
+                      <p className="text-xl font-black text-slate-800 mt-1 flex items-center gap-1">
+                        <DollarSign className="h-4 w-4 text-slate-400" />
+                        {formatCurrency(allocatedSpend)}
+                      </p>
+                    )}
                   </div>
                   <div className="p-4">
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Booking ROI</span>
-                    <p className="text-xl font-black text-emerald-650 mt-1 flex items-center gap-1">
-                      <TrendingUp className="h-4 w-4" />
-                      {roi.toFixed(1)}x
-                    </p>
+                    {isDataLoading ? (
+                      <LineSkeleton width={50} height={24} />
+                    ) : (
+                      <p className="text-xl font-black text-emerald-650 mt-1 flex items-center gap-1">
+                        <TrendingUp className="h-4 w-4" />
+                        {roi.toFixed(1)}x
+                      </p>
+                    )}
                     <span className="text-[9px] text-slate-450">{bookingCount} bookings • {formatCurrency(bookingValue)}</span>
                   </div>
                   <div className="p-4">
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Missed Leads</span>
-                    <p className={`text-xl font-black mt-1 ${missedLeads.length > 0 ? "text-red-650" : "text-slate-800"}`}>
-                      {missedLeads.length}
-                    </p>
+                    {isDataLoading ? (
+                      <LineSkeleton width={30} height={24} />
+                    ) : (
+                      <p className={`text-xl font-black mt-1 ${missedLeads.length > 0 ? "text-red-650" : "text-slate-800"}`}>
+                        {missedLeads.length}
+                      </p>
+                    )}
                     <span className="text-[9px] text-slate-450">SLA: 20 min response window</span>
                   </div>
                   <div className="p-4">
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Missed Follow-ups</span>
-                    <p className={`text-xl font-black mt-1 ${missedFollowups.length > 0 ? "text-red-650" : "text-slate-800"}`}>
-                      {missedFollowups.length}
-                    </p>
+                    {isDataLoading ? (
+                      <LineSkeleton width={30} height={24} />
+                    ) : (
+                      <p className={`text-xl font-black mt-1 ${missedFollowups.length > 0 ? "text-red-650" : "text-slate-800"}`}>
+                        {missedFollowups.length}
+                      </p>
+                    )}
                     <span className="text-[9px] text-slate-450">SLA: 10 min after reminder due</span>
                   </div>
                 </div>
@@ -208,7 +231,9 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {missedLeads.length === 0 ? (
+                      {isDataLoading && missedLeads.length === 0 ? (
+                        <TableRowsSkeleton rows={6} columns={activeRole === "ADMIN" ? 7 : 6} />
+                      ) : missedLeads.length === 0 ? (
                         <tr>
                           <td colSpan={activeRole === "ADMIN" ? 7 : 6} className="p-6 text-center text-slate-400 italic font-semibold">
                             No missed leads for {activeAgent} in this date range.
@@ -293,7 +318,9 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {missedFollowups.length === 0 ? (
+                      {isDataLoading && missedFollowups.length === 0 ? (
+                        <TableRowsSkeleton rows={6} columns={4} />
+                      ) : missedFollowups.length === 0 ? (
                         <tr>
                           <td colSpan={4} className="p-6 text-center text-slate-400 italic font-semibold">
                             No missed follow-ups for {activeAgent} in this date range.

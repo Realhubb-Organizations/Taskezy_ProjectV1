@@ -3,6 +3,7 @@
 import React, { useMemo, useRef, useState } from "react";
 import { Search, ChevronDown, ChevronLeft, ChevronRight, Copy, Check, X } from "lucide-react";
 import { WhatsAppIcon, CallIcon } from "@/components/icons/ContactIcons";
+import { TableRowsSkeleton } from "@/components/ui/Skeletons";
 
 export interface PendingRow {
   id: string;
@@ -18,11 +19,13 @@ export interface PendingRow {
 export default function PendingLeadsTable({
   title,
   rows,
-  onViewLead
+  onViewLead,
+  isLoading = false
 }: {
   title: string;
   rows: PendingRow[];
   onViewLead?: (leadId: string) => void;
+  isLoading?: boolean;
 }) {
   const [search, setSearch] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -205,7 +208,9 @@ export default function PendingLeadsTable({
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {filteredRows.length === 0 ? (
+            {isLoading && filteredRows.length === 0 ? (
+              <TableRowsSkeleton rows={5} columns={6} />
+            ) : filteredRows.length === 0 ? (
               <tr>
                 <td colSpan={6} className="px-4 py-8 text-center text-slate-400 font-semibold italic text-xs">
                   {rows.length === 0 ? "No records in this range." : "No records match the current search/filters."}

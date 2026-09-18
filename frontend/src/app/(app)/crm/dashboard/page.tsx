@@ -10,6 +10,7 @@ import { deriveActivityTimeline, STATUS_OPTIONS, statusBadgeClasses } from "@/li
 import { computeLeadSummaryStats } from "@/lib/leadSummaryStats";
 import { WhatsAppIcon, CallIcon } from "@/components/icons/ContactIcons";
 import { ChevronDown, Plus, CheckCircle, Phone, Mail, X, Copy, Check, User, Search, ArrowRight } from "lucide-react";
+import { LineSkeleton, TableRowsSkeleton } from "@/components/ui/Skeletons";
 
 // CRM's own overview — moved out of the old bare /dashboard route (which
 // branched its content by department/activeSystem, so the same URL showed a
@@ -18,7 +19,7 @@ import { ChevronDown, Plus, CheckCircle, Phone, Mail, X, Copy, Check, User, Sear
 // this rendered, even for users who weren't in CRM at all) into its own
 // real path, alongside /hrms/dashboard and /finance/dashboard.
 export default function CrmDashboardPage() {
-  const { leads, properties, users, currentUser, addLead, followupCalls, updateLeadStatus } = useApp();
+  const { leads, properties, users, currentUser, addLead, followupCalls, updateLeadStatus, isDataLoading } = useApp();
 
   const [dateRange, setDateRange] = useState<"today" | "yesterday" | "week" | "month" | "all">("today");
   const [isUploadOpen, setIsUploadOpen] = useState(false);
@@ -511,7 +512,9 @@ export default function CrmDashboardPage() {
                   {s.label}
                   <ChevronDown className={`h-3 w-3 text-slate-300 shrink-0 transition-transform ${isActive ? "rotate-180 text-blue-500" : ""}`} />
                 </span>
-                <span className={`text-lg font-extrabold block mt-1.5 ${s.color}`}>{s.value}</span>
+                <span className={`text-lg font-extrabold block mt-1.5 ${s.color}`}>
+                  {isDataLoading ? <LineSkeleton width={32} height={18} /> : s.value}
+                </span>
               </button>
             );
           })}
@@ -688,7 +691,9 @@ export default function CrmDashboardPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-xs">
-                {drillLeads.length === 0 ? (
+                {isDataLoading && drillLeads.length === 0 ? (
+                  <TableRowsSkeleton rows={6} columns={9} />
+                ) : drillLeads.length === 0 ? (
                   <tr>
                     <td colSpan={9} className="px-4 py-8 text-center text-slate-400 font-semibold italic">
                       No leads in this category for the selected date range.
@@ -789,10 +794,10 @@ export default function CrmDashboardPage() {
       )}
 
       {/* Pending Follow ups — leads currently sitting in the Follow-ups status */}
-      <PendingLeadsTable title="Pending Follow ups" rows={followUpRows} onViewLead={openQuickView} />
+      <PendingLeadsTable title="Pending Follow ups" rows={followUpRows} onViewLead={openQuickView} isLoading={isDataLoading} />
 
       {/* Pending Call Backs — the operational followup_calls callback queue */}
-      <PendingLeadsTable title="Pending Call Backs" rows={callBackRows} onViewLead={openQuickView} />
+      <PendingLeadsTable title="Pending Call Backs" rows={callBackRows} onViewLead={openQuickView} isLoading={isDataLoading} />
 
       <AddLeadModal
         isOpen={isUploadOpen}

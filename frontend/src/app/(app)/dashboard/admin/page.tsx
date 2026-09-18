@@ -3,9 +3,10 @@
 import React, { useState } from "react";
 import { useApp, User, Role } from "@/context/AppContext";
 import { ShieldCheck, Edit, X, AlertTriangle, Eye, EyeOff, CheckCircle, Plus } from "lucide-react";
+import { TableRowsSkeleton } from "@/components/ui/Skeletons";
 
 export default function AdminPage() {
-  const { users, activeRole, updateUserFields, addTeamMember, deleteTeamMember } = useApp();
+  const { users, activeRole, updateUserFields, addTeamMember, deleteTeamMember, isDataLoading } = useApp();
 
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   
@@ -177,7 +178,10 @@ export default function AdminPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {users.map((user) => (
+                {isDataLoading && users.length === 0 ? (
+                  <TableRowsSkeleton rows={6} columns={8} />
+                ) : (
+                  users.map((user) => (
                   <tr key={user.id} className="hover:bg-slate-50/50 transition-colors">
                     <td className="p-4 font-mono text-[10px] text-slate-500 font-semibold">
                       {user.employee_code || `TE-USR-${user.id.slice(-4).toUpperCase()}`}
@@ -239,7 +243,8 @@ export default function AdminPage() {
                       )}
                     </td>
                   </tr>
-                ))}
+                  ))
+                )}
               </tbody>
             </table>
           </div>

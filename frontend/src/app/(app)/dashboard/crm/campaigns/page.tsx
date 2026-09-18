@@ -26,6 +26,7 @@ import {
   RefreshCw
 } from "lucide-react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine } from "recharts";
+import { LineSkeleton, TableRowsSkeleton, CardListSkeleton } from "@/components/ui/Skeletons";
 
 import {
   CampaignItem,
@@ -272,7 +273,7 @@ function CampaignDateRangePicker({
 }
 
 export default function AdminCampaignsPage() {
-  const { leads, adSpendRecords, adLevelSpendRecords, followupCalls, refetchAdLevelSpend, triggerAdSpendSync } = useApp();
+  const { leads, adSpendRecords, adLevelSpendRecords, followupCalls, refetchAdLevelSpend, triggerAdSpendSync, isDataLoading } = useApp();
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -1241,8 +1242,14 @@ export default function AdminCampaignsPage() {
                   >
                     <div>
                       <span className="text-[11px] font-medium text-slate-500 block">{s.label}</span>
-                      <span className={`text-lg font-extrabold mt-1.5 block ${s.color}`}>{s.value}</span>
-                      {s.subtitle && <span className="text-[10px] text-slate-400 block mt-0.5" title="Meta + Google + Other's own self-reported total for this Date Range">{s.subtitle}</span>}
+                      <span className={`text-lg font-extrabold mt-1.5 block ${s.color}`}>
+                        {isDataLoading ? <LineSkeleton width={36} height={18} /> : s.value}
+                      </span>
+                      {s.subtitle && (
+                        <span className="text-[10px] text-slate-400 block mt-0.5" title="Meta + Google + Other's own self-reported total for this Date Range">
+                          {isDataLoading ? <LineSkeleton width={48} height={10} /> : s.subtitle}
+                        </span>
+                      )}
                     </div>
                     <ChevronRight className={`h-3.5 w-3.5 text-slate-300 transition-transform ${isActive ? "rotate-90 text-blue-500" : "group-hover:translate-x-0.5"}`} />
                   </button>
@@ -1313,7 +1320,9 @@ export default function AdminCampaignsPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 text-[12px] text-slate-700">
-                        {shownCampaigns.length === 0 ? (
+                        {isDataLoading && shownCampaigns.length === 0 ? (
+                          <TableRowsSkeleton rows={6} columns={4} />
+                        ) : shownCampaigns.length === 0 ? (
                           <tr>
                             <td colSpan={4} className="px-5 py-6 text-center text-slate-400 italic">
                               No campaigns found.
@@ -1346,7 +1355,9 @@ export default function AdminCampaignsPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 text-[12px] text-slate-700">
-                        {shownLeads.length === 0 ? (
+                        {isDataLoading && shownLeads.length === 0 ? (
+                          <TableRowsSkeleton rows={6} columns={4} />
+                        ) : shownLeads.length === 0 ? (
                           <tr>
                             <td colSpan={4} className="px-5 py-6 text-center text-slate-400 italic">
                               No leads found for this category.
@@ -1524,7 +1535,9 @@ export default function AdminCampaignsPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-[12px] font-medium text-slate-700">
-                      {qualifiedLeadsDrillList.length === 0 ? (
+                      {isDataLoading && qualifiedLeadsDrillList.length === 0 ? (
+                        <TableRowsSkeleton rows={6} columns={8} />
+                      ) : qualifiedLeadsDrillList.length === 0 ? (
                         <tr>
                           <td colSpan={8} className="px-5 py-8 text-center text-slate-400 italic">No qualified leads found for this campaign.</td>
                         </tr>
@@ -1688,7 +1701,9 @@ export default function AdminCampaignsPage() {
                 <span className="text-right">Spend</span>
               </div>
               <div className="overflow-y-auto max-h-[160px] divide-y divide-slate-50">
-                {typeBreakdown.length === 0 ? (
+                {isDataLoading && typeBreakdown.length === 0 ? (
+                  <CardListSkeleton count={4} />
+                ) : typeBreakdown.length === 0 ? (
                   <p className="text-xs text-slate-400 italic py-4 text-center">No data yet.</p>
                 ) : (
                   typeBreakdown.map(t => (
@@ -1723,16 +1738,16 @@ export default function AdminCampaignsPage() {
               <div className="grid grid-cols-[1fr_64px_112px] gap-x-4 items-start pt-2 mt-2 border-t border-slate-200 text-xs font-bold text-slate-900">
                 <span className="pt-0.5">Total</span>
                 <span className="text-right">
-                  {typeBreakdownPlatformLeadsTotal.toLocaleString("en-IN")}
+                  {isDataLoading ? <LineSkeleton width={32} height={14} /> : typeBreakdownPlatformLeadsTotal.toLocaleString("en-IN")}
                   {/* Spend was actually incurred to generate this larger
                       platform-reported count, not the smaller real-synced
                       number underneath it — shown here so the two never
                       read as an unexplained ~10x cost-per-lead jump. */}
                   <span className="block text-right text-[9px] font-normal text-slate-400" title="Real individual leads actually synced into the CRM for this Date Range">
-                    {typeBreakdownLeadsTotal.toLocaleString("en-IN")} synced
+                    {isDataLoading ? <LineSkeleton width={40} height={10} /> : `${typeBreakdownLeadsTotal.toLocaleString("en-IN")} synced`}
                   </span>
                 </span>
-                <span className="text-right pt-0.5">{formatCurrency(typeBreakdownTotal)}</span>
+                <span className="text-right pt-0.5">{isDataLoading ? <LineSkeleton width={48} height={14} /> : formatCurrency(typeBreakdownTotal)}</span>
               </div>
             </div>
           </div>
@@ -1859,7 +1874,9 @@ export default function AdminCampaignsPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-[12px] font-medium text-slate-700">
-                      {propertyBreakdown.length === 0 ? (
+                      {isDataLoading && propertyBreakdown.length === 0 ? (
+                        <TableRowsSkeleton rows={6} columns={BREAKDOWN_COLUMNS.filter(c => breakdownVisibleColumns[c.key]).length || 1} />
+                      ) : propertyBreakdown.length === 0 ? (
                         <tr>
                           <td colSpan={BREAKDOWN_COLUMNS.filter(c => breakdownVisibleColumns[c.key]).length || 1} className="px-5 py-8 text-center text-slate-400 italic">No campaign/ad-spend data yet.</td>
                         </tr>
@@ -1956,7 +1973,9 @@ export default function AdminCampaignsPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-[12px] font-medium text-slate-700">
-                      {statusDateBreakdown.length === 0 ? (
+                      {isDataLoading && statusDateBreakdown.length === 0 ? (
+                        <TableRowsSkeleton rows={6} columns={STATUS_COLUMNS.filter(c => statusVisibleColumns[c.key]).length || 1} />
+                      ) : statusDateBreakdown.length === 0 ? (
                         <tr>
                           <td colSpan={STATUS_COLUMNS.filter(c => statusVisibleColumns[c.key]).length || 1} className="px-5 py-8 text-center text-slate-400 italic">No ad-spend data yet.</td>
                         </tr>
@@ -2159,7 +2178,9 @@ export default function AdminCampaignsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-[12px] font-medium text-slate-700">
-                  {deepDiveCampaigns.length === 0 ? (
+                  {isDataLoading && deepDiveCampaigns.length === 0 ? (
+                    <TableRowsSkeleton rows={6} columns={7} />
+                  ) : deepDiveCampaigns.length === 0 ? (
                     <tr>
                       <td colSpan={7} className="px-5 py-8 text-center text-slate-400 italic">No campaigns found matching filter.</td>
                     </tr>
@@ -2332,7 +2353,9 @@ export default function AdminCampaignsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-[12px] font-medium text-slate-700">
-                  {paginatedCampaigns.length === 0 ? (
+                  {isDataLoading && paginatedCampaigns.length === 0 ? (
+                    <TableRowsSkeleton rows={6} columns={2 + CAMPAIGN_COLUMNS.filter(c => campaignVisibleColumns[c.key]).length} />
+                  ) : paginatedCampaigns.length === 0 ? (
                     <tr>
                       <td colSpan={2 + CAMPAIGN_COLUMNS.filter(c => campaignVisibleColumns[c.key]).length} className="px-5 py-8 text-center text-slate-400 italic">
                         No campaigns found matching filter.

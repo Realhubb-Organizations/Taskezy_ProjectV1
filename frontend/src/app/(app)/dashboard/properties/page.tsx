@@ -25,6 +25,7 @@ import MetaCampaignLinker from "@/components/properties/MetaCampaignLinker";
 import GoogleCampaignLinker from "@/components/properties/GoogleCampaignLinker";
 import SheetSourceLinker from "@/components/properties/SheetSourceLinker";
 import { MetaIcon, GoogleIcon, platformFromText } from "@/components/icons/ContactIcons";
+import { LineSkeleton, TableRowsSkeleton } from "@/components/ui/Skeletons";
 
 const ROWS_PER_PAGE_OPTIONS = [25, 50, 100];
 
@@ -37,7 +38,7 @@ function formatDateTime(iso?: string): string {
 }
 
 export default function PropertiesPage() {
-  const { properties, users, leads, deleteProperty, editProperty, activeRole } = useApp();
+  const { properties, users, leads, deleteProperty, editProperty, activeRole, isDataLoading } = useApp();
   const isAdmin = activeRole === "ADMIN";
 
   // Drawer (view/edit) state
@@ -354,7 +355,9 @@ export default function PropertiesPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {pageRows.length === 0 ? (
+              {isDataLoading && pageRows.length === 0 ? (
+                <TableRowsSkeleton rows={6} columns={8} />
+              ) : pageRows.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="p-8 text-center text-slate-400 font-semibold italic">
                     No properties match the current filters.
@@ -423,7 +426,7 @@ export default function PropertiesPage() {
 
         {/* Pagination footer */}
         <div className="flex items-center justify-between px-4 py-3 border-t border-slate-200 text-[11px] text-slate-500">
-          <span className="font-semibold">{totalRows} Rows</span>
+          <span className="font-semibold">{isDataLoading ? <LineSkeleton width={50} height={11} /> : `${totalRows} Rows`}</span>
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-1.5">
               <span>Rows per page:</span>
@@ -436,7 +439,11 @@ export default function PropertiesPage() {
               </select>
             </div>
             <span>
-              {totalRows === 0 ? "0-0" : `${pageStart + 1}-${Math.min(pageStart + rowsPerPage, totalRows)}`} of {totalRows}
+              {isDataLoading ? (
+                <LineSkeleton width={70} height={11} />
+              ) : (
+                <>{totalRows === 0 ? "0-0" : `${pageStart + 1}-${Math.min(pageStart + rowsPerPage, totalRows)}`} of {totalRows}</>
+              )}
             </span>
             <div className="flex items-center gap-1">
               <button

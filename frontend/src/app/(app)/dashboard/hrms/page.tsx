@@ -5,6 +5,7 @@ import { useApp, AttendanceRecord, TimesheetLog, CalendarEventType } from "@/con
 import { useSearchParams } from "next/navigation";
 import MonthCalendar from "@/components/calendar/MonthCalendar";
 import AddCalendarEventModal from "@/components/calendar/AddCalendarEventModal";
+import { LineSkeleton, TableRowsSkeleton, CardListSkeleton } from "@/components/ui/Skeletons";
 import {
   Users,
   Clock,
@@ -37,7 +38,8 @@ export default function HRMSPage() {
     approveRegularization,
     rejectRegularization,
     calendarEvents,
-    addCalendarEvent
+    addCalendarEvent,
+    isDataLoading
   } = useApp();
 
   const searchParams = useSearchParams();
@@ -209,13 +211,13 @@ export default function HRMSPage() {
             <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-xs">
               <span className="text-slate-400 block font-semibold mb-0.5">Team Leads / Managers</span>
               <span className="text-lg font-black text-slate-800">
-                {users.filter(u => u.role_type === "Manager" && u.role !== "ADMIN").length}
+                {isDataLoading ? <LineSkeleton width={24} height={18} /> : users.filter(u => u.role_type === "Manager" && u.role !== "ADMIN").length}
               </span>
             </div>
             <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-xs">
               <span className="text-slate-400 block font-semibold mb-0.5">Agents / Members</span>
               <span className="text-lg font-black text-slate-800">
-                {users.filter(u => u.role_type === "Member" && u.role !== "ADMIN").length}
+                {isDataLoading ? <LineSkeleton width={24} height={18} /> : users.filter(u => u.role_type === "Member" && u.role !== "ADMIN").length}
               </span>
             </div>
             <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-xs">
@@ -225,7 +227,7 @@ export default function HRMSPage() {
             <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-xs">
               <span className="text-slate-400 block font-semibold mb-0.5">Active Members</span>
               <span className="text-lg font-black text-brand-700">
-                {users.length}
+                {isDataLoading ? <LineSkeleton width={24} height={18} /> : users.length}
               </span>
             </div>
           </div>
@@ -243,7 +245,9 @@ export default function HRMSPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                  {users.map((u) => (
+                  {isDataLoading && users.length === 0 ? (
+                    <TableRowsSkeleton rows={6} columns={5} />
+                  ) : users.map((u) => (
                     <tr key={u.id} className="hover:bg-slate-50/50 transition-colors">
                       <td className="p-4 font-bold text-slate-805">{u.name}</td>
                       <td className="p-4 text-slate-500 font-mono">{u.email}</td>
@@ -340,7 +344,9 @@ export default function HRMSPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                        {myLogs.length === 0 ? (
+                        {isDataLoading && myLogs.length === 0 ? (
+                          <TableRowsSkeleton rows={6} columns={6} />
+                        ) : myLogs.length === 0 ? (
                           <tr>
                             <td colSpan={6} className="p-6 text-center text-slate-400 font-semibold italic">
                               No attendance punches recorded yet. Use the punch clock.
@@ -407,7 +413,9 @@ export default function HRMSPage() {
                 </div>
 
                 <div className="space-y-3">
-                  {timesheets.filter(ts => ts.status === "Regularization Pending").length === 0 ? (
+                  {isDataLoading && timesheets.length === 0 ? (
+                    <CardListSkeleton count={4} />
+                  ) : timesheets.filter(ts => ts.status === "Regularization Pending").length === 0 ? (
                     <div className="text-center py-6 text-xs text-slate-400 border border-dashed border-slate-200 rounded-xl">
                       No pending timesheet regularization requests from team members.
                     </div>
@@ -481,7 +489,9 @@ export default function HRMSPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
-                      {attendanceRecords.length === 0 ? (
+                      {isDataLoading && attendanceRecords.length === 0 ? (
+                        <TableRowsSkeleton rows={6} columns={5} />
+                      ) : attendanceRecords.length === 0 ? (
                         <tr>
                           <td colSpan={5} className="p-6 text-center text-slate-400 font-semibold italic">
                             No attendance records yet.
@@ -517,15 +527,15 @@ export default function HRMSPage() {
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
                       <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Present Days</span>
-                      <p className="text-xl font-black text-slate-800 mt-1">{presentDays}</p>
+                      <p className="text-xl font-black text-slate-800 mt-1">{isDataLoading ? <LineSkeleton width={30} height={20} /> : presentDays}</p>
                     </div>
                     <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
                       <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Regularized</span>
-                      <p className="text-xl font-black text-emerald-600 mt-1">{regularized}</p>
+                      <p className="text-xl font-black text-emerald-600 mt-1">{isDataLoading ? <LineSkeleton width={30} height={20} /> : regularized}</p>
                     </div>
                     <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
                       <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Pending Correction</span>
-                      <p className="text-xl font-black text-amber-600 mt-1">{pending}</p>
+                      <p className="text-xl font-black text-amber-600 mt-1">{isDataLoading ? <LineSkeleton width={30} height={20} /> : pending}</p>
                     </div>
                   </div>
 
@@ -544,7 +554,9 @@ export default function HRMSPage() {
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                            {myLogs.length === 0 ? (
+                            {isDataLoading && myLogs.length === 0 ? (
+                              <TableRowsSkeleton rows={6} columns={5} />
+                            ) : myLogs.length === 0 ? (
                               <tr>
                                 <td colSpan={5} className="p-6 text-center text-slate-400 font-semibold italic">
                                   No attendance punches recorded yet.
@@ -669,16 +681,20 @@ export default function HRMSPage() {
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm text-center">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Employees</span>
-              <p className="text-xl font-black text-slate-800">{users.length}</p>
+              <p className="text-xl font-black text-slate-800">{isDataLoading ? <LineSkeleton width={30} height={20} /> : users.length}</p>
               <span className="text-[9px] text-slate-450">Active team members</span>
             </div>
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm text-center">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Present Today</span>
               <p className="text-xl font-black text-slate-850">
-                {timesheets.filter(ts => ts.date === todayStr).length}
+                {isDataLoading ? <LineSkeleton width={30} height={20} /> : timesheets.filter(ts => ts.date === todayStr).length}
               </p>
               <span className="text-[9px] text-slate-455">
-                Attendance rate: {users.length > 0 ? Math.round((timesheets.filter(ts => ts.date === todayStr).length / users.length) * 100) : 0}%
+                {isDataLoading ? (
+                  <LineSkeleton width={100} height={11} />
+                ) : (
+                  `Attendance rate: ${users.length > 0 ? Math.round((timesheets.filter(ts => ts.date === todayStr).length / users.length) * 100) : 0}%`
+                )}
               </span>
             </div>
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm text-center">

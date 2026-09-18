@@ -5,6 +5,7 @@ import { useApp, Invoice, ReimbursementClaim, Lead, CalendarEventType } from "@/
 import { useSearchParams } from "next/navigation";
 import MonthCalendar from "@/components/calendar/MonthCalendar";
 import AddCalendarEventModal from "@/components/calendar/AddCalendarEventModal";
+import { LineSkeleton, TableRowsSkeleton, CardListSkeleton } from "@/components/ui/Skeletons";
 import {
   CreditCard,
   DollarSign,
@@ -37,7 +38,8 @@ export default function FinancePage() {
     deleteClaim,
     activeRole,
     calendarEvents,
-    addCalendarEvent
+    addCalendarEvent,
+    isDataLoading
   } = useApp();
 
   const searchParams = useSearchParams();
@@ -166,7 +168,9 @@ export default function FinancePage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
-                  {invoices.map((inv) => (
+                  {isDataLoading && invoices.length === 0 ? (
+                    <TableRowsSkeleton rows={6} columns={8} />
+                  ) : invoices.map((inv) => (
                     <tr key={inv.id} className="hover:bg-slate-50/50">
                       <td className="p-4 font-mono font-bold text-brand-700">{inv.invoiceNumber || "Draft (Pending)"}</td>
                       <td className="p-4 font-bold text-slate-800">{inv.clientName}</td>
@@ -257,7 +261,9 @@ export default function FinancePage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
-                  {filteredReimbursements.map((c) => (
+                  {isDataLoading && filteredReimbursements.length === 0 ? (
+                    <TableRowsSkeleton rows={6} columns={7} />
+                  ) : filteredReimbursements.map((c) => (
                     <tr key={c.id} className="hover:bg-slate-50/50">
                       <td className="p-4 text-slate-500 font-mono">{c.date}</td>
                       <td className="p-4 font-bold text-slate-800">{c.agentName}</td>
@@ -394,7 +400,7 @@ export default function FinancePage() {
               <div className="space-y-1">
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Completed Revenue</span>
                 <p className="text-xl font-black text-slate-800">
-                  ₹{invoices.filter(i => i.status === "Paid").reduce((sum, i) => sum + i.totalAmount, 0).toLocaleString("en-IN")}
+                  {isDataLoading ? <LineSkeleton width={90} height={20} /> : `₹${invoices.filter(i => i.status === "Paid").reduce((sum, i) => sum + i.totalAmount, 0).toLocaleString("en-IN")}`}
                 </p>
               </div>
               <div className="h-10 w-10 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600">
@@ -406,7 +412,7 @@ export default function FinancePage() {
               <div className="space-y-1">
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Draft/Pending Invoices</span>
                 <p className="text-xl font-black text-slate-800">
-                  {invoices.filter(i => i.status !== "Paid").length}
+                  {isDataLoading ? <LineSkeleton width={30} height={20} /> : invoices.filter(i => i.status !== "Paid").length}
                 </p>
               </div>
               <div className="h-10 w-10 rounded-xl bg-amber-50 border border-amber-100 flex items-center justify-center text-amber-600">
@@ -418,7 +424,7 @@ export default function FinancePage() {
               <div className="space-y-1">
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Pending Bookings</span>
                 <p className="text-xl font-black text-slate-850">
-                  {pendingApprovals.length}
+                  {isDataLoading ? <LineSkeleton width={30} height={20} /> : pendingApprovals.length}
                 </p>
               </div>
               <div className="h-10 w-10 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-650">
@@ -430,7 +436,7 @@ export default function FinancePage() {
               <div className="space-y-1">
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Unpaid Claims</span>
                 <p className="text-xl font-black text-red-600">
-                  ₹{reimbursements.filter(r => r.status === "Pending").reduce((sum, r) => sum + r.amount, 0).toLocaleString("en-IN")}
+                  {isDataLoading ? <LineSkeleton width={80} height={20} /> : `₹${reimbursements.filter(r => r.status === "Pending").reduce((sum, r) => sum + r.amount, 0).toLocaleString("en-IN")}`}
                 </p>
               </div>
               <div className="h-10 w-10 rounded-xl bg-red-50 border border-red-105 flex items-center justify-center text-red-600">
@@ -452,7 +458,9 @@ export default function FinancePage() {
             </div>
 
             <div className="space-y-3">
-              {pendingApprovals.length === 0 ? (
+              {isDataLoading && pendingApprovals.length === 0 ? (
+                <CardListSkeleton count={4} />
+              ) : pendingApprovals.length === 0 ? (
                 <div className="text-center py-8 text-xs text-slate-400 border border-dashed border-slate-200 rounded-xl">
                   All customer bookings are fully verified, tax incepted, and matching in the system.
                 </div>
@@ -517,17 +525,27 @@ export default function FinancePage() {
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Upcoming Payments</span>
-                    <p className="text-xl font-black text-slate-800 mt-1">₹{upcomingTotal.toLocaleString("en-IN")}</p>
-                    <span className="text-[9px] text-slate-450">{upcoming.length} invoice{upcoming.length === 1 ? "" : "s"} not yet due</span>
+                    <p className="text-xl font-black text-slate-800 mt-1">
+                      {isDataLoading ? <LineSkeleton width={80} height={20} /> : `₹${upcomingTotal.toLocaleString("en-IN")}`}
+                    </p>
+                    <span className="text-[9px] text-slate-450">
+                      {isDataLoading ? <LineSkeleton width={100} height={11} /> : `${upcoming.length} invoice${upcoming.length === 1 ? "" : "s"} not yet due`}
+                    </span>
                   </div>
                   <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Overdue Payments</span>
-                    <p className="text-xl font-black text-red-600 mt-1">₹{overdueTotal.toLocaleString("en-IN")}</p>
-                    <span className="text-[9px] text-slate-450">{overdue.length} invoice{overdue.length === 1 ? "" : "s"} past due date</span>
+                    <p className="text-xl font-black text-red-600 mt-1">
+                      {isDataLoading ? <LineSkeleton width={80} height={20} /> : `₹${overdueTotal.toLocaleString("en-IN")}`}
+                    </p>
+                    <span className="text-[9px] text-slate-450">
+                      {isDataLoading ? <LineSkeleton width={100} height={11} /> : `${overdue.length} invoice${overdue.length === 1 ? "" : "s"} past due date`}
+                    </span>
                   </div>
                   <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Collected</span>
-                    <p className="text-xl font-black text-emerald-600 mt-1">₹{totalCollected.toLocaleString("en-IN")}</p>
+                    <p className="text-xl font-black text-emerald-600 mt-1">
+                      {isDataLoading ? <LineSkeleton width={80} height={20} /> : `₹${totalCollected.toLocaleString("en-IN")}`}
+                    </p>
                     <span className="text-[9px] text-slate-450">All-time, fully paid invoices</span>
                   </div>
                 </div>
@@ -547,7 +565,9 @@ export default function FinancePage() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
-                          {rows.length === 0 ? (
+                          {isDataLoading && rows.length === 0 ? (
+                            <TableRowsSkeleton rows={6} columns={5} />
+                          ) : rows.length === 0 ? (
                             <tr>
                               <td colSpan={5} className="p-6 text-center text-slate-400 font-semibold italic">
                                 No outstanding invoices — everything is settled.

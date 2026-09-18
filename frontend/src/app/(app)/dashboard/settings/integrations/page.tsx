@@ -13,6 +13,7 @@ import {
   ApiGoogleAdsAccount
 } from "@/lib/apiClient";
 import { ChevronRight, CheckCircle, AlertTriangle, Info, Search, HelpCircle, ArrowRight, Users, TrendingUp, LayoutGrid, Calendar, RefreshCw, Clock, Zap, ExternalLink, Mail, Hash, IndianRupee, ShieldCheck, Edit } from "lucide-react";
+import { LineSkeleton } from "@/components/ui/Skeletons";
 
 type IntegrationKey = "meta" | "google";
 
@@ -108,7 +109,7 @@ function Sparkline({ points }: { points: number[] }) {
   );
 }
 
-function StatCard({ icon, label, value, changeLabel, trend }: { icon: React.ReactNode; label: string; value: string; changeLabel?: string; trend?: number[] }) {
+function StatCard({ icon, label, value, changeLabel, trend }: { icon: React.ReactNode; label: string; value: React.ReactNode; changeLabel?: string; trend?: number[] }) {
   return (
     <div className="bg-white border border-slate-200 rounded-2xl p-4 flex items-center justify-between gap-3">
       <div className="flex items-center gap-3">
@@ -175,7 +176,7 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
   const key: IntegrationKey = keyParam === "google" ? "google" : "meta";
   const info = INTEGRATION_INFO[key];
 
-  const { activeRole, users, leads } = useApp();
+  const { activeRole, users, leads, isDataLoading } = useApp();
   const { adSpendRecords } = useApp();
 
   // --- Meta ---
@@ -394,7 +395,9 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
                     <td className="px-5 py-3 font-bold text-slate-800">{c.page_name}</td>
                     <td className="px-5 py-3 font-mono text-slate-500">{c.page_id}</td>
                     <td className="px-5 py-3">{statusPill(true)}</td>
-                    <td className="px-5 py-3 text-slate-700">{leadsForPageLast30Days(c.page_name)}</td>
+                    <td className="px-5 py-3 text-slate-700">
+                      {isDataLoading ? <LineSkeleton width={24} height={12} /> : leadsForPageLast30Days(c.page_name)}
+                    </td>
                     <td className="px-5 py-3 text-slate-500">{formatDateTime(lastActivityForPage(c))}</td>
                     <td className="px-5 py-3 text-right">
                       <button onClick={() => handleDisconnectMeta(c.id, c.page_name)} className="text-red-600 hover:text-red-700 font-bold">Disconnect</button>
@@ -412,7 +415,9 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
                     <td className="px-5 py-3 font-bold text-slate-800">{a.name}</td>
                     <td className="px-5 py-3 font-mono text-slate-500">{a.id}</td>
                     <td className="px-5 py-3">{statusPill(true)}</td>
-                    <td className="px-5 py-3 text-slate-700">₹{spend.toLocaleString("en-IN")}</td>
+                    <td className="px-5 py-3 text-slate-700">
+                      {isDataLoading ? <LineSkeleton width={48} height={12} /> : `₹${spend.toLocaleString("en-IN")}`}
+                    </td>
                     <td className="px-5 py-3 text-slate-500">{formatDate(a.created_at)}</td>
                   </tr>
                 );
@@ -447,11 +452,11 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
       <StatCard
         icon={<Users className="h-4.5 w-4.5" />}
         label="Leads This Month"
-        value={String(leadsThisMonth)}
+        value={isDataLoading ? <LineSkeleton width={28} height={20} /> : String(leadsThisMonth)}
         changeLabel={monthChangePct === null ? undefined : `${monthChangePct >= 0 ? "↑" : "↓"} ${Math.abs(monthChangePct)}% vs last month`}
         trend={dailyLeadTrend}
       />
-      <StatCard icon={<TrendingUp className="h-4.5 w-4.5" />} label="Avg Leads / Page" value={String(avgLeadsPerPage)} />
+      <StatCard icon={<TrendingUp className="h-4.5 w-4.5" />} label="Avg Leads / Page" value={isDataLoading ? <LineSkeleton width={28} height={20} /> : String(avgLeadsPerPage)} />
       <StatCard icon={<LayoutGrid className="h-4.5 w-4.5" />} label="New Pages This Month" value={String(newPagesThisMonth)} />
     </div>
   );
@@ -531,7 +536,11 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
                 <p className="text-[10px] text-slate-500 font-bold whitespace-nowrap">{key === "meta" ? "Pages Connected" : "Accounts Connected"}</p>
               </div>
               <div className="text-center px-1 border-l border-slate-200/80 pl-5">
-                <p className="text-xl font-black text-slate-900">{key === "meta" ? totalLeadsViaMeta : `₹${totalGoogleSpend.toLocaleString("en-IN")}`}</p>
+                <p className="text-xl font-black text-slate-900">
+                  {isDataLoading ? (
+                    <LineSkeleton width={40} height={20} />
+                  ) : key === "meta" ? totalLeadsViaMeta : `₹${totalGoogleSpend.toLocaleString("en-IN")}`}
+                </p>
                 <p className="text-[10px] text-slate-500 font-bold whitespace-nowrap">{key === "meta" ? "Total Leads" : "Total Spend Synced"}</p>
               </div>
             </div>
@@ -709,7 +718,12 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
                     <div className="space-y-2 text-xs">
                       <div className="flex justify-between"><span className="text-slate-400 font-semibold">Accounts Linked</span><span className="font-bold text-slate-700">{activeGoogleAccounts.length}</span></div>
                       <div className="flex justify-between"><span className="text-slate-400 font-semibold">First Linked</span><span className="font-bold text-slate-700">{formatDate([...activeGoogleAccounts].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())[0]?.created_at)}</span></div>
-                      <div className="flex justify-between"><span className="text-slate-400 font-semibold">Total Spend Synced</span><span className="font-bold text-slate-700">₹{totalGoogleSpend.toLocaleString("en-IN")}</span></div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-400 font-semibold">Total Spend Synced</span>
+                        <span className="font-bold text-slate-700">
+                          {isDataLoading ? <LineSkeleton width={48} height={12} /> : `₹${totalGoogleSpend.toLocaleString("en-IN")}`}
+                        </span>
+                      </div>
                     </div>
                   ) : (
                     <p className="text-[11px] text-slate-400 italic">Nothing to show until an account is linked.</p>

@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
+import "react-loading-skeleton/dist/skeleton.css";
+import { SkeletonTheme } from "react-loading-skeleton";
 import { AppProvider } from "@/context/AppContext";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -22,7 +24,13 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${inter.className} bg-slate-50 text-slate-900 antialiased`}>
-        <AppProvider>{children}</AppProvider>
+        {/* App-wide skeleton colors, matched to the slate palette every
+            card/table already uses, so a loading placeholder never looks
+            like a different design language from the real content it's
+            standing in for. */}
+        <SkeletonTheme baseColor="#e2e8f0" highlightColor="#f1f5f9" borderRadius={8}>
+          <AppProvider>{children}</AppProvider>
+        </SkeletonTheme>
       </body>
     </html>
   );

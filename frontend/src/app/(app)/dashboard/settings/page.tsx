@@ -34,6 +34,7 @@ import {
   ChevronDown,
   MoreHorizontal
 } from "lucide-react";
+import { LineSkeleton, CardListSkeleton } from "@/components/ui/Skeletons";
 
 const TABS = ["Connected Apps", "Leads", "HRMS", "Finance", "Manage Users", "Preference", "About"] as const;
 type Tab = (typeof TABS)[number];
@@ -75,7 +76,7 @@ function initialsFor(name: string): string {
 export default function SettingsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { users, leads, activeRole, activeSystem, logout, updateUserFields, addTeamMember, deleteTeamMember, refreshMetaConnectionStatus, tenantSettings, updateTenantSettings } = useApp();
+  const { users, leads, activeRole, activeSystem, logout, updateUserFields, addTeamMember, deleteTeamMember, refreshMetaConnectionStatus, tenantSettings, updateTenantSettings, isDataLoading } = useApp();
 
   const initialTabParam = searchParams.get("tab");
   const initialTab = (TABS as readonly string[]).includes(initialTabParam || "") ? (initialTabParam as Tab) : "Connected Apps";
@@ -947,10 +948,14 @@ export default function SettingsPage() {
               <TrendingUp className="h-4 w-4 text-slate-500" />
               Lead Source Breakdown
             </h3>
-            <span className="text-[10px] text-slate-450 font-bold">{leads.length} total leads</span>
+            <span className="text-[10px] text-slate-450 font-bold">
+              {isDataLoading ? <LineSkeleton width={70} height={11} /> : `${leads.length} total leads`}
+            </span>
           </div>
 
-          {leadSourceRows.length === 0 ? (
+          {isDataLoading && leadSourceRows.length === 0 ? (
+            <CardListSkeleton count={4} />
+          ) : leadSourceRows.length === 0 ? (
             <p className="text-[11px] text-slate-400 italic py-6 text-center">No leads ingested yet.</p>
           ) : (
             <div className="space-y-3">
@@ -1169,7 +1174,9 @@ export default function SettingsPage() {
               <div key={stat.label} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
                 <div>
                   <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">{stat.label}</span>
-                  <p className="text-lg font-black text-slate-800 mt-0.5">{stat.count}</p>
+                  <p className="text-lg font-black text-slate-800 mt-0.5">
+                    {isDataLoading ? <LineSkeleton width={32} height={18} /> : stat.count}
+                  </p>
                 </div>
                 <div className={`h-8 w-8 rounded-lg border flex items-center justify-center shrink-0 ${stat.color}`}>
                   <stat.icon className="h-4 w-4" />
@@ -1192,7 +1199,9 @@ export default function SettingsPage() {
 
           {/* User records */}
           <div className="space-y-2.5">
-            {filteredUsers.length === 0 ? (
+            {isDataLoading && filteredUsers.length === 0 ? (
+              <CardListSkeleton count={4} />
+            ) : filteredUsers.length === 0 ? (
               <div className="text-center py-10 text-xs text-slate-400 border border-dashed border-slate-200 rounded-xl">
                 No users match &quot;{searchQuery}&quot;.
               </div>

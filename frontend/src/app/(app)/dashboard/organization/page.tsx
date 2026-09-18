@@ -3,9 +3,10 @@
 import React, { useState } from "react";
 import { useApp } from "@/context/AppContext";
 import { Building, MapPin, Phone, Users, Landmark, FileText, CheckCircle, HelpCircle } from "lucide-react";
+import { LineSkeleton } from "@/components/ui/Skeletons";
 
 export default function OrganizationPage() {
-  const { users, properties, leads } = useApp();
+  const { users, properties, leads, isDataLoading } = useApp();
   const [activeTab, setActiveTab] = useState("Organization Details");
 
   // No real subscription-billing/receipts data model exists yet (checkout/provisioning
@@ -35,15 +36,15 @@ export default function OrganizationPage() {
         <div className="flex gap-4 text-xs font-semibold text-slate-500">
           <div className="text-center px-4 py-2 border-r border-slate-200">
             <span className="block text-slate-400 text-[10px] uppercase font-bold">Total Users</span>
-            <span className="text-base font-black text-slate-850">{users.length}</span>
+            {isDataLoading ? <LineSkeleton width={30} height={16} /> : <span className="text-base font-black text-slate-850">{users.length}</span>}
           </div>
           <div className="text-center px-4 py-2 border-r border-slate-200">
             <span className="block text-slate-400 text-[10px] uppercase font-bold">Active Leads</span>
-            <span className="text-base font-black text-slate-850">{leads.length}</span>
+            {isDataLoading ? <LineSkeleton width={30} height={16} /> : <span className="text-base font-black text-slate-850">{leads.length}</span>}
           </div>
           <div className="text-center px-4 py-2">
             <span className="block text-slate-400 text-[10px] uppercase font-bold">Properties</span>
-            <span className="text-base font-black text-slate-850">{properties.length}</span>
+            {isDataLoading ? <LineSkeleton width={30} height={16} /> : <span className="text-base font-black text-slate-850">{properties.length}</span>}
           </div>
         </div>
       </div>

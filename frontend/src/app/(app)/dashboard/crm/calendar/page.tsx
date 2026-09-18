@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useApp, CalendarEvent, CalendarEventType } from "@/context/AppContext";
 import MonthCalendar from "@/components/calendar/MonthCalendar";
 import { CalendarDays, MapPin, PhoneCall, Handshake, FileSignature, LucideIcon } from "lucide-react";
+import { CardListSkeleton } from "@/components/ui/Skeletons";
 
 const TYPE_META: Record<string, { label: string; color: string; icon: LucideIcon }> = {
   SITE_VISIT: { label: "Site Visit", color: "bg-blue-500", icon: MapPin },
@@ -14,7 +15,7 @@ const TYPE_META: Record<string, { label: string; color: string; icon: LucideIcon
 };
 
 function CRMCalendarContent() {
-  const { calendarEvents } = useApp();
+  const { calendarEvents, isDataLoading } = useApp();
   const router = useRouter();
   const crmEvents = calendarEvents.filter(e => e.system === "CRM");
 
@@ -62,7 +63,9 @@ function CRMCalendarContent() {
           <h3 className="text-xs font-bold text-slate-700 border-b border-slate-100 pb-2">
             {new Date(selectedDate + "T00:00:00").toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
           </h3>
-          {dayEvents.length === 0 ? (
+          {isDataLoading && dayEvents.length === 0 ? (
+            <CardListSkeleton count={4} />
+          ) : dayEvents.length === 0 ? (
             <p className="text-[11px] text-slate-400 italic py-4 text-center">No scheduled activity on this date.</p>
           ) : (
             <div className="space-y-2 max-h-[26rem] overflow-y-auto pr-1">

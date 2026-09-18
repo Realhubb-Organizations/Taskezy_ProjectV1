@@ -14,9 +14,10 @@ import {
   isMissedLead,
   formatCurrency
 } from "@/lib/reportMetrics";
+import { TableRowsSkeleton } from "@/components/ui/Skeletons";
 
 export default function ManagerReports({ dateRange }: { dateRange: DateRange }) {
-  const { leads, adSpendRecords, followupCalls, users, currentUser, activeRole } = useApp();
+  const { leads, adSpendRecords, followupCalls, users, currentUser, activeRole, isDataLoading } = useApp();
   const [expanded, setExpanded] = useState<string | null>(null);
 
   const rangeLeads = useMemo(() => filterLeadsByRange(leads, dateRange.from, dateRange.to), [leads, dateRange]);
@@ -136,7 +137,9 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {managerRows.length === 0 ? (
+              {isDataLoading && managerRows.length === 0 ? (
+                <TableRowsSkeleton rows={6} columns={12} />
+              ) : managerRows.length === 0 ? (
                 <tr>
                   <td colSpan={11} className="p-6 text-center text-slate-400 italic font-semibold">
                     Manager-level reports aren&apos;t visible at your access level.

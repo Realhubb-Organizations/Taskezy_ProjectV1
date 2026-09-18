@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useApp, CalendarEvent, SystemType } from "@/context/AppContext";
 import MonthCalendar from "@/components/calendar/MonthCalendar";
 import { CalendarDays } from "lucide-react";
+import { CardListSkeleton } from "@/components/ui/Skeletons";
 
 const SYSTEM_COLOR: Record<string, string> = {
   CRM: "bg-blue-500",
@@ -15,7 +16,7 @@ const SYSTEM_COLOR: Record<string, string> = {
 const SYSTEMS: SystemType[] = ["CRM", "HRMS", "FINANCE"];
 
 function AdminCalendarContent() {
-  const { calendarEvents } = useApp();
+  const { calendarEvents, isDataLoading } = useApp();
   const router = useRouter();
 
   const todayKey = new Date().toISOString().split("T")[0];
@@ -64,7 +65,9 @@ function AdminCalendarContent() {
           <h3 className="text-xs font-bold text-slate-700 border-b border-slate-100 pb-2">
             {new Date(selectedDate + "T00:00:00").toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
           </h3>
-          {dayEvents.length === 0 ? (
+          {isDataLoading && dayEvents.length === 0 ? (
+            <CardListSkeleton count={4} />
+          ) : dayEvents.length === 0 ? (
             <p className="text-[11px] text-slate-400 italic py-4 text-center">No scheduled activity across any partition.</p>
           ) : (
             <div className="space-y-2 max-h-[26rem] overflow-y-auto pr-1">

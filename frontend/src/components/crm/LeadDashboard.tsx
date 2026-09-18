@@ -8,6 +8,7 @@ import { Sliders, Sparkles, Plus, Check, ChevronDown, Search, Calendar, X, Minus
 import { STATUS_OPTIONS } from "@/lib/leadStatusMapping";
 import { computeLeadSummaryStats } from "@/lib/leadSummaryStats";
 import { WhatsAppIcon, CallIcon, PlatformLabel } from "@/components/icons/ContactIcons";
+import { LineSkeleton, TableRowsSkeleton } from "@/components/ui/Skeletons";
 import AddLeadModal from "./AddLeadModal";
 import LeadDetailDrawer from "./LeadDetailDrawer";
 
@@ -92,7 +93,8 @@ export default function LeadDashboard() {
     currentUser,
     properties,
     users,
-    followupCalls
+    followupCalls,
+    isDataLoading
   } = useApp();
 
   const router = useRouter();
@@ -1034,7 +1036,9 @@ export default function LeadDashboard() {
                         {s.label}
                         <ChevronDown className={`h-3 w-3 text-slate-300 shrink-0 transition-transform ${isActive ? "rotate-180 text-blue-500" : ""}`} />
                       </span>
-                      <span className={`text-lg font-extrabold block mt-1.5 ${s.color}`}>{s.value}</span>
+                      <span className={`text-lg font-extrabold block mt-1.5 ${s.color}`}>
+                        {isDataLoading ? <LineSkeleton width={36} height={18} /> : s.value}
+                      </span>
                     </button>
                   );
                 })}
@@ -1384,7 +1388,9 @@ export default function LeadDashboard() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-xs">
-                    {adminFilteredLeads.length === 0 ? (
+                    {isDataLoading && adminFilteredLeads.length === 0 ? (
+                      <TableRowsSkeleton rows={8} columns={3 + adminVisibleColumnList.length} />
+                    ) : adminFilteredLeads.length === 0 ? (
                       <tr>
                         <td colSpan={3 + adminVisibleColumnList.length} className="px-4 py-8 text-center text-slate-400 font-semibold italic">
                           No leads match the current filters.
@@ -1874,7 +1880,9 @@ export default function LeadDashboard() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 text-slate-700">
-                        {analyticsPageRows.map(row => {
+                        {isDataLoading && analyticsPageRows.length === 0 ? (
+                          <TableRowsSkeleton rows={8} columns={1 + ANALYTICS_COLUMNS.filter(c => analyticsVisibleColumns[c.key]).length} />
+                        ) : analyticsPageRows.map(row => {
                           const isExpanded = expandedManagers.has(row.agentName);
                           const visibleColCount = ANALYTICS_COLUMNS.filter(c => analyticsVisibleColumns[c.key]).length;
                           const teamNames = [row.agentName, ...row.directReports.map(d => d.name)];
@@ -2121,7 +2129,9 @@ export default function LeadDashboard() {
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
-                            {(drilldownPageRowRefs.current = [], analyticsDrilldownFilteredLeads.map((l, idx) => (
+                            {isDataLoading && analyticsDrilldownFilteredLeads.length === 0 ? (
+                              <TableRowsSkeleton rows={6} columns={8} />
+                            ) : (drilldownPageRowRefs.current = [], analyticsDrilldownFilteredLeads.map((l, idx) => (
                               <tr
                                 key={l.id}
                                 ref={idx % drilldownRowsPerPage === 0 ? (el) => { drilldownPageRowRefs.current[Math.floor(idx / drilldownRowsPerPage)] = el; } : undefined}
@@ -2231,7 +2241,7 @@ export default function LeadDashboard() {
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-slate-700">
                     <tr>
-                      <td className="px-4 py-3 font-bold">{rnrLeads.length}</td>
+                      <td className="px-4 py-3 font-bold">{isDataLoading ? <LineSkeleton width={24} height={14} /> : rnrLeads.length}</td>
                       <td className="px-4 py-3 text-slate-400 italic" title="Needs a per-call attempt log (timestamped per call, per lead) — not tracked yet">—</td>
                       <td className="px-4 py-3 text-slate-400 italic" title="Needs a per-call attempt log tied to when a lead is marked Dead — not tracked yet">—</td>
                       <td className="px-4 py-3">{rnrMostRecentActivity ? adminFormatDateTime(rnrMostRecentActivity) : "—"}</td>
