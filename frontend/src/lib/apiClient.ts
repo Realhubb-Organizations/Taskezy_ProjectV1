@@ -60,12 +60,23 @@ async function request<T>(path: string, options: RequestInit = {}, allowRefreshR
   return json.data;
 }
 
-async function requestWithMeta<T>(path: string): Promise<{ data: T[]; meta: Envelope<T[]>["meta"] }> {
+async function requestWithMeta<T>(path: string, allowRefreshRetry = true): Promise<{ data: T[]; meta: Envelope<T[]>["meta"] }> {
   const token = getAccessToken();
   const res = await fetch(`${API_BASE_URL}${path}`, {
     credentials: "include",
     headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) }
   });
+
+  // Unlike request() above, this had no refresh-and-retry at all — an
+  // expired token meant apiListAllLeads's page loop (the only caller)
+  // threw outright instead of transparently refreshing, same bug class as
+  // the de-duplicated refreshAccessToken() above just for a different code
+  // path.
+  if (res.status === 401 && allowRefreshRetry) {
+    const refreshed = await refreshAccessToken();
+    if (refreshed) return requestWithMeta<T>(path, false);
+  }
+
   const json = (await res.json().catch(() => null)) as Envelope<T[]> | null;
   if (!res.ok || !json?.success) {
     throw new ApiRequestError(res.status, json?.error?.message || "Request failed", json?.error?.code);
@@ -73,19 +84,40 @@ async function requestWithMeta<T>(path: string): Promise<{ data: T[]; meta: Enve
   return { data: json.data, meta: json.meta };
 }
 
+// loadAllRealData fires ~14 requests in parallel; if the access token has
+// expired, every single one of them independently hits a 401 and would
+// otherwise each call this to refresh — up to 14 simultaneous POSTs to
+// /auth/refresh from one page load. If the refresh token rotates on use
+// (single-use), only the first of those to land actually succeeds; the
+// rest race against an already-invalidated token and fail with their own
+// 401, and that same burst is often enough on its own to trip the auth
+// rate limiter (see rateLimiter.ts). Sharing one in-flight promise across
+// every concurrent caller means only one real network call ever happens no
+// matter how many requests hit a 401 at once — everyone else just awaits
+// the same result.
+let refreshPromise: Promise<boolean> | null = null;
+
 export async function refreshAccessToken(): Promise<boolean> {
-  try {
-    const res = await fetch(`${API_BASE_URL}/api/v1/auth/refresh`, { method: "POST", credentials: "include" });
-    if (!res.ok) {
+  if (refreshPromise) return refreshPromise;
+  refreshPromise = (async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/v1/auth/refresh`, { method: "POST", credentials: "include" });
+      if (!res.ok) {
+        setAccessToken(null);
+        return false;
+      }
+      const json = await res.json();
+      setAccessToken(json.data.accessToken);
+      return true;
+    } catch {
       setAccessToken(null);
       return false;
     }
-    const json = await res.json();
-    setAccessToken(json.data.accessToken);
-    return true;
-  } catch {
-    setAccessToken(null);
-    return false;
+  })();
+  try {
+    return await refreshPromise;
+  } finally {
+    refreshPromise = null;
   }
 }
 
