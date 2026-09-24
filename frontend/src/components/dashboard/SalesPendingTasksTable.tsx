@@ -34,7 +34,8 @@ export default function SalesPendingTasksTable({
   isLoading = false,
   title = "Pending Tasks",
   subtitle,
-  taskFilter
+  taskFilter,
+  visibleBuckets = ["missed", "pending", "upcoming"]
 }: {
   leads: Lead[];
   followupCalls: FollowupCall[];
@@ -44,6 +45,7 @@ export default function SalesPendingTasksTable({
   title?: string;
   subtitle?: string;
   taskFilter?: (t: PendingTask) => boolean;
+  visibleBuckets?: TaskBucket[]; // legend entries to show — e.g. a Pending Task view has no Upcoming
 }) {
   // Buckets are time-based (pending → missed after 10 min), so re-evaluate
   // periodically rather than only when data changes.
@@ -176,7 +178,7 @@ export default function SalesPendingTasksTable({
               All
             </button>
           )}
-          {(Object.keys(BUCKET_STYLES) as TaskBucket[]).map(b => {
+          {visibleBuckets.map(b => {
             const isActive = bucketFilter === b;
             return (
               <button

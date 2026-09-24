@@ -12,7 +12,8 @@ import DateRangePicker, { DateRangeValue } from "@/components/ui/DateRangePicker
 import { PendingTask } from "@/lib/salesPendingTasks";
 
 // Admin / Manager only — one team member's open tasks, opened by clicking
-// their count in the dashboard's All Task / Pending Task table. The link
+// their count in the dashboard's All Task / Pending Task table. Titled after
+// the tab it came from; the Pending Task view lists only missed + pending. The link
 // carries ?agent=&tab=&type= so this page lists exactly what was counted;
 // the date range then narrows it by task due date.
 function AgentTasksView() {
@@ -65,7 +66,7 @@ function AgentTasksView() {
     );
   }
 
-  const subtitle = [agent || "No team member selected", tab === "pending" ? "Pending Task" : null, taskType !== "All" ? taskType : null]
+  const subtitle = [agent || "No team member selected", taskType !== "All" ? taskType : null]
     .filter(Boolean)
     .join(" · ");
 
@@ -80,8 +81,9 @@ function AgentTasksView() {
       </div>
 
       <SalesPendingTasksTable
-        title="All Task"
+        title={tab === "pending" ? "Pending Task" : "All Task"}
         subtitle={subtitle}
+        visibleBuckets={(["missed", "pending", "upcoming"] as const).filter(b => TAB_BUCKETS[tab].includes(b))}
         leads={leads}
         followupCalls={followupCalls}
         taskFilter={taskFilter}
