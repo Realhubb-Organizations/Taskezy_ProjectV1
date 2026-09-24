@@ -54,7 +54,7 @@ export default function Home() {
           </div>
 
           <h1>
-            Hii my name is Inder.....
+            Hii my name is Inder kjghfsdgfhjsakgf
           </h1>
 
           {/* Editorial Headline */}
