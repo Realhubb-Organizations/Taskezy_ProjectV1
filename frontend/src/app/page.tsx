@@ -53,6 +53,10 @@ export default function Home() {
            
           </div>
 
+          <h1>
+            Hii my name is Inder
+          </h1>
+
           {/* Editorial Headline */}
           <h1 className="text-4xl sm:text-6xl lg:text-7xl font-extrabold tracking-tight text-slate-900 leading-[1.08] mb-6">
             The simple business operating system for{" "}
