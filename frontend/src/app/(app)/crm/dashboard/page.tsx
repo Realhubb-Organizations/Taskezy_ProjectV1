@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useApp, Lead, LeadStatus } from "@/context/AppContext";
 import AddLeadModal from "@/components/crm/AddLeadModal";
 import PendingLeadsTable, { PendingRow } from "@/components/dashboard/PendingLeadsTable";
+import SalesPendingTasksTable from "@/components/dashboard/SalesPendingTasksTable";
 import { deriveActivityTimeline, STATUS_OPTIONS, statusBadgeClasses } from "@/lib/leadStatusMapping";
 import { computeLeadSummaryStats } from "@/lib/leadSummaryStats";
 import { WhatsAppIcon, CallIcon } from "@/components/icons/ContactIcons";
@@ -793,11 +794,26 @@ export default function CrmDashboardPage() {
         </div>
       )}
 
-      {/* Pending Follow ups — leads currently sitting in the Follow-ups status */}
-      <PendingLeadsTable title="Pending Follow ups" rows={followUpRows} onViewLead={openQuickView} isLoading={isDataLoading} />
+      {isSalesMember ? (
+        // Sales agent: one color-coded Pending Tasks queue (missed / pending /
+        // upcoming) in place of the two per-status tables below. followupCalls
+        // is already scoped server-side to the agent's own calls.
+        <SalesPendingTasksTable
+          leads={scopedLeads}
+          followupCalls={followupCalls}
+          onViewLead={openQuickView}
+          onStatusChange={handleDrillStatusChange}
+          isLoading={isDataLoading}
+        />
+      ) : (
+        <>
+          {/* Pending Follow ups — leads currently sitting in the Follow-ups status */}
+          <PendingLeadsTable title="Pending Follow ups" rows={followUpRows} onViewLead={openQuickView} isLoading={isDataLoading} />
 
-      {/* Pending Call Backs — the operational followup_calls callback queue */}
-      <PendingLeadsTable title="Pending Call Backs" rows={callBackRows} onViewLead={openQuickView} isLoading={isDataLoading} />
+          {/* Pending Call Backs — the operational followup_calls callback queue */}
+          <PendingLeadsTable title="Pending Call Backs" rows={callBackRows} onViewLead={openQuickView} isLoading={isDataLoading} />
+        </>
+      )}
 
       <AddLeadModal
         isOpen={isUploadOpen}

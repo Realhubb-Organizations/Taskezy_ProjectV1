@@ -320,6 +320,7 @@ export interface FollowupCall {
   leadId?: string;
   date: string; // YYYY-MM-DD, for report date-range filtering
   time: string;
+  scheduledAt?: string; // raw ISO timestamp — date/time above are display-only and lose precision
   status: "Missed" | "Upcoming" | "Completed";
   leadName: string;
   phone: string;
@@ -730,6 +731,7 @@ function mapApiFollowupToFrontend(row: ApiFollowupRow): FollowupCall {
     id: row.id,
     leadId: row.lead_id || undefined,
     date: row.scheduled_at.split("T")[0],
+    scheduledAt: row.scheduled_at,
     time: new Date(row.scheduled_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true }).toLowerCase(),
     status: FOLLOWUP_STATUS_MAP[row.status] || "Upcoming",
     leadName: row.lead_name,
