@@ -63,7 +63,7 @@ export default function Home() {
 
           {/* Clean Subtitle */}
           <p className="text-base sm:text-lg text-slate-600 max-w-2xl mb-10 leading-relaxed font-normal">
-            Unify sales CRM pipelines, geofenced team attendance, and compliant client invoicing in one intuitive enterprise platform.
+            PRIYA SINGH IS TESTING 
           </p>
 
           {/* Action CTAs */}
