@@ -5,7 +5,8 @@ import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useApp, Lead, LeadStatus } from "@/context/AppContext";
 import AddLeadModal from "@/components/crm/AddLeadModal";
-import PendingLeadsTable, { PendingRow } from "@/components/dashboard/PendingLeadsTable";
+import TeamTasksTable from "@/components/dashboard/TeamTasksTable";
+import LeadInsightsCharts from "@/components/dashboard/LeadInsightsCharts";
 import SalesPendingTasksTable from "@/components/dashboard/SalesPendingTasksTable";
 import { deriveActivityTimeline, STATUS_OPTIONS, statusBadgeClasses } from "@/lib/leadStatusMapping";
 import { computeLeadSummaryStats } from "@/lib/leadSummaryStats";
@@ -366,16 +367,14 @@ export default function CrmDashboardPage() {
     setQuickViewStatusMenuOpen(false);
   };
 
-  const byMostRecentActivity = (a: Lead, b: Lead) => new Date(lastActivityIso(b) || 0).getTime() - new Date(lastActivityIso(a) || 0).getTime();
-
-  const pendingFollowUpLeads = scopedLeads.filter(l => l.status === "Follow-ups").sort(byMostRecentActivity);
-  const pendingCallBackLeads = scopedLeads.filter(l => l.status === "Call Back").sort(byMostRecentActivity);
-
   // Real sales roster + property list, same source the Leads page's Add Lead
   // modal already uses — reused here so "+ Upload Leads" is a real, working
   // entry point rather than a second, divergent implementation.
   const propertiesList = properties.map(p => p.name);
   const agentsList = users.filter(u => u.department === "SALES" && u.status !== "INACTIVE").map(u => u.name);
+  // Chart agent filters — the active roster plus anyone still holding leads
+  // (e.g. a deactivated agent whose leads haven't been reassigned yet).
+  const chartAgents = Array.from(new Set([...agentsList, ...scopedLeads.map(l => l.assignedAgent).filter(Boolean)])).sort();
 
   const handleUploadManualLead = (data: { name: string; phone: string; email: string; agent: string; source: string; property: string; note: string }) => {
     const res = addLead({
@@ -401,28 +400,6 @@ export default function CrmDashboardPage() {
     alert(`Bulk Import Started!\nFile: ${data.fileName}\nAssignment Mode: ${data.assignmentMode} (${data.target})\nProcessing rows...`);
     setIsUploadOpen(false);
   };
-
-  const followUpRows: PendingRow[] = pendingFollowUpLeads.map(l => ({
-    id: l.id,
-    time: lastActivityTime(l),
-    name: l.name,
-    phone: l.phone,
-    assignedTo: l.assignedAgent,
-    feedback: latestLogMessage(l),
-    property: l.property || "Not set",
-    leadId: l.id
-  }));
-
-  const callBackRows: PendingRow[] = pendingCallBackLeads.map(l => ({
-    id: l.id,
-    time: lastActivityTime(l),
-    name: l.name,
-    phone: l.phone,
-    assignedTo: l.assignedAgent,
-    feedback: latestLogMessage(l),
-    property: l.property || "Not set",
-    leadId: l.id
-  }));
 
   return (
     <div className="space-y-4 pb-8 animate-fade-in">
@@ -806,12 +783,12 @@ export default function CrmDashboardPage() {
           isLoading={isDataLoading}
         />
       ) : (
+        // Admin / Manager: team-wide task counts per agent (All Task /
+        // Pending Task), then the deal-value trend and lead status mix for
+        // the selected Date Range.
         <>
-          {/* Pending Follow ups — leads currently sitting in the Follow-ups status */}
-          <PendingLeadsTable title="Pending Follow ups" rows={followUpRows} onViewLead={openQuickView} isLoading={isDataLoading} />
-
-          {/* Pending Call Backs — the operational followup_calls callback queue */}
-          <PendingLeadsTable title="Pending Call Backs" rows={callBackRows} onViewLead={openQuickView} isLoading={isDataLoading} />
+          <TeamTasksTable leads={scopedLeads} followupCalls={followupCalls} teamMembers={agentsList} isLoading={isDataLoading} />
+          <LeadInsightsCharts leads={rangeLeads} dateRange={dateRange} agents={chartAgents} />
         </>
       )}
 

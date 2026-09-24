@@ -23,6 +23,8 @@ export interface PendingTask {
   email: string;
   status: string; // the lead's current status, or the call type when the follow-up isn't linked to a lead
   feedback: string;
+  taskType: string; // follow-up call type (Callback / Meeting / Site Visit), or the lead status that makes it a task
+  assignedTo: string;
 }
 
 // Lead statuses that themselves mean "the agent still has to act on this".
@@ -55,6 +57,8 @@ const actedSince = (lead: Lead | undefined, dueAt: Date | null): boolean => {
   return (lead.logs || []).some(log => new Date(log.timestamp).getTime() >= dueAt.getTime());
 };
 
+// Works for any scope: the sales dashboard passes one agent's leads/calls,
+// the admin/manager dashboard passes everyone's and groups by assignedTo.
 export function buildSalesPendingTasks(leads: Lead[], followupCalls: FollowupCall[], now: Date): PendingTask[] {
   const leadById = new Map(leads.map(l => [l.id, l]));
   const leadsWithTask = new Set<string>();
@@ -79,7 +83,9 @@ export function buildSalesPendingTasks(leads: Lead[], followupCalls: FollowupCal
       phone: lead?.phone || call.phone,
       email: lead?.email || "",
       status: lead?.status || call.type,
-      feedback: (lead && latestLog(lead)?.message) || "No feedback yet"
+      feedback: (lead && latestLog(lead)?.message) || "No feedback yet",
+      taskType: call.type,
+      assignedTo: call.assignedTo || lead?.assignedAgent || ""
     });
   }
 
@@ -101,7 +107,9 @@ export function buildSalesPendingTasks(leads: Lead[], followupCalls: FollowupCal
       phone: lead.phone,
       email: lead.email || "",
       status: lead.status,
-      feedback: last?.message || "No feedback yet"
+      feedback: last?.message || "No feedback yet",
+      taskType: lead.status,
+      assignedTo: lead.assignedAgent || ""
     });
   }
 
