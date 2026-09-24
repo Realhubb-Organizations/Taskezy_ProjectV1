@@ -1,11 +1,12 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown, Search } from "lucide-react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine } from "recharts";
 import { Lead, FollowupCall } from "@/context/AppContext";
 import { buildSalesPendingTasks, PendingTask, TaskBucket } from "@/lib/salesPendingTasks";
+import { useCloseOnScroll } from "@/lib/useCloseOnScroll";
 
 const LINE_COLOR = "#6D3FD9";
 
@@ -30,6 +31,15 @@ const IMAGE_SLICES = [
   { color: "#FD69A1", start: 232, end: 292 }, // pink
   { color: "#FBA56A", start: 295, end: 351 }  // orange
 ];
+// SVG wedge over one image slice (angles clockwise from 12 o'clock), a
+// little past the pie's edge so the whole slice incl. its 3D rim is covered.
+const wedgePath = (start: number, end: number, cx = 110, cy = 110, r = 112) => {
+  const point = (a: number) => `${cx + r * Math.sin((a * Math.PI) / 180)} ${cy - r * Math.cos((a * Math.PI) / 180)}`;
+  const s = start - 2;
+  const e = end + 2;
+  return `M ${cx} ${cy} L ${point(s)} A ${r} ${r} 0 ${e - s > 180 ? 1 : 0} 1 ${point(e)} Z`;
+};
+
 const SLICES_BY_SIZE = IMAGE_SLICES.map((s, i) => ({ ...s, index: i })).sort((a, b) => (b.end - b.start) - (a.end - a.start));
 
 interface TaskFilter {
@@ -58,6 +68,8 @@ const menuPosition = (el: HTMLElement, width: number) => {
 // native <select> popup renders dark on macOS/Chrome and clashes).
 function MiniSelect({ value, options, allLabel, onChange }: { value: string; options: string[]; allLabel: string; onChange: (v: string) => void }) {
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  useCloseOnScroll(!!pos, () => setPos(null), panelRef);
   const width = 176;
   return (
     <>
@@ -71,7 +83,7 @@ function MiniSelect({ value, options, allLabel, onChange }: { value: string; opt
       {pos && createPortal(
         <>
           <div className="fixed inset-0 z-[60]" onClick={() => setPos(null)} />
-          <div className="fixed z-[70] bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 max-h-60 overflow-y-auto" style={{ top: pos.top, left: pos.left, width }}>
+          <div ref={panelRef} className="fixed z-[70] bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 max-h-60 overflow-y-auto" style={{ top: pos.top, left: pos.left, width }}>
             {["", ...options].map(opt => (
               <button
                 key={opt || "__all"}
@@ -95,6 +107,8 @@ function MiniSelect({ value, options, allLabel, onChange }: { value: string; opt
 function StatusMultiSelect({ selected, leadStatuses, onChange }: { selected: string[]; leadStatuses: string[]; onChange: (v: string[]) => void }) {
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const [query, setQuery] = useState("");
+  const panelRef = useRef<HTMLDivElement>(null);
+  useCloseOnScroll(!!pos, () => setPos(null), panelRef);
   const width = 220;
   const q = query.trim().toLowerCase();
   const groups = [
@@ -119,7 +133,7 @@ function StatusMultiSelect({ selected, leadStatuses, onChange }: { selected: str
       {pos && createPortal(
         <>
           <div className="fixed inset-0 z-[60]" onClick={() => setPos(null)} />
-          <div className="fixed z-[70] bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden" style={{ top: pos.top, left: pos.left, width }}>
+          <div ref={panelRef} className="fixed z-[70] bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden" style={{ top: pos.top, left: pos.left, width }}>
             <div className="p-1.5 border-b border-slate-100">
               <div className="relative">
                 <Search className="h-3 w-3 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2" />
@@ -291,6 +305,12 @@ export default function TaskInsightsCharts({ leads, followupCalls, agents }: { l
               <div className="absolute inset-0" onMouseMove={handlePieHover} onMouseLeave={() => setHoverSlice(null)}>
                 {/* eslint-disable-next-line @next/next/no-img-element -- static design asset; next/image adds nothing for a small local PNG */}
                 <img src="/images/task-pie-3d.png" alt="Task type pie chart" className="w-full h-full select-none pointer-events-none" draggable={false} />
+                {/* Fade the slices with no tasks, matching their dimmed "0 Task" labels */}
+                <svg viewBox="0 0 220 220" className="absolute inset-0 w-full h-full pointer-events-none" aria-hidden="true">
+                  {pie.slices.filter(s => !s.name).map(s => (
+                    <path key={s.index} d={wedgePath(s.start, s.end)} fill="#fff" fillOpacity={0.65} />
+                  ))}
+                </svg>
               </div>
               {pie.slices.map(s => {
                 const r = 124;

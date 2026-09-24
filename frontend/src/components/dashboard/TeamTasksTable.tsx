@@ -1,11 +1,12 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown, ChevronLeft, ChevronRight, SlidersHorizontal } from "lucide-react";
 import { Lead, FollowupCall } from "@/context/AppContext";
 import { buildSalesPendingTasks, TaskBucket } from "@/lib/salesPendingTasks";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
+import { useCloseOnScroll } from "@/lib/useCloseOnScroll";
 
 type Tab = "all" | "pending";
 
@@ -52,6 +53,10 @@ export default function TeamTasksTable({
   const [typeMenuPos, setTypeMenuPos] = useState<{ top: number; left: number } | null>(null);
   const [settingsPos, setSettingsPos] = useState<{ top: number; left: number } | null>(null);
   const [showIdleMembers, setShowIdleMembers] = useState(false);
+  const typeMenuRef = useRef<HTMLDivElement>(null);
+  const settingsRef = useRef<HTMLDivElement>(null);
+  useCloseOnScroll(!!typeMenuPos, () => setTypeMenuPos(null), typeMenuRef);
+  useCloseOnScroll(!!settingsPos, () => setSettingsPos(null), settingsRef);
   const [page, setPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(10);
 
@@ -121,7 +126,7 @@ export default function TeamTasksTable({
         {settingsPos && createPortal(
           <>
             <div className="fixed inset-0 z-[60]" onClick={() => setSettingsPos(null)} />
-            <div className="fixed z-[70] w-64 bg-white border border-slate-200 rounded-xl shadow-lg p-3 space-y-2.5" style={{ top: settingsPos.top, left: settingsPos.left }}>
+            <div ref={settingsRef} className="fixed z-[70] w-64 bg-white border border-slate-200 rounded-xl shadow-lg p-3 space-y-2.5" style={{ top: settingsPos.top, left: settingsPos.left }}>
               <p className="text-[11px] font-extrabold text-slate-500">Table settings</p>
               <label className="flex items-start gap-2 text-xs text-slate-700 cursor-pointer">
                 <input type="checkbox" className="mt-0.5" checked={showIdleMembers} onChange={(e) => { setShowIdleMembers(e.target.checked); setPage(1); }} />
@@ -156,7 +161,7 @@ export default function TeamTasksTable({
                 {typeMenuPos && createPortal(
                   <>
                     <div className="fixed inset-0 z-[60]" onClick={() => setTypeMenuPos(null)} />
-                    <div className="fixed z-[70] w-48 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 max-h-60 overflow-y-auto" style={{ top: typeMenuPos.top, left: typeMenuPos.left }}>
+                    <div ref={typeMenuRef} className="fixed z-[70] w-48 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 max-h-60 overflow-y-auto" style={{ top: typeMenuPos.top, left: typeMenuPos.left }}>
                       {taskTypeOptions.map(opt => (
                         <button
                           key={opt}
