@@ -11,10 +11,10 @@ type Tab = "all" | "pending";
 
 // Which task buckets each tab counts (see salesPendingTasks.ts for the
 // buckets themselves):
-//   All Task     — every open task: upcoming + pending (+ missed if enabled in Settings)
+//   All Task     — every open task: upcoming + pending + missed
 //   Pending Task — tasks already due with no action yet: pending + missed
 const TAB_BUCKETS: Record<Tab, TaskBucket[]> = {
-  all: ["upcoming", "pending"],
+  all: ["upcoming", "pending", "missed"],
   pending: ["pending", "missed"]
 };
 
@@ -51,7 +51,6 @@ export default function TeamTasksTable({
   const [taskType, setTaskType] = useState("All");
   const [typeMenuPos, setTypeMenuPos] = useState<{ top: number; left: number } | null>(null);
   const [settingsPos, setSettingsPos] = useState<{ top: number; left: number } | null>(null);
-  const [includeMissedInAll, setIncludeMissedInAll] = useState(false);
   const [showIdleMembers, setShowIdleMembers] = useState(false);
   const [page, setPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(10);
@@ -60,7 +59,7 @@ export default function TeamTasksTable({
   const taskTypeOptions = useMemo(() => ["All", ...Array.from(new Set(tasks.map(t => t.taskType))).sort()], [tasks]);
 
   const rows = useMemo<TeamRow[]>(() => {
-    const buckets = tab === "all" && includeMissedInAll ? [...TAB_BUCKETS.all, "missed" as TaskBucket] : TAB_BUCKETS[tab];
+    const buckets = TAB_BUCKETS[tab];
     const byAgent = new Map<string, TeamRow>();
     const keyOf = (name: string) => name.trim().toLowerCase();
 
@@ -77,7 +76,7 @@ export default function TeamTasksTable({
       byAgent.set(keyOf(name), row);
     }
     return Array.from(byAgent.values()).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
-  }, [tasks, tab, taskType, includeMissedInAll, showIdleMembers, teamMembers]);
+  }, [tasks, tab, taskType, showIdleMembers, teamMembers]);
 
   const totalPages = Math.max(1, Math.ceil(rows.length / rowsPerPage));
   const currentPage = Math.min(page, totalPages);
@@ -124,10 +123,6 @@ export default function TeamTasksTable({
             <div className="fixed inset-0 z-[60]" onClick={() => setSettingsPos(null)} />
             <div className="fixed z-[70] w-64 bg-white border border-slate-200 rounded-xl shadow-lg p-3 space-y-2.5" style={{ top: settingsPos.top, left: settingsPos.left }}>
               <p className="text-[11px] font-extrabold text-slate-500">Table settings</p>
-              <label className="flex items-start gap-2 text-xs text-slate-700 cursor-pointer">
-                <input type="checkbox" className="mt-0.5" checked={includeMissedInAll} onChange={(e) => { setIncludeMissedInAll(e.target.checked); setPage(1); }} />
-                <span>Count missed tasks in <b>All Task</b></span>
-              </label>
               <label className="flex items-start gap-2 text-xs text-slate-700 cursor-pointer">
                 <input type="checkbox" className="mt-0.5" checked={showIdleMembers} onChange={(e) => { setShowIdleMembers(e.target.checked); setPage(1); }} />
                 <span>Show team members with no tasks</span>

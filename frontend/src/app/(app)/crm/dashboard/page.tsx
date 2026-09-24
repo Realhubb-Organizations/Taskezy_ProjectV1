@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useApp, Lead, LeadStatus } from "@/context/AppContext";
 import AddLeadModal from "@/components/crm/AddLeadModal";
 import TeamTasksTable from "@/components/dashboard/TeamTasksTable";
-import LeadInsightsCharts from "@/components/dashboard/LeadInsightsCharts";
+import TaskInsightsCharts from "@/components/dashboard/TaskInsightsCharts";
 import SalesPendingTasksTable from "@/components/dashboard/SalesPendingTasksTable";
 import { deriveActivityTimeline, STATUS_OPTIONS, statusBadgeClasses } from "@/lib/leadStatusMapping";
 import { computeLeadSummaryStats } from "@/lib/leadSummaryStats";
@@ -784,11 +784,11 @@ export default function CrmDashboardPage() {
         />
       ) : (
         // Admin / Manager: team-wide task counts per agent (All Task /
-        // Pending Task), then the deal-value trend and lead status mix for
-        // the selected Date Range.
+        // Pending Task), then the same open tasks charted by due date and
+        // by task type.
         <>
           <TeamTasksTable leads={scopedLeads} followupCalls={followupCalls} teamMembers={agentsList} isLoading={isDataLoading} />
-          <LeadInsightsCharts leads={rangeLeads} dateRange={dateRange} agents={chartAgents} />
+          <TaskInsightsCharts leads={scopedLeads} followupCalls={followupCalls} agents={chartAgents} />
         </>
       )}
 
