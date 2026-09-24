@@ -178,7 +178,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   // NotificationBell, the Home dashboard's per-role content) keeps working
   // exactly as before — only how the sidebar presents them changed.
   const crmItems = [
-    { name: "Dashboard", href: "/crm/dashboard", activeCheck: (p: string, t?: string | null) => p === "/crm/dashboard", icon: LayoutGrid },
+    { name: "Dashboard", href: "/crm/dashboard", activeCheck: (p: string, t?: string | null) => p === "/crm/dashboard" || p.startsWith("/crm/dashboard/"), icon: LayoutGrid },
     { name: "Properties", href: "/dashboard/properties", activeCheck: (p: string, t?: string | null) => p === "/dashboard/properties", icon: Building },
     { name: "Leads", href: "/dashboard/crm", activeCheck: (p: string, t?: string | null) => p === "/dashboard/crm", icon: Users },
     { name: "Campaigns", href: "/dashboard/crm/campaigns", activeCheck: (p: string) => p.startsWith("/dashboard/crm/campaigns"), icon: Megaphone },

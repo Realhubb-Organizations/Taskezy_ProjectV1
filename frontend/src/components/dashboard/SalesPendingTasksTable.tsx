@@ -22,21 +22,28 @@ const pad = (n: number) => String(n).padStart(2, "0");
 const formatTaskDate = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const formatTaskClock = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 
-// Sales-agent (Member) only — replaces the Pending Follow ups / Pending
-// Call Backs tables on /crm/dashboard for that role. Admin and Manager
-// views don't render this.
+// The sales agent's Pending Tasks table on /crm/dashboard. Also reused by
+// the admin/manager per-agent task page (/crm/dashboard/tasks), which passes
+// its own title/subtitle and a taskFilter (agent + tab + type + date range);
+// with those left unset it behaves exactly as the sales dashboard expects.
 export default function SalesPendingTasksTable({
   leads,
   followupCalls,
   onViewLead,
   onStatusChange,
-  isLoading = false
+  isLoading = false,
+  title = "Pending Tasks",
+  subtitle,
+  taskFilter
 }: {
   leads: Lead[];
   followupCalls: FollowupCall[];
   onViewLead: (leadId: string) => void;
   onStatusChange: (leadId: string, status: LeadStatus) => void;
   isLoading?: boolean;
+  title?: string;
+  subtitle?: string;
+  taskFilter?: (t: PendingTask) => boolean;
 }) {
   // Buckets are time-based (pending → missed after 10 min), so re-evaluate
   // periodically rather than only when data changes.
@@ -62,7 +69,10 @@ export default function SalesPendingTasksTable({
   useCloseOnScroll(!!rowMenu, () => setRowMenu(null), rowMenuRef);
   const [copied, setCopied] = useState<string | null>(null);
 
-  const tasks = useMemo(() => buildSalesPendingTasks(leads, followupCalls, now), [leads, followupCalls, now]);
+  const tasks = useMemo(() => {
+    const all = buildSalesPendingTasks(leads, followupCalls, now);
+    return taskFilter ? all.filter(taskFilter) : all;
+  }, [leads, followupCalls, now, taskFilter]);
   const statusOptions = useMemo(() => Array.from(new Set(tasks.map(t => t.status))), [tasks]);
   const filteredStatusOptions = statusOptions.filter(o => o.toLowerCase().includes(statusMenuSearch.trim().toLowerCase()));
 
@@ -154,7 +164,10 @@ export default function SalesPendingTasksTable({
   return (
     <div className="bg-white rounded-2xl shadow-md">
       <div className="px-5 pt-5 pb-3 flex flex-wrap items-start justify-between gap-3">
-        <h3 className="text-lg font-extrabold text-slate-900">Pending Tasks</h3>
+        <div>
+          <h3 className="text-lg font-extrabold text-slate-900">{title}</h3>
+          {subtitle && <p className="text-xs text-slate-400 font-medium mt-0.5">{subtitle}</p>}
+        </div>
         {/* Legend doubles as a filter — click a bucket to show only its
             tasks, click it again (or "All") to clear. */}
         <div className="flex items-center gap-1 text-[11px] text-slate-500 font-medium">

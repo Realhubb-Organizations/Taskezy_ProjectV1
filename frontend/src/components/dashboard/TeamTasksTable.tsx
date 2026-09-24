@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { createPortal } from "react-dom";
 import { ChevronDown, ChevronLeft, ChevronRight, SlidersHorizontal } from "lucide-react";
 import { Lead, FollowupCall } from "@/context/AppContext";
@@ -8,13 +9,14 @@ import { buildSalesPendingTasks, TaskBucket } from "@/lib/salesPendingTasks";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
 import { useCloseOnScroll } from "@/lib/useCloseOnScroll";
 
-type Tab = "all" | "pending";
+export type TeamTaskTab = "all" | "pending";
+type Tab = TeamTaskTab;
 
 // Which task buckets each tab counts (see salesPendingTasks.ts for the
 // buckets themselves):
 //   All Task     — every open task: upcoming + pending + missed
 //   Pending Task — tasks already due with no action yet: pending + missed
-const TAB_BUCKETS: Record<Tab, TaskBucket[]> = {
+export const TAB_BUCKETS: Record<Tab, TaskBucket[]> = {
   all: ["upcoming", "pending", "missed"],
   pending: ["pending", "missed"]
 };
@@ -194,7 +196,18 @@ export default function TeamTasksTable({
               pageRows.map(r => (
                 <tr key={r.name} className="hover:bg-slate-50/60 transition-colors">
                   <td className="px-4 py-3.5 text-slate-800 font-medium truncate" title={r.name}>{r.name}</td>
-                  <td className="px-4 py-3.5 text-slate-800 tabular-nums">{r.count}</td>
+                  <td className="px-4 py-3.5 text-slate-800 tabular-nums">
+                    {/* Opens this member's task list — same tab + task type, so it lists exactly what was counted */}
+                    {r.count > 0 ? (
+                      <Link
+                        href={`/crm/dashboard/tasks?${new URLSearchParams({ agent: r.name, tab, type: taskType }).toString()}`}
+                        className="font-bold text-[#0B1E6E] hover:underline"
+                        title={`View ${r.name}'s tasks`}
+                      >
+                        {r.count}
+                      </Link>
+                    ) : r.count}
+                  </td>
                   <td className="px-4 py-3.5 text-slate-800">{taskType}</td>
                   <td className="px-4 py-3.5 text-slate-800 tabular-nums">{r.earliest ? formatDate(r.earliest) : "—"}</td>
                 </tr>
