@@ -48,6 +48,7 @@ export default function SalesPendingTasksTable({
   const [search, setSearch] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
+  const [bucketFilter, setBucketFilter] = useState<TaskBucket | null>(null);
   const [statusMenuPos, setStatusMenuPos] = useState<{ top: number; left: number } | null>(null);
   const [rowMenu, setRowMenu] = useState<{ taskId: string; top: number; left: number } | null>(null);
   const [rowMenuSearch, setRowMenuSearch] = useState("");
@@ -60,8 +61,14 @@ export default function SalesPendingTasksTable({
     const q = search.trim().toLowerCase();
     const matchesSearch = !q || t.name.toLowerCase().includes(q) || t.phone.includes(q);
     const matchesStatus = statusFilter.length === 0 || statusFilter.includes(t.status);
-    return matchesSearch && matchesStatus;
+    const matchesBucket = !bucketFilter || t.bucket === bucketFilter;
+    return matchesSearch && matchesStatus && matchesBucket;
   });
+
+  const bucketCounts = tasks.reduce<Record<TaskBucket, number>>(
+    (acc, t) => ({ ...acc, [t.bucket]: acc[t.bucket] + 1 }),
+    { missed: 0, pending: 0, upcoming: 0 }
+  );
 
   const copy = (key: string, value: string) => {
     navigator.clipboard.writeText(value).then(() => {
@@ -139,13 +146,31 @@ export default function SalesPendingTasksTable({
     <div className="bg-white rounded-2xl shadow-md">
       <div className="px-5 pt-5 pb-3 flex flex-wrap items-start justify-between gap-3">
         <h3 className="text-lg font-extrabold text-slate-900">Pending Tasks</h3>
-        <div className="flex items-center gap-3 text-[11px] text-slate-500 font-medium">
-          {(Object.keys(BUCKET_STYLES) as TaskBucket[]).map(b => (
-            <span key={b} className="flex items-center gap-1">
-              <span className={`h-2.5 w-2.5 rounded-full border-[1.5px] bg-white ${BUCKET_STYLES[b].dot}`} />
-              {BUCKET_STYLES[b].label}
-            </span>
-          ))}
+        {/* Legend doubles as a filter — click a bucket to show only its
+            tasks, click it again (or "All") to clear. */}
+        <div className="flex items-center gap-1 text-[11px] text-slate-500 font-medium">
+          {bucketFilter && (
+            <button onClick={() => setBucketFilter(null)} className="px-2 py-1 rounded-md hover:bg-slate-100 hover:text-slate-800">
+              All
+            </button>
+          )}
+          {(Object.keys(BUCKET_STYLES) as TaskBucket[]).map(b => {
+            const isActive = bucketFilter === b;
+            return (
+              <button
+                key={b}
+                onClick={() => setBucketFilter(prev => (prev === b ? null : b))}
+                aria-pressed={isActive}
+                className={`flex items-center gap-1 px-2 py-1 rounded-md border transition-colors ${
+                  isActive ? `${BUCKET_STYLES[b].row} text-slate-900 font-bold` : "border-transparent hover:bg-slate-100 hover:text-slate-800"
+                }`}
+              >
+                <span className={`h-2.5 w-2.5 rounded-full border-[1.5px] bg-white ${BUCKET_STYLES[b].dot}`} />
+                {BUCKET_STYLES[b].label}
+                <span className="text-slate-400 font-semibold">({bucketCounts[b]})</span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -237,7 +262,11 @@ export default function SalesPendingTasksTable({
             ) : visibleTasks.length === 0 ? (
               <tr>
                 <td colSpan={5} className="px-4 py-8 text-center text-slate-400 font-semibold italic">
-                  {tasks.length === 0 ? "No pending tasks — you're all caught up." : "No tasks match the current search/filters."}
+                  {tasks.length === 0
+                    ? "No pending tasks — you're all caught up."
+                    : bucketFilter && bucketCounts[bucketFilter] === 0
+                      ? `No ${BUCKET_STYLES[bucketFilter].label.toLowerCase()} tasks.`
+                      : "No tasks match the current search/filters."}
                 </td>
               </tr>
             ) : (
