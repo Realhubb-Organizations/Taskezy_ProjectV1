@@ -31,10 +31,25 @@ import {
   Percent,
   LayoutGrid,
   CreditCard,
-  ChevronDown,
   MoreHorizontal
 } from "lucide-react";
 import { LineSkeleton, CardListSkeleton } from "@/components/ui/Skeletons";
+import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
+import TablePagination, { usePagination } from "@/components/ui/TablePagination";
+
+const DEPARTMENT_OPTIONS = [
+  { value: "SALES", label: "SALES" },
+  { value: "TECH", label: "IT / TECH" },
+  { value: "MARKETING", label: "MARKETING" },
+  { value: "FINANCE", label: "FINANCE" }
+];
+const ROLE_TYPE_OPTIONS = ["Member", "Manager"];
+const LICENSE_OPTIONS = [
+  { value: "AGENT", label: "AGENT (Sales/IT/Mktg)" },
+  { value: "FINANCE", label: "FINANCE OPS" },
+  { value: "ADMIN", label: "GLOBAL ADMIN" }
+];
+const USER_STATUS_OPTIONS = ["ACTIVE", "INACTIVE"];
 
 const TABS = ["Connected Apps", "Leads", "HRMS", "Finance", "Manage Users", "Preference", "About"] as const;
 type Tab = (typeof TABS)[number];
@@ -112,9 +127,9 @@ export default function SettingsPage() {
   };
 
   const [integrationSearch, setIntegrationSearch] = useState("");
-  const [integrationFilter, setIntegrationFilter] = useState<"all" | "active" | "inactive">("all");
+  // "active" / "inactive" ([] = all).
+  const [integrationStatuses, setIntegrationStatuses] = useState<string[]>([]);
   const [integrationSort, setIntegrationSort] = useState<"popular" | "name" | "status">("popular");
-  const [integrationSortMenuOpen, setIntegrationSortMenuOpen] = useState(false);
   const [integrationCardMenuOpen, setIntegrationCardMenuOpen] = useState<string | null>(null);
 
   // --- Preference: only real, already-wired client-side preference today —
@@ -246,13 +261,12 @@ export default function SettingsPage() {
   const visibleIntegrations = useMemo(() => {
     const q = integrationSearch.trim().toLowerCase();
     let list = integrationSummaries.filter(s => !q || s.name.toLowerCase().includes(q));
-    if (integrationFilter === "active") list = list.filter(s => s.active);
-    if (integrationFilter === "inactive") list = list.filter(s => !s.active);
+    if (integrationStatuses.length > 0) list = list.filter(s => integrationStatuses.includes(s.active ? "active" : "inactive"));
     if (integrationSort === "name") list = [...list].sort((a, b) => a.name.localeCompare(b.name));
     if (integrationSort === "status") list = [...list].sort((a, b) => Number(b.active) - Number(a.active));
     return list;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [integrationSearch, integrationFilter, integrationSort, integrations, activeMetaConnections.length, activeGoogleAccounts.length]);
+  }, [integrationSearch, integrationStatuses, integrationSort, integrations, activeMetaConnections.length, activeGoogleAccounts.length]);
 
   // --- Leads source breakdown ---
   const leadSourceRows = useMemo(() => {
@@ -266,6 +280,7 @@ export default function SettingsPage() {
       .map(([name, count]) => ({ name, count, percent: (count / total) * 100 }))
       .sort((a, b) => b.count - a.count);
   }, [leads]);
+  const leadSourcePagination = usePagination(leadSourceRows, 10);
 
   // --- HRMS Settings: geofence + half-day threshold, admin-editable, tenant-wide ---
   const [officeLat, setOfficeLat] = useState("");
@@ -380,6 +395,7 @@ export default function SettingsPage() {
       (u.phone_number || "").includes(q)
     );
   }, [users, searchQuery]);
+  const userPagination = usePagination(filteredUsers, 10, searchQuery);
 
   const handleEditClick = (user: User) => {
     setSelectedUser(user);
@@ -814,15 +830,14 @@ export default function SettingsPage() {
           );
         };
 
-        const FILTER_PILLS: { key: typeof integrationFilter; label: string; count: number }[] = [
-          { key: "all", label: "All", count: integrationSummaries.length },
-          { key: "active", label: "Active", count: integrationActiveCount },
-          { key: "inactive", label: "Inactive", count: integrationInactiveCount }
+        const STATUS_OPTIONS = [
+          { value: "active", label: `Active (${integrationActiveCount})` },
+          { value: "inactive", label: `Inactive (${integrationInactiveCount})` }
         ];
-        const SORT_OPTIONS: { key: typeof integrationSort; label: string }[] = [
-          { key: "popular", label: "Most Popular" },
-          { key: "name", label: "Name (A–Z)" },
-          { key: "status", label: "Active First" }
+        const SORT_OPTIONS: { value: typeof integrationSort; label: string }[] = [
+          { value: "popular", label: "Most Popular" },
+          { value: "name", label: "Name (A–Z)" },
+          { value: "status", label: "Active First" }
         ];
 
         return (
@@ -860,50 +875,26 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            {/* Filter pills + Sort */}
+            {/* Status filter + Sort */}
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                {FILTER_PILLS.map(p => (
-                  <button
-                    key={p.key}
-                    onClick={() => setIntegrationFilter(p.key)}
-                    className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-all ${
-                      integrationFilter === p.key
-                        ? "bg-brand-50 border-brand-200 text-brand-700"
-                        : "bg-white border-slate-200 text-slate-500 hover:text-slate-700"
-                    }`}
-                  >
-                    {p.label} ({p.count})
-                  </button>
-                ))}
-              </div>
-              <div className="relative">
+              <SearchableMultiSelect
+                options={STATUS_OPTIONS}
+                selected={integrationStatuses}
+                onChange={setIntegrationStatuses}
+                placeholder={`All (${integrationSummaries.length})`}
+                searchPlaceholder="Search status..."
+              />
+              <div className="flex items-center">
                 <span className="text-[11px] text-slate-400 font-semibold mr-1.5">Sort by</span>
-                <button
-                  onClick={() => setIntegrationSortMenuOpen(o => !o)}
-                  className="inline-flex items-center gap-1.5 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-[11px] font-bold text-slate-700 hover:bg-slate-50"
-                >
-                  {SORT_OPTIONS.find(o => o.key === integrationSort)?.label}
-                  <ChevronDown className={`h-3 w-3 text-slate-400 transition-transform ${integrationSortMenuOpen ? "rotate-180" : ""}`} />
-                </button>
-                {integrationSortMenuOpen && (
-                  <>
-                    <div className="fixed inset-0 z-[60]" onClick={() => setIntegrationSortMenuOpen(false)} />
-                    <div className="absolute right-0 top-full mt-1 z-[70] w-40 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 overflow-hidden">
-                      {SORT_OPTIONS.map(o => (
-                        <button
-                          key={o.key}
-                          onClick={() => { setIntegrationSort(o.key); setIntegrationSortMenuOpen(false); }}
-                          className={`w-full text-left px-3 py-1.5 text-xs font-bold transition-colors ${
-                            integrationSort === o.key ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"
-                          }`}
-                        >
-                          {o.label}
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                )}
+                <SearchableSelect
+                  variant="pill"
+                  options={SORT_OPTIONS}
+                  value={integrationSort}
+                  onChange={(v) => setIntegrationSort(v as typeof integrationSort)}
+                  searchPlaceholder="Search sort..."
+                  panelWidth={180}
+                  align="right"
+                />
               </div>
             </div>
 
@@ -959,7 +950,7 @@ export default function SettingsPage() {
             <p className="text-[11px] text-slate-400 italic py-6 text-center">No leads ingested yet.</p>
           ) : (
             <div className="space-y-3">
-              {leadSourceRows.map(row => (
+              {leadSourcePagination.pageRows.map(row => (
                 <div key={row.name} className="space-y-1">
                   <div className="flex justify-between text-xs font-medium">
                     <span className="text-slate-650 font-bold">{row.name}</span>
@@ -971,6 +962,9 @@ export default function SettingsPage() {
                 </div>
               ))}
             </div>
+          )}
+          {leadSourceRows.length > 0 && (
+            <TablePagination {...leadSourcePagination.paginationProps} rowLabel="Source" className="!px-0" />
           )}
 
           <p className="text-[10px] text-slate-450 leading-relaxed pt-3 border-t border-slate-100">
@@ -1206,7 +1200,7 @@ export default function SettingsPage() {
                 No users match &quot;{searchQuery}&quot;.
               </div>
             ) : (
-              filteredUsers.map(user => {
+              userPagination.pageRows.map(user => {
                 const isRevealed = revealedUserId === user.id;
                 const deptKey = user.role === "ADMIN" ? "ADMIN" : (user.department || "SALES");
                 return (
@@ -1262,6 +1256,11 @@ export default function SettingsPage() {
               })
             )}
           </div>
+          {filteredUsers.length > 0 && (
+            <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+              <TablePagination {...userPagination.paginationProps} rowLabel="User" className="!border-t-0" />
+            </div>
+          )}
         </div>
       )}
 
@@ -1408,16 +1407,12 @@ export default function SettingsPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Department</label>
-                  <select
+                  <SearchableSelect
+                    options={DEPARTMENT_OPTIONS}
                     value={addDepartment}
-                    onChange={(e) => setAddDepartment(e.target.value as "SALES" | "TECH" | "MARKETING" | "FINANCE")}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none"
-                  >
-                    <option value="SALES">SALES</option>
-                    <option value="TECH">IT / TECH</option>
-                    <option value="MARKETING">MARKETING</option>
-                    <option value="FINANCE">FINANCE</option>
-                  </select>
+                    onChange={(v) => setAddDepartment(v as "SALES" | "TECH" | "MARKETING" | "FINANCE")}
+                    searchPlaceholder="Search departments..."
+                  />
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Designation</label>
@@ -1435,41 +1430,34 @@ export default function SettingsPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Role Type</label>
-                  <select
+                  <SearchableSelect
+                    options={ROLE_TYPE_OPTIONS}
                     value={addRoleType}
-                    onChange={(e) => setAddRoleType(e.target.value as "Manager" | "Member")}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none"
-                  >
-                    <option value="Member">Member</option>
-                    <option value="Manager">Manager</option>
-                  </select>
+                    onChange={(v) => setAddRoleType(v as "Manager" | "Member")}
+                    searchPlaceholder="Search role types..."
+                  />
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">SaaS License Type</label>
-                  <select
+                  <SearchableSelect
+                    options={LICENSE_OPTIONS}
                     value={addRole}
-                    onChange={(e) => setAddRole(e.target.value as Role)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none"
-                  >
-                    <option value="AGENT">AGENT (Sales/IT/Mktg)</option>
-                    <option value="FINANCE">FINANCE OPS</option>
-                    <option value="ADMIN">GLOBAL ADMIN</option>
-                  </select>
+                    onChange={(v) => setAddRole(v as Role)}
+                    searchPlaceholder="Search license types..."
+                  />
                 </div>
               </div>
 
               <div>
                 <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Reports To</label>
-                <select
+                <SearchableSelect
+                  options={managerOptions.map(m => ({ value: m.id, label: m.name }))}
                   value={addManagerId}
-                  onChange={(e) => setAddManagerId(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none"
-                >
-                  <option value="">No manager / top-level</option>
-                  {managerOptions.map(m => (
-                    <option key={m.id} value={m.id}>{m.name}</option>
-                  ))}
-                </select>
+                  onChange={setAddManagerId}
+                  placeholder="No manager / top-level"
+                  searchPlaceholder="Search managers..."
+                  clearable
+                />
                 {managerOptions.length === 0 && (
                   <p className="text-[9px] text-slate-400 mt-1">No Manager-role_type users exist yet — add one first if this person should report to someone.</p>
                 )}
@@ -1564,42 +1552,34 @@ export default function SettingsPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[10px] font-bold text-slate-500 mb-1.5 uppercase">Role Type</label>
-                  <select
+                  <SearchableSelect
+                    options={ROLE_TYPE_OPTIONS}
                     value={roleType}
-                    onChange={(e) => setRoleType(e.target.value as "Manager" | "Member")}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none"
-                  >
-                    <option value="Manager">Manager</option>
-                    <option value="Member">Member</option>
-                  </select>
+                    onChange={(v) => setRoleType(v as "Manager" | "Member")}
+                    searchPlaceholder="Search role types..."
+                  />
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold text-slate-500 mb-1.5 uppercase">Status</label>
-                  <select
+                  <SearchableSelect
+                    options={USER_STATUS_OPTIONS}
                     value={status}
-                    onChange={(e) => setStatus(e.target.value as "ACTIVE" | "INACTIVE")}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none"
-                  >
-                    <option value="ACTIVE">ACTIVE</option>
-                    <option value="INACTIVE">INACTIVE</option>
-                  </select>
+                    onChange={(v) => setStatus(v as "ACTIVE" | "INACTIVE")}
+                    searchPlaceholder="Search status..."
+                  />
                 </div>
               </div>
 
               <div>
                 <label className="block text-[10px] font-bold text-slate-500 mb-1.5 uppercase">Reports To</label>
-                <select
+                <SearchableSelect
+                  options={managerOptions.filter(m => m.id !== selectedUser?.id).map(m => ({ value: m.id, label: m.name }))}
                   value={managerId}
-                  onChange={(e) => setManagerId(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none"
-                >
-                  <option value="">No manager / top-level</option>
-                  {managerOptions
-                    .filter(m => m.id !== selectedUser?.id)
-                    .map(m => (
-                      <option key={m.id} value={m.id}>{m.name}</option>
-                    ))}
-                </select>
+                  onChange={setManagerId}
+                  placeholder="No manager / top-level"
+                  searchPlaceholder="Search managers..."
+                  clearable
+                />
               </div>
 
               <div>

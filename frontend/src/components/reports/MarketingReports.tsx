@@ -16,29 +16,32 @@ import {
   formatCurrency
 } from "@/lib/reportMetrics";
 import { LineSkeleton, TableRowsSkeleton } from "@/components/ui/Skeletons";
+import { SearchableMultiSelect } from "@/components/ui/SearchableDropdown";
+import TablePagination, { usePagination } from "@/components/ui/TablePagination";
 
 const SUB_TABS = ["By Ad Account", "Overall", "Property-wise"] as const;
 type SubTab = (typeof SUB_TABS)[number];
 
-const CAMPAIGN_FILTERS = ["All", "Active", "Inactive"] as const;
-type CampaignFilter = (typeof CAMPAIGN_FILTERS)[number];
+const CAMPAIGN_STATUS_OPTIONS = [
+  { value: "ACTIVE", label: "Active" },
+  { value: "INACTIVE", label: "Inactive" }
+];
 
 export default function MarketingReports({ dateRange }: { dateRange: DateRange }) {
   const { leads, adSpendRecords, properties, isDataLoading } = useApp();
   const [subTab, setSubTab] = useState<SubTab>("Overall");
-  // Active/Inactive/All — records with no linked Meta campaign (legacy/manual
-  // rows, or any campaign the sync job hasn't reached yet) always count as
-  // "All" but are excluded from a specific Active/Inactive filter, since we
-  // genuinely don't know their status.
-  const [campaignFilter, setCampaignFilter] = useState<CampaignFilter>("All");
+  // Active/Inactive ([] = all) — records with no linked Meta campaign
+  // (legacy/manual rows, or any campaign the sync job hasn't reached yet)
+  // always count when nothing is picked but are excluded from a specific
+  // Active/Inactive filter, since we genuinely don't know their status.
+  const [campaignStatuses, setCampaignStatuses] = useState<string[]>([]);
 
   const rangeLeads = useMemo(() => filterLeadsByRange(leads, dateRange.from, dateRange.to), [leads, dateRange]);
   const dateFilteredSpend = useMemo(() => filterAdSpendByRange(adSpendRecords, dateRange.from, dateRange.to), [adSpendRecords, dateRange]);
   const rangeSpend = useMemo(() => {
-    if (campaignFilter === "All") return dateFilteredSpend;
-    const wanted = campaignFilter === "Active" ? "ACTIVE" : "INACTIVE";
-    return dateFilteredSpend.filter(r => r.campaignStatus === wanted);
-  }, [dateFilteredSpend, campaignFilter]);
+    if (campaignStatuses.length === 0) return dateFilteredSpend;
+    return dateFilteredSpend.filter(r => !!r.campaignStatus && campaignStatuses.includes(r.campaignStatus));
+  }, [dateFilteredSpend, campaignStatuses]);
 
   const totalSpend = rangeSpend.reduce((sum, r) => sum + r.spend, 0);
   const totalPlatformLeads = rangeSpend.reduce((sum, r) => sum + r.leadsGenerated, 0);
@@ -96,24 +99,24 @@ export default function MarketingReports({ dateRange }: { dateRange: DateRange }
     }).filter(row => row.spend > 0 || row.crmLeadsCount > 0).sort((a, b) => b.spend - a.spend);
   }, [properties, rangeSpend, rangeLeads]);
 
+  // Both tables jump back to page 1 when the date range or campaign filter changes.
+  const tableResetKey = JSON.stringify([dateRange, campaignStatuses]);
+  const accountPagination = usePagination(accountRows, 10, tableResetKey);
+  const propertyPagination = usePagination(propertyRows, 10, tableResetKey);
+
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Campaign filter — applies to Total Ad Spend, CPL, and every table/breakdown below */}
       <div className="flex items-center gap-2">
         <span className="text-[10px] font-bold text-slate-450 uppercase tracking-wider">Campaigns:</span>
-        <div className="flex gap-1.5">
-          {CAMPAIGN_FILTERS.map(f => (
-            <button
-              key={f}
-              onClick={() => setCampaignFilter(f)}
-              className={`px-3 py-1 rounded-lg text-[10px] font-bold border transition-all ${
-                campaignFilter === f ? "bg-slate-800 border-slate-800 text-white" : "bg-white border-slate-200 text-slate-500 hover:text-slate-700"
-              }`}
-            >
-              {f}
-            </button>
-          ))}
-        </div>
+        <SearchableMultiSelect
+          options={CAMPAIGN_STATUS_OPTIONS}
+          selected={campaignStatuses}
+          onChange={setCampaignStatuses}
+          placeholder="All"
+          searchPlaceholder="Search status..."
+          panelWidth={180}
+        />
       </div>
 
       {/* Summary metrics: CPL, Lead Quality, Booking ROI — one unified card
@@ -215,7 +218,7 @@ export default function MarketingReports({ dateRange }: { dateRange: DateRange }
                 ) : accountRows.length === 0 ? (
                   <tr><td colSpan={7} className="p-6 text-center text-slate-400 italic font-semibold">No ad spend recorded in this date range.</td></tr>
                 ) : (
-                  accountRows.map(acc => (
+                  accountPagination.pageRows.map(acc => (
                     <tr key={acc.accountName} className="hover:bg-slate-50/50">
                       <td className="p-3">
                         <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${
@@ -243,6 +246,7 @@ export default function MarketingReports({ dateRange }: { dateRange: DateRange }
                 )}
               </tbody>
             </table>
+            <TablePagination {...accountPagination.paginationProps} rowLabel="Ad Account" />
           </div>
         </div>
       )}
@@ -321,7 +325,7 @@ export default function MarketingReports({ dateRange }: { dateRange: DateRange }
                 ) : propertyRows.length === 0 ? (
                   <tr><td colSpan={7} className="p-6 text-center text-slate-400 italic font-semibold">No property-linked activity in this date range.</td></tr>
                 ) : (
-                  propertyRows.map(row => (
+                  propertyPagination.pageRows.map(row => (
                     <tr key={row.name} className="hover:bg-slate-50/50">
                       <td className="p-3 font-bold text-slate-800">{row.name}</td>
                       <td className="p-3 font-mono text-slate-700">{formatCurrency(row.spend)}</td>
@@ -335,6 +339,7 @@ export default function MarketingReports({ dateRange }: { dateRange: DateRange }
                 )}
               </tbody>
             </table>
+            <TablePagination {...propertyPagination.paginationProps} rowLabel="Property" />
           </div>
         </div>
       )}

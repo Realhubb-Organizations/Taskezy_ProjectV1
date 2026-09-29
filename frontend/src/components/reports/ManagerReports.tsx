@@ -15,6 +15,7 @@ import {
   formatCurrency
 } from "@/lib/reportMetrics";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
+import TablePagination, { usePagination } from "@/components/ui/TablePagination";
 
 export default function ManagerReports({ dateRange }: { dateRange: DateRange }) {
   const { leads, adSpendRecords, followupCalls, users, currentUser, activeRole, isDataLoading } = useApp();
@@ -96,6 +97,7 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
       };
     });
   }, [managers, users, rangeLeads, rangeFollowups, rangeSpend]);
+  const managerPagination = usePagination(managerRows, 10, JSON.stringify(dateRange));
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -145,7 +147,7 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
                     Manager-level reports aren&apos;t visible at your access level.
                   </td>
                 </tr>
-              ) : managerRows.map(row => (
+              ) : managerPagination.pageRows.map(row => (
                 <React.Fragment key={row.manager}>
                   <tr className="hover:bg-slate-50/50">
                     <td className="p-3 font-bold text-slate-800">{row.manager}</td>
@@ -232,6 +234,7 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
               ))}
             </tbody>
           </table>
+          <TablePagination {...managerPagination.paginationProps} rowLabel="Manager" />
         </div>
       </div>
     </div>

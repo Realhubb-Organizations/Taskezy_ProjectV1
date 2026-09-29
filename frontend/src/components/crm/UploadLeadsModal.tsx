@@ -3,6 +3,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { X, UploadCloud, Download, ChevronDown, CheckCircle2, AlertTriangle } from "lucide-react";
+import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
 
 // exceljs is a ~260KB dependency used only by this modal (template
 // generation + file parsing) — dynamically imported so it's fetched when an
@@ -116,89 +117,6 @@ function SourceSearchSelect({ value, onChange }: { value: string; onChange: (v: 
                   className="h-3.5 w-3.5 rounded border-slate-300 text-[#0B1E6E] focus:ring-0"
                 />
                 {h}
-              </label>
-            ))
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Checkbox multi-select for Agent mode's assignees — rows get round-robined
-// evenly across whichever agents are checked (see leads.service.ts's
-// bulkImportLeads), so more than one agent is a normal, expected choice
-// here, not an edge case.
-function AgentMultiSelect({
-  agents,
-  selectedIds,
-  onChange
-}: {
-  agents: { id: string; name: string }[];
-  selectedIds: string[];
-  onChange: (ids: string[]) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const wrapRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open]);
-
-  const toggle = (id: string) => {
-    onChange(selectedIds.includes(id) ? selectedIds.filter(x => x !== id) : [...selectedIds, id]);
-  };
-
-  const label =
-    selectedIds.length === 0
-      ? "Select agent(s)"
-      : selectedIds.length === 1
-        ? agents.find(a => a.id === selectedIds[0])?.name || "1 agent selected"
-        : `${selectedIds.length} agents selected`;
-
-  const q = query.trim().toLowerCase();
-  const filtered = agents.filter(a => !q || a.name.toLowerCase().includes(q));
-
-  return (
-    <div className="relative" ref={wrapRef}>
-      <button
-        type="button"
-        onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:outline-none focus:bg-white focus:border-[#0B1E6E] transition-all"
-      >
-        <span className={`truncate ${selectedIds.length === 0 ? "text-slate-400 font-semibold" : ""}`}>{label}</span>
-        <ChevronDown className={`h-3.5 w-3.5 text-slate-400 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
-      </button>
-
-      {open && (
-        <div className="absolute z-20 mt-1.5 w-full bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 max-h-56 overflow-y-auto">
-          <div className="px-2 pb-1.5 sticky top-0 bg-white">
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search agents..."
-              className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none"
-            />
-          </div>
-          {filtered.length === 0 ? (
-            <p className="px-3.5 py-2 text-xs text-slate-400 italic font-normal">No agents found</p>
-          ) : (
-            filtered.map(a => (
-              <label key={a.id} className="flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={selectedIds.includes(a.id)}
-                  onChange={() => toggle(a.id)}
-                  className="h-3.5 w-3.5 rounded border-slate-300 text-[#0B1E6E] focus:ring-0"
-                />
-                {a.name}
               </label>
             ))
           )}
@@ -463,18 +381,25 @@ export default function UploadLeadsModal({ isOpen, onClose, onSubmit, properties
                       {assignmentMode === "PROPERTY" ? "Select Property" : "Select Agent(s)"}
                     </label>
                     {assignmentMode === "PROPERTY" ? (
-                      <select
+                      <SearchableSelect
                         value={propertyId}
-                        onChange={(e) => setPropertyId(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:outline-none focus:bg-white focus:border-[#0B1E6E] transition-all"
-                      >
-                        <option value="">Select property</option>
-                        {propertiesList.map(p => (
-                          <option key={p.id} value={p.id}>{p.name}</option>
-                        ))}
-                      </select>
+                        onChange={setPropertyId}
+                        options={propertiesList.map(p => ({ value: p.id, label: p.name }))}
+                        placeholder="Select property"
+                        searchPlaceholder="Search properties..."
+                      />
                     ) : (
-                      <AgentMultiSelect agents={agentsList} selectedIds={agentIds} onChange={setAgentIds} />
+                      // Rows get round-robined evenly across whichever agents
+                      // are checked (see leads.service.ts's bulkImportLeads),
+                      // so more than one agent is a normal choice here.
+                      <SearchableMultiSelect
+                        variant="field"
+                        selected={agentIds}
+                        onChange={setAgentIds}
+                        options={agentsList.map(a => ({ value: a.id, label: a.name }))}
+                        placeholder="Select agent(s)"
+                        searchPlaceholder="Search agents..."
+                      />
                     )}
                   </div>
                   <div className="space-y-1">

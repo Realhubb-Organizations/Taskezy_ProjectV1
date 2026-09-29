@@ -1,9 +1,11 @@
 "use client";
 
 import React, { useMemo, useRef, useState } from "react";
-import { Search, ChevronDown, ChevronLeft, ChevronRight, Copy, Check, X } from "lucide-react";
+import { Search, Copy, Check, X } from "lucide-react";
 import { WhatsAppIcon, CallIcon } from "@/components/icons/ContactIcons";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
+import { SearchableMultiSelect } from "@/components/ui/SearchableDropdown";
+import TablePagination from "@/components/ui/TablePagination";
 
 export interface PendingRow {
   id: string;
@@ -31,8 +33,6 @@ export default function PendingLeadsTable({
   const [searchOpen, setSearchOpen] = useState(false);
   const [assignedFilter, setAssignedFilter] = useState<string[]>([]);
   const [propertyFilter, setPropertyFilter] = useState<string[]>([]);
-  const [assignedMenuOpen, setAssignedMenuOpen] = useState(false);
-  const [propertyMenuOpen, setPropertyMenuOpen] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(10);
@@ -51,8 +51,6 @@ export default function PendingLeadsTable({
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / rowsPerPage));
   const currentPage = Math.min(page, totalPages);
-  const rangeStart = filteredRows.length === 0 ? 0 : (currentPage - 1) * rowsPerPage + 1;
-  const rangeEnd = Math.min(currentPage * rowsPerPage, filteredRows.length);
 
   // Rows render continuously in one scrollable container instead of being
   // sliced per page — a scroll-spy tracks each page-boundary row's real DOM
@@ -90,9 +88,10 @@ export default function PendingLeadsTable({
     });
   };
 
-  const toggleFilterValue = (list: string[], value: string, setList: (v: string[]) => void) => {
+  // Any filter change starts back at page 1.
+  const setFilter = (setList: (v: string[]) => void) => (next: string[]) => {
     setPage(1);
-    setList(list.includes(value) ? list.filter(v => v !== value) : [...list, value]);
+    setList(next);
   };
 
   const handleCopy = async (row: PendingRow) => {
@@ -154,55 +153,26 @@ export default function PendingLeadsTable({
                 )}
               </th>
               <th className="px-4 py-2.5">
-                <div className="relative">
-                  <button onClick={() => setAssignedMenuOpen(o => !o)} className="flex items-center gap-1.5 hover:text-brand-700">
-                    Assigned To
-                    <ChevronDown className="h-3 w-3" />
-                    {assignedFilter.length > 0 && (
-                      <span className="text-[9px] bg-brand-50 text-brand-700 rounded-full px-1.5 py-0.5 font-bold">{assignedFilter.length}</span>
-                    )}
-                  </button>
-                  {assignedMenuOpen && (
-                    <div className="absolute left-0 top-8 z-20 w-56 bg-white border border-slate-200 rounded-lg shadow-lg py-1.5 max-h-56 overflow-y-auto">
-                      {assignedOptions.length === 0 ? (
-                        <p className="px-3 py-2 text-xs text-slate-400 italic font-normal">No data yet</p>
-                      ) : (
-                        assignedOptions.map(opt => (
-                          <label key={opt} className="flex items-center gap-2 px-3 py-1.5 text-xs font-normal text-slate-700 hover:bg-slate-50 cursor-pointer">
-                            <input type="checkbox" checked={assignedFilter.includes(opt)} onChange={() => toggleFilterValue(assignedFilter, opt, setAssignedFilter)} />
-                            {opt}
-                          </label>
-                        ))
-                      )}
-                    </div>
-                  )}
-                </div>
+                <SearchableMultiSelect
+                  variant="inline"
+                  label="Assigned To"
+                  options={assignedOptions}
+                  selected={assignedFilter}
+                  onChange={setFilter(setAssignedFilter)}
+                  panelWidth={224}
+                />
               </th>
               <th className="px-4 py-2.5">Feedback</th>
               <th className="px-4 py-2.5">
-                <div className="relative">
-                  <button onClick={() => setPropertyMenuOpen(o => !o)} className="flex items-center gap-1.5 hover:text-brand-700">
-                    Property
-                    <ChevronDown className="h-3 w-3" />
-                    {propertyFilter.length > 0 && (
-                      <span className="text-[9px] bg-brand-50 text-brand-700 rounded-full px-1.5 py-0.5 font-bold">{propertyFilter.length}</span>
-                    )}
-                  </button>
-                  {propertyMenuOpen && (
-                    <div className="absolute right-0 top-8 z-20 w-56 bg-white border border-slate-200 rounded-lg shadow-lg py-1.5 max-h-56 overflow-y-auto">
-                      {propertyOptions.length === 0 ? (
-                        <p className="px-3 py-2 text-xs text-slate-400 italic font-normal">No data yet</p>
-                      ) : (
-                        propertyOptions.map(opt => (
-                          <label key={opt} className="flex items-center gap-2 px-3 py-1.5 text-xs font-normal text-slate-700 hover:bg-slate-50 cursor-pointer">
-                            <input type="checkbox" checked={propertyFilter.includes(opt)} onChange={() => toggleFilterValue(propertyFilter, opt, setPropertyFilter)} />
-                            {opt}
-                          </label>
-                        ))
-                      )}
-                    </div>
-                  )}
-                </div>
+                <SearchableMultiSelect
+                  variant="inline"
+                  label="Property"
+                  options={propertyOptions}
+                  selected={propertyFilter}
+                  onChange={setFilter(setPropertyFilter)}
+                  align="right"
+                  panelWidth={224}
+                />
               </th>
               <th className="px-4 py-2.5 text-right">Actions</th>
             </tr>
@@ -273,46 +243,21 @@ export default function PendingLeadsTable({
         </table>
       </div>
 
-      <div className="px-4 py-3 flex flex-wrap justify-between items-center gap-3 border-t border-slate-100 text-[11px] text-slate-500 font-semibold">
-        <span>{filteredRows.length} Row{filteredRows.length === 1 ? "" : "s"}</span>
-        <div className="flex items-center gap-4">
-          <span className="flex items-center gap-1.5">
-            Rows per page
-            <select
-              value={rowsPerPage}
-              onChange={(e) => {
-                programmaticScroll.current = true;
-                setRowsPerPage(Number(e.target.value));
-                setPage(1);
-                scrollRef.current?.scrollTo(0, 0);
-                requestAnimationFrame(() => {
-                  requestAnimationFrame(() => { programmaticScroll.current = false; });
-                });
-              }}
-              className="bg-slate-50 border border-slate-200 rounded px-1.5 py-1 font-bold text-slate-700 focus:outline-none"
-            >
-              {[10, 25, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
-            </select>
-          </span>
-          <span>{rangeStart}-{rangeEnd} of {filteredRows.length}</span>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => goToPage(currentPage - 1)}
-              disabled={currentPage <= 1}
-              className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
-            >
-              <ChevronLeft className="h-3.5 w-3.5" />
-            </button>
-            <button
-              onClick={() => goToPage(currentPage + 1)}
-              disabled={currentPage >= totalPages}
-              className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
-            >
-              <ChevronRight className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        </div>
-      </div>
+      <TablePagination
+        totalRows={filteredRows.length}
+        page={currentPage}
+        rowsPerPage={rowsPerPage}
+        onPageChange={goToPage}
+        onRowsPerPageChange={(n) => {
+          programmaticScroll.current = true;
+          setRowsPerPage(n);
+          scrollRef.current?.scrollTo(0, 0);
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => { programmaticScroll.current = false; });
+          });
+        }}
+        rowLabel="Lead"
+      />
     </div>
   );
 }

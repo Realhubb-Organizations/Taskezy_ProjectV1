@@ -18,6 +18,7 @@ import {
   SLA_MINUTES
 } from "@/lib/reportMetrics";
 import { LineSkeleton, TableRowsSkeleton, CardListSkeleton } from "@/components/ui/Skeletons";
+import TablePagination, { usePagination } from "@/components/ui/TablePagination";
 
 export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
   const { leads, adSpendRecords, followupCalls, users, currentUser, activeRole, reassignLead, isDataLoading } = useApp();
@@ -76,6 +77,12 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
   const agentFollowups = rangeFollowups.filter(f => f.assignedTo === activeAgent);
   const missedFollowups = agentFollowups.filter(f => f.status === "Missed");
 
+  // Both detail tables jump back to page 1 when the agent or date range changes.
+  const detailResetKey = JSON.stringify([activeAgent, dateRange]);
+  const agentListPagination = usePagination(agentNames, 10, JSON.stringify(dateRange));
+  const missedLeadsPagination = usePagination(missedLeads, 10, detailResetKey);
+  const missedFollowupsPagination = usePagination(missedFollowups, 10, detailResetKey);
+
   const handleReassign = (leadId: string, leadName: string) => {
     const target = prompt(`Reassign "${leadName}" to which team member?`, agentSalesTeamOptions.find(n => n !== activeAgent) || "");
     if (!target) return;
@@ -102,7 +109,7 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
               ) : agentNames.length === 0 ? (
                 <p className="text-[11px] text-slate-400 italic px-1">No agents with lead activity in range.</p>
               ) : (
-                agentNames.map(name => {
+                agentListPagination.pageRows.map(name => {
                   const count = rangeLeads.filter(l => l.assignedAgent === name).length;
                   const isManagedBy = reportsToByName.get(name);
                   return (
@@ -127,6 +134,16 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                 })
               )}
             </div>
+            {agentNames.length > 0 && (
+              <TablePagination
+                totalRows={agentListPagination.paginationProps.totalRows}
+                page={agentListPagination.page}
+                rowsPerPage={agentListPagination.rowsPerPage}
+                onPageChange={agentListPagination.setPage}
+                rowLabel="Agent"
+                className="!px-1 !pb-0"
+              />
+            )}
           </div>
         )}
 
@@ -240,7 +257,7 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                           </td>
                         </tr>
                       ) : (
-                        missedLeads.map(({ lead, info }) => {
+                        missedLeadsPagination.pageRows.map(({ lead, info }) => {
                           const latestLog = lead.logs.length > 0 ? lead.logs[lead.logs.length - 1] : undefined;
                           // "Missed" fires SLA_MINUTES after assignment — this is how
                           // far past that deadline the logged activity (or "now", if
@@ -299,6 +316,7 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                       )}
                     </tbody>
                   </table>
+                  <TablePagination {...missedLeadsPagination.paginationProps} rowLabel="Missed Lead" />
                 </div>
               </div>
 
@@ -327,7 +345,7 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                           </td>
                         </tr>
                       ) : (
-                        missedFollowups.map(f => {
+                        missedFollowupsPagination.pageRows.map(f => {
                           // Missed time = when it became due (falls back to the
                           // originally scheduled time for older rows from before
                           // the scheduler existed) + the 10-minute SLA. Overdue By
@@ -357,6 +375,7 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                       )}
                     </tbody>
                   </table>
+                  <TablePagination {...missedFollowupsPagination.paginationProps} rowLabel="Missed Follow-up" />
                 </div>
               </div>
             </>

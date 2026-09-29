@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { X, Phone, MessageSquare, Mail, Share2, Calendar, ArrowRight, Bell, Repeat, ChevronDown, Search, Copy, Check, User } from "lucide-react";
+import { X, Phone, MessageSquare, Mail, Share2, Calendar, ArrowRight, Bell, Repeat, Copy, Check, User } from "lucide-react";
 import { useApp, Lead, LeadStatus } from "@/context/AppContext";
+import { SearchableSelect } from "@/components/ui/SearchableDropdown";
+import { DatePicker } from "@/components/ui/DateRangePicker";
 import { deriveActivityTimeline, STATUS_OPTIONS, statusBadgeClasses } from "@/lib/leadStatusMapping";
 
 interface LeadDetailDrawerProps {
@@ -39,9 +41,6 @@ export default function LeadDetailDrawer({
   const [reminderTime, setReminderTime] = useState("");
   const [reminderSet, setReminderSet] = useState(false);
   const [reassignTarget, setReassignTarget] = useState("");
-  const [statusMenuOpen, setStatusMenuOpen] = useState(false);
-  const [statusMenuPos, setStatusMenuPos] = useState<{ top: number; left: number } | null>(null);
-  const [statusSearch, setStatusSearch] = useState("");
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
   // Who this lead can be handed to: ADMIN can reassign to anyone; a Manager
@@ -67,7 +66,6 @@ export default function LeadDetailDrawer({
       setReminderDate("");
       setReminderTime("");
       setReminderSet(false);
-      setStatusMenuOpen(false);
       setCopiedField(null);
     }
   }, [lead]);
@@ -77,20 +75,14 @@ export default function LeadDetailDrawer({
   const handleSelectStatus = (nextStatus: LeadStatus) => {
     if (restrictedStatuses?.includes(nextStatus) && onRestrictedStatus) {
       onRestrictedStatus(lead.id, lead.name, nextStatus);
-      setStatusMenuOpen(false);
       return;
     }
     setLocalStatus(nextStatus);
     onUpdateStatus(lead.id, nextStatus);
-    setStatusMenuOpen(false);
   };
 
   const baseStatusOptions = statusOptions ?? STATUS_OPTIONS;
   const statusOptionsList = baseStatusOptions.includes(localStatus) ? baseStatusOptions : [localStatus, ...baseStatusOptions];
-  const statusQuery = statusSearch.trim().toLowerCase();
-  const filteredStatusOptions = statusQuery
-    ? statusOptionsList.filter(s => s.toLowerCase().includes(statusQuery))
-    : statusOptionsList;
 
   const handleSaveReminder = (e: React.FormEvent) => {
     e.preventDefault();
@@ -283,64 +275,16 @@ export default function LeadDetailDrawer({
                   {lead.subStatus}
                 </span>
               )}
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const panelWidth = 224;
-                    const left = Math.max(8, Math.min(rect.right - panelWidth, window.innerWidth - panelWidth - 8));
-                    setStatusMenuPos({ top: rect.bottom + 4, left });
-                    setStatusSearch("");
-                    setStatusMenuOpen(prev => !prev);
-                  }}
-                  className={`flex items-center gap-1.5 border rounded-lg px-2 py-0.5 text-[11px] font-bold transition-colors focus:outline-none ${statusBadgeClasses(localStatus)}`}
-                >
-                  <span>{localStatus}</span>
-                  <ChevronDown className={`h-3 w-3 shrink-0 transition-transform ${statusMenuOpen ? "rotate-180" : ""}`} />
-                </button>
-                {statusMenuOpen && statusMenuPos && createPortal(
-                  <>
-                    <div className="fixed inset-0 z-[70]" onClick={() => setStatusMenuOpen(false)} />
-                    <div
-                      className="fixed z-[80] w-56 bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden"
-                      style={{ top: statusMenuPos.top, left: statusMenuPos.left }}
-                  >
-                    <div className="p-1.5 border-b border-slate-100">
-                      <div className="relative">
-                        <Search className="h-3 w-3 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2" />
-                        <input
-                          autoFocus
-                          value={statusSearch}
-                          onChange={(e) => setStatusSearch(e.target.value)}
-                          placeholder="Search status..."
-                          className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-6 pr-2 py-1 text-[11px] font-semibold text-slate-700 focus:outline-none focus:border-[#0B1E6E]"
-                        />
-                      </div>
-                    </div>
-                    <div className="max-h-56 overflow-y-auto py-1">
-                      {filteredStatusOptions.length === 0 ? (
-                        <p className="px-3 py-2 text-[11px] text-slate-400 italic">No matching status</p>
-                      ) : (
-                        filteredStatusOptions.map(st => (
-                          <button
-                            key={st}
-                            type="button"
-                            onClick={() => handleSelectStatus(st)}
-                            className={`w-full text-left px-3 py-1.5 text-xs font-semibold transition-colors ${
-                              localStatus === st ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"
-                            }`}
-                          >
-                            {st}
-                          </button>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                </>,
-                document.body
-              )}
-              </div>
+              <SearchableSelect
+                variant="inline"
+                value={localStatus}
+                onChange={(v) => handleSelectStatus(v as LeadStatus)}
+                options={statusOptionsList}
+                searchPlaceholder="Search status..."
+                panelWidth={224}
+                align="right"
+                className={`border rounded-lg px-2 py-0.5 text-[11px] transition-colors focus:outline-none ${statusBadgeClasses(localStatus)}`}
+              />
             </div>
           </div>
           <div className="flex items-center justify-between text-[10px] text-slate-400 font-semibold">
@@ -370,12 +314,10 @@ export default function LeadDetailDrawer({
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="block text-[8px] font-bold text-slate-400 uppercase">Callback Date</label>
-                  <input
-                    type="date"
-                    required
+                  <DatePicker
                     value={reminderDate}
-                    onChange={(e) => setReminderDate(e.target.value)}
-                    className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-[10px] font-bold text-slate-700 focus:outline-none focus:border-brand-500"
+                    onChange={setReminderDate}
+                    className="w-full flex items-center justify-between gap-2 bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-[10px] font-bold text-slate-700 focus:outline-none focus:border-brand-500"
                   />
                 </div>
                 <div className="space-y-1">
@@ -410,16 +352,15 @@ export default function LeadDetailDrawer({
             <p className="text-[10px] text-slate-400 italic">No eligible teammates to reassign to.</p>
           ) : (
             <div className="flex gap-2">
-              <select
-                value={reassignTarget}
-                onChange={(e) => setReassignTarget(e.target.value)}
-                className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 focus:outline-none"
-              >
-                <option value="">Select a team member…</option>
-                {reassignTargets.map(u => (
-                  <option key={u.id} value={u.name}>{u.name}</option>
-                ))}
-              </select>
+              <div className="flex-1 min-w-0">
+                <SearchableSelect
+                  value={reassignTarget}
+                  onChange={setReassignTarget}
+                  options={reassignTargets.map(u => ({ value: u.name, label: u.name }))}
+                  placeholder="Select a team member…"
+                  searchPlaceholder="Search team members..."
+                />
+              </div>
               <button
                 type="button"
                 onClick={handleReassign}

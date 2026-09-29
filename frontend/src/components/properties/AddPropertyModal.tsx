@@ -1,9 +1,12 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { useApp, Property, LeadAssignmentMode, PropertyTeamAssignmentMode, PropertyTeamMember } from "@/context/AppContext";
 import { CardListSkeleton } from "@/components/ui/Skeletons";
+import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
+import { DatePicker } from "@/components/ui/DateRangePicker";
 
 interface AddPropertyModalProps {
   isOpen: boolean;
@@ -13,8 +16,24 @@ interface AddPropertyModalProps {
   duplicateFrom?: Property | null;
 }
 
-const PROPERTY_TYPES = ["Apartment", "Villa", "Plot", "Commercial", "Residential", "Mixed-Use"];
-const PROPERTY_STATUSES = ["Pre-Launch", "Under Construction", "Ready to Move", "Sold Out"];
+export const PROPERTY_TYPES = ["Apartment", "Villa", "Plot", "Commercial", "Residential", "Mixed-Use"];
+export const PROPERTY_STATUSES = ["Pre-Launch", "Under Construction", "Ready to Move", "Sold Out"];
+
+// A property can span several types (e.g. Apartment + Villa) but the API
+// stores property_type as one string, so multiple picks are joined with ", ".
+export const splitPropertyTypes = (value: string): string[] =>
+  value.split(",").map(t => t.trim()).filter(Boolean);
+
+// Joins picks back into that one string, in PROPERTY_TYPES' own order so the
+// saved value is stable ("Apartment, Villa", never "Villa, Apartment"
+// depending on click order); unknown legacy types are kept at the end.
+export const joinPropertyTypes = (picked: string[]): string =>
+  PROPERTY_TYPES.filter(t => picked.includes(t)).concat(picked.filter(t => !PROPERTY_TYPES.includes(t))).join(", ");
+
+// Options for the Property Type field — the standard list plus any legacy
+// type already on the property, so it stays visible and can be unticked.
+export const propertyTypeOptions = (value: string): string[] =>
+  Array.from(new Set([...PROPERTY_TYPES, ...splitPropertyTypes(value)]));
 
 // One consistent 3-column grid on tablet/desktop, collapsing to a single
 // stacked column on mobile — every field below just declares how many of
@@ -183,10 +202,13 @@ export default function AddPropertyModal({ isOpen, onClose, onSuccess, duplicate
     handleClose();
   };
 
-  return (
+  // Portaled to <body> so the backdrop always covers the full viewport —
+  // rendered inline it sat inside the app shell and left an uncovered strip
+  // along the top edge.
+  return createPortal(
     <>
-      <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-30" onClick={handleClose} />
-      <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center sm:p-4">
+      <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50" onClick={handleClose} />
+      <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4">
         <div className="w-full sm:max-w-3xl h-[95vh] sm:h-auto sm:max-h-[90vh] bg-white border-0 sm:border border-slate-200 rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden">
           {/* Header */}
           <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 shrink-0">
@@ -224,28 +246,31 @@ export default function AddPropertyModal({ isOpen, onClose, onSuccess, duplicate
                 <Field label="Property Name" type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. property name" />
                 <div>
                   <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Property Type</label>
-                  <select
-                    value={propertyType}
-                    onChange={(e) => setPropertyType(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none focus:border-brand-500"
-                  >
-                    <option value="">Select property type</option>
-                    {PROPERTY_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-                  </select>
+                  <SearchableMultiSelect
+                    variant="field"
+                    options={propertyTypeOptions(propertyType)}
+                    selected={splitPropertyTypes(propertyType)}
+                    onChange={(next) => setPropertyType(joinPropertyTypes(next))}
+                    placeholder="Select property type(s)"
+                    searchPlaceholder="Search property types..."
+                  />
                 </div>
 
                 <div>
                   <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Property Status</label>
-                  <select
+                  <SearchableSelect
+                    options={PROPERTY_STATUSES}
                     value={propertyStatus}
-                    onChange={(e) => setPropertyStatus(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none focus:border-brand-500"
-                  >
-                    <option value="">Select property status</option>
-                    {PROPERTY_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-                  </select>
+                    onChange={setPropertyStatus}
+                    placeholder="Select property status"
+                    searchPlaceholder="Search status..."
+                    clearable
+                  />
                 </div>
-                <Field label="Possession Date" type="date" value={possessionDate} onChange={(e) => setPossessionDate(e.target.value)} />
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Possession Date</label>
+                  <DatePicker value={possessionDate} onChange={setPossessionDate} />
+                </div>
                 <Field label="Quoted Price" type="text" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="e.g. 1.91 Cr" />
 
                 <Field label="Lead Registration URL" type="text" value={leadRegistrationUrl} onChange={(e) => setLeadRegistrationUrl(e.target.value)} placeholder="e.g. landing page lead form link" />
@@ -406,6 +431,7 @@ export default function AddPropertyModal({ isOpen, onClose, onSuccess, duplicate
           </div>
         </div>
       </div>
-    </>
+    </>,
+    document.body
   );
 }

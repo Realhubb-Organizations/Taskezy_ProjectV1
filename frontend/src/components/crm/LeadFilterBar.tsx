@@ -1,6 +1,7 @@
 import React from "react";
 import { Search, Filter, X } from "lucide-react";
 import { LeadStatus } from "@/context/AppContext";
+import { SearchableMultiSelect } from "@/components/ui/SearchableDropdown";
 
 interface LeadFilterBarProps {
   searchQuery: string;
@@ -17,14 +18,6 @@ export default function LeadFilterBar({
   setSelectedStatuses,
   availableStatuses
 }: LeadFilterBarProps) {
-
-  const handleStatusToggle = (status: LeadStatus) => {
-    if (selectedStatuses.includes(status)) {
-      setSelectedStatuses(selectedStatuses.filter(s => s !== status));
-    } else {
-      setSelectedStatuses([...selectedStatuses, status]);
-    }
-  };
 
   const handleClearAll = () => {
     setSelectedStatuses([]);
@@ -64,37 +57,16 @@ export default function LeadFilterBar({
         </div>
       </div>
 
-      {/* Scrollable Status Pool Chipset */}
+      {/* Status Pool Filter */}
       <div className="space-y-1.5">
         <label className="text-[9px] font-extrabold text-slate-400 uppercase tracking-wider block">Status Pool Filters (Multi-Select)</label>
-        <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-slate-200">
-          <button
-            onClick={() => setSelectedStatuses([])}
-            className={`px-3 py-1.5 rounded-full text-[10px] font-bold border transition-all shrink-0 ${
-              selectedStatuses.length === 0
-                ? "bg-[#0B1E6E] border-[#0B1E6E] text-white shadow-sm shadow-[#0B1E6E]/10"
-                : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"
-            }`}
-          >
-            All Statuses
-          </button>
-          {availableStatuses.map((status) => {
-            const isSelected = selectedStatuses.includes(status);
-            return (
-              <button
-                key={status}
-                onClick={() => handleStatusToggle(status)}
-                className={`px-3 py-1.5 rounded-full text-[10px] font-bold border transition-all shrink-0 ${
-                  isSelected
-                    ? "bg-[#0B1E6E] border-[#0B1E6E] text-white shadow-sm shadow-[#0B1E6E]/10"
-                    : "bg-slate-50 hover:bg-slate-100 border-slate-200/80 text-slate-600"
-                }`}
-              >
-                {status}
-              </button>
-            );
-          })}
-        </div>
+        <SearchableMultiSelect
+          options={availableStatuses}
+          selected={selectedStatuses}
+          onChange={(next) => setSelectedStatuses(next as LeadStatus[])}
+          placeholder="All Statuses"
+          searchPlaceholder="Search status..."
+        />
       </div>
     </div>
   );

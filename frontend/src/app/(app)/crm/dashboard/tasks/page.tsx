@@ -1,6 +1,6 @@
 "use client";
 
-import React, { Suspense, useCallback, useState } from "react";
+import React, { Suspense, useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
@@ -21,7 +21,8 @@ function AgentTasksView() {
   const params = useSearchParams();
   const agent = params.get("agent") || "";
   const tab: TeamTaskTab = params.get("tab") === "pending" ? "pending" : "all";
-  const taskType = params.get("type") || "All";
+  // One `type` param per selected task type; none (or the legacy "All") means every type.
+  const taskTypes = useMemo(() => params.getAll("type").filter(t => t && t !== "All"), [params]);
 
   const [range, setRange] = useState<DateRangeValue | null>(null);
   const [drawerLead, setDrawerLead] = useState<Lead | null>(null);
@@ -30,7 +31,7 @@ function AgentTasksView() {
     const assignee = (t.assignedTo || "Unassigned").trim().toLowerCase();
     if (assignee !== agent.trim().toLowerCase()) return false;
     if (!TAB_BUCKETS[tab].includes(t.bucket)) return false;
-    if (taskType !== "All" && t.taskType !== taskType) return false;
+    if (taskTypes.length > 0 && !taskTypes.includes(t.taskType)) return false;
     if (range) {
       if (!t.dueAt) return false;
       const from = new Date(`${range.start}T00:00:00`);
@@ -38,7 +39,7 @@ function AgentTasksView() {
       if (t.dueAt < from || t.dueAt > to) return false;
     }
     return true;
-  }, [agent, tab, taskType, range]);
+  }, [agent, tab, taskTypes, range]);
 
   // Same Booking guard as the Leads page and the dashboard: booking a lead
   // auto-generates an invoice from its deal value, so a real value is required.
@@ -66,7 +67,7 @@ function AgentTasksView() {
     );
   }
 
-  const subtitle = [agent || "No team member selected", taskType !== "All" ? taskType : null]
+  const subtitle = [agent || "No team member selected", taskTypes.length > 0 ? taskTypes.join(", ") : null]
     .filter(Boolean)
     .join(" · ");
 
@@ -77,7 +78,8 @@ function AgentTasksView() {
           <ArrowLeft className="h-3.5 w-3.5" />
           Back to Dashboard
         </Link>
-        <DateRangePicker value={range} onChange={setRange} heading="Filter tasks by due date" />
+        {/* Due dates can be upcoming, so no max date here */}
+        <DateRangePicker value={range} onChange={setRange} maxDate="" />
       </div>
 
       <SalesPendingTasksTable

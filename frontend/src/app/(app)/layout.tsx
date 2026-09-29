@@ -36,6 +36,10 @@ import {
   PanelLeftOpen
 } from "lucide-react";
 
+// Organization + Help & Support / CRM Tutorials / Contact Support are hidden
+// from the sidebar (desktop and mobile) for now — flip to true to bring them back.
+const SHOW_SIDEBAR_EXTRA_LINKS = false;
+
 function initialsFor(name?: string): string {
   if (!name) return "U";
   const parts = name.trim().split(" ").filter(Boolean);
@@ -346,6 +350,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
             })}
 
             {/* Static links — Organization, then Help/Tutorials/Contact — always visible regardless of which group is expanded */}
+            {SHOW_SIDEBAR_EXTRA_LINKS && (<>
             <div className="pt-3 mt-3 border-t border-slate-100 space-y-1">
               {staticBottomLinks.map((item) => {
                 const isActive = item.activeCheck(pathname);
@@ -388,6 +393,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                 <LifeBuoy className={`h-3.5 w-3.5 ${isSidebarCollapsed ? "" : "mr-2"}`} /> {!isSidebarCollapsed && "Contact Support"}
               </button>
             </div>
+            </>)}
           </nav>
         </div>
       </aside>
@@ -539,7 +545,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
 
                 {/* Organization — present on the desktop sidebar but previously
                     missing here, leaving mobile with no way to reach it at all. */}
-                {staticBottomLinks.length > 0 && (
+                {SHOW_SIDEBAR_EXTRA_LINKS && staticBottomLinks.length > 0 && (
                   <div className="space-y-1 pt-2 mt-2 border-t border-slate-100">
                     {staticBottomLinks.map((item) => {
                       const isActive = item.activeCheck(pathname);
@@ -561,6 +567,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                 )}
 
                 {/* Help / Support — same as the desktop sidebar's bottom links, also previously missing on mobile */}
+                {SHOW_SIDEBAR_EXTRA_LINKS && (
                 <div className="space-y-1 pt-2 border-t border-slate-100 text-[11px] font-bold text-slate-450">
                   <button
                     onClick={() => setActiveModal("help")}
@@ -581,6 +588,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                     <LifeBuoy className="mr-2 h-3.5 w-3.5" /> Contact Support
                   </button>
                 </div>
+                )}
               </nav>
 
               {/* Logout — present in the desktop sidebar footer, previously

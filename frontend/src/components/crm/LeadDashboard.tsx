@@ -4,13 +4,17 @@ import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useApp, Lead, LeadStatus } from "@/context/AppContext";
-import { Sliders, Sparkles, Plus, Check, ChevronDown, Search, Calendar, X, Minus, Download, RotateCcw } from "lucide-react";
+import { Sliders, Sparkles, Plus, Check, ChevronDown, Search, X, Minus, Download, RotateCcw } from "lucide-react";
 import { STATUS_OPTIONS } from "@/lib/leadStatusMapping";
 import { computeLeadSummaryStats } from "@/lib/leadSummaryStats";
 import { WhatsAppIcon, CallIcon, PlatformLabel } from "@/components/icons/ContactIcons";
 import { LineSkeleton, TableRowsSkeleton } from "@/components/ui/Skeletons";
+import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
+import DateRangePicker, { type DateRangeValue } from "@/components/ui/DateRangePicker";
+import TablePagination, { usePagination } from "@/components/ui/TablePagination";
 import AddLeadModal from "./AddLeadModal";
 import LeadDetailDrawer from "./LeadDetailDrawer";
+import LeadDrillDownPanel from "./LeadDrillDownPanel";
 
 // The admin leads table's togglable columns (beyond the always-shown Lead
 // Name/Email/Assigned To) — driven by the Filter panel's Settings modal.
@@ -51,6 +55,19 @@ function StatCell({ value, onClick }: { value: string | number; onClick: () => v
     <button type="button" onClick={onClick} className="hover:underline hover:text-[#0B1E6E] transition-colors text-left">
       {value}
     </button>
+  );
+}
+
+// Client-side pagination for a list rendered inside another row (e.g. a
+// manager's expanded team) — each instance keeps its own page state, so
+// every expanded manager pages independently.
+function PaginatedSubList<T>({ items, rowLabel, children }: { items: T[]; rowLabel: string; children: (pageRows: T[]) => React.ReactNode }) {
+  const { pageRows, paginationProps } = usePagination(items, 10);
+  return (
+    <>
+      {children(pageRows)}
+      <TablePagination {...paginationProps} rowLabel={rowLabel} className="!px-0 !pb-0" />
+    </>
   );
 }
 
@@ -177,74 +194,21 @@ export default function LeadDashboard() {
     setTimeout(() => setSuccessMsg(""), 3000);
   };
 
-  // Per-row Status editor cell — a searchable portal dropdown matching the
-  // rest of the app's white-panel menus, in place of a plain native <select>
-  // (whose OS-default popup, e.g. dark on macOS/Chrome, clashed with every
-  // other dropdown here). Shared by the main Leads table and the Analytics
-  // drilldown table, both of which used to render the same native select.
+  // Per-row Status editor cell — the shared searchable single-select (the
+  // full status list runs ~18 options deep). Shared by the main Leads table
+  // and the Analytics drilldown table.
   const renderStatusCell = (l: Lead) => {
     const allOptions = STATUS_OPTIONS.includes(l.status) ? STATUS_OPTIONS : [l.status, ...STATUS_OPTIONS];
-    const query = rowStatusSearch.trim().toLowerCase();
-    const filteredOptions = query ? allOptions.filter(s => s.toLowerCase().includes(query)) : allOptions;
     return (
-      <div className="relative inline-block">
-        <button
-          type="button"
-          onClick={(e) => {
-            const rect = e.currentTarget.getBoundingClientRect();
-            const panelWidth = 176;
-            const left = Math.max(8, Math.min(rect.left, window.innerWidth - panelWidth - 8));
-            setRowStatusMenuPos({ top: rect.bottom + 4, left });
-            setRowStatusSearch("");
-            setRowStatusMenuFor(prev => (prev === l.id ? null : l.id));
-          }}
-          className="w-full max-w-[110px] flex items-center justify-between gap-1 bg-slate-50 border border-slate-200 rounded-md px-1.5 py-0.5 text-[11px] font-bold text-slate-700 hover:border-slate-300 transition-colors"
-        >
-          <span className="truncate">{l.status}</span>
-          <ChevronDown className={`h-3 w-3 text-slate-400 shrink-0 transition-transform ${rowStatusMenuFor === l.id ? "rotate-180" : ""}`} />
-        </button>
-        {rowStatusMenuFor === l.id && rowStatusMenuPos && createPortal(
-          <>
-            <div className="fixed inset-0 z-[60]" onClick={() => setRowStatusMenuFor(null)} />
-            <div
-              className="fixed z-[70] w-44 bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden"
-              style={{ top: rowStatusMenuPos.top, left: rowStatusMenuPos.left }}
-            >
-              <div className="p-1.5 border-b border-slate-100">
-                <div className="relative">
-                  <Search className="h-3 w-3 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2" />
-                  <input
-                    autoFocus
-                    value={rowStatusSearch}
-                    onChange={(e) => setRowStatusSearch(e.target.value)}
-                    placeholder="Search status..."
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-6 pr-2 py-1 text-[11px] font-semibold text-slate-700 focus:outline-none focus:border-[#0B1E6E]"
-                  />
-                </div>
-              </div>
-              <div className="max-h-56 overflow-y-auto py-1">
-                {filteredOptions.length === 0 ? (
-                  <p className="px-3 py-2 text-[11px] text-slate-400 italic">No matching status</p>
-                ) : (
-                  filteredOptions.map(st => (
-                    <button
-                      key={st}
-                      type="button"
-                      onClick={() => { handleUpdateLeadStatus(l.id, st); setRowStatusMenuFor(null); }}
-                      className={`w-full text-left px-3 py-1.5 text-xs font-semibold transition-colors ${
-                        l.status === st ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"
-                      }`}
-                    >
-                      {st}
-                    </button>
-                  ))
-                )}
-              </div>
-            </div>
-          </>,
-          document.body
-        )}
-      </div>
+      <SearchableSelect
+        variant="inline"
+        options={allOptions}
+        value={l.status}
+        onChange={(v) => handleUpdateLeadStatus(l.id, v as LeadStatus)}
+        searchPlaceholder="Search status..."
+        panelWidth={176}
+        className="max-w-[110px] text-[11px] text-slate-700"
+      />
     );
   };
 
@@ -319,51 +283,25 @@ export default function LeadDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminTab]);
   const [adminDateRange, setAdminDateRange] = useState<"today" | "yesterday" | "week" | "month" | "all" | "custom">("today");
-  const [adminCustomRange, setAdminCustomRange] = useState<{ start: string; end: string } | null>(null);
+  // Applied range from the calendar badge (DateRangePicker) — an alternative
+  // to the preset Today/Yesterday/Week/Month/All buckets; only used while
+  // adminDateRange === "custom".
+  const [adminCustomRange, setAdminCustomRange] = useState<DateRangeValue | null>(null);
+  // Stat card selection. Sales agents (non-admin): filters the main leads
+  // table below. Admins: opens the drill-down panel under the cards instead
+  // (adminDrillMetric), same as the CRM Dashboard, leaving the table unfiltered.
   const [adminMetric, setAdminMetric] = useState<string | null>(null);
+  const [adminDrillMetric, setAdminDrillMetric] = useState<string | null>(null);
   const [adminSearch, setAdminSearch] = useState("");
   const [adminSearchOpen, setAdminSearchOpen] = useState(false);
+  // Column-header filters (Assigned To / Status / Campaign). adminCampaignFilter
+  // is also driven by the top "Campaigns" quick-filter (next to Upload Leads),
+  // which lists the same campaigns grouped by ad platform.
   const [adminStatusFilter, setAdminStatusFilter] = useState<string[]>([]);
-  const [adminStatusMenuOpen, setAdminStatusMenuOpen] = useState(false);
   const [adminAssignedFilter, setAdminAssignedFilter] = useState<string[]>([]);
-  const [adminAssignedMenuOpen, setAdminAssignedMenuOpen] = useState(false);
   const [adminCampaignFilter, setAdminCampaignFilter] = useState<string[]>([]);
-  const [adminCampaignMenuOpen, setAdminCampaignMenuOpen] = useState(false);
-  // Per-row Status editor — replaces a plain native <select> (which renders
-  // with jarring OS-default styling, e.g. a dark popup on macOS/Chrome) with
-  // the same white portal-panel look as the other row/column dropdowns here,
-  // plus a search box since the full status list runs ~18 options deep.
-  const [rowStatusMenuFor, setRowStatusMenuFor] = useState<string | null>(null);
-  const [rowStatusMenuPos, setRowStatusMenuPos] = useState<{ top: number; left: number } | null>(null);
-  const [rowStatusSearch, setRowStatusSearch] = useState("");
   const [adminPage, setAdminPage] = useState(1);
   const [adminRowsPerPage, setAdminRowsPerPage] = useState(100);
-  const [dateRangeMenuOpen, setDateRangeMenuOpen] = useState(false);
-  const [dateRangeMenuPos, setDateRangeMenuPos] = useState<{ top: number; left: number } | null>(null);
-  const dateRangeBtnRef = useRef<HTMLButtonElement>(null);
-  const [adminStatusMenuPos, setAdminStatusMenuPos] = useState<{ top: number; left: number } | null>(null);
-  const adminStatusBtnRef = useRef<HTMLButtonElement>(null);
-  const [adminAssignedMenuPos, setAdminAssignedMenuPos] = useState<{ top: number; left: number } | null>(null);
-  const adminAssignedBtnRef = useRef<HTMLButtonElement>(null);
-  const [adminCampaignMenuPos, setAdminCampaignMenuPos] = useState<{ top: number; left: number } | null>(null);
-  const adminCampaignBtnRef = useRef<HTMLButtonElement>(null);
-
-  // Top "Campaigns" quick-filter (next to Upload Leads) — a grouped dropdown
-  // splitting real campaigns by ad platform, distinct from the table column
-  // header's flat Campaign filter dropdown above.
-  const [adminCampaignsQuickMenuOpen, setAdminCampaignsQuickMenuOpen] = useState(false);
-  const [adminCampaignsQuickMenuPos, setAdminCampaignsQuickMenuPos] = useState<{ top: number; left: number } | null>(null);
-  const adminCampaignsQuickBtnRef = useRef<HTMLButtonElement>(null);
-  const [adminCampaignsMetaOpen, setAdminCampaignsMetaOpen] = useState(true);
-  const [adminCampaignsGoogleOpen, setAdminCampaignsGoogleOpen] = useState(true);
-
-  // Calendar badge → a real custom date-range picker (Start/End), an
-  // alternative to the preset Today/Yesterday/Week/Month/All buckets above.
-  const [calendarPickerOpen, setCalendarPickerOpen] = useState(false);
-  const [calendarMenuPos, setCalendarMenuPos] = useState<{ top: number; left: number } | null>(null);
-  const calendarBtnRef = useRef<HTMLButtonElement>(null);
-  const [customRangeStartDraft, setCustomRangeStartDraft] = useState("");
-  const [customRangeEndDraft, setCustomRangeEndDraft] = useState("");
 
   // Filter button → Settings panel for which table columns are shown — both
   // roles get the full-height right-docked drawer (same pattern as the lead
@@ -377,29 +315,11 @@ export default function LeadDashboard() {
   // (date range, member, property, campaign) from the Leads tab's, so
   // switching tabs never silently changes what the other tab is scoped to.
   const [analyticsDateRange, setAnalyticsDateRange] = useState<"today" | "yesterday" | "week" | "month" | "all" | "custom">("month");
-  const [analyticsCustomRange, setAnalyticsCustomRange] = useState<{ start: string; end: string } | null>(null);
-  const [analyticsCalendarOpen, setAnalyticsCalendarOpen] = useState(false);
-  const [analyticsCalendarPos, setAnalyticsCalendarPos] = useState<{ top: number; left: number } | null>(null);
-  const analyticsCalendarBtnRef = useRef<HTMLButtonElement>(null);
-  const [analyticsRangeStartDraft, setAnalyticsRangeStartDraft] = useState("");
-  const [analyticsRangeEndDraft, setAnalyticsRangeEndDraft] = useState("");
+  const [analyticsCustomRange, setAnalyticsCustomRange] = useState<DateRangeValue | null>(null);
 
   const [analyticsMemberFilter, setAnalyticsMemberFilter] = useState<string[]>([]);
-  const [analyticsMemberMenuOpen, setAnalyticsMemberMenuOpen] = useState(false);
-  const [analyticsMemberMenuPos, setAnalyticsMemberMenuPos] = useState<{ top: number; left: number } | null>(null);
-  const analyticsMemberBtnRef = useRef<HTMLButtonElement>(null);
-
   const [analyticsPropertyFilter, setAnalyticsPropertyFilter] = useState<string[]>([]);
-  const [analyticsPropertyMenuOpen, setAnalyticsPropertyMenuOpen] = useState(false);
-  const [analyticsPropertyMenuPos, setAnalyticsPropertyMenuPos] = useState<{ top: number; left: number } | null>(null);
-  const analyticsPropertyBtnRef = useRef<HTMLButtonElement>(null);
-
   const [analyticsCampaignFilter, setAnalyticsCampaignFilter] = useState<string[]>([]);
-  const [analyticsCampaignMenuOpen, setAnalyticsCampaignMenuOpen] = useState(false);
-  const [analyticsCampaignMenuPos, setAnalyticsCampaignMenuPos] = useState<{ top: number; left: number } | null>(null);
-  const analyticsCampaignBtnRef = useRef<HTMLButtonElement>(null);
-  const [analyticsCampaignsMetaOpen, setAnalyticsCampaignsMetaOpen] = useState(true);
-  const [analyticsCampaignsGoogleOpen, setAnalyticsCampaignsGoogleOpen] = useState(true);
 
   const [analyticsPage, setAnalyticsPage] = useState(1);
   const [analyticsRowsPerPage, setAnalyticsRowsPerPage] = useState(100);
@@ -528,24 +448,6 @@ export default function LeadDashboard() {
     { value: "all", label: "All Time" }
   ];
 
-  const openPositionedMenu = (
-    ref: React.RefObject<HTMLButtonElement>,
-    setPos: (p: { top: number; left: number } | null) => void,
-    setOpen: (fn: (o: boolean) => boolean) => void,
-    align: "left" | "right" = "left",
-    panelWidth = 208
-  ) => {
-    const rect = ref.current?.getBoundingClientRect();
-    if (rect) {
-      const rawLeft = align === "left" ? rect.left : rect.right - panelWidth;
-      // Clamped to the viewport so these panels stay fully on-screen on
-      // narrow phones instead of overflowing past the right or left edge.
-      const left = Math.max(8, Math.min(rawLeft, window.innerWidth - panelWidth - 8));
-      setPos({ top: rect.bottom + 6, left });
-    }
-    setOpen(o => !o);
-  };
-
   // Shared by both the Leads tab's date filter and the Leads Analytics tab's
   // own independent date filter — each passes its own customRange so the two
   // tabs' date pickers stay fully decoupled while sharing one implementation.
@@ -607,10 +509,8 @@ export default function LeadDashboard() {
     return upcoming.length > 0 ? `${upcoming[0].date} ${upcoming[0].time}` : "—";
   };
 
-  // The Campaigns quick-filter (declared further below, alongside the
-  // dropdown's own state) narrows these same 7 stat cards down to whichever
-  // campaign(s) are selected — declared as a var here since adminCampaignFilter
-  // itself is defined later in this file alongside its dropdown state.
+  // The Campaigns quick-filter (adminCampaignFilter) narrows these same 7
+  // stat cards down to whichever campaign(s) are selected.
   const adminCampaignScopedLeads = adminCampaignFilter.length === 0
     ? scopedLeads
     : scopedLeads.filter(l => !!l.campaign && adminCampaignFilter.includes(l.campaign));
@@ -655,16 +555,14 @@ export default function LeadDashboard() {
     if (/google/i.test(haystack)) return "Google";
     return "Other";
   };
-  const adminMetaCampaigns = adminCampaignsList.filter(c => classifyCampaignPlatform(c) === "Meta");
-  const adminGoogleCampaigns = adminCampaignsList.filter(c => classifyCampaignPlatform(c) === "Google");
-  const adminOtherCampaigns = adminCampaignsList.filter(c => classifyCampaignPlatform(c) === "Other");
+  // Grouped (Meta → Google → Other) options for the Campaigns dropdowns.
+  const groupCampaignOptions = (campaigns: string[]) =>
+    (["Meta", "Google", "Other"] as const).flatMap(group =>
+      campaigns.filter(c => classifyCampaignPlatform(c) === group).map(c => ({ value: c, label: c, group }))
+    );
+  const adminCampaignOptions = groupCampaignOptions(adminCampaignsList);
 
-  const toggleAdminCampaignFilter = (value: string) => {
-    setAdminPage(1);
-    setAdminCampaignFilter(prev => prev.includes(value) ? prev.filter(v => v !== value) : [...prev, value]);
-  };
-
-  const adminFilteredLeads = (adminMetric ? adminRangeLeads.filter(adminMetricPredicate[adminMetric]) : adminRangeLeads).filter(l => {
+  const adminFilteredLeads = (!isAdmin && adminMetric ? adminRangeLeads.filter(adminMetricPredicate[adminMetric]) : adminRangeLeads).filter(l => {
     const matchesSearch = !adminSearch || l.name.toLowerCase().includes(adminSearch.toLowerCase()) || l.phone.includes(adminSearch);
     const matchesStatus = adminStatusFilter.length === 0 || adminStatusFilter.includes(l.status);
     const matchesAssigned = adminAssignedFilter.length === 0 || adminAssignedFilter.includes(l.assignedAgent);
@@ -728,11 +626,9 @@ export default function LeadDashboard() {
   const analyticsPropertiesList = Array.from(new Set(scopedLeads.map(l => l.property).filter(Boolean))) as string[];
   const analyticsCampaignsList = Array.from(new Set(scopedLeads.map(l => l.campaign).filter(Boolean))) as string[];
   // Same Meta/Google grouping as the Leads tab's own Campaigns dropdown
-  // (classifyCampaignPlatform, defined above), reused here rather than
+  // (groupCampaignOptions, defined above), reused here rather than
   // re-implemented.
-  const analyticsMetaCampaigns = analyticsCampaignsList.filter(c => classifyCampaignPlatform(c) === "Meta");
-  const analyticsGoogleCampaigns = analyticsCampaignsList.filter(c => classifyCampaignPlatform(c) === "Google");
-  const analyticsOtherCampaigns = analyticsCampaignsList.filter(c => classifyCampaignPlatform(c) === "Other");
+  const analyticsCampaignOptions = groupCampaignOptions(analyticsCampaignsList);
 
   const computeLeadStats = (leadsForPerson: Lead[]) => {
     const qualified = leadsForPerson.filter(l => !UNQUALIFIED_STATUSES.includes(l.status)).length;
@@ -855,102 +751,15 @@ export default function LeadDashboard() {
           {adminTab === "leads" && (
             <div className="flex flex-wrap items-center gap-3 ml-auto">
               {isAdmin && (
-              <div className="relative">
-                <button
-                  ref={adminCampaignsQuickBtnRef}
-                  onClick={() => openPositionedMenu(adminCampaignsQuickBtnRef, setAdminCampaignsQuickMenuPos, setAdminCampaignsQuickMenuOpen, "left", 260)}
-                  className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-4 py-2.5 text-xs text-slate-700 font-bold focus:outline-none cursor-pointer"
-                >
-                  {adminCampaignFilter.length === 0
-                    ? "Campaigns"
-                    : adminCampaignFilter.length === 1
-                    ? adminCampaignFilter[0]
-                    : `${adminCampaignFilter.length} Campaigns`}
-                  <ChevronDown className={`h-3.5 w-3.5 text-slate-400 transition-transform ${adminCampaignsQuickMenuOpen ? "rotate-180" : ""}`} />
-                </button>
-                {adminCampaignsQuickMenuOpen && adminCampaignsQuickMenuPos && createPortal(
-                  <>
-                    <div className="fixed inset-0 z-[60]" onClick={() => setAdminCampaignsQuickMenuOpen(false)} />
-                    <div
-                      className="fixed z-[70] w-64 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 max-h-80 overflow-y-auto"
-                      style={{ top: adminCampaignsQuickMenuPos.top, left: adminCampaignsQuickMenuPos.left }}
-                    >
-                      {adminCampaignFilter.length > 0 && (
-                        <button
-                          onClick={() => { setAdminPage(1); setAdminCampaignFilter([]); }}
-                          className="w-full text-left px-3 py-1.5 text-[11px] font-bold text-brand-700 hover:bg-slate-50"
-                        >
-                          Clear selection
-                        </button>
-                      )}
-
-                      {/* Meta group */}
-                      <button
-                        onClick={() => setAdminCampaignsMetaOpen(o => !o)}
-                        className="w-full flex items-center justify-between px-3 py-2 text-xs font-bold text-slate-800 hover:bg-slate-50"
-                      >
-                        <span className="flex items-center gap-2">
-                          <img src="https://img.icons8.com/?size=100&id=wA5rN96FVDtq&format=png&color=000000" alt="Meta" className="h-4 w-4" />
-                          Meta
-                        </span>
-                        <ChevronDown className={`h-3 w-3 text-slate-400 transition-transform ${adminCampaignsMetaOpen ? "rotate-180" : ""}`} />
-                      </button>
-                      {adminCampaignsMetaOpen && (
-                        adminMetaCampaigns.length === 0 ? (
-                          <p className="pl-9 pr-3 py-1.5 text-[11px] text-slate-400 italic font-normal">No Meta campaigns yet</p>
-                        ) : (
-                          adminMetaCampaigns.map(c => (
-                            <label key={c} className="flex items-center gap-2 pl-9 pr-3 py-1.5 text-xs font-normal text-slate-700 hover:bg-slate-50 cursor-pointer">
-                              <input type="checkbox" checked={adminCampaignFilter.includes(c)} onChange={() => toggleAdminCampaignFilter(c)} />
-                              <span className="truncate">{c}</span>
-                            </label>
-                          ))
-                        )
-                      )}
-
-                      <div className="border-t border-slate-100 my-1" />
-
-                      {/* Google group */}
-                      <button
-                        onClick={() => setAdminCampaignsGoogleOpen(o => !o)}
-                        className="w-full flex items-center justify-between px-3 py-2 text-xs font-bold text-slate-800 hover:bg-slate-50"
-                      >
-                        <span className="flex items-center gap-2">
-                          <img src="https://img.icons8.com/?size=100&id=4hR4Ih04Je2t&format=png&color=000000" alt="Google" className="h-4 w-4" />
-                          Google
-                        </span>
-                        <ChevronDown className={`h-3 w-3 text-slate-400 transition-transform ${adminCampaignsGoogleOpen ? "rotate-180" : ""}`} />
-                      </button>
-                      {adminCampaignsGoogleOpen && (
-                        adminGoogleCampaigns.length === 0 ? (
-                          <p className="pl-9 pr-3 py-1.5 text-[11px] text-slate-400 italic font-normal">No Google campaigns yet</p>
-                        ) : (
-                          adminGoogleCampaigns.map(c => (
-                            <label key={c} className="flex items-center gap-2 pl-9 pr-3 py-1.5 text-xs font-normal text-slate-700 hover:bg-slate-50 cursor-pointer">
-                              <input type="checkbox" checked={adminCampaignFilter.includes(c)} onChange={() => toggleAdminCampaignFilter(c)} />
-                              <span className="truncate">{c}</span>
-                            </label>
-                          ))
-                        )
-                      )}
-
-                      {adminOtherCampaigns.length > 0 && (
-                        <>
-                          <div className="border-t border-slate-100 my-1" />
-                          <p className="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wide">Other</p>
-                          {adminOtherCampaigns.map(c => (
-                            <label key={c} className="flex items-center gap-2 px-3 py-1.5 text-xs font-normal text-slate-700 hover:bg-slate-50 cursor-pointer">
-                              <input type="checkbox" checked={adminCampaignFilter.includes(c)} onChange={() => toggleAdminCampaignFilter(c)} />
-                              <span className="truncate">{c}</span>
-                            </label>
-                          ))}
-                        </>
-                      )}
-                    </div>
-                  </>,
-                  document.body
-                )}
-              </div>
+                <SearchableMultiSelect
+                  options={adminCampaignOptions}
+                  selected={adminCampaignFilter}
+                  onChange={(next) => { setAdminPage(1); setAdminCampaignFilter(next); }}
+                  placeholder="Campaigns"
+                  searchPlaceholder="Search campaigns..."
+                  renderLabel={(l) => <PlatformLabel text={l} />}
+                  panelWidth={260}
+                />
               )}
               <button
                 onClick={() => setIsAddOpen(true)}
@@ -977,38 +786,14 @@ export default function LeadDashboard() {
               <div className="flex flex-wrap justify-between items-center gap-2 px-4 py-2.5 text-[11px] border-b border-slate-200/60">
                 <div className="flex items-center gap-1.5 font-bold text-slate-700">
                   <span className="font-normal text-slate-500">Date Range</span>
-                  <div className="relative">
-                    <button
-                      ref={dateRangeBtnRef}
-                      onClick={() => openPositionedMenu(dateRangeBtnRef, setDateRangeMenuPos, setDateRangeMenuOpen, "left", 144)}
-                      className="flex items-center gap-1.5 bg-white border border-slate-300/80 rounded-md px-2 py-0.5 font-black text-slate-800 text-[11px] hover:bg-slate-50 transition-colors"
-                    >
-                      {DATE_RANGE_OPTIONS.find(o => o.value === adminDateRange)?.label ?? "Custom Range"}
-                      <ChevronDown className={`h-3 w-3 text-slate-400 transition-transform ${dateRangeMenuOpen ? "rotate-180" : ""}`} />
-                    </button>
-                    {dateRangeMenuOpen && dateRangeMenuPos && createPortal(
-                      <>
-                        <div className="fixed inset-0 z-[60]" onClick={() => setDateRangeMenuOpen(false)} />
-                        <div
-                          className="fixed z-[70] w-36 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 overflow-hidden"
-                          style={{ top: dateRangeMenuPos.top, left: dateRangeMenuPos.left }}
-                        >
-                          {DATE_RANGE_OPTIONS.map((opt) => (
-                            <button
-                              key={opt.value}
-                              onClick={() => { setAdminDateRange(opt.value); setDateRangeMenuOpen(false); setAdminPage(1); }}
-                              className={`w-full text-left px-3 py-1.5 text-xs font-bold transition-colors ${
-                                adminDateRange === opt.value ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"
-                              }`}
-                            >
-                              {opt.label}
-                            </button>
-                          ))}
-                        </div>
-                      </>,
-                      document.body
-                    )}
-                  </div>
+                  <SearchableSelect
+                    variant="pill"
+                    options={adminDateRange === "custom" ? [...DATE_RANGE_OPTIONS, { value: "custom", label: "Custom Range" }] : DATE_RANGE_OPTIONS}
+                    value={adminDateRange}
+                    onChange={(v) => { setAdminDateRange(v as typeof adminDateRange); setAdminPage(1); }}
+                    searchPlaceholder="Search range..."
+                    panelWidth={144}
+                  />
                 </div>
                 {canViewLeadsAnalytics && (
                 <button
@@ -1023,11 +808,18 @@ export default function LeadDashboard() {
 
               <div className="flex md:grid md:grid-cols-7 bg-white divide-x divide-slate-100 overflow-x-auto min-w-full">
                 {adminStatCards.map((s) => {
-                  const isActive = adminMetric === s.key;
+                  const isActive = (isAdmin ? adminDrillMetric : adminMetric) === s.key;
                   return (
                     <button
                       key={s.key}
-                      onClick={() => { setAdminMetric(prev => (prev === s.key ? null : s.key)); setAdminPage(1); }}
+                      onClick={() => {
+                        if (isAdmin) {
+                          setAdminDrillMetric(prev => (prev === s.key ? null : s.key));
+                        } else {
+                          setAdminMetric(prev => (prev === s.key ? null : s.key));
+                          setAdminPage(1);
+                        }
+                      }}
                       className={`p-3 flex flex-col justify-between min-h-[70px] min-w-[110px] md:min-w-0 flex-1 text-left group transition-colors ${
                         isActive ? "bg-blue-50/70" : "hover:bg-slate-50/50"
                       }`}
@@ -1045,120 +837,28 @@ export default function LeadDashboard() {
               </div>
             </div>
 
-            {/* Date badge (now a real custom date-range picker) + Filter row */}
+            {/* Admin only — the real leads behind the selected stat card */}
+            {isAdmin && (
+              <LeadDrillDownPanel
+                title={adminStatCards.find(s => s.key === adminDrillMetric)?.label ?? null}
+                leads={adminDrillMetric ? adminRangeLeads.filter(adminMetricPredicate[adminDrillMetric]) : []}
+                onClose={() => setAdminDrillMetric(null)}
+              />
+            )}
+
+            {/* Date badge (opens the shared range calendar) + Filter row.
+                Applying a range switches the Date Range select above to
+                "Custom Range"; the × on the badge reverts it to Today. */}
             <div className="flex flex-wrap justify-end items-center gap-3">
-              <div className="relative">
-                <button
-                  ref={calendarBtnRef}
-                  type="button"
-                  onClick={() => {
-                    const rect = calendarBtnRef.current?.getBoundingClientRect();
-                    if (rect) {
-                      const panelWidth = 260;
-                      const estimatedPanelHeight = 300;
-                      const left = Math.max(8, Math.min(rect.right - panelWidth, window.innerWidth - panelWidth - 8));
-                      // Flip above the button when there isn't room below —
-                      // keeps the panel fully on-screen on short/landscape viewports.
-                      const top = rect.bottom + 6 + estimatedPanelHeight > window.innerHeight
-                        ? Math.max(8, rect.top - estimatedPanelHeight - 6)
-                        : rect.bottom + 6;
-                      setCalendarMenuPos({ top, left });
-                    }
-                    setCustomRangeStartDraft(adminCustomRange?.start || "");
-                    setCustomRangeEndDraft(adminCustomRange?.end || "");
-                    setCalendarPickerOpen(o => !o);
-                  }}
-                  className="flex items-center gap-2 border border-slate-200 bg-white rounded-lg px-3 py-1.5 text-xs text-slate-700 font-bold shadow-sm hover:bg-slate-50 transition-all"
-                >
-                  <Calendar className="h-4 w-4 text-blue-600" />
-                  <span>
-                    {adminDateRange === "custom" && adminCustomRange
-                      ? `${adminCustomRange.start} to ${adminCustomRange.end}`
-                      : todayStr}
-                  </span>
-                </button>
-                {calendarPickerOpen && calendarMenuPos && createPortal(
-                  <>
-                    <div className="fixed inset-0 z-[60]" onClick={() => setCalendarPickerOpen(false)} />
-                    <div
-                      className="fixed z-[70] w-64 max-w-[calc(100vw-1rem)] bg-white border border-slate-200 rounded-xl shadow-lg p-4 space-y-3"
-                      style={{ top: calendarMenuPos.top, left: calendarMenuPos.left }}
-                    >
-                      <p className="text-[11px] font-bold text-slate-700">Filter leads by date range</p>
-                      <div className="space-y-1.5">
-                        <label className="block text-[9px] font-bold text-slate-400 uppercase">Start Date</label>
-                        <input
-                          type="date"
-                          value={customRangeStartDraft}
-                          onChange={(e) => {
-                            const newStart = e.target.value;
-                            setCustomRangeStartDraft(newStart);
-                            // A previously-picked End Date can now be earlier
-                            // than the new Start Date — clear it rather than
-                            // silently keep an invalid range around.
-                            if (customRangeEndDraft && newStart && customRangeEndDraft < newStart) {
-                              setCustomRangeEndDraft("");
-                            }
-                          }}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-700 focus:outline-none focus:border-[#0B1E6E]"
-                        />
-                      </div>
-                      <div className="space-y-1.5">
-                        <label className="block text-[9px] font-bold text-slate-400 uppercase">End Date</label>
-                        <input
-                          type="date"
-                          value={customRangeEndDraft}
-                          min={customRangeStartDraft || undefined}
-                          onChange={(e) => {
-                            const newEnd = e.target.value;
-                            // The `min` attribute only blocks the native
-                            // picker's own calendar UI — typing digits
-                            // directly into the field still fires onChange
-                            // with an out-of-range value, so this is the
-                            // real guard: silently refuse an End Date
-                            // earlier than the chosen Start Date.
-                            if (customRangeStartDraft && newEnd && newEnd < customRangeStartDraft) return;
-                            setCustomRangeEndDraft(newEnd);
-                          }}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-700 focus:outline-none focus:border-[#0B1E6E]"
-                        />
-                        {customRangeStartDraft && customRangeEndDraft && customRangeEndDraft < customRangeStartDraft && (
-                          <p className="text-[10px] font-semibold text-red-500">End date can&apos;t be before the start date.</p>
-                        )}
-                      </div>
-                      <div className="flex gap-2 pt-1">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setAdminCustomRange(null);
-                            setAdminDateRange("today");
-                            setCalendarPickerOpen(false);
-                            setAdminPage(1);
-                          }}
-                          className="flex-1 bg-slate-100 text-slate-600 font-bold text-[11px] py-1.5 rounded-lg hover:bg-slate-200 transition-colors"
-                        >
-                          Reset
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (!customRangeStartDraft || !customRangeEndDraft || customRangeEndDraft < customRangeStartDraft) return;
-                            setAdminCustomRange({ start: customRangeStartDraft, end: customRangeEndDraft });
-                            setAdminDateRange("custom");
-                            setCalendarPickerOpen(false);
-                            setAdminPage(1);
-                          }}
-                          disabled={!customRangeStartDraft || !customRangeEndDraft || customRangeEndDraft < customRangeStartDraft}
-                          className="flex-1 bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold text-[11px] py-1.5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                        >
-                          Apply
-                        </button>
-                      </div>
-                    </div>
-                  </>,
-                  document.body
-                )}
-              </div>
+              <DateRangePicker
+                value={adminDateRange === "custom" ? adminCustomRange : null}
+                onChange={(range) => {
+                  setAdminCustomRange(range);
+                  setAdminDateRange(range ? "custom" : "today");
+                  setAdminPage(1);
+                }}
+                emptyLabel={todayStr}
+              />
               <button
                 type="button"
                 onClick={() => setIsColumnsSettingsOpen(true)}
@@ -1245,47 +945,15 @@ export default function LeadDashboard() {
                       <th className="px-4 py-2.5 whitespace-nowrap">Email</th>
                       {/* Pinned */}
                       <th className="px-4 py-2.5">
-                        <div className="relative">
-                          <button
-                            ref={adminAssignedBtnRef}
-                            onClick={() => openPositionedMenu(adminAssignedBtnRef, setAdminAssignedMenuPos, setAdminAssignedMenuOpen, "left", 208)}
-                            className="flex items-center gap-1.5 hover:text-brand-700 whitespace-nowrap"
-                          >
-                            Assigned To
-                            <ChevronDown className="h-3 w-3" />
-                            {adminAssignedFilter.length > 0 && (
-                              <span className="text-[9px] bg-brand-50 text-brand-700 rounded-full px-1.5 py-0.5 font-bold">{adminAssignedFilter.length}</span>
-                            )}
-                          </button>
-                          {adminAssignedMenuOpen && adminAssignedMenuPos && createPortal(
-                            <>
-                              <div className="fixed inset-0 z-[60]" onClick={() => setAdminAssignedMenuOpen(false)} />
-                              <div
-                                className="fixed z-[70] w-52 bg-white border border-slate-200 rounded-lg shadow-lg py-1.5 max-h-56 overflow-y-auto"
-                                style={{ top: adminAssignedMenuPos.top, left: adminAssignedMenuPos.left }}
-                              >
-                                {adminAssignedOptions.length === 0 ? (
-                                  <p className="px-3 py-2 text-xs text-slate-400 italic font-normal">No data yet</p>
-                                ) : (
-                                  adminAssignedOptions.map(opt => (
-                                    <label key={opt} className="flex items-center gap-2 px-3 py-1.5 text-xs font-normal text-slate-700 hover:bg-slate-50 cursor-pointer">
-                                      <input
-                                        type="checkbox"
-                                        checked={adminAssignedFilter.includes(opt)}
-                                        onChange={() => {
-                                          setAdminPage(1);
-                                          setAdminAssignedFilter(prev => prev.includes(opt) ? prev.filter(v => v !== opt) : [...prev, opt]);
-                                        }}
-                                      />
-                                      {opt}
-                                    </label>
-                                  ))
-                                )}
-                              </div>
-                            </>,
-                            document.body
-                          )}
-                        </div>
+                        <SearchableMultiSelect
+                          variant="inline"
+                          label="Assigned To"
+                          options={adminAssignedOptions}
+                          selected={adminAssignedFilter}
+                          onChange={(next) => { setAdminPage(1); setAdminAssignedFilter(next); }}
+                          searchPlaceholder="Search agents..."
+                          panelWidth={208}
+                        />
                       </th>
 
                       {/* Togglable, in the same order as the Filter panel */}
@@ -1296,43 +964,15 @@ export default function LeadDashboard() {
                       {adminVisibleColumns.leadScore && <th className="px-4 py-2.5 whitespace-nowrap">Lead Score</th>}
                       {adminVisibleColumns.status && (
                         <th className="px-4 py-2.5">
-                          <div className="relative">
-                            <button
-                              ref={adminStatusBtnRef}
-                              onClick={() => openPositionedMenu(adminStatusBtnRef, setAdminStatusMenuPos, setAdminStatusMenuOpen, "left", 208)}
-                              className="flex items-center gap-1.5 hover:text-brand-700 whitespace-nowrap"
-                            >
-                              Status
-                              <ChevronDown className="h-3 w-3" />
-                              {adminStatusFilter.length > 0 && (
-                                <span className="text-[9px] bg-brand-50 text-brand-700 rounded-full px-1.5 py-0.5 font-bold">{adminStatusFilter.length}</span>
-                              )}
-                            </button>
-                            {adminStatusMenuOpen && adminStatusMenuPos && createPortal(
-                              <>
-                                <div className="fixed inset-0 z-[60]" onClick={() => setAdminStatusMenuOpen(false)} />
-                                <div
-                                  className="fixed z-[70] w-52 bg-white border border-slate-200 rounded-lg shadow-lg py-1.5 max-h-56 overflow-y-auto"
-                                  style={{ top: adminStatusMenuPos.top, left: adminStatusMenuPos.left }}
-                                >
-                                  {STATUS_OPTIONS.map(opt => (
-                                    <label key={opt} className="flex items-center gap-2 px-3 py-1.5 text-xs font-normal text-slate-700 hover:bg-slate-50 cursor-pointer">
-                                      <input
-                                        type="checkbox"
-                                        checked={adminStatusFilter.includes(opt)}
-                                        onChange={() => {
-                                          setAdminPage(1);
-                                          setAdminStatusFilter(prev => prev.includes(opt) ? prev.filter(v => v !== opt) : [...prev, opt]);
-                                        }}
-                                      />
-                                      {opt}
-                                    </label>
-                                  ))}
-                                </div>
-                              </>,
-                              document.body
-                            )}
-                          </div>
+                          <SearchableMultiSelect
+                            variant="inline"
+                            label="Status"
+                            options={STATUS_OPTIONS}
+                            selected={adminStatusFilter}
+                            onChange={(next) => { setAdminPage(1); setAdminStatusFilter(next); }}
+                            searchPlaceholder="Search status..."
+                            panelWidth={208}
+                          />
                         </th>
                       )}
                       {adminVisibleColumns.nextCallDate && <th className="px-4 py-2.5 whitespace-nowrap">Next Call Date</th>}
@@ -1340,47 +980,17 @@ export default function LeadDashboard() {
                       {adminVisibleColumns.adSetName && <th className="px-4 py-2.5 whitespace-nowrap">Ad Set Name</th>}
                       {isAdmin && adminVisibleColumns.campaign && (
                         <th className="px-4 py-2.5">
-                          <div className="relative">
-                            <button
-                              ref={adminCampaignBtnRef}
-                              onClick={() => openPositionedMenu(adminCampaignBtnRef, setAdminCampaignMenuPos, setAdminCampaignMenuOpen, "right", 224)}
-                              className="flex items-center gap-1.5 hover:text-brand-700 whitespace-nowrap"
-                            >
-                              Campaign
-                              <ChevronDown className="h-3 w-3" />
-                              {adminCampaignFilter.length > 0 && (
-                                <span className="text-[9px] bg-brand-50 text-brand-700 rounded-full px-1.5 py-0.5 font-bold">{adminCampaignFilter.length}</span>
-                              )}
-                            </button>
-                            {adminCampaignMenuOpen && adminCampaignMenuPos && createPortal(
-                              <>
-                                <div className="fixed inset-0 z-[60]" onClick={() => setAdminCampaignMenuOpen(false)} />
-                                <div
-                                  className="fixed z-[70] w-56 bg-white border border-slate-200 rounded-lg shadow-lg py-1.5 max-h-56 overflow-y-auto"
-                                  style={{ top: adminCampaignMenuPos.top, left: adminCampaignMenuPos.left }}
-                                >
-                                  {adminCampaignsList.length === 0 ? (
-                                    <p className="px-3 py-2 text-xs text-slate-400 italic font-normal">No data yet</p>
-                                  ) : (
-                                    adminCampaignsList.map(opt => (
-                                      <label key={opt} className="flex items-center gap-2 px-3 py-1.5 text-xs font-normal text-slate-700 hover:bg-slate-50 cursor-pointer">
-                                        <input
-                                          type="checkbox"
-                                          checked={adminCampaignFilter.includes(opt)}
-                                          onChange={() => {
-                                            setAdminPage(1);
-                                            setAdminCampaignFilter(prev => prev.includes(opt) ? prev.filter(v => v !== opt) : [...prev, opt]);
-                                          }}
-                                        />
-                                        {opt}
-                                      </label>
-                                    ))
-                                  )}
-                                </div>
-                              </>,
-                              document.body
-                            )}
-                          </div>
+                          <SearchableMultiSelect
+                            variant="inline"
+                            label="Campaign"
+                            options={adminCampaignsList}
+                            selected={adminCampaignFilter}
+                            onChange={(next) => { setAdminPage(1); setAdminCampaignFilter(next); }}
+                            searchPlaceholder="Search campaigns..."
+                            renderLabel={(l) => <PlatformLabel text={l} />}
+                            panelWidth={224}
+                            align="right"
+                          />
                         </th>
                       )}
                       {adminVisibleColumns.notes && <th className="px-4 py-2.5 whitespace-nowrap">Notes</th>}
@@ -1481,34 +1091,22 @@ export default function LeadDashboard() {
                 </table>
               </div>
 
-              <div className="px-4 py-3 flex flex-wrap justify-between items-center gap-3 border-t border-slate-100 text-[11px] text-slate-500 font-semibold">
-                <span>{adminFilteredLeads.length} Row{adminFilteredLeads.length === 1 ? "" : "s"}</span>
-                <div className="flex items-center gap-4">
-                  <span className="flex items-center gap-1.5">
-                    Rows per page
-                    <select
-                      value={adminRowsPerPage}
-                      onChange={(e) => {
-                        adminProgrammaticScroll.current = true;
-                        setAdminRowsPerPage(Number(e.target.value));
-                        setAdminPage(1);
-                        adminScrollRef.current?.scrollTo(0, 0);
-                        requestAnimationFrame(() => {
-                          requestAnimationFrame(() => { adminProgrammaticScroll.current = false; });
-                        });
-                      }}
-                      className="bg-slate-50 border border-slate-200 rounded px-1.5 py-1 font-bold text-slate-700 focus:outline-none"
-                    >
-                      {[10, 25, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
-                    </select>
-                  </span>
-                  <span>{adminFilteredLeads.length === 0 ? 0 : (adminCurrentPage - 1) * adminRowsPerPage + 1}-{Math.min(adminCurrentPage * adminRowsPerPage, adminFilteredLeads.length)} of {adminFilteredLeads.length}</span>
-                  <div className="flex items-center gap-1">
-                    <button onClick={() => goToAdminPage(adminCurrentPage - 1)} disabled={adminCurrentPage <= 1} className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed">‹</button>
-                    <button onClick={() => goToAdminPage(adminCurrentPage + 1)} disabled={adminCurrentPage >= adminTotalPages} className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed">›</button>
-                  </div>
-                </div>
-              </div>
+              <TablePagination
+                totalRows={adminFilteredLeads.length}
+                page={adminCurrentPage}
+                rowsPerPage={adminRowsPerPage}
+                onPageChange={goToAdminPage}
+                onRowsPerPageChange={(n) => {
+                  adminProgrammaticScroll.current = true;
+                  setAdminRowsPerPage(n);
+                  setAdminPage(1);
+                  adminScrollRef.current?.scrollTo(0, 0);
+                  requestAnimationFrame(() => {
+                    requestAnimationFrame(() => { adminProgrammaticScroll.current = false; });
+                  });
+                }}
+                rowLabel="Lead"
+              />
             </div>
           </>
         ) : (
@@ -1533,304 +1131,48 @@ export default function LeadDashboard() {
                   <Sliders className="h-4.5 w-4.5" />
                 </button>
 
-                {/* Date range — same custom Start/End picker pattern as the Leads tab, fully independent state */}
-                <div className="relative">
-                  <button
-                    ref={analyticsCalendarBtnRef}
-                    type="button"
-                    onClick={() => {
-                      const rect = analyticsCalendarBtnRef.current?.getBoundingClientRect();
-                      if (rect) {
-                        const panelWidth = 260;
-                        const estimatedPanelHeight = 300;
-                        const left = Math.max(8, Math.min(rect.left, window.innerWidth - panelWidth - 8));
-                        const top = rect.bottom + 6 + estimatedPanelHeight > window.innerHeight
-                          ? Math.max(8, rect.top - estimatedPanelHeight - 6)
-                          : rect.bottom + 6;
-                        setAnalyticsCalendarPos({ top, left });
-                      }
-                      setAnalyticsRangeStartDraft(analyticsCustomRange?.start || "");
-                      setAnalyticsRangeEndDraft(analyticsCustomRange?.end || "");
-                      setAnalyticsCalendarOpen(o => !o);
-                    }}
-                    className="h-10 flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-4 text-xs text-slate-700 font-bold shadow-sm hover:bg-slate-50 transition-all whitespace-nowrap"
-                  >
-                    <Calendar className="h-4 w-4 text-blue-600 shrink-0" />
-                    {analyticsDateRange === "custom" && analyticsCustomRange
-                      ? `${analyticsCustomRange.start} - ${analyticsCustomRange.end}`
-                      : DATE_RANGE_OPTIONS.find(o => o.value === analyticsDateRange)?.label ?? "Custom Range"}
-                  </button>
-                  {analyticsCalendarOpen && analyticsCalendarPos && createPortal(
-                    <>
-                      <div className="fixed inset-0 z-[60]" onClick={() => setAnalyticsCalendarOpen(false)} />
-                      <div
-                        className="fixed z-[70] w-64 max-w-[calc(100vw-1rem)] bg-white border border-slate-200 rounded-xl shadow-lg p-4 space-y-3"
-                        style={{ top: analyticsCalendarPos.top, left: analyticsCalendarPos.left }}
-                      >
-                        <p className="text-[11px] font-bold text-slate-700">Filter analytics by date range</p>
-                        <div className="space-y-1.5">
-                          <label className="block text-[9px] font-bold text-slate-400 uppercase">Start Date</label>
-                          <input
-                            type="date"
-                            value={analyticsRangeStartDraft}
-                            onChange={(e) => {
-                              const newStart = e.target.value;
-                              setAnalyticsRangeStartDraft(newStart);
-                              if (analyticsRangeEndDraft && newStart && analyticsRangeEndDraft < newStart) {
-                                setAnalyticsRangeEndDraft("");
-                              }
-                            }}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-700 focus:outline-none focus:border-[#0B1E6E]"
-                          />
-                        </div>
-                        <div className="space-y-1.5">
-                          <label className="block text-[9px] font-bold text-slate-400 uppercase">End Date</label>
-                          <input
-                            type="date"
-                            value={analyticsRangeEndDraft}
-                            min={analyticsRangeStartDraft || undefined}
-                            onChange={(e) => {
-                              const newEnd = e.target.value;
-                              if (analyticsRangeStartDraft && newEnd && newEnd < analyticsRangeStartDraft) return;
-                              setAnalyticsRangeEndDraft(newEnd);
-                            }}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-700 focus:outline-none focus:border-[#0B1E6E]"
-                          />
-                          {analyticsRangeStartDraft && analyticsRangeEndDraft && analyticsRangeEndDraft < analyticsRangeStartDraft && (
-                            <p className="text-[10px] font-semibold text-red-500">End date can&apos;t be before the start date.</p>
-                          )}
-                        </div>
-                        <div className="flex gap-2 pt-1">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setAnalyticsCustomRange(null);
-                              setAnalyticsDateRange("month");
-                              setAnalyticsCalendarOpen(false);
-                              setAnalyticsPage(1);
-                            }}
-                            className="flex-1 bg-slate-100 text-slate-600 font-bold text-[11px] py-1.5 rounded-lg hover:bg-slate-200 transition-colors"
-                          >
-                            Reset
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (!analyticsRangeStartDraft || !analyticsRangeEndDraft || analyticsRangeEndDraft < analyticsRangeStartDraft) return;
-                              setAnalyticsCustomRange({ start: analyticsRangeStartDraft, end: analyticsRangeEndDraft });
-                              setAnalyticsDateRange("custom");
-                              setAnalyticsCalendarOpen(false);
-                              setAnalyticsPage(1);
-                            }}
-                            disabled={!analyticsRangeStartDraft || !analyticsRangeEndDraft || analyticsRangeEndDraft < analyticsRangeStartDraft}
-                            className="flex-1 bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold text-[11px] py-1.5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                          >
-                            Apply
-                          </button>
-                        </div>
-                      </div>
-                    </>,
-                    document.body
-                  )}
-                </div>
+                {/* Date range — the shared calendar, same as the Leads tab but with
+                    fully independent state. Applying switches to "custom"; the ×
+                    clears back to the default This Month bucket. */}
+                <DateRangePicker
+                  value={analyticsDateRange === "custom" ? analyticsCustomRange : null}
+                  onChange={(range) => {
+                    setAnalyticsCustomRange(range);
+                    setAnalyticsDateRange(range ? "custom" : "month");
+                    setAnalyticsPage(1);
+                  }}
+                  emptyLabel={DATE_RANGE_OPTIONS.find(o => o.value === analyticsDateRange)?.label ?? "Custom Range"}
+                />
 
-                {/* Member */}
-                <div className="relative">
-                  <button
-                    ref={analyticsMemberBtnRef}
-                    type="button"
-                    onClick={() => openPositionedMenu(analyticsMemberBtnRef, setAnalyticsMemberMenuPos, setAnalyticsMemberMenuOpen, "left", 200)}
-                    className="h-10 flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-4 text-xs text-slate-700 font-bold shadow-sm hover:bg-slate-50 transition-all whitespace-nowrap"
-                  >
-                    {analyticsMemberFilter.length === 0 ? "Member" : analyticsMemberFilter.length === 1 ? analyticsMemberFilter[0] : `${analyticsMemberFilter.length} Members`}
-                    <ChevronDown className={`h-3.5 w-3.5 text-slate-400 transition-transform ${analyticsMemberMenuOpen ? "rotate-180" : ""}`} />
-                  </button>
-                  {analyticsMemberMenuOpen && analyticsMemberMenuPos && createPortal(
-                    <>
-                      <div className="fixed inset-0 z-[60]" onClick={() => setAnalyticsMemberMenuOpen(false)} />
-                      <div
-                        className="fixed z-[70] w-52 bg-white border border-slate-200 rounded-lg shadow-lg py-1.5 max-h-56 overflow-y-auto"
-                        style={{ top: analyticsMemberMenuPos.top, left: analyticsMemberMenuPos.left }}
-                      >
-                        {agentsList.length === 0 ? (
-                          <p className="px-3 py-2 text-xs text-slate-400 italic font-normal">No data yet</p>
-                        ) : (
-                          agentsList.map(opt => (
-                            <label key={opt} className="flex items-center gap-2 px-3 py-1.5 text-xs font-normal text-slate-700 hover:bg-slate-50 cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={analyticsMemberFilter.includes(opt)}
-                                onChange={() => {
-                                  setAnalyticsPage(1);
-                                  setAnalyticsMemberFilter(prev => prev.includes(opt) ? prev.filter(v => v !== opt) : [...prev, opt]);
-                                }}
-                              />
-                              {opt}
-                            </label>
-                          ))
-                        )}
-                      </div>
-                    </>,
-                    document.body
-                  )}
-                </div>
+                <SearchableMultiSelect
+                  options={agentsList}
+                  selected={analyticsMemberFilter}
+                  onChange={(next) => { setAnalyticsPage(1); setAnalyticsMemberFilter(next); }}
+                  placeholder="Member"
+                  searchPlaceholder="Search members..."
+                  panelWidth={200}
+                />
 
-                {/* Property */}
-                <div className="relative">
-                  <button
-                    ref={analyticsPropertyBtnRef}
-                    type="button"
-                    onClick={() => openPositionedMenu(analyticsPropertyBtnRef, setAnalyticsPropertyMenuPos, setAnalyticsPropertyMenuOpen, "left", 200)}
-                    className="h-10 flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-4 text-xs text-slate-700 font-bold shadow-sm hover:bg-slate-50 transition-all whitespace-nowrap"
-                  >
-                    {analyticsPropertyFilter.length === 0 ? "Property" : analyticsPropertyFilter.length === 1 ? analyticsPropertyFilter[0] : `${analyticsPropertyFilter.length} Properties`}
-                    <ChevronDown className={`h-3.5 w-3.5 text-slate-400 transition-transform ${analyticsPropertyMenuOpen ? "rotate-180" : ""}`} />
-                  </button>
-                  {analyticsPropertyMenuOpen && analyticsPropertyMenuPos && createPortal(
-                    <>
-                      <div className="fixed inset-0 z-[60]" onClick={() => setAnalyticsPropertyMenuOpen(false)} />
-                      <div
-                        className="fixed z-[70] w-52 bg-white border border-slate-200 rounded-lg shadow-lg py-1.5 max-h-56 overflow-y-auto"
-                        style={{ top: analyticsPropertyMenuPos.top, left: analyticsPropertyMenuPos.left }}
-                      >
-                        {analyticsPropertiesList.length === 0 ? (
-                          <p className="px-3 py-2 text-xs text-slate-400 italic font-normal">No data yet</p>
-                        ) : (
-                          analyticsPropertiesList.map(opt => (
-                            <label key={opt} className="flex items-center gap-2 px-3 py-1.5 text-xs font-normal text-slate-700 hover:bg-slate-50 cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={analyticsPropertyFilter.includes(opt)}
-                                onChange={() => {
-                                  setAnalyticsPage(1);
-                                  setAnalyticsPropertyFilter(prev => prev.includes(opt) ? prev.filter(v => v !== opt) : [...prev, opt]);
-                                }}
-                              />
-                              {opt}
-                            </label>
-                          ))
-                        )}
-                      </div>
-                    </>,
-                    document.body
-                  )}
-                </div>
+                <SearchableMultiSelect
+                  options={analyticsPropertiesList}
+                  selected={analyticsPropertyFilter}
+                  onChange={(next) => { setAnalyticsPage(1); setAnalyticsPropertyFilter(next); }}
+                  placeholder="Property"
+                  searchPlaceholder="Search properties..."
+                  panelWidth={200}
+                />
 
-                {/* Campaigns — grouped by ad platform, same pattern as the Leads tab's own Campaigns dropdown */}
-                <div className="relative">
-                  <button
-                    ref={analyticsCampaignBtnRef}
-                    type="button"
-                    onClick={() => openPositionedMenu(analyticsCampaignBtnRef, setAnalyticsCampaignMenuPos, setAnalyticsCampaignMenuOpen, "right", 260)}
-                    className="h-10 flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-4 text-xs text-slate-700 font-bold shadow-sm hover:bg-slate-50 transition-all whitespace-nowrap"
-                  >
-                    {analyticsCampaignFilter.length === 0 ? "Campaigns" : analyticsCampaignFilter.length === 1 ? analyticsCampaignFilter[0] : `${analyticsCampaignFilter.length} Campaigns`}
-                    <ChevronDown className={`h-3.5 w-3.5 text-slate-400 transition-transform ${analyticsCampaignMenuOpen ? "rotate-180" : ""}`} />
-                  </button>
-                  {analyticsCampaignMenuOpen && analyticsCampaignMenuPos && createPortal(
-                    <>
-                      <div className="fixed inset-0 z-[60]" onClick={() => setAnalyticsCampaignMenuOpen(false)} />
-                      <div
-                        className="fixed z-[70] w-64 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 max-h-80 overflow-y-auto"
-                        style={{ top: analyticsCampaignMenuPos.top, left: analyticsCampaignMenuPos.left }}
-                      >
-                        {analyticsCampaignFilter.length > 0 && (
-                          <button
-                            onClick={() => { setAnalyticsPage(1); setAnalyticsCampaignFilter([]); }}
-                            className="w-full text-left px-3 py-1.5 text-[11px] font-bold text-brand-700 hover:bg-slate-50"
-                          >
-                            Clear selection
-                          </button>
-                        )}
-
-                        {/* Meta group */}
-                        <button
-                          onClick={() => setAnalyticsCampaignsMetaOpen(o => !o)}
-                          className="w-full flex items-center justify-between px-3 py-2 text-xs font-bold text-slate-800 hover:bg-slate-50"
-                        >
-                          <span className="flex items-center gap-2">
-                            <img src="https://img.icons8.com/?size=100&id=wA5rN96FVDtq&format=png&color=000000" alt="Meta" className="h-4 w-4" />
-                            Meta
-                          </span>
-                          <ChevronDown className={`h-3 w-3 text-slate-400 transition-transform ${analyticsCampaignsMetaOpen ? "rotate-180" : ""}`} />
-                        </button>
-                        {analyticsCampaignsMetaOpen && (
-                          analyticsMetaCampaigns.length === 0 ? (
-                            <p className="pl-9 pr-3 py-1.5 text-[11px] text-slate-400 italic font-normal">No Meta campaigns yet</p>
-                          ) : (
-                            analyticsMetaCampaigns.map(opt => (
-                              <label key={opt} className="flex items-center gap-2 pl-9 pr-3 py-1.5 text-xs font-normal text-slate-700 hover:bg-slate-50 cursor-pointer">
-                                <input
-                                  type="checkbox"
-                                  checked={analyticsCampaignFilter.includes(opt)}
-                                  onChange={() => {
-                                    setAnalyticsPage(1);
-                                    setAnalyticsCampaignFilter(prev => prev.includes(opt) ? prev.filter(v => v !== opt) : [...prev, opt]);
-                                  }}
-                                />
-                                <span className="truncate">{opt}</span>
-                              </label>
-                            ))
-                          )
-                        )}
-
-                        <div className="border-t border-slate-100 my-1" />
-
-                        {/* Google group */}
-                        <button
-                          onClick={() => setAnalyticsCampaignsGoogleOpen(o => !o)}
-                          className="w-full flex items-center justify-between px-3 py-2 text-xs font-bold text-slate-800 hover:bg-slate-50"
-                        >
-                          <span className="flex items-center gap-2">
-                            <img src="https://img.icons8.com/?size=100&id=4hR4Ih04Je2t&format=png&color=000000" alt="Google" className="h-4 w-4" />
-                            Google
-                          </span>
-                          <ChevronDown className={`h-3 w-3 text-slate-400 transition-transform ${analyticsCampaignsGoogleOpen ? "rotate-180" : ""}`} />
-                        </button>
-                        {analyticsCampaignsGoogleOpen && (
-                          analyticsGoogleCampaigns.length === 0 ? (
-                            <p className="pl-9 pr-3 py-1.5 text-[11px] text-slate-400 italic font-normal">No Google campaigns yet</p>
-                          ) : (
-                            analyticsGoogleCampaigns.map(opt => (
-                              <label key={opt} className="flex items-center gap-2 pl-9 pr-3 py-1.5 text-xs font-normal text-slate-700 hover:bg-slate-50 cursor-pointer">
-                                <input
-                                  type="checkbox"
-                                  checked={analyticsCampaignFilter.includes(opt)}
-                                  onChange={() => {
-                                    setAnalyticsPage(1);
-                                    setAnalyticsCampaignFilter(prev => prev.includes(opt) ? prev.filter(v => v !== opt) : [...prev, opt]);
-                                  }}
-                                />
-                                <span className="truncate">{opt}</span>
-                              </label>
-                            ))
-                          )
-                        )}
-
-                        {analyticsOtherCampaigns.length > 0 && (
-                          <>
-                            <div className="border-t border-slate-100 my-1" />
-                            <p className="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wide">Other</p>
-                            {analyticsOtherCampaigns.map(opt => (
-                              <label key={opt} className="flex items-center gap-2 px-3 py-1.5 text-xs font-normal text-slate-700 hover:bg-slate-50 cursor-pointer">
-                                <input
-                                  type="checkbox"
-                                  checked={analyticsCampaignFilter.includes(opt)}
-                                  onChange={() => {
-                                    setAnalyticsPage(1);
-                                    setAnalyticsCampaignFilter(prev => prev.includes(opt) ? prev.filter(v => v !== opt) : [...prev, opt]);
-                                  }}
-                                />
-                                <span className="truncate">{opt}</span>
-                              </label>
-                            ))}
-                          </>
-                        )}
-                      </div>
-                    </>,
-                    document.body
-                  )}
-                </div>
+                {/* Campaigns — grouped by ad platform, same as the Leads tab's own Campaigns dropdown */}
+                <SearchableMultiSelect
+                  options={analyticsCampaignOptions}
+                  selected={analyticsCampaignFilter}
+                  onChange={(next) => { setAnalyticsPage(1); setAnalyticsCampaignFilter(next); }}
+                  placeholder="Campaigns"
+                  searchPlaceholder="Search campaigns..."
+                  renderLabel={(l) => <PlatformLabel text={l} />}
+                  panelWidth={260}
+                  align="right"
+                />
               </div>
 
               {adminAgentBreakdown.length === 0 ? (
@@ -1950,58 +1292,62 @@ export default function LeadDashboard() {
                                       {row.directReports.length === 0 ? (
                                         <p className="text-[11px] text-slate-400 italic py-1">No team members reporting to {row.agentName} yet.</p>
                                       ) : (
-                                        <table className="w-full text-left text-[11px] border-collapse">
-                                          <thead>
-                                            <tr className="border-b border-slate-200 font-bold text-slate-600">
-                                              <th className="py-2 pr-4">Team Member</th>
-                                              {analyticsVisibleColumns.total && <th className="py-2 pr-4">Total Leads Assigned</th>}
-                                              {analyticsVisibleColumns.qualified && <th className="py-2 pr-4">Qualified Leads</th>}
-                                              {analyticsVisibleColumns.unqualified && <th className="py-2 pr-4">Unqualified Leads</th>}
-                                              {analyticsVisibleColumns.siteVisits && <th className="py-2 pr-4">Site Visit Leads</th>}
-                                              {analyticsVisibleColumns.qlPct && <th className="py-2 pr-4">QL&apos;s %age</th>}
-                                              {analyticsVisibleColumns.ql2svPct && <th className="py-2 pr-4">QL2SV %age</th>}
-                                            </tr>
-                                          </thead>
-                                          <tbody className="divide-y divide-slate-100 text-slate-700">
-                                            {row.directReports.map(member => (
-                                              <tr key={member.name}>
-                                                <td className="py-2 pr-4 font-semibold">
-                                                  <StatCell value={member.name} onClick={() => openAnalyticsDrilldown([member.name], null, `${member.name} — All Leads`)} />
-                                                </td>
-                                                {analyticsVisibleColumns.total && (
-                                                  <td className="py-2 pr-4">
-                                                    <StatCell value={member.total} onClick={() => openAnalyticsDrilldown([member.name], null, `${member.name} — All Leads`)} />
-                                                  </td>
-                                                )}
-                                                {analyticsVisibleColumns.qualified && (
-                                                  <td className="py-2 pr-4">
-                                                    <StatCell value={member.qualified} onClick={() => openAnalyticsDrilldown([member.name], QUALIFIED_STATUS_OPTIONS, `${member.name} — Qualified Leads`)} />
-                                                  </td>
-                                                )}
-                                                {analyticsVisibleColumns.unqualified && (
-                                                  <td className="py-2 pr-4">
-                                                    <StatCell value={member.unqualified} onClick={() => openAnalyticsDrilldown([member.name], UNQUALIFIED_STATUSES, `${member.name} — Unqualified Leads`)} />
-                                                  </td>
-                                                )}
-                                                {analyticsVisibleColumns.siteVisits && (
-                                                  <td className="py-2 pr-4">
-                                                    <StatCell value={member.siteVisits} onClick={() => openAnalyticsDrilldown([member.name], SITE_VISIT_STATUSES, `${member.name} — Site Visit Leads`)} />
-                                                  </td>
-                                                )}
-                                                {analyticsVisibleColumns.qlPct && (
-                                                  <td className="py-2 pr-4">
-                                                    <StatCell value={`${member.qlPct.toFixed(2)}%`} onClick={() => openAnalyticsDrilldown([member.name], QUALIFIED_STATUS_OPTIONS, `${member.name} — Qualified Leads`)} />
-                                                  </td>
-                                                )}
-                                                {analyticsVisibleColumns.ql2svPct && (
-                                                  <td className="py-2 pr-4">
-                                                    <StatCell value={`${member.ql2svPct.toFixed(2)}%`} onClick={() => openAnalyticsDrilldown([member.name], SITE_VISIT_STATUSES, `${member.name} — Site Visit Leads`)} />
-                                                  </td>
-                                                )}
-                                              </tr>
-                                            ))}
-                                          </tbody>
-                                        </table>
+                                        <PaginatedSubList items={row.directReports} rowLabel="Member">
+                                          {(pageRows) => (
+                                            <table className="w-full text-left text-[11px] border-collapse">
+                                              <thead>
+                                                <tr className="border-b border-slate-200 font-bold text-slate-600">
+                                                  <th className="py-2 pr-4">Team Member</th>
+                                                  {analyticsVisibleColumns.total && <th className="py-2 pr-4">Total Leads Assigned</th>}
+                                                  {analyticsVisibleColumns.qualified && <th className="py-2 pr-4">Qualified Leads</th>}
+                                                  {analyticsVisibleColumns.unqualified && <th className="py-2 pr-4">Unqualified Leads</th>}
+                                                  {analyticsVisibleColumns.siteVisits && <th className="py-2 pr-4">Site Visit Leads</th>}
+                                                  {analyticsVisibleColumns.qlPct && <th className="py-2 pr-4">QL&apos;s %age</th>}
+                                                  {analyticsVisibleColumns.ql2svPct && <th className="py-2 pr-4">QL2SV %age</th>}
+                                                </tr>
+                                              </thead>
+                                              <tbody className="divide-y divide-slate-100 text-slate-700">
+                                                {pageRows.map(member => (
+                                                  <tr key={member.name}>
+                                                    <td className="py-2 pr-4 font-semibold">
+                                                      <StatCell value={member.name} onClick={() => openAnalyticsDrilldown([member.name], null, `${member.name} — All Leads`)} />
+                                                    </td>
+                                                    {analyticsVisibleColumns.total && (
+                                                      <td className="py-2 pr-4">
+                                                        <StatCell value={member.total} onClick={() => openAnalyticsDrilldown([member.name], null, `${member.name} — All Leads`)} />
+                                                      </td>
+                                                    )}
+                                                    {analyticsVisibleColumns.qualified && (
+                                                      <td className="py-2 pr-4">
+                                                        <StatCell value={member.qualified} onClick={() => openAnalyticsDrilldown([member.name], QUALIFIED_STATUS_OPTIONS, `${member.name} — Qualified Leads`)} />
+                                                      </td>
+                                                    )}
+                                                    {analyticsVisibleColumns.unqualified && (
+                                                      <td className="py-2 pr-4">
+                                                        <StatCell value={member.unqualified} onClick={() => openAnalyticsDrilldown([member.name], UNQUALIFIED_STATUSES, `${member.name} — Unqualified Leads`)} />
+                                                      </td>
+                                                    )}
+                                                    {analyticsVisibleColumns.siteVisits && (
+                                                      <td className="py-2 pr-4">
+                                                        <StatCell value={member.siteVisits} onClick={() => openAnalyticsDrilldown([member.name], SITE_VISIT_STATUSES, `${member.name} — Site Visit Leads`)} />
+                                                      </td>
+                                                    )}
+                                                    {analyticsVisibleColumns.qlPct && (
+                                                      <td className="py-2 pr-4">
+                                                        <StatCell value={`${member.qlPct.toFixed(2)}%`} onClick={() => openAnalyticsDrilldown([member.name], QUALIFIED_STATUS_OPTIONS, `${member.name} — Qualified Leads`)} />
+                                                      </td>
+                                                    )}
+                                                    {analyticsVisibleColumns.ql2svPct && (
+                                                      <td className="py-2 pr-4">
+                                                        <StatCell value={`${member.ql2svPct.toFixed(2)}%`} onClick={() => openAnalyticsDrilldown([member.name], SITE_VISIT_STATUSES, `${member.name} — Site Visit Leads`)} />
+                                                      </td>
+                                                    )}
+                                                  </tr>
+                                                ))}
+                                              </tbody>
+                                            </table>
+                                          )}
+                                        </PaginatedSubList>
                                       )}
                                     </div>
                                   </td>
@@ -2014,41 +1360,14 @@ export default function LeadDashboard() {
                     </table>
                   </div>
 
-                  <div className="px-4 py-3 flex flex-wrap justify-between items-center gap-3 border-t border-slate-100 text-[11px] text-slate-500 font-semibold">
-                    <span>{adminAgentBreakdown.length} Row{adminAgentBreakdown.length === 1 ? "" : "s"}</span>
-                    <div className="flex items-center gap-4">
-                      <span className="flex items-center gap-1.5">
-                        Rows per page
-                        <select
-                          value={analyticsRowsPerPage}
-                          onChange={(e) => { setAnalyticsRowsPerPage(Number(e.target.value)); setAnalyticsPage(1); }}
-                          className="bg-slate-50 border border-slate-200 rounded px-1.5 py-1 font-bold text-slate-700 focus:outline-none"
-                        >
-                          {[10, 25, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
-                        </select>
-                      </span>
-                      <span>
-                        {adminAgentBreakdown.length === 0 ? 0 : (analyticsCurrentPage - 1) * analyticsRowsPerPage + 1}-
-                        {Math.min(analyticsCurrentPage * analyticsRowsPerPage, adminAgentBreakdown.length)} of {adminAgentBreakdown.length}
-                      </span>
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => setAnalyticsPage(p => Math.max(1, p - 1))}
-                          disabled={analyticsCurrentPage <= 1}
-                          className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
-                        >
-                          ‹
-                        </button>
-                        <button
-                          onClick={() => setAnalyticsPage(p => Math.min(analyticsTotalPages, p + 1))}
-                          disabled={analyticsCurrentPage >= analyticsTotalPages}
-                          className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
-                        >
-                          ›
-                        </button>
-                      </div>
-                    </div>
-                  </div>
+                  <TablePagination
+                    totalRows={adminAgentBreakdown.length}
+                    page={analyticsCurrentPage}
+                    rowsPerPage={analyticsRowsPerPage}
+                    onPageChange={setAnalyticsPage}
+                    onRowsPerPageChange={setAnalyticsRowsPerPage}
+                    rowLabel="Manager"
+                  />
                 </>
               )}
             </div>
@@ -2164,49 +1483,23 @@ export default function LeadDashboard() {
                         </table>
                       </div>
 
-                      <div className="px-4 py-3 flex flex-wrap justify-between items-center gap-3 border-t border-slate-100 text-[11px] text-slate-500 font-semibold">
-                        <span>{analyticsDrilldownFilteredLeads.length} Row{analyticsDrilldownFilteredLeads.length === 1 ? "" : "s"}</span>
-                        <div className="flex items-center gap-4">
-                          <span className="flex items-center gap-1.5">
-                            Rows per page
-                            <select
-                              value={drilldownRowsPerPage}
-                              onChange={(e) => {
-                                drilldownProgrammaticScroll.current = true;
-                                setDrilldownRowsPerPage(Number(e.target.value));
-                                setDrilldownPage(1);
-                                drilldownScrollRef.current?.scrollTo(0, 0);
-                                requestAnimationFrame(() => {
-                                  requestAnimationFrame(() => { drilldownProgrammaticScroll.current = false; });
-                                });
-                              }}
-                              className="bg-slate-50 border border-slate-200 rounded px-1.5 py-1 font-bold text-slate-700 focus:outline-none"
-                            >
-                              {[8, 25, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
-                            </select>
-                          </span>
-                          <span>
-                            {analyticsDrilldownFilteredLeads.length === 0 ? 0 : (drilldownCurrentPage - 1) * drilldownRowsPerPage + 1}-
-                            {Math.min(drilldownCurrentPage * drilldownRowsPerPage, analyticsDrilldownFilteredLeads.length)} of {analyticsDrilldownFilteredLeads.length}
-                          </span>
-                          <div className="flex items-center gap-1">
-                            <button
-                              onClick={() => goToDrilldownPage(drilldownCurrentPage - 1)}
-                              disabled={drilldownCurrentPage <= 1}
-                              className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
-                            >
-                              ‹
-                            </button>
-                            <button
-                              onClick={() => goToDrilldownPage(drilldownCurrentPage + 1)}
-                              disabled={drilldownCurrentPage >= drilldownTotalPages}
-                              className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
-                            >
-                              ›
-                            </button>
-                          </div>
-                        </div>
-                      </div>
+                      <TablePagination
+                        totalRows={analyticsDrilldownFilteredLeads.length}
+                        page={drilldownCurrentPage}
+                        rowsPerPage={drilldownRowsPerPage}
+                        onPageChange={goToDrilldownPage}
+                        onRowsPerPageChange={(n) => {
+                          drilldownProgrammaticScroll.current = true;
+                          setDrilldownRowsPerPage(n);
+                          setDrilldownPage(1);
+                          drilldownScrollRef.current?.scrollTo(0, 0);
+                          requestAnimationFrame(() => {
+                            requestAnimationFrame(() => { drilldownProgrammaticScroll.current = false; });
+                          });
+                        }}
+                        rowsPerPageOptions={[8, 25, 50, 100]}
+                        rowLabel="Lead"
+                      />
                     </>
                   )}
                 </div>

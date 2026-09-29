@@ -8,6 +8,7 @@ import {
   apiSetPropertyMetaCampaigns,
   ApiRequestError
 } from "@/lib/apiClient";
+import { SearchableSelect } from "@/components/ui/SearchableDropdown";
 
 interface MetaCampaignLinkerProps {
   propertyId: string;
@@ -136,19 +137,15 @@ export default function MetaCampaignLinker({ propertyId, isAdmin }: MetaCampaign
         <div className="space-y-2">
           {/* Visible dropdown of campaign names seen on real incoming Meta leads */}
           <div className="flex gap-2">
-            <select
+            <SearchableSelect
+              options={availableSuggestions}
               value={selected}
-              onChange={(e) => setSelected(e.target.value)}
+              onChange={setSelected}
               disabled={saving}
-              className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none focus:border-brand-500 disabled:opacity-60"
-            >
-              <option value="">
-                {availableSuggestions.length === 0 ? "No campaigns seen on leads yet" : "Select a campaign that has sent leads…"}
-              </option>
-              {availableSuggestions.map(s => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
+              placeholder={availableSuggestions.length === 0 ? "No campaigns seen on leads yet" : "Select a campaign that has sent leads…"}
+              searchPlaceholder="Search campaigns..."
+              panelWidth={260}
+            />
             <button
               type="button"
               onClick={handleAddSelected}
