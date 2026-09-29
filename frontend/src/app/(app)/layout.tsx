@@ -40,6 +40,9 @@ import {
 // from the sidebar (desktop and mobile) for now — flip to true to bring them back.
 const SHOW_SIDEBAR_EXTRA_LINKS = false;
 
+// Shown in the sidebar footer on every login. No release date on purpose.
+const APP_VERSION = "v0.01| Released on: 30 Sep 2026";
+
 function initialsFor(name?: string): string {
   if (!name) return "U";
   const parts = name.trim().split(" ").filter(Boolean);
@@ -279,9 +282,9 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
             {!isSidebarCollapsed && (
               <Link href="/home" className="flex items-center min-w-0">
                 <img
-                  src="/Blue White Professional Minimal Company Business Card.png"
+                  src="/taskezy-logo-clean.png"
                   alt="TASKEZY Logo"
-                  className="h-14 w-auto object-contain"
+                  className="h-8 w-auto max-w-[130px] object-contain"
                 />
               </Link>
             )}
@@ -290,7 +293,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
               className="p-1.5 rounded-lg text-slate-400 hover:text-brand-700 hover:bg-slate-50 transition-colors shrink-0"
               title={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
             >
-              {isSidebarCollapsed ? <PanelLeftOpen className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}
+              {isSidebarCollapsed ? <PanelLeftOpen className="h-6 w-6" /> : <PanelLeftClose className="h-6 w-6" />}
             </button>
           </div>
 
@@ -349,6 +352,21 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
               );
             })}
 
+            {/* Settings — right after FINANCE, styled like the group headers.
+                No page behind it yet, so it doesn't navigate anywhere. */}
+            <button
+              type="button"
+              title="Settings (coming soon)"
+              className={`w-full flex items-center text-xs font-extrabold text-slate-800 rounded-lg hover:bg-slate-50 transition-colors ${
+                isSidebarCollapsed ? "justify-center py-2.5" : "px-4 py-2.5"
+              }`}
+            >
+              <span className={`flex items-center ${isSidebarCollapsed ? "" : "gap-2.5"}`}>
+                <Settings className="h-4.5 w-4.5 text-brand-700" />
+                {!isSidebarCollapsed && "SETTINGS"}
+              </span>
+            </button>
+
             {/* Static links — Organization, then Help/Tutorials/Contact — always visible regardless of which group is expanded */}
             {SHOW_SIDEBAR_EXTRA_LINKS && (<>
             <div className="pt-3 mt-3 border-t border-slate-100 space-y-1">
@@ -395,6 +413,14 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
             </div>
             </>)}
           </nav>
+        </div>
+
+        {/* Pinned sidebar footer: copyright/version */}
+        <div className={`flex-shrink-0 pb-4 ${isSidebarCollapsed ? "px-2" : "px-4"}`}>
+          <div className="text-center text-[10px] leading-4 text-slate-400">
+            {!isSidebarCollapsed && <p>{new Date().getFullYear()} © Taskezy</p>}
+            <p>{APP_VERSION}</p>
+          </div>
         </div>
       </aside>
 
@@ -455,9 +481,9 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
               <div className="flex items-center justify-between mb-4 border-b border-slate-100 pb-4">
                 <Link href="/home" className="flex items-center">
                   <img
-                    src="/Blue White Professional Minimal Company Business Card.png"
+                    src="/taskezy-logo-clean.png"
                     alt="TASKEZY Logo"
-                    className="h-12 w-auto object-contain"
+                    className="h-8 w-auto max-w-[140px] object-contain"
                   />
                 </Link>
                 <button
@@ -543,6 +569,18 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                   );
                 })}
 
+                {/* Settings — right after FINANCE, same as the desktop sidebar (no page yet) */}
+                <button
+                  type="button"
+                  title="Settings (coming soon)"
+                  className="w-full flex items-center px-4 py-2.5 text-xs font-extrabold text-slate-800 rounded-lg hover:bg-slate-50 transition-colors"
+                >
+                  <span className="flex items-center gap-2.5">
+                    <Settings className="h-4.5 w-4.5 text-brand-700" />
+                    SETTINGS
+                  </span>
+                </button>
+
                 {/* Organization — present on the desktop sidebar but previously
                     missing here, leaving mobile with no way to reach it at all. */}
                 {SHOW_SIDEBAR_EXTRA_LINKS && staticBottomLinks.length > 0 && (
@@ -604,6 +642,10 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                   <LogOut className="h-4 w-4" />
                   Sign Out
                 </button>
+                <div className="mt-3 text-center text-[10px] leading-4 text-slate-400">
+                  <p>{new Date().getFullYear()} © Taskezy</p>
+                  <p>{APP_VERSION}</p>
+                </div>
               </div>
             </div>
           </>
