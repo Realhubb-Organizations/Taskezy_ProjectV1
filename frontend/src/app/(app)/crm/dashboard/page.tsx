@@ -11,7 +11,8 @@ import SalesPendingTasksTable from "@/components/dashboard/SalesPendingTasksTabl
 import { computeLeadSummaryStats } from "@/lib/leadSummaryStats";
 import { ChevronDown, Plus, CheckCircle } from "lucide-react";
 import { LineSkeleton } from "@/components/ui/Skeletons";
-import { SearchableSelect } from "@/components/ui/SearchableDropdown";
+import DateRangeSelect from "@/components/ui/DateRangeSelect";
+import { DateRangeValue, toIsoDate } from "@/components/ui/DateRangePicker";
 
 // CRM's own overview — moved out of the old bare /dashboard route (which
 // branched its content by department/activeSystem, so the same URL showed a
@@ -22,7 +23,9 @@ import { SearchableSelect } from "@/components/ui/SearchableDropdown";
 export default function CrmDashboardPage() {
   const { leads, properties, users, currentUser, addLead, followupCalls, isDataLoading } = useApp();
 
-  const [dateRange, setDateRange] = useState<"today" | "yesterday" | "week" | "month" | "all">("today");
+  const [dateRange, setDateRange] = useState<"today" | "yesterday" | "week" | "month" | "all" | "custom">("today");
+  // The range picked via the Date Range dropdown's "Custom" option.
+  const [customRange, setCustomRange] = useState<DateRangeValue | null>(null);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   // Shared by the team tasks table and the charts under it, so both show the same tab.
   const [teamTaskTab, setTeamTaskTab] = useState<TeamTaskTab>("all");
@@ -30,6 +33,7 @@ export default function CrmDashboardPage() {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [quickViewLead, setQuickViewLead] = useState<Lead | null>(null);
 
+  // Presets only — DateRangeSelect appends "Custom" itself.
   const DATE_RANGE_OPTIONS: { value: typeof dateRange; label: string }[] = [
     { value: "today", label: "Today" },
     { value: "yesterday", label: "Yesterday" },
@@ -43,6 +47,11 @@ export default function CrmDashboardPage() {
     const d = new Date(dateStr);
     if (isNaN(d.getTime())) return false;
     if (range === "all") return true;
+    if (range === "custom") {
+      if (!customRange) return true;
+      const day = toIsoDate(d);
+      return day >= customRange.start && day <= customRange.end;
+    }
     const startOfToday = new Date(refNow.getFullYear(), refNow.getMonth(), refNow.getDate());
     if (range === "today") return d.toDateString() === refNow.toDateString();
     if (range === "yesterday") {
@@ -189,12 +198,13 @@ export default function CrmDashboardPage() {
         <div className="flex justify-between items-center px-4 py-2.5 text-[11px] border-b border-slate-200/60">
           <div className="flex items-center gap-1.5 font-bold text-slate-700">
             <span className="font-normal text-slate-500">Date Range</span>
-            <SearchableSelect
-              variant="pill"
+            <DateRangeSelect
               options={DATE_RANGE_OPTIONS}
               value={dateRange}
-              onChange={(v) => setDateRange(v as typeof dateRange)}
-              panelWidth={160}
+              customValue="custom"
+              customRange={customRange}
+              onPresetChange={(v) => { setDateRange(v); setCustomRange(null); }}
+              onCustomApply={(r) => { setCustomRange(r); setDateRange("custom"); }}
             />
           </div>
           {canViewLeadAnalytics && (

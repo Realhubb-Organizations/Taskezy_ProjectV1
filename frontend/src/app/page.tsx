@@ -53,9 +53,6 @@ export default function Home() {
            
           </div>
 
-          <h1>
-            Hii my name is Inder kjghfsdgfhjsakgf
-          </h1>
 
           {/* Editorial Headline */}
           <h1 className="text-4xl sm:text-6xl lg:text-7xl font-extrabold tracking-tight text-slate-900 leading-[1.08] mb-6">
@@ -67,7 +64,7 @@ export default function Home() {
 
           {/* Clean Subtitle */}
           <p className="text-base sm:text-lg text-slate-600 max-w-2xl mb-10 leading-relaxed font-normal">
-            PRIYA SINGH IS TESTING 
+            Taskezy Enterprise is a comprehensive platform that streamlines your real estate operations, from lead management to client engagement, all in one place.
           </p>
 
           {/* Action CTAs */}

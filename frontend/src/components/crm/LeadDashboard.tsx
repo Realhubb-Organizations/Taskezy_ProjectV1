@@ -4,13 +4,15 @@ import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useApp, Lead, LeadStatus } from "@/context/AppContext";
-import { Sliders, Sparkles, Plus, Check, ChevronDown, Search, X, Minus, Download, RotateCcw } from "lucide-react";
+import { Sliders, Sparkles, Plus, Check, ChevronDown, Search, X, Minus, Download, RotateCcw, Users } from "lucide-react";
 import { STATUS_OPTIONS } from "@/lib/leadStatusMapping";
 import { computeLeadSummaryStats } from "@/lib/leadSummaryStats";
 import { WhatsAppIcon, CallIcon, PlatformLabel } from "@/components/icons/ContactIcons";
 import { LineSkeleton, TableRowsSkeleton } from "@/components/ui/Skeletons";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
+import { eligibleAssignees, isUnassignedLead } from "@/lib/leadAssignment";
 import DateRangePicker, { type DateRangeValue } from "@/components/ui/DateRangePicker";
+import DateRangeSelect from "@/components/ui/DateRangeSelect";
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
 import AddLeadModal from "./AddLeadModal";
 import LeadDetailDrawer from "./LeadDetailDrawer";
@@ -111,6 +113,7 @@ export default function LeadDashboard() {
     properties,
     users,
     followupCalls,
+    reassignLead,
     isDataLoading
   } = useApp();
 
@@ -148,6 +151,9 @@ export default function LeadDashboard() {
   // showing them the same per-agent breakdown here exposes nothing they
   // couldn't already see on the plain Leads tab.
   const canViewLeadsAnalytics = isAdmin || currentUser?.role_type === "Manager";
+  // Bulk select + Assign/Reshuffle (same workflow as Data Calling) — Admin
+  // and Manager only; who they can pick is scoped in lib/leadAssignment.ts.
+  const canBulkAssign = isAdmin || currentUser?.role_type === "Manager";
 
   // Data scoping based on role
   const scopedLeads = leads.filter(l => {
@@ -573,6 +579,68 @@ export default function LeadDashboard() {
   const adminTotalPages = Math.max(1, Math.ceil(adminFilteredLeads.length / adminRowsPerPage));
   const adminCurrentPage = Math.min(adminPage, adminTotalPages);
 
+  // ---- Bulk Assign / Reshuffle (Admin + Manager) ----
+  // "Assign" appears once the selection holds an unassigned lead, "Reshuffle"
+  // once it holds an already-assigned one — same split as Data Calling.
+  const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
+  const toggleLeadSelection = (id: string) => setSelectedLeadIds(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const currentPageLeads = adminFilteredLeads.slice((adminCurrentPage - 1) * adminRowsPerPage, adminCurrentPage * adminRowsPerPage);
+  const allOnPageSelected = currentPageLeads.length > 0 && currentPageLeads.every(l => selectedLeadIds.has(l.id));
+  const toggleSelectAllOnPage = () => setSelectedLeadIds(prev => {
+    const next = new Set(prev);
+    if (allOnPageSelected) currentPageLeads.forEach(l => next.delete(l.id));
+    else currentPageLeads.forEach(l => next.add(l.id));
+    return next;
+  });
+  const selectedUnassignedLeads = scopedLeads.filter(l => selectedLeadIds.has(l.id) && isUnassignedLead(l));
+  const selectedAssignedLeads = scopedLeads.filter(l => selectedLeadIds.has(l.id) && !isUnassignedLead(l));
+
+  const [assignFlowMode, setAssignFlowMode] = useState<"assign" | "reshuffle" | null>(null);
+  const [assignPropertyIds, setAssignPropertyIds] = useState<Set<string>>(new Set());
+  const [assignAssigneeId, setAssignAssigneeId] = useState("");
+  const flowTargetLeads = assignFlowMode === "reshuffle" ? selectedAssignedLeads : selectedUnassignedLeads;
+  const assigneeOptions = eligibleAssignees({
+    users,
+    properties,
+    selectedPropertyIds: assignPropertyIds,
+    caller: currentUser,
+    targetLeads: flowTargetLeads
+  });
+  const canConfirmAssign = assignPropertyIds.size > 0 && !!assignAssigneeId && assigneeOptions.some(u => u.id === assignAssigneeId);
+
+  const openAssignFlow = (mode: "assign" | "reshuffle") => {
+    setAssignPropertyIds(new Set());
+    setAssignAssigneeId("");
+    setAssignFlowMode(mode);
+  };
+  const confirmBulkAssign = () => {
+    const assignee = users.find(u => u.id === assignAssigneeId);
+    if (!canConfirmAssign || !assignFlowMode || !assignee) return;
+    // The backend rejects moving a lead to the agent who already holds it,
+    // so those are skipped rather than sent.
+    const toMove = flowTargetLeads.filter(l => l.assignedAgent?.trim().toLowerCase() !== assignee.name.trim().toLowerCase());
+    toMove.forEach(l => {
+      reassignLead(l.id, assignee.name);
+      if (assignFlowMode === "assign" && l.status === "Unassigned") updateLeadStatus(l.id, "New Lead");
+    });
+    const skipped = flowTargetLeads.length - toMove.length;
+    setSelectedLeadIds(prev => {
+      const next = new Set(prev);
+      flowTargetLeads.forEach(l => next.delete(l.id));
+      return next;
+    });
+    setAssignFlowMode(null);
+    setSuccessMsg(
+      `${assignFlowMode === "reshuffle" ? "Reshuffled" : "Assigned"} ${toMove.length} lead${toMove.length === 1 ? "" : "s"} to ${assignee.name}` +
+      (skipped > 0 ? ` (${skipped} already with ${assignee.name}, skipped)` : "") + "."
+    );
+    setTimeout(() => setSuccessMsg(""), 4000);
+  };
+
   // All rows render continuously in the scroll container (not just the
   // current page's slice) so scrolling moves smoothly across page
   // boundaries instead of stopping dead at the end of each page. Each
@@ -786,13 +854,19 @@ export default function LeadDashboard() {
               <div className="flex flex-wrap justify-between items-center gap-2 px-4 py-2.5 text-[11px] border-b border-slate-200/60">
                 <div className="flex items-center gap-1.5 font-bold text-slate-700">
                   <span className="font-normal text-slate-500">Date Range</span>
-                  <SearchableSelect
-                    variant="pill"
-                    options={adminDateRange === "custom" ? [...DATE_RANGE_OPTIONS, { value: "custom", label: "Custom Range" }] : DATE_RANGE_OPTIONS}
+                  {/* Presets + "Custom" (opens the shared calendar). Shares
+                      state with the date badge below, so both stay in sync. */}
+                  <DateRangeSelect
+                    options={DATE_RANGE_OPTIONS}
                     value={adminDateRange}
-                    onChange={(v) => { setAdminDateRange(v as typeof adminDateRange); setAdminPage(1); }}
-                    searchPlaceholder="Search range..."
-                    panelWidth={144}
+                    customValue="custom"
+                    customRange={adminCustomRange}
+                    onPresetChange={(v) => { setAdminDateRange(v); setAdminPage(1); }}
+                    onCustomApply={(range) => {
+                      setAdminCustomRange(range);
+                      setAdminDateRange("custom");
+                      setAdminPage(1);
+                    }}
                   />
                 </div>
                 {canViewLeadsAnalytics && (
@@ -848,8 +922,29 @@ export default function LeadDashboard() {
 
             {/* Date badge (opens the shared range calendar) + Filter row.
                 Applying a range switches the Date Range select above to
-                "Custom Range"; the × on the badge reverts it to Today. */}
+                Custom (it shows the picked dates); the × on the badge
+                reverts it to Today. */}
             <div className="flex flex-wrap justify-end items-center gap-3">
+              {canBulkAssign && selectedUnassignedLeads.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => openAssignFlow("assign")}
+                  className="flex items-center gap-2 border border-slate-200 bg-white rounded-lg px-3 py-1.5 text-xs text-slate-700 font-bold shadow-sm hover:bg-slate-50 transition-all"
+                >
+                  <Users className="h-4 w-4 text-blue-600" />
+                  Assign ({selectedUnassignedLeads.length})
+                </button>
+              )}
+              {canBulkAssign && selectedAssignedLeads.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => openAssignFlow("reshuffle")}
+                  className="flex items-center gap-2 border border-slate-200 bg-white rounded-lg px-3 py-1.5 text-xs text-slate-700 font-bold shadow-sm hover:bg-slate-50 transition-all"
+                >
+                  <Users className="h-4 w-4 text-blue-600" />
+                  Reshuffle ({selectedAssignedLeads.length})
+                </button>
+              )}
               <DateRangePicker
                 value={adminDateRange === "custom" ? adminCustomRange : null}
                 onChange={(range) => {
@@ -902,6 +997,8 @@ export default function LeadDashboard() {
               <div ref={adminScrollRef} onScroll={handleAdminTableScroll} className="overflow-auto max-h-[70vh]">
                 <table className="w-full text-left border-collapse table-fixed min-w-[1080px]">
                   <colgroup>
+                    {/* Bulk-select checkbox (Admin/Manager) */}
+                    {canBulkAssign && <col className="w-[40px]" />}
                     {/* Pinned: Lead Name, Email, Assigned To */}
                     <col className="w-[150px]" />
                     <col className="w-[170px]" />
@@ -913,6 +1010,17 @@ export default function LeadDashboard() {
                   </colgroup>
                   <thead className="sticky top-0 z-10 bg-white">
                     <tr className="border-b border-slate-200 text-xs font-bold text-slate-800">
+                      {canBulkAssign && (
+                        <th className="pl-4 pr-1 py-2.5">
+                          <input
+                            type="checkbox"
+                            checked={allOnPageSelected}
+                            onChange={toggleSelectAllOnPage}
+                            title="Select all leads on this page"
+                            className="h-3.5 w-3.5 rounded border-slate-300 accent-[#0B1E6E]"
+                          />
+                        </th>
+                      )}
                       <th className="px-4 py-2.5">
                         {adminSearchOpen ? (
                           <div className="flex items-center gap-1">
@@ -999,10 +1107,10 @@ export default function LeadDashboard() {
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-xs">
                     {isDataLoading && adminFilteredLeads.length === 0 ? (
-                      <TableRowsSkeleton rows={8} columns={3 + adminVisibleColumnList.length} />
+                      <TableRowsSkeleton rows={8} columns={(canBulkAssign ? 4 : 3) + adminVisibleColumnList.length} />
                     ) : adminFilteredLeads.length === 0 ? (
                       <tr>
-                        <td colSpan={3 + adminVisibleColumnList.length} className="px-4 py-8 text-center text-slate-400 font-semibold italic">
+                        <td colSpan={(canBulkAssign ? 4 : 3) + adminVisibleColumnList.length} className="px-4 py-8 text-center text-slate-400 font-semibold italic">
                           No leads match the current filters.
                         </td>
                       </tr>
@@ -1011,7 +1119,18 @@ export default function LeadDashboard() {
                         <tr
                           key={l.id}
                           ref={idx % adminRowsPerPage === 0 ? (el) => { adminPageRowRefs.current[Math.floor(idx / adminRowsPerPage)] = el; } : undefined}
-                          className="hover:bg-slate-50/60 transition-colors">
+                          className={`transition-colors ${selectedLeadIds.has(l.id) ? "bg-blue-50/50" : "hover:bg-slate-50/60"}`}>
+                          {canBulkAssign && (
+                            <td className="pl-4 pr-1 py-3 align-top">
+                              <input
+                                type="checkbox"
+                                checked={selectedLeadIds.has(l.id)}
+                                onChange={() => toggleLeadSelection(l.id)}
+                                aria-label={`Select ${l.name}`}
+                                className="h-3.5 w-3.5 rounded border-slate-300 accent-[#0B1E6E]"
+                              />
+                            </td>
+                          )}
                           <td className="px-4 py-3 align-top overflow-hidden">
                             <button
                               onClick={() => setSelectedLead(l)}
@@ -1555,6 +1674,82 @@ export default function LeadDashboard() {
           agentsList={agentsList}
           propertiesList={propertiesList}
         />
+
+        {/* Assign/Reshuffle Leads modal — same as Data Calling: Property must
+            be picked before Assignee unlocks (it scopes who's eligible), and
+            confirm stays disabled until both hold a value. The assignee list
+            never includes the person reassigning, and a Manager only sees
+            their own direct reports (lib/leadAssignment.ts). */}
+        {canBulkAssign && assignFlowMode && createPortal(
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <div className="fixed inset-0 bg-slate-900/40" onClick={() => setAssignFlowMode(null)} />
+            <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md">
+              <div className="px-6 pt-6 pb-4 border-b border-slate-100">
+                <h3 className="text-xl font-extrabold text-slate-900">
+                  {assignFlowMode === "reshuffle" ? "Reshuffle Leads" : "Assign Leads"}
+                </h3>
+              </div>
+              <div className="px-6 py-5 space-y-5">
+                <p className="text-xs text-slate-500">
+                  {assignFlowMode === "reshuffle"
+                    ? `Reshuffling ${flowTargetLeads.length} assigned lead${flowTargetLeads.length === 1 ? "" : "s"}.`
+                    : `Assigning ${flowTargetLeads.length} unassigned lead${flowTargetLeads.length === 1 ? "" : "s"}.`}
+                </p>
+
+                <div className="space-y-1.5">
+                  <label className="block text-sm font-bold text-slate-800">Select Property</label>
+                  <SearchableMultiSelect
+                    variant="field"
+                    selected={Array.from(assignPropertyIds)}
+                    onChange={(ids) => { setAssignPropertyIds(new Set(ids)); setAssignAssigneeId(""); }}
+                    options={properties.map(p => ({ value: p.id, label: p.name }))}
+                    placeholder="Select property"
+                    searchPlaceholder="Search property..."
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="block text-sm font-bold text-slate-800">
+                    {assignFlowMode === "reshuffle" ? "Select Reshuffle Assignee" : "Select Assignee"}
+                  </label>
+                  <SearchableSelect
+                    value={assignAssigneeId}
+                    onChange={setAssignAssigneeId}
+                    options={assigneeOptions.map(u => ({ value: u.id, label: u.name }))}
+                    disabled={assignPropertyIds.size === 0}
+                    placeholder="Select Member"
+                    searchPlaceholder="Search assignee..."
+                  />
+                  {assignPropertyIds.size > 0 && assigneeOptions.length === 0 && (
+                    <p className="text-[11px] text-slate-400 italic">
+                      {isAdmin ? "No eligible members for the selected properties." : "None of your direct reports are eligible for the selected properties."}
+                    </p>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setAssignFlowMode(null)}
+                  className="px-5 py-2 rounded-xl border border-slate-300 font-bold text-slate-700 text-sm hover:bg-slate-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={!canConfirmAssign}
+                  onClick={confirmBulkAssign}
+                  className={`px-5 py-2 rounded-xl font-bold text-sm text-white transition-colors ${
+                    canConfirmAssign ? "bg-[#0B1E6E] hover:bg-[#081650]" : "bg-slate-300 cursor-not-allowed"
+                  }`}
+                >
+                  {assignFlowMode === "reshuffle" ? "Reshuffle" : "Assign"}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
 
         <LeadDetailDrawer
           lead={selectedLead}

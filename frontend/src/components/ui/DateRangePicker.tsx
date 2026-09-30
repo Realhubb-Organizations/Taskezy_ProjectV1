@@ -236,23 +236,88 @@ export default function DateRangePicker({
   heading?: string;
   className?: string;
 }) {
-  const panel = usePanel();
-  const [start, setStart] = useState("");
-  const [end, setEnd] = useState("");
+  const [open, setOpen] = useState(false);
+  const anchorRef = useRef<HTMLButtonElement>(null);
+
+  return (
+    <>
+      <span className={`inline-flex items-center ${className ?? ""}`}>
+        <button ref={anchorRef} type="button" onClick={() => setOpen(o => !o)} className={triggerClass}>
+          <Calendar className="h-3.5 w-3.5 text-blue-600" />
+          <span className="tabular-nums">
+            {value ? `${formatDisplayDate(value.start)} To ${formatDisplayDate(value.end)}` : emptyLabel}
+          </span>
+          {clearable && value && (
+            <span
+              role="button"
+              tabIndex={0}
+              aria-label="Clear date range"
+              onClick={(e) => { e.stopPropagation(); onChange(null); setOpen(false); }}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); onChange(null); } }}
+              className="-mr-1 p-0.5 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+            >
+              <X className="h-3 w-3" />
+            </span>
+          )}
+        </button>
+      </span>
+      {open && (
+        <RangeCalendarPanel
+          anchorRef={anchorRef}
+          initial={value}
+          maxDate={maxDate}
+          minDate={minDate}
+          onApply={(v) => { onChange(v); setOpen(false); }}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </>
+  );
+}
+
+/**
+ * The range calendar on its own, opened under any element (`anchorRef`) —
+ * used by DateRangePicker's button and by DateRangeSelect's "Custom" option.
+ * Mount it to open; it calls onApply with the picked range or onClose.
+ */
+export function RangeCalendarPanel({
+  anchorRef,
+  initial,
+  maxDate = todayIso(),
+  minDate,
+  onApply,
+  onClose
+}: {
+  anchorRef: React.RefObject<HTMLElement>;
+  initial: DateRangeValue | null;
+  maxDate?: string;
+  minDate?: string;
+  onApply: (v: DateRangeValue) => void;
+  onClose: () => void;
+}) {
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  useCloseOnScroll(!!pos, onClose, panelRef);
+
+  const [start, setStart] = useState(initial?.start || "");
+  const [end, setEnd] = useState(initial?.end || "");
   const [picking, setPicking] = useState<"start" | "end">("start");
   const [hover, setHover] = useState<string | null>(null);
-  const [month, setMonth] = useState(() => new Date());
+  const [month, setMonth] = useState(() => {
+    const anchor = initial?.end ? fromIso(initial.end) : new Date();
+    return new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+  });
 
-  const openPanel = () => {
-    if (panel.pos) return panel.close();
-    setStart(value?.start || "");
-    setEnd(value?.end || "");
-    setPicking("start");
-    setHover(null);
-    const anchor = value?.end ? fromIso(value.end) : new Date();
-    setMonth(new Date(anchor.getFullYear(), anchor.getMonth(), 1));
-    panel.open();
-  };
+  // Place under the anchor, flipping above when there's no room below.
+  useLayoutEffect(() => {
+    const rect = anchorRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - PANEL_WIDTH - 8));
+    const h = panelRef.current?.offsetHeight ?? 0;
+    const fitsBelow = rect.bottom + 6 + h <= window.innerHeight - 8;
+    const top = !pos || fitsBelow || rect.top - 6 - h < 8 ? rect.bottom + 6 : rect.top - 6 - h;
+    if (!pos || pos.top !== top || pos.left !== left) setPos({ top, left });
+  }, [anchorRef, pos]);
 
   const isDisabled = (iso: string) => (!!maxDate && iso > maxDate) || (!!minDate && iso < minDate);
 
@@ -272,38 +337,16 @@ export default function DateRangePicker({
   // While choosing the end, preview the range up to the hovered day.
   const previewEnd = picking === "end" && start && !end && hover && hover >= start ? hover : end;
   const canApply = !!start && !!end && end >= start;
-  const apply = () => { if (!canApply) return; onChange({ start, end }); panel.close(); };
+  const apply = () => { if (canApply) onApply({ start, end }); };
 
-  return (
-    <>
-      <span className={`inline-flex items-center ${className ?? ""}`}>
-        <button ref={panel.triggerRef} type="button" onClick={openPanel} className={triggerClass}>
-          <Calendar className="h-3.5 w-3.5 text-blue-600" />
-          <span className="tabular-nums">
-            {value ? `${formatDisplayDate(value.start)} To ${formatDisplayDate(value.end)}` : emptyLabel}
-          </span>
-          {clearable && value && (
-            <span
-              role="button"
-              tabIndex={0}
-              aria-label="Clear date range"
-              onClick={(e) => { e.stopPropagation(); onChange(null); panel.close(); }}
-              onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); onChange(null); } }}
-              className="-mr-1 p-0.5 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100"
-            >
-              <X className="h-3 w-3" />
-            </span>
-          )}
-        </button>
-      </span>
-      {panel.pos && createPortal(
+  return createPortal(
         <>
-          <div className="fixed inset-0 z-[200]" onClick={panel.close} />
+          <div className="fixed inset-0 z-[200]" onClick={onClose} />
           <div
-            ref={panel.panelRef}
-            onKeyDown={(e) => { if (e.key === "Escape") panel.close(); }}
+            ref={panelRef}
+            onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}
             className="fixed z-[210] max-w-[calc(100vw-1rem)] bg-white rounded-2xl shadow-2xl border border-slate-100"
-            style={{ top: panel.pos.top, left: panel.pos.left, width: PANEL_WIDTH }}
+            style={{ top: pos?.top ?? -9999, left: pos?.left ?? 0, width: PANEL_WIDTH }}
           >
             <div className="flex justify-center pt-4">
               <div className="flex items-center gap-2 rounded-full bg-white shadow-md border border-slate-100 px-4 py-1.5">
@@ -343,12 +386,10 @@ export default function DateRangePicker({
               onPick={pick}
               onHover={setHover}
             />
-            <PanelFooter onClose={panel.close} onApply={apply} canApply={canApply} />
+            <PanelFooter onClose={onClose} onApply={apply} canApply={canApply} />
           </div>
         </>,
         document.body
-      )}
-    </>
   );
 }
 
