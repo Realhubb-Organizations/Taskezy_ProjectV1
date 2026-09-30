@@ -29,6 +29,7 @@ import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tool
 import { LineSkeleton, TableRowsSkeleton, CardListSkeleton } from "@/components/ui/Skeletons";
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
 import DateRangePicker from "@/components/ui/DateRangePicker";
+import DateRangeSelect from "@/components/ui/DateRangeSelect";
 
 import {
   CampaignItem,
@@ -180,9 +181,9 @@ export default function AdminCampaignsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
-  // Summary Card Filters — "Custom" is set behind the scenes by the
-  // toolbar's calendar picker (below), not offered as its own menu option
-  // here, same split as the admin leads page.
+  // Summary Card Filters — "Custom" is set either by the Date Range
+  // dropdown's own "Custom" option (opens the calendar under it) or by the
+  // toolbar's calendar picker (below); both share appliedCustomRange.
   const [dateRange, setDateRange] = useState<"Today" | "Yesterday" | "This Week" | "This Month" | "All Time" | "Custom">("Today");
 
   // Stat card drill-down — clicking a summary card shows the underlying
@@ -1003,12 +1004,13 @@ export default function AdminCampaignsPage() {
             <div className="flex items-center px-4 py-2.5 text-[11px] border-b border-slate-200/60">
               <div className="flex items-center gap-1.5 font-bold text-slate-700">
                 <span className="font-normal text-slate-500">Date Range</span>
-                <SearchableSelect
-                  variant="pill"
-                  options={["Today", "Yesterday", "This Week", "This Month", "All Time"]}
+                <DateRangeSelect
+                  options={(["Today", "Yesterday", "This Week", "This Month", "All Time"] as const).map(v => ({ value: v, label: v }))}
                   value={dateRange}
-                  onChange={(v) => { setDateRange(v as typeof dateRange); setAppliedCustomRange(null); setCurrentPage(1); }}
-                  panelWidth={140}
+                  customValue="Custom"
+                  customRange={appliedCustomRange}
+                  onPresetChange={(v) => { setDateRange(v); setAppliedCustomRange(null); setCurrentPage(1); }}
+                  onCustomApply={handleDateRangeChange}
                 />
               </div>
             </div>

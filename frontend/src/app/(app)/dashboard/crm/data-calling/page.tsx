@@ -10,7 +10,8 @@ import LeadDetailDrawer from "@/components/crm/LeadDetailDrawer";
 import { LineSkeleton, TableRowsSkeleton } from "@/components/ui/Skeletons";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
-import DateRangePicker, { DatePicker, DateRangeValue, formatDisplayDate, todayIso } from "@/components/ui/DateRangePicker";
+import DateRangePicker, { DatePicker, DateRangeValue, formatDisplayDate, todayIso, toIsoDate } from "@/components/ui/DateRangePicker";
+import DateRangeSelect from "@/components/ui/DateRangeSelect";
 
 // Data Calling's whole status model is deliberately just these three — a
 // cold-outreach triage pipeline, not the full CRM pipeline: a fresh
@@ -180,24 +181,38 @@ export default function DataCallingPage() {
 
   // Summary card date range — every one of the 5 cards below respects it
   // (see categoryLeadsInRange), same as the CRM Dashboard/Campaigns pages.
-  const [dateRange, setDateRange] = useState<"Today" | "Yesterday" | "This Week" | "This Month" | "All Time">("Today");
+  // "Custom" = summaryCustomRange (picked from the dropdown's own calendar).
+  const [dateRange, setDateRange] = useState<"Today" | "Yesterday" | "This Week" | "This Month" | "All Time" | "Custom">("Today");
+  const [summaryCustomRange, setSummaryCustomRange] = useState<DateRangeValue | null>(null);
 
   const today = new Date();
 
-  const mapDateRangeToKey = (dr: typeof dateRange): "today" | "yesterday" | "week" | "month" | "all" => {
+  const mapDateRangeToKey = (dr: typeof dateRange): "today" | "yesterday" | "week" | "month" | "all" | "custom" => {
     switch (dr) {
       case "Today": return "today";
       case "Yesterday": return "yesterday";
       case "This Week": return "week";
       case "This Month": return "month";
+      case "Custom": return "custom";
       default: return "all";
     }
   };
-  const dateInRange = (dateStr: string | undefined, range: "today" | "yesterday" | "week" | "month" | "all", refNow: Date): boolean => {
+  const dateInRange = (
+    dateStr: string | undefined,
+    range: "today" | "yesterday" | "week" | "month" | "all" | "custom",
+    refNow: Date,
+    customRange: DateRangeValue | null = null
+  ): boolean => {
     if (!dateStr) return false;
     const d = new Date(dateStr);
     if (isNaN(d.getTime())) return false;
     if (range === "all") return true;
+    // Custom: inclusive start..end, compared on the lead's local calendar day.
+    if (range === "custom") {
+      if (!customRange) return true;
+      const day = toIsoDate(d);
+      return day >= customRange.start && day <= customRange.end;
+    }
     const startOfToday = new Date(refNow.getFullYear(), refNow.getMonth(), refNow.getDate());
     if (range === "today") return d.toDateString() === refNow.toDateString();
     if (range === "yesterday") {
@@ -212,7 +227,7 @@ export default function DataCallingPage() {
     }
     return d.getMonth() === refNow.getMonth() && d.getFullYear() === refNow.getFullYear();
   };
-  const leadInSelectedRange = (l: Lead) => dateInRange(l.createdAtStr, mapDateRangeToKey(dateRange), today);
+  const leadInSelectedRange = (l: Lead) => dateInRange(l.createdAtStr, mapDateRangeToKey(dateRange), today, summaryCustomRange);
 
   // Custom date-range calendar pill (toolbar) — the shared CRM
   // DateRangePicker. Independent of the summary-card preset above; null =
@@ -312,7 +327,7 @@ export default function DataCallingPage() {
       out[key] = list.filter(leadInSelectedRange);
     });
     return out;
-  }, [categoryLeads, dateRange]);
+  }, [categoryLeads, dateRange, summaryCustomRange]);
 
   // Summary metrics — real, no hardcoded fallbacks.
   const summaryMetrics = useMemo(() => ({
@@ -780,13 +795,13 @@ export default function DataCallingPage() {
         <div className="flex items-center px-4 py-2.5 text-[11px] border-b border-slate-200/60">
           <div className="flex items-center gap-1.5 font-bold text-slate-700">
             <span className="font-normal text-slate-500">Date Range</span>
-            <SearchableSelect
-              variant="pill"
+            <DateRangeSelect
               value={dateRange}
-              onChange={(v) => setDateRange(v as typeof dateRange)}
-              options={["Today", "Yesterday", "This Week", "This Month", "All Time"]}
-              searchPlaceholder="Search range..."
-              panelWidth={140}
+              customValue="Custom"
+              customRange={summaryCustomRange}
+              onPresetChange={(v) => { setDateRange(v); setSummaryCustomRange(null); }}
+              onCustomApply={(range) => { setSummaryCustomRange(range); setDateRange("Custom"); }}
+              options={(["Today", "Yesterday", "This Week", "This Month", "All Time"] as const).map(v => ({ value: v, label: v }))}
             />
           </div>
         </div>
