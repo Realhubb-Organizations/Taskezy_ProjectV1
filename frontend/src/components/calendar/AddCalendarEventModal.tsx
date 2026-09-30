@@ -3,6 +3,8 @@
 import React, { useState } from "react";
 import { X } from "lucide-react";
 import { CalendarEventType } from "@/context/AppContext";
+import { SearchableSelect } from "@/components/ui/SearchableDropdown";
+import { DatePicker } from "@/components/ui/DateRangePicker";
 
 interface TypeOption {
   value: CalendarEventType;
@@ -72,15 +74,12 @@ export default function AddCalendarEventModal({
           {typeOptions.length > 1 && (
             <div>
               <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Type</label>
-              <select
+              <SearchableSelect
+                options={typeOptions}
                 value={type}
-                onChange={(e) => setType(e.target.value as CalendarEventType)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none"
-              >
-                {typeOptions.map(o => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
-                ))}
-              </select>
+                onChange={(v) => setType(v as CalendarEventType)}
+                searchPlaceholder="Search types..."
+              />
             </div>
           )}
 
@@ -99,13 +98,7 @@ export default function AddCalendarEventModal({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Date</label>
-              <input
-                type="date"
-                required
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none"
-              />
+              <DatePicker value={date} onChange={setDate} />
             </div>
             <div>
               <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Time (optional)</label>

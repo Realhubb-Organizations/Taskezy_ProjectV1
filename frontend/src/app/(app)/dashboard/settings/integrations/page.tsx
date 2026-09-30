@@ -14,6 +14,7 @@ import {
 } from "@/lib/apiClient";
 import { ChevronRight, CheckCircle, AlertTriangle, Info, Search, HelpCircle, ArrowRight, Users, TrendingUp, LayoutGrid, Calendar, RefreshCw, Clock, Zap, ExternalLink, Mail, Hash, IndianRupee, ShieldCheck, Edit } from "lucide-react";
 import { LineSkeleton } from "@/components/ui/Skeletons";
+import TablePagination, { usePagination } from "@/components/ui/TablePagination";
 
 type IntegrationKey = "meta" | "google";
 
@@ -171,6 +172,7 @@ function IntegrationDetailContent() {
 }
 
 const PAGE_TABLE_SIZE = 5;
+const PAGE_TABLE_SIZE_OPTIONS = [5, 10, 25, 50];
 
 function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
   const key: IntegrationKey = keyParam === "google" ? "google" : "meta";
@@ -186,6 +188,7 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
   const [metaBanner, setMetaBanner] = useState<{ kind: "success" | "error"; text: string } | null>(null);
   const [pageSearch, setPageSearch] = useState("");
   const [pageTablePage, setPageTablePage] = useState(1);
+  const [pageTableRowsPerPage, setPageTableRowsPerPage] = useState(PAGE_TABLE_SIZE);
 
   const loadMetaConnections = async () => {
     if (activeRole !== "ADMIN") {
@@ -233,9 +236,11 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
   const filteredMetaConnections = activeMetaConnections.filter(c =>
     !pageSearch.trim() || c.page_name.toLowerCase().includes(pageSearch.trim().toLowerCase())
   );
-  const pageTableTotalPages = Math.max(1, Math.ceil(filteredMetaConnections.length / PAGE_TABLE_SIZE));
-  const pagedMetaConnections = filteredMetaConnections.slice((pageTablePage - 1) * PAGE_TABLE_SIZE, pageTablePage * PAGE_TABLE_SIZE);
+  const pageTableTotalPages = Math.max(1, Math.ceil(filteredMetaConnections.length / pageTableRowsPerPage));
+  const clampedPageTablePage = Math.min(pageTablePage, pageTableTotalPages);
+  const pagedMetaConnections = filteredMetaConnections.slice((clampedPageTablePage - 1) * pageTableRowsPerPage, clampedPageTablePage * pageTableRowsPerPage);
   useEffect(() => { setPageTablePage(1); }, [pageSearch]);
+  const connectionSettingsPagination = usePagination(activeMetaConnections, 10);
 
   // Real lead count per connected Page — matched by the same metaPageName
   // every ingested lead is stamped with (see meta.lead-ingest.ts), never
@@ -314,6 +319,7 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
   const filteredGoogleAccounts = activeGoogleAccounts.filter(a =>
     !pageSearch.trim() || a.name.toLowerCase().includes(pageSearch.trim().toLowerCase())
   );
+  const googleAccountsPagination = usePagination(filteredGoogleAccounts, PAGE_TABLE_SIZE, pageSearch);
 
   // Real synced spend/leads per account — from the same ad_spend_records the
   // Reports/Campaigns pages already read, never invented.
@@ -408,7 +414,7 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
             ) : filteredGoogleAccounts.length === 0 ? (
               <tr><td colSpan={5} className="px-5 py-8 text-center text-slate-400 italic">No connected accounts{pageSearch ? " match your search" : " yet"}.</td></tr>
             ) : (
-              filteredGoogleAccounts.map(a => {
+              googleAccountsPagination.pageRows.map(a => {
                 const { spend } = spendForAccount(a.name);
                 return (
                   <tr key={a.id}>
@@ -426,23 +432,22 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
           </tbody>
         </table>
       </div>
-      {key === "meta" && filteredMetaConnections.length > PAGE_TABLE_SIZE && (
-        <div className="flex items-center justify-between px-5 py-3 border-t border-slate-100">
-          <span className="text-[11px] text-slate-400 font-semibold">
-            {filteredMetaConnections.length} Page{filteredMetaConnections.length === 1 ? "" : "s"} total
-          </span>
-          <div className="flex items-center gap-1">
-            {Array.from({ length: pageTableTotalPages }, (_, i) => i + 1).map(p => (
-              <button
-                key={p}
-                onClick={() => setPageTablePage(p)}
-                className={`h-6 w-6 rounded-lg text-[11px] font-bold ${p === pageTablePage ? "bg-brand-600 text-white" : "text-slate-500 hover:bg-slate-100"}`}
-              >
-                {p}
-              </button>
-            ))}
-          </div>
-        </div>
+      {key === "meta" ? (
+        filteredMetaConnections.length > 0 && (
+          <TablePagination
+            totalRows={filteredMetaConnections.length}
+            page={clampedPageTablePage}
+            rowsPerPage={pageTableRowsPerPage}
+            onPageChange={setPageTablePage}
+            onRowsPerPageChange={setPageTableRowsPerPage}
+            rowsPerPageOptions={PAGE_TABLE_SIZE_OPTIONS}
+            rowLabel="Page"
+          />
+        )
+      ) : (
+        filteredGoogleAccounts.length > 0 && (
+          <TablePagination {...googleAccountsPagination.paginationProps} rowsPerPageOptions={PAGE_TABLE_SIZE_OPTIONS} rowLabel="Account" />
+        )
       )}
     </div>
   );
@@ -786,13 +791,14 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
                 <>
                   <p className="text-[11px] text-slate-500">Disconnecting stops new leads from every connected Page below from arriving until you reconnect.</p>
                   <div className="space-y-1.5">
-                    {activeMetaConnections.map(c => (
+                    {connectionSettingsPagination.pageRows.map(c => (
                       <div key={c.id} className="flex items-center justify-between text-xs bg-slate-50 border border-slate-150 rounded-lg px-3 py-2">
                         <span className="font-bold text-slate-700">{c.page_name}</span>
                         <button onClick={() => handleDisconnectMeta(c.id, c.page_name)} className="text-red-600 hover:text-red-700 font-bold">Disconnect</button>
                       </div>
                     ))}
                   </div>
+                  <TablePagination {...connectionSettingsPagination.paginationProps} rowLabel="Page" className="!px-0 !pb-0" />
                 </>
               ) : (
                 <p className="text-[11px] text-slate-400 italic">Nothing to configure until a Page is connected.</p>

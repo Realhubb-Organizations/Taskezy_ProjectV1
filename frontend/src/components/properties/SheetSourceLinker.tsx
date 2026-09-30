@@ -8,6 +8,7 @@ import {
   apiSetPropertySheetSources,
   ApiRequestError
 } from "@/lib/apiClient";
+import { SearchableSelect } from "@/components/ui/SearchableDropdown";
 
 interface SheetSourceLinkerProps {
   propertyId: string;
@@ -141,19 +142,15 @@ export default function SheetSourceLinker({ propertyId, isAdmin }: SheetSourceLi
         <div className="space-y-2">
           {/* Visible dropdown of sheet source names actually seen on an incoming lead */}
           <div className="flex gap-2">
-            <select
+            <SearchableSelect
+              options={availableSuggestions}
               value={selected}
-              onChange={(e) => setSelected(e.target.value)}
+              onChange={setSelected}
               disabled={saving}
-              className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none focus:border-brand-500 disabled:opacity-60"
-            >
-              <option value="">
-                {availableSuggestions.length === 0 ? "No unlinked sheet sources yet" : "Select a sheet source…"}
-              </option>
-              {availableSuggestions.map(s => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
+              placeholder={availableSuggestions.length === 0 ? "No unlinked sheet sources yet" : "Select a sheet source…"}
+              searchPlaceholder="Search sheet sources..."
+              panelWidth={260}
+            />
             <button
               type="button"
               onClick={handleAddSelected}

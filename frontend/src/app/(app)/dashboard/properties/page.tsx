@@ -4,6 +4,7 @@ import React, { useMemo, useState } from "react";
 import { useApp, Property, PropertyTeamAssignmentMode, LeadAssignmentMode, PropertyTeamMember } from "@/context/AppContext";
 import {
   Search,
+  ArrowUp,
   Building,
   Plus,
   Eye,
@@ -12,20 +13,25 @@ import {
   Copy,
   Trash2,
   Download,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
   X,
   MapPin,
   Users,
   Info
 } from "lucide-react";
-import AddPropertyModal from "@/components/properties/AddPropertyModal";
+import AddPropertyModal, {
+  splitPropertyTypes,
+  joinPropertyTypes,
+  propertyTypeOptions,
+  PROPERTY_STATUSES
+} from "@/components/properties/AddPropertyModal";
 import MetaCampaignLinker from "@/components/properties/MetaCampaignLinker";
 import GoogleCampaignLinker from "@/components/properties/GoogleCampaignLinker";
 import SheetSourceLinker from "@/components/properties/SheetSourceLinker";
 import { MetaIcon, GoogleIcon, platformFromText } from "@/components/icons/ContactIcons";
-import { LineSkeleton, TableRowsSkeleton } from "@/components/ui/Skeletons";
+import { TableRowsSkeleton } from "@/components/ui/Skeletons";
+import TablePagination from "@/components/ui/TablePagination";
+import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
+import { DatePicker } from "@/components/ui/DateRangePicker";
 
 const ROWS_PER_PAGE_OPTIONS = [25, 50, 100];
 
@@ -48,8 +54,7 @@ export default function PropertiesPage() {
 
   // Search / filter / sort / pagination
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedType, setSelectedType] = useState("All Types");
-  const [isTypeMenuOpen, setIsTypeMenuOpen] = useState(false);
+  const [selectedTypes, setSelectedTypes] = useState<string[]>([]);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [rowsPerPage, setRowsPerPage] = useState(100);
   const [currentPage, setCurrentPage] = useState(1);
@@ -89,7 +94,7 @@ export default function PropertiesPage() {
     setEditSelectedMemberIds(prev => (prev.includes(userId) ? prev.filter(id => id !== userId) : [...prev, userId]));
   };
 
-  const types = ["All Types", ...Array.from(new Set(properties.map(p => p.type)))];
+  const types = Array.from(new Set(properties.flatMap(p => splitPropertyTypes(p.type || ""))));
 
   const teamLabelForProperty = (p: Property): string => {
     if (p.teamAssignmentMode === "CUSTOM_MEMBERS" && p.assignedTeam && p.assignedTeam.length > 0) {
@@ -179,7 +184,8 @@ export default function PropertiesPage() {
         p.name.toLowerCase().includes(q) ||
         p.developer.toLowerCase().includes(q) ||
         p.location.toLowerCase().includes(q);
-      const matchesType = selectedType === "All Types" || p.type === selectedType;
+      // A multi-type property ("Apartment, Villa") matches if ANY of its types is picked.
+      const matchesType = selectedTypes.length === 0 || splitPropertyTypes(p.type || "").some(t => selectedTypes.includes(t));
       return matchesSearch && matchesType;
     });
     return filtered.sort((a, b) => {
@@ -187,7 +193,7 @@ export default function PropertiesPage() {
       const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
       return sortDir === "asc" ? aTime - bTime : bTime - aTime;
     });
-  }, [properties, searchQuery, selectedType, sortDir]);
+  }, [properties, searchQuery, selectedTypes, sortDir]);
 
   const totalRows = filteredProperties.length;
   const totalPages = Math.max(1, Math.ceil(totalRows / rowsPerPage));
@@ -217,6 +223,12 @@ export default function PropertiesPage() {
   const handleSavePropertyEdit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedProperty) return;
+
+    // Property type is required server-side; the multi-select can be emptied.
+    if (!editType.trim()) {
+      alert("Select at least one property type.");
+      return;
+    }
 
     if (editTeamAssignmentMode === "CUSTOM_MEMBERS" && editSelectedMemberIds.length === 0) {
       alert("Select at least one team member, or switch to All Members.");
@@ -273,7 +285,7 @@ export default function PropertiesPage() {
     <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold text-slate-800">Properties</h2>
+        <h2 className="text-lg font-bold text-slate-800"></h2>
         {isAdmin && (
           <button
             onClick={() => { setDuplicateSource(null); setIsAddOpen(true); }}
@@ -313,32 +325,15 @@ export default function PropertiesPage() {
                 <th className="p-3.5">Properties</th>
                 <th className="p-3.5">Property Location</th>
                 <th className="p-3.5">
-                  <div className="relative inline-block">
-                    <button
-                      onClick={() => setIsTypeMenuOpen(v => !v)}
-                      className="flex items-center gap-1 hover:text-slate-700"
-                    >
-                      Property Type <ChevronDown className="h-3 w-3" />
-                    </button>
-                    {isTypeMenuOpen && (
-                      <>
-                        <div className="fixed inset-0 z-10" onClick={() => setIsTypeMenuOpen(false)} />
-                        <div className="absolute left-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-20 py-1 w-40 normal-case">
-                          {types.map(t => (
-                            <button
-                              key={t}
-                              onClick={() => { setSelectedType(t); setIsTypeMenuOpen(false); setCurrentPage(1); }}
-                              className={`w-full text-left px-3 py-1.5 text-[11px] font-semibold hover:bg-slate-50 ${
-                                selectedType === t ? "text-brand-700 bg-brand-50/60" : "text-slate-600"
-                              }`}
-                            >
-                              {t}
-                            </button>
-                          ))}
-                        </div>
-                      </>
-                    )}
-                  </div>
+                  <SearchableMultiSelect
+                    variant="inline"
+                    label="Property Type"
+                    options={types}
+                    selected={selectedTypes}
+                    onChange={(next) => { setSelectedTypes(next); setCurrentPage(1); }}
+                    searchPlaceholder="Search types..."
+                    className="uppercase"
+                  />
                 </th>
                 <th className="p-3.5">Price</th>
                 <th className="p-3.5">
@@ -346,11 +341,11 @@ export default function PropertiesPage() {
                     onClick={() => setSortDir(d => (d === "asc" ? "desc" : "asc"))}
                     className="flex items-center gap-1 hover:text-slate-700"
                   >
-                    Date <ChevronDown className={`h-3 w-3 transition-transform ${sortDir === "asc" ? "rotate-180" : ""}`} />
+                    Date <ArrowUp className={`h-3 w-3 transition-transform duration-300 ease-out ${sortDir === "asc" ? "rotate-180" : ""}`} />
                   </button>
                 </th>
                 <th className="p-3.5">Assigned To</th>
-                <th className="p-3.5">Source</th>
+                <th className="p-3.5">Campaigns</th>
                 <th className="p-3.5">Actions</th>
               </tr>
             </thead>
@@ -425,44 +420,15 @@ export default function PropertiesPage() {
         </div>
 
         {/* Pagination footer */}
-        <div className="flex items-center justify-between px-4 py-3 border-t border-slate-200 text-[11px] text-slate-500">
-          <span className="font-semibold">{isDataLoading ? <LineSkeleton width={50} height={11} /> : `${totalRows} Rows`}</span>
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-1.5">
-              <span>Rows per page:</span>
-              <select
-                value={rowsPerPage}
-                onChange={(e) => { setRowsPerPage(Number(e.target.value)); setCurrentPage(1); }}
-                className="bg-transparent border border-slate-200 rounded-md px-1.5 py-0.5 text-[11px] font-semibold focus:outline-none"
-              >
-                {ROWS_PER_PAGE_OPTIONS.map(n => <option key={n} value={n}>{n}</option>)}
-              </select>
-            </div>
-            <span>
-              {isDataLoading ? (
-                <LineSkeleton width={70} height={11} />
-              ) : (
-                <>{totalRows === 0 ? "0-0" : `${pageStart + 1}-${Math.min(pageStart + rowsPerPage, totalRows)}`} of {totalRows}</>
-              )}
-            </span>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                disabled={clampedPage <= 1}
-                className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
-              >
-                <ChevronLeft className="h-3.5 w-3.5" />
-              </button>
-              <button
-                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                disabled={clampedPage >= totalPages}
-                className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
-              >
-                <ChevronRight className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          </div>
-        </div>
+        <TablePagination
+          totalRows={totalRows}
+          page={clampedPage}
+          rowsPerPage={rowsPerPage}
+          onPageChange={setCurrentPage}
+          onRowsPerPageChange={setRowsPerPage}
+          rowsPerPageOptions={ROWS_PER_PAGE_OPTIONS}
+          rowLabel="Property"
+        />
       </div>
 
       {/* Detail / Edit Drawer */}
@@ -512,30 +478,31 @@ export default function PropertiesPage() {
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Property Type</label>
-                      <select value={editType} onChange={(e) => setEditType(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none">
-                        <option>Apartment</option>
-                        <option>Villa</option>
-                        <option>Plot</option>
-                        <option>Commercial</option>
-                        <option>Residential</option>
-                        <option>Mixed-Use</option>
-                      </select>
+                      <SearchableMultiSelect
+                        variant="field"
+                        options={propertyTypeOptions(editType)}
+                        selected={splitPropertyTypes(editType)}
+                        onChange={(next) => setEditType(joinPropertyTypes(next))}
+                        placeholder="Select property type(s)"
+                        searchPlaceholder="Search property types..."
+                      />
                     </div>
                     <div>
                       <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Property Status</label>
-                      <select value={editStatus} onChange={(e) => setEditStatus(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none">
-                        <option value="">Select status</option>
-                        <option>Pre-Launch</option>
-                        <option>Under Construction</option>
-                        <option>Ready to Move</option>
-                        <option>Sold Out</option>
-                      </select>
+                      <SearchableSelect
+                        options={PROPERTY_STATUSES}
+                        value={editStatus}
+                        onChange={setEditStatus}
+                        placeholder="Select status"
+                        searchPlaceholder="Search status..."
+                        clearable
+                      />
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Possession Date</label>
-                      <input type="date" value={editPossessionDate} onChange={(e) => setEditPossessionDate(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none" />
+                      <DatePicker value={editPossessionDate} onChange={setEditPossessionDate} />
                     </div>
                     <div>
                       <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Quoted Price</label>

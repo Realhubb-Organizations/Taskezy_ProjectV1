@@ -1,13 +1,16 @@
 "use client";
 
-import React, { useState, useRef, useMemo, useEffect } from "react";
+import React, { useState, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useApp, Lead } from "@/context/AppContext";
-import { ChevronDown, ChevronRight, Calendar, Search, Sliders, Minus, X, Copy, Users, Plus, Check } from "lucide-react";
+import { ChevronRight, Search, Sliders, Minus, X, Copy, Users, Plus, Check } from "lucide-react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine } from "recharts";
 import UploadLeadsModal from "@/components/crm/UploadLeadsModal";
 import LeadDetailDrawer from "@/components/crm/LeadDetailDrawer";
 import { LineSkeleton, TableRowsSkeleton } from "@/components/ui/Skeletons";
+import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
+import TablePagination, { usePagination } from "@/components/ui/TablePagination";
+import DateRangePicker, { DatePicker, DateRangeValue, formatDisplayDate, todayIso } from "@/components/ui/DateRangePicker";
 
 // Data Calling's whole status model is deliberately just these three — a
 // cold-outreach triage pipeline, not the full CRM pipeline: a fresh
@@ -178,12 +181,8 @@ export default function DataCallingPage() {
   // Summary card date range — every one of the 5 cards below respects it
   // (see categoryLeadsInRange), same as the CRM Dashboard/Campaigns pages.
   const [dateRange, setDateRange] = useState<"Today" | "Yesterday" | "This Week" | "This Month" | "All Time">("Today");
-  const [summaryDateMenuOpen, setSummaryDateMenuOpen] = useState(false);
-  const [summaryDateMenuPos, setSummaryDateMenuPos] = useState<{ top: number; left: number } | null>(null);
-  const summaryDateBtnRef = useRef<HTMLButtonElement>(null);
 
   const today = new Date();
-  const todayStr = today.toISOString().slice(0, 10);
 
   const mapDateRangeToKey = (dr: typeof dateRange): "today" | "yesterday" | "week" | "month" | "all" => {
     switch (dr) {
@@ -215,27 +214,17 @@ export default function DataCallingPage() {
   };
   const leadInSelectedRange = (l: Lead) => dateInRange(l.createdAtStr, mapDateRangeToKey(dateRange), today);
 
-  // Custom date-range calendar pill (toolbar) — mirrors the Campaigns page's
-  // picker: Start/End inputs, Reset/Apply, guards end < start.
-  const [calendarPickerOpen, setCalendarPickerOpen] = useState(false);
-  const [calendarMenuPos, setCalendarMenuPos] = useState<{ top: number; left: number } | null>(null);
-  const calendarBtnRef = useRef<HTMLButtonElement>(null);
-  const [customRangeStartDraft, setCustomRangeStartDraft] = useState("");
-  const [customRangeEndDraft, setCustomRangeEndDraft] = useState("");
-  const [appliedCustomRange, setAppliedCustomRange] = useState<{ start: string; end: string } | null>(null);
-  const dateRangePickerLabel = appliedCustomRange ? `${appliedCustomRange.start} to ${appliedCustomRange.end}` : todayStr;
+  // Custom date-range calendar pill (toolbar) — the shared CRM
+  // DateRangePicker. Independent of the summary-card preset above; null =
+  // no custom range (every lead).
+  const [appliedCustomRange, setAppliedCustomRange] = useState<DateRangeValue | null>(null);
 
   // Data Calling Analytics tab — its own Sub-Source scope, Filter drawer
   // (Source Performance table's extra columns), and chart controls. Shares
   // the page's existing calendar (appliedCustomRange, above) rather than
   // keeping a second date filter, so both tabs stay in sync on "when".
-  const [analyticsSubSource, setAnalyticsSubSource] = useState<string>("All Sources");
-  const [subSourceMenuOpen, setSubSourceMenuOpen] = useState(false);
-  const [subSourceMenuPos, setSubSourceMenuPos] = useState<{ top: number; left: number } | null>(null);
-  const subSourceBtnRef = useRef<HTMLButtonElement>(null);
-  const [chartSourceMenuOpen, setChartSourceMenuOpen] = useState(false);
-  const [chartSourceMenuPos, setChartSourceMenuPos] = useState<{ top: number; left: number } | null>(null);
-  const chartSourceBtnRef = useRef<HTMLButtonElement>(null);
+  // [] = every source.
+  const [analyticsSubSources, setAnalyticsSubSources] = useState<string[]>([]);
 
   const [isAnalyticsFilterOpen, setIsAnalyticsFilterOpen] = useState(false);
   const [analyticsVisibleColumns, setAnalyticsVisibleColumns] = useState<Record<AnalyticsColumnKey, boolean>>(ANALYTICS_DEFAULT_VISIBLE_COLUMNS);
@@ -253,9 +242,6 @@ export default function DataCallingPage() {
   const [sourceSearch, setSourceSearch] = useState("");
 
   const [analyticsChartMetric, setAnalyticsChartMetric] = useState<AnalyticsChartMetric>("Qualified");
-  const [chartMetricMenuOpen, setChartMetricMenuOpen] = useState(false);
-  const [chartMetricMenuPos, setChartMetricMenuPos] = useState<{ top: number; left: number } | null>(null);
-  const chartMetricBtnRef = useRef<HTMLButtonElement>(null);
 
   // Analytics tab's own stat-card drill-down — same click-to-expand pattern
   // as the Data Calling tab's cards above, kept as separate state so the two
@@ -363,10 +349,10 @@ export default function DataCallingPage() {
   );
 
   const subSourceScopedLeads = useMemo(
-    () => analyticsSubSource === "All Sources"
+    () => analyticsSubSources.length === 0
       ? analyticsDateFilteredLeads
-      : analyticsDateFilteredLeads.filter(l => l.source === analyticsSubSource),
-    [analyticsDateFilteredLeads, analyticsSubSource]
+      : analyticsDateFilteredLeads.filter(l => !!l.source && analyticsSubSources.includes(l.source)),
+    [analyticsDateFilteredLeads, analyticsSubSources]
   );
 
   const analyticsSummaryMetrics = useMemo(() => ({
@@ -405,6 +391,19 @@ export default function DataCallingPage() {
     const q = sourceSearch.trim().toLowerCase();
     return q ? sourceRows.filter(r => r.name.toLowerCase().includes(q)) : sourceRows;
   }, [sourceRows, sourceSearch]);
+
+  // Salesperson/Source Performance pagination — back to page 1 whenever the
+  // table's own search or the page-wide scope (date range, Sub-Source) changes.
+  const salespersonPagination = usePagination(
+    filteredSalespersonRows,
+    10,
+    JSON.stringify([salespersonSearch, analyticsSubSources, appliedCustomRange])
+  );
+  const sourcePagination = usePagination(
+    filteredSourceRows,
+    10,
+    JSON.stringify([sourceSearch, appliedCustomRange])
+  );
 
   // Performance Line Graph — one point per real calendar day, either the
   // last 7 days (default) or the applied custom range (capped at 31 points
@@ -492,9 +491,6 @@ export default function DataCallingPage() {
   const [searchQuery, setSearchQuery] = useState("");
 
   const [statusFilters, setStatusFilters] = useState<string[]>([]);
-  const [statusMenuOpen, setStatusMenuOpen] = useState(false);
-  const [statusMenuPos, setStatusMenuPos] = useState<{ top: number; left: number } | null>(null);
-  const statusBtnRef = useRef<HTMLButtonElement>(null);
   const statusOptions = useMemo(() => Array.from(new Set(leads.map(l => l.status))).sort(), [leads]);
 
   // Sub-status filter — Qualified/Not Qualified, only ever set while a
@@ -502,9 +498,6 @@ export default function DataCallingPage() {
   // every lead that either isn't Connected or hasn't been given a
   // sub-status yet.
   const [subStatusFilters, setSubStatusFilters] = useState<string[]>([]);
-  const [subStatusMenuOpen, setSubStatusMenuOpen] = useState(false);
-  const [subStatusMenuPos, setSubStatusMenuPos] = useState<{ top: number; left: number } | null>(null);
-  const subStatusBtnRef = useRef<HTMLButtonElement>(null);
   const SUB_STATUS_NONE = "—";
   const subStatusOptions = useMemo(
     () => Array.from(new Set(leads.map(l => l.subStatus || SUB_STATUS_NONE))).sort(),
@@ -512,9 +505,6 @@ export default function DataCallingPage() {
   );
 
   const [assignedFilters, setAssignedFilters] = useState<string[]>([]);
-  const [assignedMenuOpen, setAssignedMenuOpen] = useState(false);
-  const [assignedMenuPos, setAssignedMenuPos] = useState<{ top: number; left: number } | null>(null);
-  const assignedBtnRef = useRef<HTMLButtonElement>(null);
   const assignedOptions = useMemo(() => Array.from(new Set(leads.map(l => l.assignedAgent).filter(Boolean))).sort(), [leads]);
 
   // Data Call Source filter — bulk upload's per-batch sub-source (e.g.
@@ -522,9 +512,6 @@ export default function DataCallingPage() {
   // Sheet, Bulk Upload, etc.). This is what lets an admin pull up one bulk
   // upload batch to filter → select all → Assign/Reshuffle as a group.
   const [dataCallSourceFilters, setDataCallSourceFilters] = useState<string[]>([]);
-  const [dataCallSourceMenuOpen, setDataCallSourceMenuOpen] = useState(false);
-  const [dataCallSourceMenuPos, setDataCallSourceMenuPos] = useState<{ top: number; left: number } | null>(null);
-  const dataCallSourceBtnRef = useRef<HTMLButtonElement>(null);
   const dataCallSourceOptions = useMemo(
     () => Array.from(new Set(leads.map(l => l.subSource || l.source).filter(Boolean) as string[])).sort(),
     [leads]
@@ -580,21 +567,6 @@ export default function DataCallingPage() {
   const [assignSelectedPropertyIds, setAssignSelectedPropertyIds] = useState<Set<string>>(new Set());
   const [assignSelectedAssigneeId, setAssignSelectedAssigneeId] = useState<string>("");
 
-  const [propertyDropdownOpen, setPropertyDropdownOpen] = useState(false);
-  const [propertyDropdownPos, setPropertyDropdownPos] = useState<{ top: number; left: number } | null>(null);
-  const propertyBtnRef = useRef<HTMLButtonElement>(null);
-  const [propertySearch, setPropertySearch] = useState("");
-
-  const [assigneeDropdownOpen, setAssigneeDropdownOpen] = useState(false);
-  const [assigneeDropdownPos, setAssigneeDropdownPos] = useState<{ top: number; left: number } | null>(null);
-  const assigneeBtnRef = useRef<HTMLButtonElement>(null);
-  const [assigneeSearch, setAssigneeSearch] = useState("");
-
-  const filteredAssignProperties = useMemo(() => {
-    const q = propertySearch.trim().toLowerCase();
-    return properties.filter(p => !q || p.name.toLowerCase().includes(q));
-  }, [properties, propertySearch]);
-
   const eligibleAssignees = useMemo(() => {
     if (assignSelectedPropertyIds.size === 0) return [];
     const selectedProps = properties.filter(p => assignSelectedPropertyIds.has(p.id));
@@ -607,18 +579,8 @@ export default function DataCallingPage() {
         anyAllMembers = true;
       }
     });
-    const pool = anyAllMembers ? users.filter(u => u.role === "AGENT") : users.filter(u => restrictedIds.has(u.id));
-    const q = assigneeSearch.trim().toLowerCase();
-    return pool.filter(u => !q || u.name.toLowerCase().includes(q));
-  }, [assignSelectedPropertyIds, properties, users, assigneeSearch]);
-
-  const selectedPropertyLabel = useMemo(() => {
-    if (assignSelectedPropertyIds.size === 0) return "";
-    if (assignSelectedPropertyIds.size === 1) {
-      return properties.find(p => assignSelectedPropertyIds.has(p.id))?.name || "";
-    }
-    return `${assignSelectedPropertyIds.size} properties selected`;
-  }, [assignSelectedPropertyIds, properties]);
+    return anyAllMembers ? users.filter(u => u.role === "AGENT") : users.filter(u => restrictedIds.has(u.id));
+  }, [assignSelectedPropertyIds, properties, users]);
   const selectedAssigneeName = useMemo(
     () => users.find(u => u.id === assignSelectedAssigneeId)?.name || "",
     [users, assignSelectedAssigneeId]
@@ -628,21 +590,11 @@ export default function DataCallingPage() {
   const openAssignFlow = (mode: "assign" | "reshuffle") => {
     setAssignSelectedPropertyIds(new Set());
     setAssignSelectedAssigneeId("");
-    setPropertySearch("");
-    setAssigneeSearch("");
     setAssignFlowMode(mode);
   };
-  const closeAssignFlow = () => {
-    setAssignFlowMode(null);
-    setPropertyDropdownOpen(false);
-    setAssigneeDropdownOpen(false);
-  };
-  const togglePropertySelection = (id: string) => {
-    setAssignSelectedPropertyIds(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
+  const closeAssignFlow = () => setAssignFlowMode(null);
+  const changePropertySelection = (ids: string[]) => {
+    setAssignSelectedPropertyIds(new Set(ids));
     // Property set changed — an assignee chosen under the old scope may no
     // longer be eligible, so make the admin re-pick rather than silently
     // keep a stale selection.
@@ -670,14 +622,6 @@ export default function DataCallingPage() {
     closeAssignFlow();
   };
 
-  // Per-row quick-edit dropdowns (Status, Assigned To) — same click-to-open-
-  // portal pattern as the header filter menus, but keyed by lead id since a
-  // table has many rows sharing one pair of open/pos state slots.
-  const [rowStatusMenuFor, setRowStatusMenuFor] = useState<string | null>(null);
-  const [rowStatusMenuPos, setRowStatusMenuPos] = useState<{ top: number; left: number } | null>(null);
-  const [rowAssignMenuFor, setRowAssignMenuFor] = useState<string | null>(null);
-  const [rowAssignMenuPos, setRowAssignMenuPos] = useState<{ top: number; left: number } | null>(null);
-
   // Individual lead view — same LeadDetailDrawer the main admin dashboard
   // uses, opened by clicking a lead's name, but scoped to Data Calling's
   // own restricted status model (see statusOptions/restrictedStatuses below).
@@ -693,12 +637,6 @@ export default function DataCallingPage() {
   const [rnrDate, setRnrDate] = useState("");
   const [rnrTime, setRnrTime] = useState("10:00");
   const [pendingActionError, setPendingActionError] = useState<string | null>(null);
-
-  // Sub-status can also be changed on an already-Connected lead without
-  // re-picking the status itself (e.g. flipping Not Qualified -> Qualified
-  // once a second call actually confirms interest).
-  const [rowSubStatusMenuFor, setRowSubStatusMenuFor] = useState<string | null>(null);
-  const [rowSubStatusMenuPos, setRowSubStatusMenuPos] = useState<{ top: number; left: number } | null>(null);
 
   const openStatusChange = (lead: Lead, status: Lead["status"]) => {
     if (status === "RNR" || status === "Connected") {
@@ -739,57 +677,6 @@ export default function DataCallingPage() {
   const copyToClipboard = (text: string) => {
     if (text) navigator.clipboard?.writeText(text).catch(() => {});
   };
-
-  const openPositionedMenu = (
-    ref: React.RefObject<HTMLButtonElement>,
-    setPos: (p: { top: number; left: number } | null) => void,
-    setOpen: (fn: (o: boolean) => boolean) => void,
-    align: "left" | "right" = "left",
-    panelWidth = 180
-  ) => {
-    const rect = ref.current?.getBoundingClientRect();
-    if (rect) setPos({ top: rect.bottom + 6, left: align === "left" ? rect.left : rect.right - panelWidth });
-    setOpen(o => !o);
-  };
-
-  // Every button-anchored dropdown here snapshots its position once on
-  // click and never re-measures, so it visually detaches from its button
-  // if the page scrolls while open — close on scroll instead (same fix
-  // applied to the Campaigns page's dropdowns). But a scroll event's target
-  // is the specific element being scrolled, and several of these dropdowns
-  // are themselves internally scrollable (long status/assignee lists) —
-  // without this check, scrolling *inside* the open panel bubbled up to
-  // this window-level capture listener and closed the panel on the very
-  // first scroll tick, before the user could see anything past the fold.
-  // Panels with internal scroll carry data-scroll-panel="true" precisely so
-  // this handler can tell "scrolled the panel" apart from "scrolled the page
-  // behind it" and only close on the latter.
-  useEffect(() => {
-    const anyOpen = summaryDateMenuOpen || calendarPickerOpen || statusMenuOpen || assignedMenuOpen ||
-      dataCallSourceMenuOpen || subStatusMenuOpen || propertyDropdownOpen || assigneeDropdownOpen || !!rowStatusMenuFor || !!rowAssignMenuFor ||
-      !!rowSubStatusMenuFor || subSourceMenuOpen || chartSourceMenuOpen || chartMetricMenuOpen;
-    if (!anyOpen) return;
-    const closeAll = (e: Event) => {
-      const target = e.target;
-      if (target instanceof Element && target.closest('[data-scroll-panel="true"]')) return;
-      setSummaryDateMenuOpen(false);
-      setCalendarPickerOpen(false);
-      setStatusMenuOpen(false);
-      setAssignedMenuOpen(false);
-      setDataCallSourceMenuOpen(false);
-      setSubStatusMenuOpen(false);
-      setPropertyDropdownOpen(false);
-      setAssigneeDropdownOpen(false);
-      setRowStatusMenuFor(null);
-      setRowAssignMenuFor(null);
-      setRowSubStatusMenuFor(null);
-      setSubSourceMenuOpen(false);
-      setChartSourceMenuOpen(false);
-      setChartMetricMenuOpen(false);
-    };
-    window.addEventListener("scroll", closeAll, true);
-    return () => window.removeEventListener("scroll", closeAll, true);
-  }, [summaryDateMenuOpen, calendarPickerOpen, statusMenuOpen, assignedMenuOpen, dataCallSourceMenuOpen, subStatusMenuOpen, propertyDropdownOpen, assigneeDropdownOpen, rowStatusMenuFor, rowAssignMenuFor, rowSubStatusMenuFor, subSourceMenuOpen, chartSourceMenuOpen, chartMetricMenuOpen]);
 
   const latestLogMessage = (l: Lead): string => {
     if (!l.logs || l.logs.length === 0) return "No feedback yet";
@@ -893,38 +780,14 @@ export default function DataCallingPage() {
         <div className="flex items-center px-4 py-2.5 text-[11px] border-b border-slate-200/60">
           <div className="flex items-center gap-1.5 font-bold text-slate-700">
             <span className="font-normal text-slate-500">Date Range</span>
-            <div className="relative">
-              <button
-                ref={summaryDateBtnRef}
-                onClick={() => openPositionedMenu(summaryDateBtnRef, setSummaryDateMenuPos, setSummaryDateMenuOpen, "left", 140)}
-                className="flex items-center gap-1.5 bg-white border border-slate-300/80 rounded-md px-2 py-0.5 font-black text-slate-800 text-[11px] hover:bg-slate-50 transition-colors"
-              >
-                {dateRange}
-                <ChevronDown className={`h-3 w-3 text-slate-400 transition-transform ${summaryDateMenuOpen ? "rotate-180" : ""}`} />
-              </button>
-              {summaryDateMenuOpen && summaryDateMenuPos && createPortal(
-                <>
-                  <div className="fixed inset-0 z-[60]" onClick={() => setSummaryDateMenuOpen(false)} />
-                  <div
-                    className="fixed z-[70] w-36 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 overflow-hidden"
-                    style={{ top: summaryDateMenuPos.top, left: summaryDateMenuPos.left }}
-                  >
-                    {(["Today", "Yesterday", "This Week", "This Month", "All Time"] as const).map(opt => (
-                      <button
-                        key={opt}
-                        onClick={() => { setDateRange(opt); setSummaryDateMenuOpen(false); }}
-                        className={`w-full text-left px-3 py-1.5 text-xs font-bold transition-colors ${
-                          dateRange === opt ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"
-                        }`}
-                      >
-                        {opt}
-                      </button>
-                    ))}
-                  </div>
-                </>,
-                document.body
-              )}
-            </div>
+            <SearchableSelect
+              variant="pill"
+              value={dateRange}
+              onChange={(v) => setDateRange(v as typeof dateRange)}
+              options={["Today", "Yesterday", "This Week", "This Month", "All Time"]}
+              searchPlaceholder="Search range..."
+              panelWidth={140}
+            />
           </div>
         </div>
 
@@ -969,39 +832,14 @@ export default function DataCallingPage() {
         <div className="flex items-center px-4 py-2.5 text-[11px] border-b border-slate-200/60">
           <div className="flex items-center gap-1.5 font-bold text-slate-700">
             <span className="font-normal text-slate-500">Sub-Source</span>
-            <div className="relative">
-              <button
-                ref={subSourceBtnRef}
-                onClick={() => openPositionedMenu(subSourceBtnRef, setSubSourceMenuPos, setSubSourceMenuOpen, "left", 160)}
-                className="flex items-center gap-1.5 bg-white border border-slate-300/80 rounded-md px-2 py-0.5 font-black text-slate-800 text-[11px] hover:bg-slate-50 transition-colors"
-              >
-                {analyticsSubSource}
-                <ChevronDown className={`h-3 w-3 text-slate-400 transition-transform ${subSourceMenuOpen ? "rotate-180" : ""}`} />
-              </button>
-              {subSourceMenuOpen && subSourceMenuPos && createPortal(
-                <>
-                  <div className="fixed inset-0 z-[60]" onClick={() => setSubSourceMenuOpen(false)} />
-                  <div
-                    data-scroll-panel="true"
-                    className="fixed z-[70] w-40 max-h-64 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-lg py-1.5"
-                    style={{ top: subSourceMenuPos.top, left: subSourceMenuPos.left }}
-                  >
-                    {["All Sources", ...dataCallSources].map(opt => (
-                      <button
-                        key={opt}
-                        onClick={() => { setAnalyticsSubSource(opt); setSubSourceMenuOpen(false); }}
-                        className={`w-full text-left px-3 py-1.5 text-xs font-bold truncate transition-colors ${
-                          analyticsSubSource === opt ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"
-                        }`}
-                      >
-                        {opt}
-                      </button>
-                    ))}
-                  </div>
-                </>,
-                document.body
-              )}
-            </div>
+            <SearchableMultiSelect
+              selected={analyticsSubSources}
+              onChange={setAnalyticsSubSources}
+              options={dataCallSources}
+              placeholder="All Sources"
+              searchPlaceholder="Search sources..."
+              panelWidth={180}
+            />
           </div>
         </div>
 
@@ -1047,8 +885,6 @@ export default function DataCallingPage() {
         const shownCount = shownLeads.length;
         const totalPages = Math.max(1, Math.ceil(shownCount / analyticsDrillRowsPerPage));
         const currentPage = Math.min(analyticsDrillPage, totalPages);
-        const rangeStart = shownCount === 0 ? 0 : (currentPage - 1) * analyticsDrillRowsPerPage + 1;
-        const rangeEnd = Math.min(currentPage * analyticsDrillRowsPerPage, shownCount);
 
         return (
           <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden animate-fade-in">
@@ -1108,46 +944,23 @@ export default function DataCallingPage() {
                 </tbody>
               </table>
             </div>
-            <div className="px-5 py-3 flex flex-wrap justify-between items-center gap-3 border-t border-slate-100 text-[11px] text-slate-500 font-semibold">
-              <span>{shownCount} Row{shownCount === 1 ? "" : "s"}</span>
-              <div className="flex items-center gap-4">
-                <span className="flex items-center gap-1.5">
-                  Rows per page
-                  <select
-                    value={analyticsDrillRowsPerPage}
-                    onChange={(e) => {
-                      analyticsDrillProgrammaticScroll.current = true;
-                      setAnalyticsDrillRowsPerPage(Number(e.target.value));
-                      setAnalyticsDrillPage(1);
-                      analyticsDrillScrollRef.current?.scrollTo(0, 0);
-                      requestAnimationFrame(() => {
-                        requestAnimationFrame(() => { analyticsDrillProgrammaticScroll.current = false; });
-                      });
-                    }}
-                    className="bg-slate-50 border border-slate-200 rounded px-1.5 py-1 font-bold text-slate-700 focus:outline-none"
-                  >
-                    {[8, 25, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
-                  </select>
-                </span>
-                <span>{rangeStart}-{rangeEnd} of {shownCount}</span>
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => goToAnalyticsDrillPage(currentPage - 1, totalPages)}
-                    disabled={currentPage <= 1}
-                    className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
-                  >
-                    ‹
-                  </button>
-                  <button
-                    onClick={() => goToAnalyticsDrillPage(currentPage + 1, totalPages)}
-                    disabled={currentPage >= totalPages}
-                    className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
-                  >
-                    ›
-                  </button>
-                </div>
-              </div>
-            </div>
+            <TablePagination
+              totalRows={shownCount}
+              page={currentPage}
+              rowsPerPage={analyticsDrillRowsPerPage}
+              onPageChange={(p) => goToAnalyticsDrillPage(p, totalPages)}
+              onRowsPerPageChange={(n) => {
+                analyticsDrillProgrammaticScroll.current = true;
+                setAnalyticsDrillRowsPerPage(n);
+                setAnalyticsDrillPage(1);
+                analyticsDrillScrollRef.current?.scrollTo(0, 0);
+                requestAnimationFrame(() => {
+                  requestAnimationFrame(() => { analyticsDrillProgrammaticScroll.current = false; });
+                });
+              }}
+              rowsPerPageOptions={[8, 25, 50, 100]}
+              rowLabel="Lead"
+            />
           </div>
         );
       })()}
@@ -1162,8 +975,6 @@ export default function DataCallingPage() {
         const shownCount = shownLeads.length;
         const totalPages = Math.max(1, Math.ceil(shownCount / drillRowsPerPage));
         const currentPage = Math.min(drillPage, totalPages);
-        const rangeStart = shownCount === 0 ? 0 : (currentPage - 1) * drillRowsPerPage + 1;
-        const rangeEnd = Math.min(currentPage * drillRowsPerPage, shownCount);
 
         return (
           <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden animate-fade-in">
@@ -1223,46 +1034,23 @@ export default function DataCallingPage() {
                 </tbody>
               </table>
             </div>
-            <div className="px-5 py-3 flex flex-wrap justify-between items-center gap-3 border-t border-slate-100 text-[11px] text-slate-500 font-semibold">
-              <span>{shownCount} Row{shownCount === 1 ? "" : "s"}</span>
-              <div className="flex items-center gap-4">
-                <span className="flex items-center gap-1.5">
-                  Rows per page
-                  <select
-                    value={drillRowsPerPage}
-                    onChange={(e) => {
-                      drillProgrammaticScroll.current = true;
-                      setDrillRowsPerPage(Number(e.target.value));
-                      setDrillPage(1);
-                      drillScrollRef.current?.scrollTo(0, 0);
-                      requestAnimationFrame(() => {
-                        requestAnimationFrame(() => { drillProgrammaticScroll.current = false; });
-                      });
-                    }}
-                    className="bg-slate-50 border border-slate-200 rounded px-1.5 py-1 font-bold text-slate-700 focus:outline-none"
-                  >
-                    {[8, 25, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
-                  </select>
-                </span>
-                <span>{rangeStart}-{rangeEnd} of {shownCount}</span>
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => goToDrillPage(currentPage - 1, totalPages)}
-                    disabled={currentPage <= 1}
-                    className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
-                  >
-                    ‹
-                  </button>
-                  <button
-                    onClick={() => goToDrillPage(currentPage + 1, totalPages)}
-                    disabled={currentPage >= totalPages}
-                    className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
-                  >
-                    ›
-                  </button>
-                </div>
-              </div>
-            </div>
+            <TablePagination
+              totalRows={shownCount}
+              page={currentPage}
+              rowsPerPage={drillRowsPerPage}
+              onPageChange={(p) => goToDrillPage(p, totalPages)}
+              onRowsPerPageChange={(n) => {
+                drillProgrammaticScroll.current = true;
+                setDrillRowsPerPage(n);
+                setDrillPage(1);
+                drillScrollRef.current?.scrollTo(0, 0);
+                requestAnimationFrame(() => {
+                  requestAnimationFrame(() => { drillProgrammaticScroll.current = false; });
+                });
+              }}
+              rowsPerPageOptions={[8, 25, 50, 100]}
+              rowLabel="Lead"
+            />
           </div>
         );
       })()}
@@ -1292,97 +1080,14 @@ export default function DataCallingPage() {
                 Reshuffle
               </button>
             )}
-            <div className="relative">
-              <button
-                ref={calendarBtnRef}
-                type="button"
-                onClick={() => {
-                  const rect = calendarBtnRef.current?.getBoundingClientRect();
-                  if (rect) {
-                    const panelWidth = 260;
-                    const left = Math.max(8, Math.min(rect.right - panelWidth, window.innerWidth - panelWidth - 8));
-                    setCalendarMenuPos({ top: rect.bottom + 6, left });
-                  }
-                  setCustomRangeStartDraft(appliedCustomRange?.start || "");
-                  setCustomRangeEndDraft(appliedCustomRange?.end || "");
-                  setCalendarPickerOpen(o => !o);
-                }}
-                className="flex items-center gap-2 bg-white border border-slate-300/80 rounded-xl px-3 py-1.5 text-xs text-slate-700 font-medium shadow-2xs hover:bg-slate-50 transition-colors"
-              >
-                <Calendar className="h-3.5 w-3.5 text-blue-600" />
-                <span>{dateRangePickerLabel}</span>
-              </button>
-              {calendarPickerOpen && calendarMenuPos && createPortal(
-                <>
-                  <div className="fixed inset-0 z-[60]" onClick={() => setCalendarPickerOpen(false)} />
-                  <div
-                    className="fixed z-[70] w-64 max-w-[calc(100vw-1rem)] bg-white border border-slate-200 rounded-xl shadow-lg p-4 space-y-3"
-                    style={{ top: calendarMenuPos.top, left: calendarMenuPos.left }}
-                  >
-                    <p className="text-[11px] font-bold text-slate-700">Filter leads by date range</p>
-                    <div className="space-y-1.5">
-                      <label className="block text-[9px] font-bold text-slate-400 uppercase">Start Date</label>
-                      <input
-                        type="date"
-                        value={customRangeStartDraft}
-                        onChange={(e) => {
-                          const newStart = e.target.value;
-                          setCustomRangeStartDraft(newStart);
-                          if (customRangeEndDraft && newStart && customRangeEndDraft < newStart) setCustomRangeEndDraft("");
-                        }}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-700 focus:outline-none focus:border-[#0B1E6E]"
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="block text-[9px] font-bold text-slate-400 uppercase">End Date</label>
-                      <input
-                        type="date"
-                        value={customRangeEndDraft}
-                        min={customRangeStartDraft || undefined}
-                        onChange={(e) => {
-                          const newEnd = e.target.value;
-                          if (customRangeStartDraft && newEnd && newEnd < customRangeStartDraft) return;
-                          setCustomRangeEndDraft(newEnd);
-                        }}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-700 focus:outline-none focus:border-[#0B1E6E]"
-                      />
-                      {customRangeStartDraft && customRangeEndDraft && customRangeEndDraft < customRangeStartDraft && (
-                        <p className="text-[10px] font-semibold text-red-500">End date can&apos;t be before the start date.</p>
-                      )}
-                    </div>
-                    <div className="flex gap-2 pt-1">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setAppliedCustomRange(null);
-                          setCustomRangeStartDraft("");
-                          setCustomRangeEndDraft("");
-                          setCalendarPickerOpen(false);
-                          setCurrentPage(1);
-                        }}
-                        className="flex-1 bg-slate-100 text-slate-600 font-bold text-[11px] py-1.5 rounded-lg hover:bg-slate-200 transition-colors"
-                      >
-                        Reset
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (!customRangeStartDraft || !customRangeEndDraft || customRangeEndDraft < customRangeStartDraft) return;
-                          setAppliedCustomRange({ start: customRangeStartDraft, end: customRangeEndDraft });
-                          setCalendarPickerOpen(false);
-                          setCurrentPage(1);
-                        }}
-                        disabled={!customRangeStartDraft || !customRangeEndDraft || customRangeEndDraft < customRangeStartDraft}
-                        className="flex-1 bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold text-[11px] py-1.5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                      >
-                        Apply
-                      </button>
-                    </div>
-                  </div>
-                </>,
-                document.body
-              )}
-            </div>
+            <DateRangePicker
+              value={appliedCustomRange}
+              onChange={(v) => {
+                setAppliedCustomRange(v);
+                setCurrentPage(1);
+              }}
+              emptyLabel={formatDisplayDate(todayIso())}
+            />
 
             <button
               type="button"
@@ -1444,7 +1149,7 @@ export default function DataCallingPage() {
                         <td colSpan={7} className="px-5 py-8 text-center text-slate-400 italic">No salesperson activity found for this scope.</td>
                       </tr>
                     ) : (
-                      filteredSalespersonRows.map(r => (
+                      salespersonPagination.pageRows.map(r => (
                         <tr key={r.name} className="hover:bg-slate-50/50 transition-colors">
                           <td className="px-5 py-3 font-semibold text-slate-900">{r.name}</td>
                           <td className="px-5 py-3">{r.totalLeads}</td>
@@ -1459,46 +1164,22 @@ export default function DataCallingPage() {
                   </tbody>
                 </table>
               </div>
+              <TablePagination {...salespersonPagination.paginationProps} rowLabel="Salesperson" />
             </div>
 
             {/* Performance Line Graph */}
             <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm p-5">
               <div className="flex items-center justify-between mb-3 gap-2">
                 <h3 className="text-sm font-bold text-slate-900">Performance Line Graph</h3>
-                <div className="relative">
-                  <button
-                    type="button"
-                    ref={chartSourceBtnRef}
-                    onClick={() => openPositionedMenu(chartSourceBtnRef, setChartSourceMenuPos, setChartSourceMenuOpen, "right", 160)}
-                    className="flex items-center gap-1.5 bg-white border border-slate-300/80 rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
-                  >
-                    {analyticsSubSource}
-                    <ChevronDown className={`h-3 w-3 text-slate-400 transition-transform ${chartSourceMenuOpen ? "rotate-180" : ""}`} />
-                  </button>
-                  {chartSourceMenuOpen && chartSourceMenuPos && createPortal(
-                    <>
-                      <div className="fixed inset-0 z-[60]" onClick={() => setChartSourceMenuOpen(false)} />
-                      <div
-                        data-scroll-panel="true"
-                        className="fixed z-[70] w-40 max-h-64 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-lg py-1.5"
-                        style={{ top: chartSourceMenuPos.top, left: chartSourceMenuPos.left }}
-                      >
-                        {["All Sources", ...dataCallSources].map(opt => (
-                          <button
-                            key={opt}
-                            onClick={() => { setAnalyticsSubSource(opt); setChartSourceMenuOpen(false); }}
-                            className={`w-full text-left px-3 py-1.5 text-xs font-bold truncate transition-colors ${
-                              analyticsSubSource === opt ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"
-                            }`}
-                          >
-                            {opt}
-                          </button>
-                        ))}
-                      </div>
-                    </>,
-                    document.body
-                  )}
-                </div>
+                <SearchableMultiSelect
+                  selected={analyticsSubSources}
+                  onChange={setAnalyticsSubSources}
+                  options={dataCallSources}
+                  placeholder="All Sources"
+                  searchPlaceholder="Search sources..."
+                  panelWidth={180}
+                  align="right"
+                />
               </div>
               {chartData.length === 0 ? (
                 <div className="h-[260px] flex items-center justify-center text-xs text-slate-400 italic">No data yet.</div>
@@ -1518,38 +1199,15 @@ export default function DataCallingPage() {
                   </LineChart>
                 </ResponsiveContainer>
               )}
-              <div className="relative mt-2 inline-block">
-                <button
-                  type="button"
-                  ref={chartMetricBtnRef}
-                  onClick={() => openPositionedMenu(chartMetricBtnRef, setChartMetricMenuPos, setChartMetricMenuOpen, "left", 140)}
-                  className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors"
-                >
-                  {analyticsChartMetric}
-                  <ChevronDown className={`h-3 w-3 text-slate-400 transition-transform ${chartMetricMenuOpen ? "rotate-180" : ""}`} />
-                </button>
-                {chartMetricMenuOpen && chartMetricMenuPos && createPortal(
-                  <>
-                    <div className="fixed inset-0 z-[60]" onClick={() => setChartMetricMenuOpen(false)} />
-                    <div
-                      className="fixed z-[70] w-36 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 overflow-hidden"
-                      style={{ top: chartMetricMenuPos.top, left: chartMetricMenuPos.left }}
-                    >
-                      {ANALYTICS_CHART_METRICS.map(opt => (
-                        <button
-                          key={opt}
-                          onClick={() => { setAnalyticsChartMetric(opt); setChartMetricMenuOpen(false); }}
-                          className={`w-full text-left px-3 py-1.5 text-xs font-bold transition-colors ${
-                            analyticsChartMetric === opt ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"
-                          }`}
-                        >
-                          {opt}
-                        </button>
-                      ))}
-                    </div>
-                  </>,
-                  document.body
-                )}
+              <div className="mt-2">
+                <SearchableSelect
+                  variant="pill"
+                  value={analyticsChartMetric}
+                  onChange={(v) => setAnalyticsChartMetric(v as AnalyticsChartMetric)}
+                  options={[...ANALYTICS_CHART_METRICS]}
+                  searchPlaceholder="Search metrics..."
+                  panelWidth={140}
+                />
               </div>
             </div>
 
@@ -1614,7 +1272,7 @@ export default function DataCallingPage() {
                         </td>
                       </tr>
                     ) : (
-                      filteredSourceRows.map(r => (
+                      sourcePagination.pageRows.map(r => (
                         <tr key={r.name} className="hover:bg-slate-50/50 transition-colors">
                           <td className="pr-5 py-3 font-medium text-slate-900">{r.name}</td>
                           <td className="px-5 py-3">{r.totalLeads.toLocaleString()}</td>
@@ -1640,6 +1298,7 @@ export default function DataCallingPage() {
                   </tbody>
                 </table>
               </div>
+              <TablePagination {...sourcePagination.paginationProps} rowLabel="Source" className="-mx-5 -mb-5 mt-2" />
             </div>
           </div>
           ) : (
@@ -1685,136 +1344,38 @@ export default function DataCallingPage() {
                     </th>
                     <th className="px-5 py-3.5 whitespace-nowrap">Email</th>
                     <th className="px-5 py-3.5 whitespace-nowrap">
-                      <div className="relative inline-block">
-                        <button
-                          type="button"
-                          ref={statusBtnRef}
-                          onClick={() => openPositionedMenu(statusBtnRef, setStatusMenuPos, setStatusMenuOpen, "left", 180)}
-                          className="flex items-center gap-1 hover:text-blue-600 transition-colors"
-                        >
-                          <span>Status</span>
-                          <ChevronDown className={`h-3 w-3 text-slate-800 transition-transform ${statusMenuOpen ? "rotate-180" : ""}`} />
-                        </button>
-                        {statusMenuOpen && statusMenuPos && createPortal(
-                          <>
-                            <div className="fixed inset-0 z-[60]" onClick={() => setStatusMenuOpen(false)} />
-                            <div
-                              data-scroll-panel="true"
-                              className="fixed z-[70] w-48 max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 text-xs font-medium"
-                              style={{ top: statusMenuPos.top, left: statusMenuPos.left }}
-                            >
-                              <button
-                                type="button"
-                                onClick={() => setStatusFilters([])}
-                                className="w-full flex items-center gap-1.5 text-left px-3 py-1.5 text-slate-500 font-bold hover:bg-slate-50 border-b border-slate-100 transition-colors"
-                              >
-                                <Minus className="h-3 w-3" />
-                                All Statuses
-                              </button>
-                              {statusOptions.map(st => (
-                                <label key={st} className="flex items-center gap-2 px-3 py-1.5 text-slate-700 font-semibold hover:bg-slate-50 cursor-pointer transition-colors">
-                                  <input
-                                    type="checkbox"
-                                    checked={statusFilters.includes(st)}
-                                    onChange={() => setStatusFilters(prev => prev.includes(st) ? prev.filter(s => s !== st) : [...prev, st])}
-                                    className="h-3.5 w-3.5 rounded border-slate-300 text-[#0B1E6E] focus:ring-0 focus:ring-offset-0"
-                                  />
-                                  {st}
-                                </label>
-                              ))}
-                            </div>
-                          </>,
-                          document.body
-                        )}
-                      </div>
+                      <SearchableMultiSelect
+                        variant="inline"
+                        label="Status"
+                        selected={statusFilters}
+                        onChange={(next) => { setStatusFilters(next); setCurrentPage(1); }}
+                        options={statusOptions}
+                        searchPlaceholder="Search status..."
+                        panelWidth={180}
+                      />
                     </th>
                     <th className="px-5 py-3.5 whitespace-nowrap">
-                      <div className="relative inline-block">
-                        <button
-                          type="button"
-                          ref={subStatusBtnRef}
-                          onClick={() => openPositionedMenu(subStatusBtnRef, setSubStatusMenuPos, setSubStatusMenuOpen, "left", 180)}
-                          className="flex items-center gap-1 hover:text-blue-600 transition-colors"
-                        >
-                          <span>Sub-status</span>
-                          <ChevronDown className={`h-3 w-3 text-slate-800 transition-transform ${subStatusMenuOpen ? "rotate-180" : ""}`} />
-                        </button>
-                        {subStatusMenuOpen && subStatusMenuPos && createPortal(
-                          <>
-                            <div className="fixed inset-0 z-[60]" onClick={() => setSubStatusMenuOpen(false)} />
-                            <div
-                              className="fixed z-[70] w-48 max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 text-xs font-medium"
-                              style={{ top: subStatusMenuPos.top, left: subStatusMenuPos.left }}
-                            >
-                              <button
-                                type="button"
-                                onClick={() => setSubStatusFilters([])}
-                                className="w-full flex items-center gap-1.5 text-left px-3 py-1.5 text-slate-500 font-bold hover:bg-slate-50 border-b border-slate-100 transition-colors"
-                              >
-                                <Minus className="h-3 w-3" />
-                                All
-                              </button>
-                              {subStatusOptions.map(st => (
-                                <label key={st} className="flex items-center gap-2 px-3 py-1.5 text-slate-700 font-semibold hover:bg-slate-50 cursor-pointer transition-colors">
-                                  <input
-                                    type="checkbox"
-                                    checked={subStatusFilters.includes(st)}
-                                    onChange={() => setSubStatusFilters(prev => prev.includes(st) ? prev.filter(s => s !== st) : [...prev, st])}
-                                    className="h-3.5 w-3.5 rounded border-slate-300 text-[#0B1E6E] focus:ring-0 focus:ring-offset-0"
-                                  />
-                                  {st}
-                                </label>
-                              ))}
-                            </div>
-                          </>,
-                          document.body
-                        )}
-                      </div>
+                      <SearchableMultiSelect
+                        variant="inline"
+                        label="Sub-status"
+                        selected={subStatusFilters}
+                        onChange={(next) => { setSubStatusFilters(next); setCurrentPage(1); }}
+                        options={subStatusOptions}
+                        searchPlaceholder="Search sub-status..."
+                        panelWidth={180}
+                      />
                     </th>
                     {visibleColumns.assignedTo && (
                       <th className="px-5 py-3.5 whitespace-nowrap">
-                        <div className="relative inline-block">
-                          <button
-                            type="button"
-                            ref={assignedBtnRef}
-                            onClick={() => openPositionedMenu(assignedBtnRef, setAssignedMenuPos, setAssignedMenuOpen, "left", 180)}
-                            className="flex items-center gap-1 hover:text-blue-600 transition-colors"
-                          >
-                            <span>Assigned To</span>
-                            <ChevronDown className={`h-3 w-3 text-slate-800 transition-transform ${assignedMenuOpen ? "rotate-180" : ""}`} />
-                          </button>
-                          {assignedMenuOpen && assignedMenuPos && createPortal(
-                            <>
-                              <div className="fixed inset-0 z-[60]" onClick={() => setAssignedMenuOpen(false)} />
-                              <div
-                                data-scroll-panel="true"
-                                className="fixed z-[70] w-48 max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 text-xs font-medium"
-                                style={{ top: assignedMenuPos.top, left: assignedMenuPos.left }}
-                              >
-                                <button
-                                  type="button"
-                                  onClick={() => setAssignedFilters([])}
-                                  className="w-full flex items-center gap-1.5 text-left px-3 py-1.5 text-slate-500 font-bold hover:bg-slate-50 border-b border-slate-100 transition-colors"
-                                >
-                                  <Minus className="h-3 w-3" />
-                                  Everyone
-                                </button>
-                                {assignedOptions.map(agent => (
-                                  <label key={agent} className="flex items-center gap-2 px-3 py-1.5 text-slate-700 font-semibold hover:bg-slate-50 cursor-pointer transition-colors">
-                                    <input
-                                      type="checkbox"
-                                      checked={assignedFilters.includes(agent)}
-                                      onChange={() => setAssignedFilters(prev => prev.includes(agent) ? prev.filter(a => a !== agent) : [...prev, agent])}
-                                      className="h-3.5 w-3.5 rounded border-slate-300 text-[#0B1E6E] focus:ring-0 focus:ring-offset-0"
-                                    />
-                                    {agent}
-                                  </label>
-                                ))}
-                              </div>
-                            </>,
-                            document.body
-                          )}
-                        </div>
+                        <SearchableMultiSelect
+                          variant="inline"
+                          label="Assigned To"
+                          selected={assignedFilters}
+                          onChange={(next) => { setAssignedFilters(next); setCurrentPage(1); }}
+                          options={assignedOptions}
+                          searchPlaceholder="Search agents..."
+                          panelWidth={180}
+                        />
                       </th>
                     )}
                     {visibleColumns.date && <th className="px-5 py-3.5 whitespace-nowrap">Date</th>}
@@ -1823,52 +1384,15 @@ export default function DataCallingPage() {
                     {visibleColumns.property && <th className="px-5 py-3.5 whitespace-nowrap">Property</th>}
                     {visibleColumns.dataCallSource && (
                       <th className="px-5 py-3.5 whitespace-nowrap">
-                        <div className="relative inline-block">
-                          <button
-                            type="button"
-                            ref={dataCallSourceBtnRef}
-                            onClick={() => openPositionedMenu(dataCallSourceBtnRef, setDataCallSourceMenuPos, setDataCallSourceMenuOpen, "left", 200)}
-                            className="flex items-center gap-1 hover:text-blue-600 transition-colors"
-                          >
-                            <span>Data Call Source</span>
-                            <ChevronDown className={`h-3 w-3 text-slate-800 transition-transform ${dataCallSourceMenuOpen ? "rotate-180" : ""}`} />
-                          </button>
-                          {dataCallSourceMenuOpen && dataCallSourceMenuPos && createPortal(
-                            <>
-                              <div className="fixed inset-0 z-[60]" onClick={() => setDataCallSourceMenuOpen(false)} />
-                              <div
-                                data-scroll-panel="true"
-                                className="fixed z-[70] w-56 max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 text-xs font-medium"
-                                style={{ top: dataCallSourceMenuPos.top, left: dataCallSourceMenuPos.left }}
-                              >
-                                <button
-                                  type="button"
-                                  onClick={() => setDataCallSourceFilters([])}
-                                  className="w-full flex items-center gap-1.5 text-left px-3 py-1.5 text-slate-500 font-bold hover:bg-slate-50 border-b border-slate-100 transition-colors"
-                                >
-                                  <Minus className="h-3 w-3" />
-                                  All Sources
-                                </button>
-                                {dataCallSourceOptions.length === 0 ? (
-                                  <p className="px-3 py-2 text-slate-400 italic font-normal">No sources yet</p>
-                                ) : (
-                                  dataCallSourceOptions.map(src => (
-                                    <label key={src} className="flex items-center gap-2 px-3 py-1.5 text-slate-700 font-semibold hover:bg-slate-50 cursor-pointer transition-colors">
-                                      <input
-                                        type="checkbox"
-                                        checked={dataCallSourceFilters.includes(src)}
-                                        onChange={() => setDataCallSourceFilters(prev => prev.includes(src) ? prev.filter(s => s !== src) : [...prev, src])}
-                                        className="h-3.5 w-3.5 rounded border-slate-300 text-[#0B1E6E] focus:ring-0 focus:ring-offset-0"
-                                      />
-                                      {src}
-                                    </label>
-                                  ))
-                                )}
-                              </div>
-                            </>,
-                            document.body
-                          )}
-                        </div>
+                        <SearchableMultiSelect
+                          variant="inline"
+                          label="Data Call Source"
+                          selected={dataCallSourceFilters}
+                          onChange={(next) => { setDataCallSourceFilters(next); setCurrentPage(1); }}
+                          options={dataCallSourceOptions}
+                          searchPlaceholder="Search sources..."
+                          panelWidth={200}
+                        />
                       </th>
                     )}
                     {visibleColumns.usageCount && <th className="px-5 py-3.5 whitespace-nowrap">Usage Count</th>}
@@ -1926,134 +1450,53 @@ export default function DataCallingPage() {
                           ) : "—"}
                         </td>
                         <td className="px-5 py-3.5 whitespace-nowrap">
-                          <div className="relative inline-block">
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                const rect = e.currentTarget.getBoundingClientRect();
-                                setRowStatusMenuPos({ top: rect.bottom + 4, left: rect.left });
-                                setRowStatusMenuFor(prev => (prev === l.id ? null : l.id));
-                              }}
-                              className="flex items-center gap-1 font-bold text-slate-900 hover:text-blue-600 transition-colors"
-                            >
-                              <span>{l.status}</span>
-                              <ChevronDown className={`h-3 w-3 transition-transform ${rowStatusMenuFor === l.id ? "rotate-180" : ""}`} />
-                            </button>
-                            {rowStatusMenuFor === l.id && rowStatusMenuPos && createPortal(
-                              <>
-                                <div className="fixed inset-0 z-[60]" onClick={() => setRowStatusMenuFor(null)} />
-                                <div
-                                  data-scroll-panel="true"
-                                  className="fixed z-[70] w-44 max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 text-xs font-semibold"
-                                  style={{ top: rowStatusMenuPos.top, left: rowStatusMenuPos.left }}
-                                >
-                                  {ROW_STATUS_OPTIONS.map(st => (
-                                    <button
-                                      key={st}
-                                      type="button"
-                                      onClick={() => { openStatusChange(l, st); setRowStatusMenuFor(null); }}
-                                      className={`w-full text-left px-3 py-1.5 transition-colors ${
-                                        l.status === st ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"
-                                      }`}
-                                    >
-                                      {st}
-                                    </button>
-                                  ))}
-                                </div>
-                              </>,
-                              document.body
-                            )}
-                          </div>
+                          <SearchableSelect
+                            variant="inline"
+                            value={l.status}
+                            onChange={(v) => openStatusChange(l, v as Lead["status"])}
+                            options={ROW_STATUS_OPTIONS}
+                            searchPlaceholder="Search status..."
+                            panelWidth={176}
+                            className="text-slate-900"
+                          />
                         </td>
                         <td className="px-5 py-3.5 whitespace-nowrap">
                           {l.status === "Connected" ? (
-                            <div className="relative inline-block">
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  const rect = e.currentTarget.getBoundingClientRect();
-                                  setRowSubStatusMenuPos({ top: rect.bottom + 4, left: rect.left });
-                                  setRowSubStatusMenuFor(prev => (prev === l.id ? null : l.id));
-                                }}
-                                className={`flex items-center gap-1 font-bold transition-colors ${
-                                  l.subStatus === "Qualified"
-                                    ? "text-emerald-600 hover:text-emerald-700"
-                                    : l.subStatus === "Not Qualified"
-                                      ? "text-red-500 hover:text-red-600"
-                                      : "text-slate-400 hover:text-blue-600"
-                                }`}
-                              >
-                                <span>{l.subStatus || "Set sub-status"}</span>
-                                <ChevronDown className={`h-3 w-3 transition-transform ${rowSubStatusMenuFor === l.id ? "rotate-180" : ""}`} />
-                              </button>
-                              {rowSubStatusMenuFor === l.id && rowSubStatusMenuPos && createPortal(
-                                <>
-                                  <div className="fixed inset-0 z-[60]" onClick={() => setRowSubStatusMenuFor(null)} />
-                                  <div
-                                    className="fixed z-[70] w-40 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 text-xs font-semibold"
-                                    style={{ top: rowSubStatusMenuPos.top, left: rowSubStatusMenuPos.left }}
-                                  >
-                                    {(["Qualified", "Not Qualified"] as const).map(sub => (
-                                      <button
-                                        key={sub}
-                                        type="button"
-                                        onClick={() => { updateLeadStatus(l.id, "Connected", undefined, undefined, sub); setRowSubStatusMenuFor(null); }}
-                                        className={`w-full text-left px-3 py-1.5 transition-colors ${
-                                          l.subStatus === sub ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"
-                                        }`}
-                                      >
-                                        {sub}
-                                      </button>
-                                    ))}
-                                  </div>
-                                </>,
-                                document.body
-                              )}
-                            </div>
+                            // Sub-status can also be changed on an already-Connected
+                            // lead without re-picking the status itself (e.g. flipping
+                            // Not Qualified -> Qualified once a second call confirms interest).
+                            <SearchableSelect
+                              variant="inline"
+                              value={l.subStatus || ""}
+                              onChange={(v) => updateLeadStatus(l.id, "Connected", undefined, undefined, v as "Qualified" | "Not Qualified")}
+                              options={["Qualified", "Not Qualified"]}
+                              placeholder="Set sub-status"
+                              searchPlaceholder="Search sub-status..."
+                              panelWidth={160}
+                              className={
+                                l.subStatus === "Qualified"
+                                  ? "text-emerald-600"
+                                  : l.subStatus === "Not Qualified"
+                                    ? "text-red-500"
+                                    : "text-slate-400"
+                              }
+                            />
                           ) : (
                             <span className="text-slate-300">—</span>
                           )}
                         </td>
                         {visibleColumns.assignedTo && (
                           <td className="px-5 py-3.5">
-                            <div className="relative inline-block max-w-[140px]">
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  const rect = e.currentTarget.getBoundingClientRect();
-                                  setRowAssignMenuPos({ top: rect.bottom + 4, left: rect.left });
-                                  setRowAssignMenuFor(prev => (prev === l.id ? null : l.id));
-                                }}
-                                className="flex items-center gap-1 font-semibold text-slate-700 hover:text-blue-600 transition-colors max-w-full"
-                              >
-                                <span className="truncate">{l.assignedAgent || "—"}</span>
-                                <ChevronDown className={`h-3 w-3 shrink-0 transition-transform ${rowAssignMenuFor === l.id ? "rotate-180" : ""}`} />
-                              </button>
-                              {rowAssignMenuFor === l.id && rowAssignMenuPos && createPortal(
-                                <>
-                                  <div className="fixed inset-0 z-[60]" onClick={() => setRowAssignMenuFor(null)} />
-                                  <div
-                                    data-scroll-panel="true"
-                                    className="fixed z-[70] w-44 max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 text-xs font-semibold"
-                                    style={{ top: rowAssignMenuPos.top, left: rowAssignMenuPos.left }}
-                                  >
-                                    {assignedOptions.map(agent => (
-                                      <button
-                                        key={agent}
-                                        type="button"
-                                        onClick={() => { reassignLead(l.id, agent); setRowAssignMenuFor(null); }}
-                                        className={`w-full text-left px-3 py-1.5 transition-colors truncate ${
-                                          l.assignedAgent === agent ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"
-                                        }`}
-                                      >
-                                        {agent}
-                                      </button>
-                                    ))}
-                                  </div>
-                                </>,
-                                document.body
-                              )}
-                            </div>
+                            <SearchableSelect
+                              variant="inline"
+                              value={l.assignedAgent || ""}
+                              onChange={(v) => reassignLead(l.id, v)}
+                              options={assignedOptions}
+                              placeholder="—"
+                              searchPlaceholder="Search agents..."
+                              panelWidth={176}
+                              className="max-w-[140px] text-slate-700"
+                            />
                           </td>
                         )}
                         {visibleColumns.date && <td className="px-5 py-3.5 whitespace-nowrap">{formatDateTime(l.createdAtStr)}</td>}
@@ -2073,43 +1516,14 @@ export default function DataCallingPage() {
               </table>
             </div>
 
-            {/* Table Footer / Pagination Controls */}
-            <div className="px-5 py-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3 text-[11px] text-slate-500 font-medium">
-              <span className="font-bold text-slate-700">{filteredLeads.length} Rows</span>
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-1.5">
-                  <span>Rows per page:</span>
-                  <select
-                    value={rowsPerPage}
-                    onChange={(e) => { setRowsPerPage(Number(e.target.value)); setCurrentPage(1); }}
-                    className="bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5 text-xs font-semibold text-slate-700 focus:outline-none"
-                  >
-                    {[10, 25, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
-                  </select>
-                </div>
-                <span>
-                  {filteredLeads.length === 0
-                    ? "0-0 of 0"
-                    : `${(currentPageClamped - 1) * rowsPerPage + 1}-${Math.min(currentPageClamped * rowsPerPage, filteredLeads.length)} of ${filteredLeads.length}`}
-                </span>
-                <div className="flex items-center gap-1 text-slate-400">
-                  <button
-                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                    disabled={currentPageClamped <= 1}
-                    className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed text-slate-600"
-                  >
-                    ‹
-                  </button>
-                  <button
-                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                    disabled={currentPageClamped >= totalPages}
-                    className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed text-slate-600"
-                  >
-                    ›
-                  </button>
-                </div>
-              </div>
-            </div>
+            <TablePagination
+              totalRows={filteredLeads.length}
+              page={currentPageClamped}
+              rowsPerPage={rowsPerPage}
+              onPageChange={setCurrentPage}
+              onRowsPerPageChange={setRowsPerPage}
+              rowLabel="Lead"
+            />
           </div>
         </>
       )}
@@ -2237,55 +1651,14 @@ export default function DataCallingPage() {
               {/* Select Property */}
               <div className="space-y-1.5">
                 <label className="block text-sm font-bold text-slate-800">Select Property</label>
-                <button
-                  ref={propertyBtnRef}
-                  type="button"
-                  onClick={() => openPositionedMenu(propertyBtnRef, setPropertyDropdownPos, setPropertyDropdownOpen, "left", 400)}
-                  className="w-full flex items-center justify-between border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm text-left hover:bg-slate-50 transition-colors"
-                >
-                  <span className={`truncate ${selectedPropertyLabel ? "text-slate-800 font-semibold" : "text-slate-400"}`}>
-                    {selectedPropertyLabel || "Select property"}
-                  </span>
-                  <ChevronDown className={`h-4 w-4 text-slate-400 shrink-0 transition-transform ${propertyDropdownOpen ? "rotate-180" : ""}`} />
-                </button>
-                {propertyDropdownOpen && propertyDropdownPos && createPortal(
-                  <>
-                    <div className="fixed inset-0 z-[110]" onClick={() => setPropertyDropdownOpen(false)} />
-                    <div
-                      className="fixed z-[120] w-[400px] max-w-[calc(100vw-2rem)] bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden"
-                      style={{ top: propertyDropdownPos.top, left: propertyDropdownPos.left }}
-                    >
-                      <div className="flex items-center gap-2 px-3.5 py-2 border-b border-slate-100">
-                        <Search className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                        <input
-                          autoFocus
-                          value={propertySearch}
-                          onChange={(e) => setPropertySearch(e.target.value)}
-                          placeholder="Search property..."
-                          className="w-full text-sm focus:outline-none"
-                        />
-                      </div>
-                      <div className="max-h-56 overflow-y-auto py-1">
-                        {filteredAssignProperties.length === 0 ? (
-                          <div className="px-3.5 py-3 text-xs text-slate-400 italic">No properties found</div>
-                        ) : (
-                          filteredAssignProperties.map(p => (
-                            <label key={p.id} className="flex items-center gap-2.5 px-3.5 py-2 text-sm text-slate-700 font-medium hover:bg-slate-50 cursor-pointer transition-colors">
-                              <input
-                                type="checkbox"
-                                checked={assignSelectedPropertyIds.has(p.id)}
-                                onChange={() => togglePropertySelection(p.id)}
-                                className="h-3.5 w-3.5 rounded border-slate-300 text-[#0B1E6E] focus:ring-0 focus:ring-offset-0"
-                              />
-                              {p.name}
-                            </label>
-                          ))
-                        )}
-                      </div>
-                    </div>
-                  </>,
-                  document.body
-                )}
+                <SearchableMultiSelect
+                  variant="field"
+                  selected={Array.from(assignSelectedPropertyIds)}
+                  onChange={changePropertySelection}
+                  options={properties.map(p => ({ value: p.id, label: p.name }))}
+                  placeholder="Select property"
+                  searchPlaceholder="Search property..."
+                />
               </div>
 
               {/* Select Assignee — locked until at least one property is picked */}
@@ -2293,61 +1666,14 @@ export default function DataCallingPage() {
                 <label className="block text-sm font-bold text-slate-800">
                   {assignFlowMode === "reshuffle" ? "Select Reshuffle Assignee" : "Select Assignee"}
                 </label>
-                <button
-                  ref={assigneeBtnRef}
-                  type="button"
+                <SearchableSelect
+                  value={assignSelectedAssigneeId}
+                  onChange={setAssignSelectedAssigneeId}
+                  options={eligibleAssignees.map(u => ({ value: u.id, label: u.name }))}
                   disabled={assignSelectedPropertyIds.size === 0}
-                  onClick={() => openPositionedMenu(assigneeBtnRef, setAssigneeDropdownPos, setAssigneeDropdownOpen, "left", 400)}
-                  className={`w-full flex items-center justify-between border rounded-xl px-3.5 py-2.5 text-sm text-left transition-colors ${
-                    assignSelectedPropertyIds.size === 0
-                      ? "border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed"
-                      : "border-slate-300 hover:bg-slate-50"
-                  }`}
-                >
-                  <span className={`truncate ${selectedAssigneeName ? "text-slate-800 font-semibold" : "text-slate-400"}`}>
-                    {selectedAssigneeName || "Select Member"}
-                  </span>
-                  <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${assigneeDropdownOpen ? "rotate-180" : ""} ${assignSelectedPropertyIds.size === 0 ? "text-slate-300" : "text-slate-400"}`} />
-                </button>
-                {assigneeDropdownOpen && assigneeDropdownPos && assignSelectedPropertyIds.size > 0 && createPortal(
-                  <>
-                    <div className="fixed inset-0 z-[110]" onClick={() => setAssigneeDropdownOpen(false)} />
-                    <div
-                      className="fixed z-[120] w-[400px] max-w-[calc(100vw-2rem)] bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden"
-                      style={{ top: assigneeDropdownPos.top, left: assigneeDropdownPos.left }}
-                    >
-                      <div className="flex items-center gap-2 px-3.5 py-2 border-b border-slate-100">
-                        <Search className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                        <input
-                          autoFocus
-                          value={assigneeSearch}
-                          onChange={(e) => setAssigneeSearch(e.target.value)}
-                          placeholder="Search assignee..."
-                          className="w-full text-sm focus:outline-none"
-                        />
-                      </div>
-                      <div className="max-h-56 overflow-y-auto py-1 text-sm font-semibold">
-                        {eligibleAssignees.length === 0 ? (
-                          <div className="px-3.5 py-3 text-xs text-slate-400 italic font-normal">No connected assignees found</div>
-                        ) : (
-                          eligibleAssignees.map(u => (
-                            <button
-                              key={u.id}
-                              type="button"
-                              onClick={() => { setAssignSelectedAssigneeId(u.id); setAssigneeDropdownOpen(false); }}
-                              className={`w-full text-left px-3.5 py-2 transition-colors truncate ${
-                                assignSelectedAssigneeId === u.id ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"
-                              }`}
-                            >
-                              {u.name}
-                            </button>
-                          ))
-                        )}
-                      </div>
-                    </div>
-                  </>,
-                  document.body
-                )}
+                  placeholder="Select Member"
+                  searchPlaceholder="Search assignee..."
+                />
               </div>
             </div>
             <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100">
@@ -2414,12 +1740,11 @@ export default function DataCallingPage() {
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1">
                       <label className="block text-[11px] font-bold text-slate-700">Next Call Date</label>
-                      <input
-                        type="date"
+                      <DatePicker
                         value={rnrDate}
-                        min={new Date().toISOString().split("T")[0]}
-                        onChange={(e) => { setRnrDate(e.target.value); setPendingActionError(null); }}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:bg-white focus:border-[#0B1E6E]"
+                        minDate={todayIso()}
+                        onChange={(v) => { setRnrDate(v); setPendingActionError(null); }}
+                        className="w-full flex items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:bg-white focus:border-[#0B1E6E]"
                       />
                     </div>
                     <div className="space-y-1">

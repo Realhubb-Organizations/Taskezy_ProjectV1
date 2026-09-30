@@ -1,13 +1,13 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import { Search, ChevronDown, Copy, Check, X } from "lucide-react";
+import React, { useEffect, useMemo, useState } from "react";
+import { Search, Copy, Check, X } from "lucide-react";
 import { Lead, FollowupCall, LeadStatus } from "@/context/AppContext";
 import { STATUS_OPTIONS } from "@/lib/leadStatusMapping";
 import { buildSalesPendingTasks, PendingTask, TaskBucket } from "@/lib/salesPendingTasks";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
-import { useCloseOnScroll } from "@/lib/useCloseOnScroll";
+import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
+import TablePagination, { usePagination } from "@/components/ui/TablePagination";
 
 // Row colors per the sales-dashboard design: missed (no action taken),
 // pending (due now — becomes missed if not acted on within 10 min),
@@ -59,16 +59,6 @@ export default function SalesPendingTasksTable({
   const [searchOpen, setSearchOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const [bucketFilter, setBucketFilter] = useState<TaskBucket | null>(null);
-  const [statusMenuPos, setStatusMenuPos] = useState<{ top: number; left: number } | null>(null);
-  const [rowMenu, setRowMenu] = useState<{ taskId: string; top: number; left: number } | null>(null);
-  const [rowMenuSearch, setRowMenuSearch] = useState("");
-  const [statusMenuSearch, setStatusMenuSearch] = useState("");
-  const statusMenuRef = useRef<HTMLDivElement>(null);
-  const rowMenuRef = useRef<HTMLDivElement>(null);
-  // Both menus are fixed-position portals — close them when the page or the
-  // table scrolls rather than leaving them floating in place.
-  useCloseOnScroll(!!statusMenuPos, () => setStatusMenuPos(null), statusMenuRef);
-  useCloseOnScroll(!!rowMenu, () => setRowMenu(null), rowMenuRef);
   const [copied, setCopied] = useState<string | null>(null);
 
   const tasks = useMemo(() => {
@@ -76,15 +66,23 @@ export default function SalesPendingTasksTable({
     return taskFilter ? all.filter(taskFilter) : all;
   }, [leads, followupCalls, now, taskFilter]);
   const statusOptions = useMemo(() => Array.from(new Set(tasks.map(t => t.status))), [tasks]);
-  const filteredStatusOptions = statusOptions.filter(o => o.toLowerCase().includes(statusMenuSearch.trim().toLowerCase()));
 
-  const visibleTasks = tasks.filter(t => {
+  const visibleTasks = useMemo(() => tasks.filter(t => {
     const q = search.trim().toLowerCase();
     const matchesSearch = !q || t.name.toLowerCase().includes(q) || t.phone.includes(q);
     const matchesStatus = statusFilter.length === 0 || statusFilter.includes(t.status);
     const matchesBucket = !bucketFilter || t.bucket === bucketFilter;
     return matchesSearch && matchesStatus && matchesBucket;
-  });
+  }), [tasks, search, statusFilter, bucketFilter]);
+
+  // Paged here (not by the pages using it) so the sales dashboard and the
+  // admin/manager per-agent task page both get it. Search, status and legend
+  // filters jump back to page 1.
+  const { pageRows, paginationProps } = usePagination(
+    visibleTasks,
+    10,
+    JSON.stringify([search, statusFilter, bucketFilter])
+  );
 
   const bucketCounts = tasks.reduce<Record<TaskBucket, number>>(
     (acc, t) => ({ ...acc, [t.bucket]: acc[t.bucket] + 1 }),
@@ -100,66 +98,20 @@ export default function SalesPendingTasksTable({
     });
   };
 
+  // Per-row status editor — only for tasks tied to a real lead.
   const renderStatusCell = (t: PendingTask) => {
     if (!t.leadId) return <span className="font-bold text-slate-900">{t.status}</span>;
-    const isOpen = rowMenu?.taskId === t.id;
-    const allOptions: string[] = STATUS_OPTIONS.includes(t.status as LeadStatus) ? STATUS_OPTIONS : [t.status, ...STATUS_OPTIONS];
-    const query = rowMenuSearch.trim().toLowerCase();
-    const options = query ? allOptions.filter(s => s.toLowerCase().includes(query)) : allOptions;
+    const options: string[] = STATUS_OPTIONS.includes(t.status as LeadStatus) ? STATUS_OPTIONS : [t.status, ...STATUS_OPTIONS];
     return (
-      <>
-        <button
-          type="button"
-          onClick={(e) => {
-            const rect = e.currentTarget.getBoundingClientRect();
-            const panelWidth = 176;
-            setRowMenuSearch("");
-            setRowMenu(isOpen ? null : { taskId: t.id, top: rect.bottom + 4, left: Math.max(8, Math.min(rect.left, window.innerWidth - panelWidth - 8)) });
-          }}
-          className="inline-flex items-center gap-1 font-bold text-slate-900 hover:text-[#0B1E6E] max-w-full"
-        >
-          <span className="truncate">{t.status}</span>
-          <ChevronDown className={`h-3.5 w-3.5 shrink-0 transition-transform ${isOpen ? "rotate-180" : ""}`} />
-        </button>
-        {isOpen && rowMenu && createPortal(
-          <>
-            <div className="fixed inset-0 z-[60]" onClick={() => setRowMenu(null)} />
-            <div ref={rowMenuRef} className="fixed z-[70] w-44 bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden" style={{ top: rowMenu.top, left: rowMenu.left }}>
-              <div className="p-1.5 border-b border-slate-100">
-                <div className="relative">
-                  <Search className="h-3 w-3 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2" />
-                  <input
-                    autoFocus
-                    value={rowMenuSearch}
-                    onChange={(e) => setRowMenuSearch(e.target.value)}
-                    placeholder="Search status..."
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-6 pr-2 py-1 text-[11px] font-semibold text-slate-700 focus:outline-none focus:border-[#0B1E6E]"
-                  />
-                </div>
-              </div>
-              <div className="max-h-56 overflow-y-auto py-1">
-                {options.length === 0 ? (
-                  <p className="px-3 py-2 text-[11px] text-slate-400 italic">No matching status</p>
-                ) : (
-                  options.map(st => (
-                    <button
-                      key={st}
-                      type="button"
-                      onClick={() => { onStatusChange(t.leadId!, st as LeadStatus); setRowMenu(null); }}
-                      className={`w-full text-left px-3 py-1.5 text-xs font-semibold transition-colors ${
-                        t.status === st ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"
-                      }`}
-                    >
-                      {st}
-                    </button>
-                  ))
-                )}
-              </div>
-            </div>
-          </>,
-          document.body
-        )}
-      </>
+      <SearchableSelect
+        variant="inline"
+        options={options}
+        value={t.status}
+        onChange={(v) => onStatusChange(t.leadId!, v as LeadStatus)}
+        searchPlaceholder="Search status..."
+        panelWidth={176}
+        className="max-w-full text-slate-900"
+      />
     );
   };
 
@@ -243,64 +195,15 @@ export default function SalesPendingTasksTable({
               </th>
               <th className="px-4 py-2.5 whitespace-nowrap border-b border-slate-200 sticky top-0 z-10 bg-white">Email</th>
               <th className="px-4 py-2.5 border-b border-slate-200 sticky top-0 z-10 bg-white">
-                <button
-                  onClick={(e) => {
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    setStatusMenuSearch("");
-                    setStatusMenuPos(p => (p ? null : { top: rect.bottom + 6, left: Math.max(8, Math.min(rect.left, window.innerWidth - 208 - 8)) }));
-                  }}
-                  className="flex items-center gap-1.5 hover:text-brand-700 whitespace-nowrap"
-                >
-                  Status
-                  <ChevronDown className="h-3 w-3" />
-                  {statusFilter.length > 0 && (
-                    <span className="text-[9px] bg-brand-50 text-brand-700 rounded-full px-1.5 py-0.5 font-bold">{statusFilter.length}</span>
-                  )}
-                </button>
-                {statusMenuPos && createPortal(
-                  <>
-                    <div className="fixed inset-0 z-[60]" onClick={() => setStatusMenuPos(null)} />
-                    <div ref={statusMenuRef} className="fixed z-[70] w-52 bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden" style={{ top: statusMenuPos.top, left: statusMenuPos.left }}>
-                      <div className="p-1.5 border-b border-slate-100">
-                        <div className="relative">
-                          <Search className="h-3 w-3 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2" />
-                          <input
-                            autoFocus
-                            value={statusMenuSearch}
-                            onChange={(e) => setStatusMenuSearch(e.target.value)}
-                            placeholder="Search status..."
-                            className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-6 pr-2 py-1 text-[11px] font-semibold text-slate-700 focus:outline-none focus:border-[#0B1E6E]"
-                          />
-                        </div>
-                      </div>
-                      <div className="max-h-56 overflow-y-auto py-1">
-                      {statusOptions.length === 0 ? (
-                        <p className="px-3 py-2 text-xs text-slate-400 italic font-normal">No data yet</p>
-                      ) : filteredStatusOptions.length === 0 ? (
-                        <p className="px-3 py-2 text-xs text-slate-400 italic font-normal">No matching status</p>
-                      ) : (
-                        filteredStatusOptions.map(opt => (
-                          <label key={opt} className="flex items-center gap-2 px-3 py-1.5 text-xs font-normal text-slate-700 hover:bg-slate-50 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={statusFilter.includes(opt)}
-                              onChange={() => setStatusFilter(f => (f.includes(opt) ? f.filter(v => v !== opt) : [...f, opt]))}
-                            />
-                            {opt}
-                          </label>
-                        ))
-                      )}
-                      </div>
-                      {statusFilter.length > 0 && (
-                        <div className="border-t border-slate-100 px-3 py-1.5 flex justify-between items-center text-[11px]">
-                          <span className="text-slate-500 font-semibold">{statusFilter.length} selected</span>
-                          <button onClick={() => setStatusFilter([])} className="font-bold text-blue-600 hover:underline">Clear</button>
-                        </div>
-                      )}
-                    </div>
-                  </>,
-                  document.body
-                )}
+                <SearchableMultiSelect
+                  variant="inline"
+                  label="Status"
+                  options={statusOptions}
+                  selected={statusFilter}
+                  onChange={setStatusFilter}
+                  searchPlaceholder="Search status..."
+                  panelWidth={208}
+                />
               </th>
               <th className="px-4 py-2.5 whitespace-nowrap border-b border-slate-200 sticky top-0 z-10 bg-white">Feedback</th>
             </tr>
@@ -319,7 +222,7 @@ export default function SalesPendingTasksTable({
                 </td>
               </tr>
             ) : (
-              visibleTasks.map(t => {
+              pageRows.map(t => {
                 const cell = `py-3.5 align-middle border-y ${BUCKET_STYLES[t.bucket].row}`;
                 return (
                   <tr key={t.id}>
@@ -371,6 +274,8 @@ export default function SalesPendingTasksTable({
           </tbody>
         </table>
       </div>
+
+      <TablePagination {...paginationProps} rowLabel="Task" />
     </div>
   );
 }

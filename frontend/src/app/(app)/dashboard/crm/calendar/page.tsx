@@ -6,6 +6,7 @@ import { useApp, CalendarEvent, CalendarEventType } from "@/context/AppContext";
 import MonthCalendar from "@/components/calendar/MonthCalendar";
 import { CalendarDays, MapPin, PhoneCall, Handshake, FileSignature, LucideIcon } from "lucide-react";
 import { CardListSkeleton } from "@/components/ui/Skeletons";
+import TablePagination, { usePagination } from "@/components/ui/TablePagination";
 
 const TYPE_META: Record<string, { label: string; color: string; icon: LucideIcon }> = {
   SITE_VISIT: { label: "Site Visit", color: "bg-blue-500", icon: MapPin },
@@ -25,6 +26,8 @@ function CRMCalendarContent() {
   const dayEvents = crmEvents
     .filter(e => e.date === selectedDate)
     .sort((a, b) => (a.time || "").localeCompare(b.time || ""));
+  // A busy day can hold any number of events — page them, back to page 1 on a new date.
+  const dayEventsPagination = usePagination(dayEvents, 10, selectedDate);
 
   const handleEventClick = (e: CalendarEvent) => {
     if (e.leadId) router.push(`/dashboard/crm?openLead=${e.leadId}`);
@@ -69,7 +72,7 @@ function CRMCalendarContent() {
             <p className="text-[11px] text-slate-400 italic py-4 text-center">No scheduled activity on this date.</p>
           ) : (
             <div className="space-y-2 max-h-[26rem] overflow-y-auto pr-1">
-              {dayEvents.map(e => {
+              {dayEventsPagination.pageRows.map(e => {
                 const meta = TYPE_META[e.type as CalendarEventType] || TYPE_META.FOLLOWUP;
                 const Icon = meta.icon;
                 return (
@@ -96,6 +99,16 @@ function CRMCalendarContent() {
                 );
               })}
             </div>
+          )}
+          {dayEvents.length > 0 && (
+            <TablePagination
+              totalRows={dayEvents.length}
+              page={dayEventsPagination.page}
+              rowsPerPage={dayEventsPagination.rowsPerPage}
+              onPageChange={dayEventsPagination.setPage}
+              rowLabel="Event"
+              className="!px-0 !pb-0"
+            />
           )}
         </div>
       </div>

@@ -1,17 +1,13 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import { ChevronDown, Search } from "lucide-react";
+import React, { useEffect, useMemo, useState } from "react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine } from "recharts";
 import { Lead, FollowupCall } from "@/context/AppContext";
-import { buildSalesPendingTasks, PendingTask, TaskBucket } from "@/lib/salesPendingTasks";
-import { useCloseOnScroll } from "@/lib/useCloseOnScroll";
+import { buildSalesPendingTasks, PendingTask } from "@/lib/salesPendingTasks";
+import { SearchableMultiSelect } from "@/components/ui/SearchableDropdown";
+import { TAB_BUCKETS, TeamTaskTab } from "@/components/dashboard/TeamTasksTable";
 
 const LINE_COLOR = "#6D3FD9";
-
-const BUCKET_LABELS: Record<TaskBucket, string> = { missed: "Missed", pending: "Pending", upcoming: "Upcoming" };
-const TASK_STATUSES = Object.values(BUCKET_LABELS);
 
 // Trend window: the last 30 days through the next 7, by task due date.
 const DAYS_BACK = 30;
@@ -43,156 +39,79 @@ const wedgePath = (start: number, end: number, cx = 110, cy = 110, r = 112) => {
 const SLICES_BY_SIZE = IMAGE_SLICES.map((s, i) => ({ ...s, index: i })).sort((a, b) => (b.end - b.start) - (a.end - a.start));
 
 interface TaskFilter {
-  agent: string;
-  statuses: string[]; // any mix of task statuses (Missed/Pending/Upcoming) and lead statuses
+  agents: string[]; // empty means every agent
+  statuses: string[]; // task types, the same values the table's Task Type filter lists
 }
 
-// Within a group the selected values are OR'd; task status and lead status
-// are AND'd with each other (e.g. "Missed" + "RNR" = missed RNR tasks).
-const filterTasks = (tasks: PendingTask[], { agent, statuses }: TaskFilter) => {
-  const taskStatuses = statuses.filter(s => TASK_STATUSES.includes(s));
-  const leadStatuses = statuses.filter(s => !TASK_STATUSES.includes(s));
+// Selected agents and task types are each OR'd; empty means all.
+const filterTasks = (tasks: PendingTask[], { agents, statuses }: TaskFilter) => {
+  const agentKeys = agents.map(a => a.trim().toLowerCase());
   return tasks.filter(t =>
-    (!agent || t.assignedTo.trim().toLowerCase() === agent.trim().toLowerCase()) &&
-    (taskStatuses.length === 0 || taskStatuses.includes(BUCKET_LABELS[t.bucket])) &&
-    (leadStatuses.length === 0 || leadStatuses.includes(t.status))
+    (agentKeys.length === 0 || agentKeys.includes(t.assignedTo.trim().toLowerCase())) &&
+    (statuses.length === 0 || statuses.includes(t.taskType))
   );
 };
 
-const menuPosition = (el: HTMLElement, width: number) => {
-  const rect = el.getBoundingClientRect();
-  return { top: rect.bottom + 4, left: Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8)) };
-};
-
-// Compact white-panel dropdown matching the app's other portal menus (a
-// native <select> popup renders dark on macOS/Chrome and clashes).
-function MiniSelect({ value, options, allLabel, onChange }: { value: string; options: string[]; allLabel: string; onChange: (v: string) => void }) {
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
-  useCloseOnScroll(!!pos, () => setPos(null), panelRef);
-  const width = 176;
+// Agent + Status filters shown in each card's header.
+function CardFilters({ filter, agents, taskTypes, onChange }: {
+  filter: TaskFilter;
+  agents: string[];
+  taskTypes: string[];
+  onChange: (f: TaskFilter) => void;
+}) {
   return (
-    <>
-      <button
-        onClick={(e) => { const p = menuPosition(e.currentTarget, width); setPos(prev => (prev ? null : p)); }}
-        className="inline-flex items-center gap-1.5 border border-slate-200 rounded-md px-2 py-1 text-[10px] font-semibold text-slate-600 hover:bg-slate-50 max-w-[140px]"
-      >
-        <span className="truncate">{value || allLabel}</span>
-        <ChevronDown className="h-3 w-3 shrink-0 text-slate-400" />
-      </button>
-      {pos && createPortal(
-        <>
-          <div className="fixed inset-0 z-[60]" onClick={() => setPos(null)} />
-          <div ref={panelRef} className="fixed z-[70] bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 max-h-60 overflow-y-auto" style={{ top: pos.top, left: pos.left, width }}>
-            {["", ...options].map(opt => (
-              <button
-                key={opt || "__all"}
-                onClick={() => { onChange(opt); setPos(null); }}
-                className={`w-full text-left px-3 py-1.5 text-xs font-semibold truncate transition-colors ${
-                  value === opt ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"
-                }`}
-              >
-                {opt || allLabel}
-              </button>
-            ))}
-          </div>
-        </>,
-        document.body
-      )}
-    </>
+    <div className="flex items-center gap-2">
+      <SearchableMultiSelect
+        options={agents}
+        selected={filter.agents}
+        onChange={(next) => onChange({ ...filter, agents: next })}
+        placeholder="All Agents"
+        searchPlaceholder="Search agent..."
+        align="right"
+        panelWidth={200}
+      />
+      <SearchableMultiSelect
+        label="Status"
+        options={taskTypes}
+        selected={filter.statuses}
+        onChange={(next) => onChange({ ...filter, statuses: next })}
+        searchPlaceholder="Search status..."
+        align="right"
+        panelWidth={220}
+      />
+    </div>
   );
 }
 
-// Searchable multi-select for Status, grouped into task status and lead status.
-function StatusMultiSelect({ selected, leadStatuses, onChange }: { selected: string[]; leadStatuses: string[]; onChange: (v: string[]) => void }) {
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
-  const [query, setQuery] = useState("");
-  const panelRef = useRef<HTMLDivElement>(null);
-  useCloseOnScroll(!!pos, () => setPos(null), panelRef);
-  const width = 220;
-  const q = query.trim().toLowerCase();
-  const groups = [
-    { label: "Task status", options: TASK_STATUSES },
-    { label: "Lead status", options: leadStatuses }
-  ].map(g => ({ ...g, options: g.options.filter(o => !q || o.toLowerCase().includes(q)) })).filter(g => g.options.length > 0);
-
-  const toggle = (opt: string) => onChange(selected.includes(opt) ? selected.filter(s => s !== opt) : [...selected, opt]);
-
-  return (
-    <>
-      <button
-        onClick={(e) => { const p = menuPosition(e.currentTarget, width); setQuery(""); setPos(prev => (prev ? null : p)); }}
-        className={`inline-flex items-center gap-1.5 border rounded-md px-2 py-1 text-[10px] font-semibold hover:bg-slate-50 ${
-          selected.length ? "border-blue-300 text-blue-700" : "border-slate-200 text-slate-600"
-        }`}
-      >
-        Status
-        {selected.length > 0 && <span className="bg-blue-600 text-white rounded-full px-1.5 leading-4">{selected.length}</span>}
-        <ChevronDown className="h-3 w-3 shrink-0 text-slate-400" />
-      </button>
-      {pos && createPortal(
-        <>
-          <div className="fixed inset-0 z-[60]" onClick={() => setPos(null)} />
-          <div ref={panelRef} className="fixed z-[70] bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden" style={{ top: pos.top, left: pos.left, width }}>
-            <div className="p-1.5 border-b border-slate-100">
-              <div className="relative">
-                <Search className="h-3 w-3 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2" />
-                <input
-                  autoFocus
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search status..."
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-6 pr-2 py-1 text-[11px] font-semibold text-slate-700 focus:outline-none focus:border-[#0B1E6E]"
-                />
-              </div>
-            </div>
-            <div className="max-h-64 overflow-y-auto py-1">
-              {groups.length === 0 ? (
-                <p className="px-3 py-2 text-[11px] text-slate-400 italic">No matching status</p>
-              ) : (
-                groups.map(g => (
-                  <div key={g.label}>
-                    <p className="px-3 pt-1.5 pb-0.5 text-[9px] font-extrabold uppercase tracking-wide text-slate-400">{g.label}</p>
-                    {g.options.map(opt => (
-                      <label key={opt} className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer">
-                        <input type="checkbox" checked={selected.includes(opt)} onChange={() => toggle(opt)} />
-                        <span className="truncate">{opt}</span>
-                      </label>
-                    ))}
-                  </div>
-                ))
-              )}
-            </div>
-            {selected.length > 0 && (
-              <div className="border-t border-slate-100 px-3 py-1.5 flex justify-between items-center text-[11px]">
-                <span className="text-slate-500 font-semibold">{selected.length} selected</span>
-                <button onClick={() => onChange([])} className="font-bold text-blue-600 hover:underline">Clear</button>
-              </div>
-            )}
-          </div>
-        </>,
-        document.body
-      )}
-    </>
-  );
-}
-
-// Admin / Manager dashboard only — the same open-task queue as the All Task
-// table above (built by salesPendingTasks.ts), charted: tasks by due date,
-// and the split by task type. Each card has its own agent + status filter.
-export default function TaskInsightsCharts({ leads, followupCalls, agents }: { leads: Lead[]; followupCalls: FollowupCall[]; agents: string[] }) {
+// Admin / Manager dashboard only — the same task queue as the table above
+// (built by salesPendingTasks.ts), limited to that table's active tab and
+// charted: tasks by due date, and the split by task type. Each card has its
+// own agent + status filter.
+export default function TaskInsightsCharts({
+  leads,
+  followupCalls,
+  agents,
+  tab
+}: {
+  leads: Lead[];
+  followupCalls: FollowupCall[];
+  agents: string[];
+  tab: TeamTaskTab;
+}) {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 30_000);
     return () => clearInterval(id);
   }, []);
 
-  const [lineFilter, setLineFilter] = useState<TaskFilter>({ agent: "", statuses: [] });
-  const [pieFilter, setPieFilter] = useState<TaskFilter>({ agent: "", statuses: [] });
+  const [lineFilter, setLineFilter] = useState<TaskFilter>({ agents: [], statuses: [] });
+  const [pieFilter, setPieFilter] = useState<TaskFilter>({ agents: [], statuses: [] });
   const [hoverSlice, setHoverSlice] = useState<number | null>(null);
 
-  const tasks = useMemo(() => buildSalesPendingTasks(leads, followupCalls, now), [leads, followupCalls, now]);
-  const leadStatuses = useMemo(() => Array.from(new Set(tasks.map(t => t.status))).sort(), [tasks]);
+  const allTasks = useMemo(() => buildSalesPendingTasks(leads, followupCalls, now), [leads, followupCalls, now]);
+  const tasks = useMemo(() => allTasks.filter(t => TAB_BUCKETS[tab].includes(t.bucket)), [allTasks, tab]);
+  // Built exactly like TeamTasksTable's Task Type options, so both list the same values.
+  const taskTypeOptions = useMemo(() => Array.from(new Set(allTasks.map(t => t.taskType))).sort(), [allTasks]);
 
   const trend = useMemo(() => {
     const filtered = filterTasks(tasks, lineFilter);
@@ -250,20 +169,17 @@ export default function TaskInsightsCharts({ leads, followupCalls, agents }: { l
 
   return (
     <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.9fr)_minmax(0,1fr)] gap-4">
-      {/* All Task — open tasks by due date */}
+      {/* All Task / Pending Task — the active tab's tasks by due date */}
       <div className={cardClass}>
         <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
           <div>
-            <h3 className="text-base font-extrabold text-slate-900">All Task</h3>
+            <h3 className="text-base font-extrabold text-slate-900">{tab === "all" ? "All Task" : "Pending Task"}</h3>
             <p className="text-[11px] text-slate-500">
-              {trend.total} open task{trend.total === 1 ? "" : "s"} by due date
+              {trend.total} {tab === "all" ? "open" : "overdue"} task{trend.total === 1 ? "" : "s"} by due date
               {trend.earlier > 0 && ` · ${trend.earlier} due before ${trend.data[0]?.label}`}
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <MiniSelect value={lineFilter.agent} options={agents} allLabel="All Agents" onChange={(agent) => setLineFilter(f => ({ ...f, agent }))} />
-            <StatusMultiSelect selected={lineFilter.statuses} leadStatuses={leadStatuses} onChange={(statuses) => setLineFilter(f => ({ ...f, statuses }))} />
-          </div>
+          <CardFilters filter={lineFilter} agents={agents} taskTypes={taskTypeOptions} onChange={setLineFilter} />
         </div>
         <ResponsiveContainer width="100%" height={300}>
           <LineChart data={trend.data} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
@@ -290,10 +206,7 @@ export default function TaskInsightsCharts({ leads, followupCalls, agents }: { l
             <h3 className="text-base font-extrabold text-slate-900">Task Type</h3>
             <p className="text-[11px] text-slate-500">{pie.total} task{pie.total === 1 ? "" : "s"}</p>
           </div>
-          <div className="flex items-center gap-2">
-            <MiniSelect value={pieFilter.agent} options={agents} allLabel="All Agents" onChange={(agent) => setPieFilter(f => ({ ...f, agent }))} />
-            <StatusMultiSelect selected={pieFilter.statuses} leadStatuses={leadStatuses} onChange={(statuses) => setPieFilter(f => ({ ...f, statuses }))} />
-          </div>
+          <CardFilters filter={pieFilter} agents={agents} taskTypes={taskTypeOptions} onChange={setPieFilter} />
         </div>
         {pie.total === 0 ? (
           <div className="h-[300px] flex items-center justify-center text-xs text-slate-400 italic">

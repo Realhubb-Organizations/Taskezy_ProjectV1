@@ -5,10 +5,10 @@ import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useApp, Lead, AdSpendRecord } from "@/context/AppContext";
 import { computeCPL } from "@/lib/reportMetrics";
-import { WhatsAppIcon, CallIcon, platformFromText } from "@/components/icons/ContactIcons";
+import { WhatsAppIcon, CallIcon, PlatformLabel, platformFromText } from "@/components/icons/ContactIcons";
+import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
 import {
   ChevronDown,
-  Calendar,
   Search,
   ChevronRight,
   CheckCircle,
@@ -27,6 +27,8 @@ import {
 } from "lucide-react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine } from "recharts";
 import { LineSkeleton, TableRowsSkeleton, CardListSkeleton } from "@/components/ui/Skeletons";
+import TablePagination, { usePagination } from "@/components/ui/TablePagination";
+import DateRangePicker from "@/components/ui/DateRangePicker";
 
 import {
   CampaignItem,
@@ -155,123 +157,6 @@ const STATUS_DEFAULT_VISIBLE_COLUMNS: Record<StatusColumnKey, boolean> = {
   siteVisits: true, eoi: false, booked: false, dead: true, rnr: true, lowBudget: true, otherReq: false, cancelled: false
 };
 
-// The custom date-range calendar pill — used both by the Campaigns tab's
-// toolbar and the Analytics tab's Property/Status toolbar, so both control
-// the exact same underlying date filter instead of drifting independently.
-// A top-level component (not nested inside AdminCampaignsPage) so each
-// rendered instance keeps its own open/position state across re-renders.
-function CampaignDateRangePicker({
-  label,
-  customRangeStartDraft,
-  customRangeEndDraft,
-  onStartDraftChange,
-  onEndDraftChange,
-  onOpen,
-  onReset,
-  onApply,
-  canApply
-}: {
-  label: string;
-  customRangeStartDraft: string;
-  customRangeEndDraft: string;
-  onStartDraftChange: (v: string) => void;
-  onEndDraftChange: (v: string) => void;
-  onOpen: () => void;
-  onReset: () => void;
-  onApply: () => void;
-  canApply: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
-  const btnRef = useRef<HTMLButtonElement>(null);
-
-  // The popover's position is a snapshot taken once on click, not re-measured
-  // continuously — so if the page scrolls while it's open, the button moves
-  // but the fixed-position popover doesn't, leaving it stranded. Closing on
-  // any scroll (capture: true catches scroll on nested containers too, since
-  // scroll events don't bubble) is simpler and safer than re-tracking position.
-  useEffect(() => {
-    if (!open) return;
-    const close = () => setOpen(false);
-    window.addEventListener("scroll", close, true);
-    return () => window.removeEventListener("scroll", close, true);
-  }, [open]);
-
-  return (
-    <div className="relative">
-      <button
-        ref={btnRef}
-        type="button"
-        onClick={() => {
-          const rect = btnRef.current?.getBoundingClientRect();
-          if (rect) {
-            const panelWidth = 260;
-            const left = Math.max(8, Math.min(rect.right - panelWidth, window.innerWidth - panelWidth - 8));
-            setPos({ top: rect.bottom + 6, left });
-          }
-          onOpen();
-          setOpen(o => !o);
-        }}
-        className="flex items-center gap-2 bg-white border border-slate-300/80 rounded-xl px-3 py-1.5 text-xs text-slate-700 font-medium shadow-2xs hover:bg-slate-50 transition-colors"
-      >
-        <Calendar className="h-3.5 w-3.5 text-blue-600" />
-        <span>{label}</span>
-      </button>
-      {open && pos && createPortal(
-        <>
-          <div className="fixed inset-0 z-[60]" onClick={() => setOpen(false)} />
-          <div
-            className="fixed z-[70] w-64 max-w-[calc(100vw-1rem)] bg-white border border-slate-200 rounded-xl shadow-lg p-4 space-y-3"
-            style={{ top: pos.top, left: pos.left }}
-          >
-            <p className="text-[11px] font-bold text-slate-700">Filter campaigns by date range</p>
-            <div className="space-y-1.5">
-              <label className="block text-[9px] font-bold text-slate-400 uppercase">Start Date</label>
-              <input
-                type="date"
-                value={customRangeStartDraft}
-                onChange={(e) => onStartDraftChange(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-700 focus:outline-none focus:border-[#0B1E6E]"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label className="block text-[9px] font-bold text-slate-400 uppercase">End Date</label>
-              <input
-                type="date"
-                value={customRangeEndDraft}
-                min={customRangeStartDraft || undefined}
-                onChange={(e) => onEndDraftChange(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-700 focus:outline-none focus:border-[#0B1E6E]"
-              />
-              {customRangeStartDraft && customRangeEndDraft && customRangeEndDraft < customRangeStartDraft && (
-                <p className="text-[10px] font-semibold text-red-500">End date can&apos;t be before the start date.</p>
-              )}
-            </div>
-            <div className="flex gap-2 pt-1">
-              <button
-                type="button"
-                onClick={() => { onReset(); setOpen(false); }}
-                className="flex-1 bg-slate-100 text-slate-600 font-bold text-[11px] py-1.5 rounded-lg hover:bg-slate-200 transition-colors"
-              >
-                Reset
-              </button>
-              <button
-                type="button"
-                onClick={() => { if (!canApply) return; onApply(); setOpen(false); }}
-                disabled={!canApply}
-                className="flex-1 bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold text-[11px] py-1.5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                Apply
-              </button>
-            </div>
-          </div>
-        </>,
-        document.body
-      )}
-    </div>
-  );
-}
-
 export default function AdminCampaignsPage() {
   const { leads, adSpendRecords, adLevelSpendRecords, followupCalls, refetchAdLevelSpend, triggerAdSpendSync, isDataLoading } = useApp();
   const router = useRouter();
@@ -299,9 +184,6 @@ export default function AdminCampaignsPage() {
   // toolbar's calendar picker (below), not offered as its own menu option
   // here, same split as the admin leads page.
   const [dateRange, setDateRange] = useState<"Today" | "Yesterday" | "This Week" | "This Month" | "All Time" | "Custom">("Today");
-  const [summaryDateMenuOpen, setSummaryDateMenuOpen] = useState(false);
-  const [summaryDateMenuPos, setSummaryDateMenuPos] = useState<{ top: number; left: number } | null>(null);
-  const summaryDateBtnRef = useRef<HTMLButtonElement>(null);
 
   // Stat card drill-down — clicking a summary card shows the underlying
   // leads it counted, same "open the respective card" pattern as the CRM
@@ -352,61 +234,22 @@ export default function AdminCampaignsPage() {
   // Table Filters & Search
   const today = new Date();
   const todayStr = today.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-  const [customRangeStartDraft, setCustomRangeStartDraft] = useState("");
-  const [customRangeEndDraft, setCustomRangeEndDraft] = useState("");
   const [appliedCustomRange, setAppliedCustomRange] = useState<{ start: string; end: string } | null>(null);
 
-  // Shared handlers for every <CampaignDateRangePicker/> instance on this
-  // page (Campaigns tab toolbar + Analytics tab toolbar) — both control the
-  // same appliedCustomRange/dateRange state so they can never disagree.
-  const dateRangePickerLabel = appliedCustomRange ? `${appliedCustomRange.start} to ${appliedCustomRange.end}` : todayStr;
-  const handleDateRangeOpen = () => {
-    setCustomRangeStartDraft(appliedCustomRange?.start || "");
-    setCustomRangeEndDraft(appliedCustomRange?.end || "");
-  };
-  const handleDateRangeStartChange = (v: string) => {
-    setCustomRangeStartDraft(v);
-    if (customRangeEndDraft && v && customRangeEndDraft < v) setCustomRangeEndDraft("");
-  };
-  const handleDateRangeEndChange = (v: string) => {
-    if (customRangeStartDraft && v && v < customRangeStartDraft) return;
-    setCustomRangeEndDraft(v);
-  };
-  const handleDateRangeReset = () => {
-    setAppliedCustomRange(null);
-    setDateRange("Today");
-    setCustomRangeStartDraft("");
-    setCustomRangeEndDraft("");
-    setCurrentPage(1);
-  };
-  const handleDateRangeApply = () => {
-    setAppliedCustomRange({ start: customRangeStartDraft, end: customRangeEndDraft });
-    setDateRange("Custom");
-    setCurrentPage(1);
-  };
-  const dateRangeCanApply = !!customRangeStartDraft && !!customRangeEndDraft && customRangeEndDraft >= customRangeStartDraft;
-
-  // Campaign Status column-header filter — a checkbox dropdown opened from
-  // the table's "Campaign Status" header, rather than a single-select pill.
-  const [selectedStatuses, setSelectedStatuses] = useState<Record<CampaignItem["status"], boolean>>({
-    Active: true, Pause: true, Stopped: true
-  });
-  const [statusColumnMenuOpen, setStatusColumnMenuOpen] = useState(false);
-  const [statusColumnMenuPos, setStatusColumnMenuPos] = useState<{ top: number; left: number } | null>(null);
-  const statusColumnBtnRef = useRef<HTMLButtonElement>(null);
-
-  const toggleStatusFilter = (s: CampaignItem["status"]) => {
-    setSelectedStatuses(prev => ({ ...prev, [s]: !prev[s] }));
+  // Shared handler for every <DateRangePicker/> instance on this page
+  // (Campaigns tab toolbar + Analytics tab toolbar) — both control the same
+  // appliedCustomRange/dateRange state so they can never disagree. Applying a
+  // range switches the preset to "Custom"; clearing it (the trigger's ×) drops
+  // back to "Today", same as the old popover's Reset.
+  const handleDateRangeChange = (v: { start: string; end: string } | null) => {
+    setAppliedCustomRange(v);
+    setDateRange(v ? "Custom" : "Today");
     setCurrentPage(1);
   };
 
-  const toggleSelectAllStatuses = () => {
-    const allOn = CAMPAIGN_STATUSES.every(s => selectedStatuses[s]);
-    const next: Record<CampaignItem["status"], boolean> = { ...selectedStatuses };
-    CAMPAIGN_STATUSES.forEach(s => { next[s] = !allOn; });
-    setSelectedStatuses(next);
-    setCurrentPage(1);
-  };
+  // Campaign Status column-header filter — a multi-select dropdown opened
+  // from the table's "Campaign Status" header. Empty = all statuses.
+  const [selectedStatuses, setSelectedStatuses] = useState<string[]>([]);
 
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -433,19 +276,6 @@ export default function AdminCampaignsPage() {
   // Pagination state
   const [rowsPerPage, setRowsPerPage] = useState(100);
   const [currentPage, setCurrentPage] = useState(1);
-
-  // Helper for portaled menus
-  const openPositionedMenu = (
-    ref: React.RefObject<HTMLButtonElement>,
-    setPos: (p: { top: number; left: number } | null) => void,
-    setOpen: (fn: (o: boolean) => boolean) => void,
-    align: "left" | "right" = "left",
-    panelWidth = 180
-  ) => {
-    const rect = ref.current?.getBoundingClientRect();
-    if (rect) setPos({ top: rect.bottom + 6, left: align === "left" ? rect.left : rect.right - panelWidth });
-    setOpen(o => !o);
-  };
 
   // Maps the "Date Range" pill's labels onto the bucket keys dateInRange
   // understands. "Custom" is handled separately via appliedCustomRange.
@@ -667,9 +497,6 @@ export default function AdminCampaignsPage() {
   const CHART_VIEW_MODES = ["Spend", "Leads", "Both"] as const;
   type ChartViewMode = typeof CHART_VIEW_MODES[number];
   const [chartViewMode, setChartViewMode] = useState<ChartViewMode>("Both");
-  const [chartViewModeMenuOpen, setChartViewModeMenuOpen] = useState(false);
-  const [chartViewModeMenuPos, setChartViewModeMenuPos] = useState<{ top: number; left: number } | null>(null);
-  const chartViewModeBtnRef = useRef<HTMLButtonElement>(null);
 
   // Clicking a top stat card both opens its drill-down (as before) and
   // switches the chart's Leads series to that same category — so the
@@ -688,9 +515,6 @@ export default function AdminCampaignsPage() {
   // (Active/Pause/Stopped, using each campaign's own real spend) — both
   // are genuine dimensions already present in the fetched data.
   const [typeGroupBy, setTypeGroupBy] = useState<"Platform" | "Status">("Platform");
-  const [typeGroupByMenuOpen, setTypeGroupByMenuOpen] = useState(false);
-  const [typeGroupByMenuPos, setTypeGroupByMenuPos] = useState<{ top: number; left: number } | null>(null);
-  const typeGroupByBtnRef = useRef<HTMLButtonElement>(null);
   const [selectedChartTypes, setSelectedChartTypes] = useState<Record<string, boolean>>({});
   const isTypeChecked = (type: string) => selectedChartTypes[type] !== false;
   const toggleChartType = (type: string) => setSelectedChartTypes(prev => ({ ...prev, [type]: !isTypeChecked(type) }));
@@ -804,12 +628,6 @@ export default function AdminCampaignsPage() {
   const [breakdownTab, setBreakdownTab] = useState<"Property" | "Status">("Property");
   // Multi-select: an empty array means "All Campaigns" (no filter applied).
   const [breakdownCampaignFilters, setBreakdownCampaignFilters] = useState<string[]>([]);
-  const toggleBreakdownCampaignFilter = (name: string) => {
-    setBreakdownCampaignFilters(prev => prev.includes(name) ? prev.filter(n => n !== name) : [...prev, name]);
-  };
-  const [breakdownCampaignMenuOpen, setBreakdownCampaignMenuOpen] = useState(false);
-  const [breakdownCampaignMenuPos, setBreakdownCampaignMenuPos] = useState<{ top: number; left: number } | null>(null);
-  const breakdownCampaignBtnRef = useRef<HTMLButtonElement>(null);
 
   // Filter button → full-height right-docked column drawer, same pattern as
   // the Campaigns tab's own Filter drawer.
@@ -841,9 +659,6 @@ export default function AdminCampaignsPage() {
   const [deepDiveSearchQuery, setDeepDiveSearchQuery] = useState("");
   const [deepDiveSearchOpen, setDeepDiveSearchOpen] = useState(false);
   const [deepDiveSourceFilters, setDeepDiveSourceFilters] = useState<string[]>([]);
-  const [deepDiveSourceMenuOpen, setDeepDiveSourceMenuOpen] = useState(false);
-  const [deepDiveSourceMenuPos, setDeepDiveSourceMenuPos] = useState<{ top: number; left: number } | null>(null);
-  const deepDiveSourceBtnRef = useRef<HTMLButtonElement>(null);
 
   // Manual "Sync" button — wakes the real Meta/Google ad-level sync jobs
   // early instead of waiting for their 6h interval. Does not bypass either
@@ -891,27 +706,18 @@ export default function AdminCampaignsPage() {
     { type: "adSetBreakdown"; campaign: CampaignItem } | { type: "qualifiedLeads"; campaign: CampaignItem } | null
   >(null);
 
-  // Every openPositionedMenu-driven dropdown snapshots its position once on
-  // click rather than tracking the button continuously, so it goes stale (and
-  // visually detaches from its button) if the page scrolls while open —
-  // closing on scroll is simpler and safer than re-measuring position live.
-  useEffect(() => {
-    const anyOpen = summaryDateMenuOpen || statusColumnMenuOpen || chartViewModeMenuOpen
-      || typeGroupByMenuOpen || breakdownCampaignMenuOpen || deepDiveSourceMenuOpen;
-    if (!anyOpen) return;
-    const closeAll = () => {
-      setSummaryDateMenuOpen(false);
-      setStatusColumnMenuOpen(false);
-      setChartViewModeMenuOpen(false);
-      setTypeGroupByMenuOpen(false);
-      setBreakdownCampaignMenuOpen(false);
-      setDeepDiveSourceMenuOpen(false);
-    };
-    window.addEventListener("scroll", closeAll, true);
-    return () => window.removeEventListener("scroll", closeAll, true);
-  }, [summaryDateMenuOpen, statusColumnMenuOpen, chartViewModeMenuOpen, typeGroupByMenuOpen, breakdownCampaignMenuOpen, deepDiveSourceMenuOpen]);
-
   const deepDiveSourceOptions = useMemo(() => Array.from(new Set(campaignsList.map(c => c.platform))), [campaignsList]);
+
+  // Property/Status breakdown's campaign filter options — one per distinct
+  // campaign name, grouped under its platform (Meta, Google, then Other).
+  const breakdownCampaignOptions = useMemo(() => {
+    const order: CampaignItem["platform"][] = ["Meta", "Google", "Other"];
+    const seen = new Set<string>();
+    return [...campaignsList]
+      .sort((a, b) => order.indexOf(a.platform) - order.indexOf(b.platform))
+      .filter(c => !seen.has(c.name) && !!seen.add(c.name))
+      .map(c => ({ value: c.name, label: c.name, group: c.platform }));
+  }, [campaignsList]);
 
   const deepDiveCampaigns = useMemo(() => {
     const q = deepDiveSearchQuery.trim().toLowerCase();
@@ -1111,17 +917,39 @@ export default function AdminCampaignsPage() {
     URL.revokeObjectURL(url);
   };
 
+  // Client-side pagination for the Analytics tab's tables (shared CRM
+  // footer). Each jumps back to page 1 when its own filters/search or the
+  // page's Date Range change.
+  const dateRangeResetKey = JSON.stringify([dateRange, appliedCustomRange]);
+  const breakdownResetKey = JSON.stringify([breakdownCampaignFilters, dateRange, appliedCustomRange]);
+  const propertyPagination = usePagination(propertyBreakdown, 10, breakdownResetKey);
+  const statusPagination = usePagination(statusDateBreakdown, 10, breakdownResetKey);
+  const deepDivePagination = usePagination(
+    deepDiveCampaigns,
+    10,
+    JSON.stringify([deepDiveSearchQuery, deepDiveSourceFilters, dateRangeResetKey])
+  );
+  const adSetDrillRows = useMemo(
+    () => (analyticsDrillView?.type === "adSetBreakdown" ? adRowsByCampaign[analyticsDrillView.campaign.name.toLowerCase()] || [] : []),
+    [analyticsDrillView, adRowsByCampaign]
+  );
+  const adSetDrillPagination = usePagination(adSetDrillRows, 10, analyticsDrillView?.campaign.id);
+  const qualifiedLeadsPagination = usePagination(
+    qualifiedLeadsDrillList,
+    25,
+    JSON.stringify([analyticsDrillView?.campaign.id, qualifiedLeadsSearchQuery])
+  );
+
   // Filtered table rows
   const filteredCampaigns = useMemo(() => {
     return campaignsList.filter(c => {
       const matchesSearch = !searchQuery || c.name.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesStatus = selectedStatuses[c.status];
+      const matchesStatus = selectedStatuses.length === 0 || selectedStatuses.includes(c.status);
       return matchesSearch && matchesStatus;
     });
   }, [campaignsList, searchQuery, selectedStatuses]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredCampaigns.length / rowsPerPage));
-  const currentPageClamped = Math.min(currentPage, totalPages);
+  const currentPageClamped = Math.min(currentPage, Math.max(1, Math.ceil(filteredCampaigns.length / rowsPerPage)));
   const paginatedCampaigns = filteredCampaigns.slice((currentPageClamped - 1) * rowsPerPage, currentPageClamped * rowsPerPage);
 
   const copyToClipboard = (field: string, value: string) => {
@@ -1175,38 +1003,13 @@ export default function AdminCampaignsPage() {
             <div className="flex items-center px-4 py-2.5 text-[11px] border-b border-slate-200/60">
               <div className="flex items-center gap-1.5 font-bold text-slate-700">
                 <span className="font-normal text-slate-500">Date Range</span>
-                <div className="relative">
-                  <button
-                    ref={summaryDateBtnRef}
-                    onClick={() => openPositionedMenu(summaryDateBtnRef, setSummaryDateMenuPos, setSummaryDateMenuOpen, "left", 140)}
-                    className="flex items-center gap-1.5 bg-white border border-slate-300/80 rounded-md px-2 py-0.5 font-black text-slate-800 text-[11px] hover:bg-slate-50 transition-colors"
-                  >
-                    {dateRange}
-                    <ChevronDown className={`h-3 w-3 text-slate-400 transition-transform ${summaryDateMenuOpen ? "rotate-180" : ""}`} />
-                  </button>
-                  {summaryDateMenuOpen && summaryDateMenuPos && createPortal(
-                    <>
-                      <div className="fixed inset-0 z-[60]" onClick={() => setSummaryDateMenuOpen(false)} />
-                      <div
-                        className="fixed z-[70] w-36 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 overflow-hidden"
-                        style={{ top: summaryDateMenuPos.top, left: summaryDateMenuPos.left }}
-                      >
-                        {(["Today", "Yesterday", "This Week", "This Month", "All Time"] as const).map(opt => (
-                          <button
-                            key={opt}
-                            onClick={() => { setDateRange(opt); setAppliedCustomRange(null); setSummaryDateMenuOpen(false); setCurrentPage(1); }}
-                            className={`w-full text-left px-3 py-1.5 text-xs font-bold transition-colors ${
-                              dateRange === opt ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"
-                            }`}
-                          >
-                            {opt}
-                          </button>
-                        ))}
-                      </div>
-                    </>,
-                    document.body
-                  )}
-                </div>
+                <SearchableSelect
+                  variant="pill"
+                  options={["Today", "Yesterday", "This Week", "This Month", "All Time"]}
+                  value={dateRange}
+                  onChange={(v) => { setDateRange(v as typeof dateRange); setAppliedCustomRange(null); setCurrentPage(1); }}
+                  panelWidth={140}
+                />
               </div>
             </div>
 
@@ -1283,8 +1086,6 @@ export default function AdminCampaignsPage() {
             const shownCount = isCampaignsTable ? shownCampaigns.length : shownLeads.length;
             const totalPages = Math.max(1, Math.ceil(shownCount / drillRowsPerPage));
             const currentPage = Math.min(drillPage, totalPages);
-            const rangeStart = shownCount === 0 ? 0 : (currentPage - 1) * drillRowsPerPage + 1;
-            const rangeEnd = Math.min(currentPage * drillRowsPerPage, shownCount);
 
             return (
               <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden animate-fade-in">
@@ -1381,46 +1182,23 @@ export default function AdminCampaignsPage() {
                     </table>
                   )}
                 </div>
-                <div className="px-5 py-3 flex flex-wrap justify-between items-center gap-3 border-t border-slate-100 text-[11px] text-slate-500 font-semibold">
-                  <span>{shownCount} Row{shownCount === 1 ? "" : "s"}</span>
-                  <div className="flex items-center gap-4">
-                    <span className="flex items-center gap-1.5">
-                      Rows per page
-                      <select
-                        value={drillRowsPerPage}
-                        onChange={(e) => {
-                          drillProgrammaticScroll.current = true;
-                          setDrillRowsPerPage(Number(e.target.value));
-                          setDrillPage(1);
-                          drillScrollRef.current?.scrollTo(0, 0);
-                          requestAnimationFrame(() => {
-                            requestAnimationFrame(() => { drillProgrammaticScroll.current = false; });
-                          });
-                        }}
-                        className="bg-slate-50 border border-slate-200 rounded px-1.5 py-1 font-bold text-slate-700 focus:outline-none"
-                      >
-                        {[8, 25, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
-                      </select>
-                    </span>
-                    <span>{rangeStart}-{rangeEnd} of {shownCount}</span>
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => goToDrillPage(currentPage - 1, totalPages)}
-                        disabled={currentPage <= 1}
-                        className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
-                      >
-                        ‹
-                      </button>
-                      <button
-                        onClick={() => goToDrillPage(currentPage + 1, totalPages)}
-                        disabled={currentPage >= totalPages}
-                        className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
-                      >
-                        ›
-                      </button>
-                    </div>
-                  </div>
-                </div>
+                <TablePagination
+                  totalRows={shownCount}
+                  page={currentPage}
+                  rowsPerPage={drillRowsPerPage}
+                  rowsPerPageOptions={[8, 25, 50, 100]}
+                  rowLabel={isCampaignsTable ? "Campaign" : "Lead"}
+                  onPageChange={(p) => goToDrillPage(p, totalPages)}
+                  onRowsPerPageChange={(n) => {
+                    drillProgrammaticScroll.current = true;
+                    setDrillRowsPerPage(n);
+                    setDrillPage(1);
+                    drillScrollRef.current?.scrollTo(0, 0);
+                    requestAnimationFrame(() => {
+                      requestAnimationFrame(() => { drillProgrammaticScroll.current = false; });
+                    });
+                  }}
+                />
               </div>
             );
           })()}
@@ -1440,7 +1218,7 @@ export default function AdminCampaignsPage() {
             </div>
 
             {analyticsDrillView.type === "adSetBreakdown" ? (() => {
-              const adRows = adRowsByCampaign[analyticsDrillView.campaign.name.toLowerCase()] || [];
+              const adRows = adSetDrillPagination.pageRows;
               return (
               <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden">
                 <div className="px-5 py-3.5 border-b border-slate-200/80">
@@ -1460,7 +1238,7 @@ export default function AdminCampaignsPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-[12px] font-medium text-slate-700">
-                      {adRows.length === 0 ? (
+                      {adSetDrillRows.length === 0 ? (
                         <tr>
                           <td className="px-5 py-3 text-slate-900 font-semibold">{analyticsDrillView.campaign.name}</td>
                           <td className="px-5 py-3"><PlatformIcon platform={analyticsDrillView.campaign.platform} /></td>
@@ -1486,10 +1264,12 @@ export default function AdminCampaignsPage() {
                     </tbody>
                   </table>
                 </div>
-                {adRows.length === 0 && (
+                {adSetDrillRows.length === 0 ? (
                   <p className="px-5 py-3 text-[11px] text-slate-400 italic border-t border-slate-100">
                     No real ad-set/ad-creative data has synced for this campaign yet. The Qualified Leads/CPL/Spend above are this campaign&apos;s real totals.
                   </p>
+                ) : (
+                  <TablePagination {...adSetDrillPagination.paginationProps} rowLabel="Ad" />
                 )}
               </div>
               );
@@ -1542,7 +1322,7 @@ export default function AdminCampaignsPage() {
                           <td colSpan={8} className="px-5 py-8 text-center text-slate-400 italic">No qualified leads found for this campaign.</td>
                         </tr>
                       ) : (
-                        qualifiedLeadsDrillList.map(l => (
+                        qualifiedLeadsPagination.pageRows.map(l => (
                           <tr key={l.id} className="hover:bg-slate-50/50 transition-colors">
                             <td className="px-5 py-3 text-slate-900 font-semibold">{l.name}</td>
                             <td className="px-5 py-3 truncate max-w-[160px]" title={l.email}>{l.email || "—"}</td>
@@ -1558,6 +1338,7 @@ export default function AdminCampaignsPage() {
                     </tbody>
                   </table>
                 </div>
+                <TablePagination {...qualifiedLeadsPagination.paginationProps} rowLabel="Lead" />
               </div>
             )}
           </div>
@@ -1569,37 +1350,14 @@ export default function AdminCampaignsPage() {
               <div className="flex items-center justify-between mb-2 gap-2">
                 <span className="text-xs font-semibold text-slate-500">Spend &amp; Leads over time</span>
                 <div className="flex items-center gap-2">
-                  <div className="relative">
-                    <button
-                      type="button"
-                      ref={chartViewModeBtnRef}
-                      onClick={() => openPositionedMenu(chartViewModeBtnRef, setChartViewModeMenuPos, setChartViewModeMenuOpen, "right", 110)}
-                      className="flex items-center gap-1.5 bg-white border border-slate-300/80 rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
-                    >
-                      {chartViewMode}
-                      <ChevronDown className={`h-3 w-3 text-slate-400 transition-transform ${chartViewModeMenuOpen ? "rotate-180" : ""}`} />
-                    </button>
-                    {chartViewModeMenuOpen && chartViewModeMenuPos && createPortal(
-                      <>
-                        <div className="fixed inset-0 z-[60]" onClick={() => setChartViewModeMenuOpen(false)} />
-                        <div
-                          className="fixed z-[70] bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 overflow-hidden text-xs font-semibold"
-                          style={{ top: chartViewModeMenuPos.top, left: chartViewModeMenuPos.left, width: 110 }}
-                        >
-                          {CHART_VIEW_MODES.map(opt => (
-                            <button
-                              key={opt}
-                              onClick={() => { setChartViewMode(opt); setChartViewModeMenuOpen(false); }}
-                              className={`w-full text-left px-3 py-1.5 transition-colors ${chartViewMode === opt ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"}`}
-                            >
-                              {opt}
-                            </button>
-                          ))}
-                        </div>
-                      </>,
-                      document.body
-                    )}
-                  </div>
+                  <SearchableSelect
+                    variant="pill"
+                    options={[...CHART_VIEW_MODES]}
+                    value={chartViewMode}
+                    onChange={(v) => setChartViewMode(v as ChartViewMode)}
+                    panelWidth={120}
+                    align="right"
+                  />
                   <span className="text-[11px] font-semibold text-amber-600 bg-amber-50 rounded-full px-2.5 py-1">{chartCategory}</span>
                 </div>
               </div>
@@ -1663,37 +1421,14 @@ export default function AdminCampaignsPage() {
 
             <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm p-4 flex flex-col">
               <div className="flex justify-end mb-3">
-                <div className="relative">
-                  <button
-                    type="button"
-                    ref={typeGroupByBtnRef}
-                    onClick={() => openPositionedMenu(typeGroupByBtnRef, setTypeGroupByMenuPos, setTypeGroupByMenuOpen, "right", 160)}
-                    className="flex items-center gap-1.5 bg-white border border-slate-300/80 rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
-                  >
-                    {typeGroupBy === "Platform" ? "Campaign Type" : "Campaign Status"}
-                    <ChevronDown className={`h-3 w-3 text-slate-400 transition-transform ${typeGroupByMenuOpen ? "rotate-180" : ""}`} />
-                  </button>
-                  {typeGroupByMenuOpen && typeGroupByMenuPos && createPortal(
-                    <>
-                      <div className="fixed inset-0 z-[60]" onClick={() => setTypeGroupByMenuOpen(false)} />
-                      <div
-                        className="fixed z-[70] w-36 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 overflow-hidden text-xs font-semibold"
-                        style={{ top: typeGroupByMenuPos.top, left: typeGroupByMenuPos.left }}
-                      >
-                        {([{ v: "Platform" as const, label: "Campaign Type" }, { v: "Status" as const, label: "Campaign Status" }]).map(opt => (
-                          <button
-                            key={opt.v}
-                            onClick={() => { setTypeGroupBy(opt.v); setSelectedChartTypes({}); setTypeGroupByMenuOpen(false); }}
-                            className={`w-full text-left px-3 py-1.5 transition-colors ${typeGroupBy === opt.v ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"}`}
-                          >
-                            {opt.label}
-                          </button>
-                        ))}
-                      </div>
-                    </>,
-                    document.body
-                  )}
-                </div>
+                <SearchableSelect
+                  variant="pill"
+                  options={[{ value: "Platform", label: "Campaign Type" }, { value: "Status", label: "Campaign Status" }]}
+                  value={typeGroupBy}
+                  onChange={(v) => { setTypeGroupBy(v as typeof typeGroupBy); setSelectedChartTypes({}); }}
+                  panelWidth={160}
+                  align="right"
+                />
               </div>
               <div className="grid grid-cols-[1fr_64px_112px] gap-x-4 items-center text-[10px] font-bold text-slate-400 uppercase pb-2 border-b border-slate-100">
                 <span>{typeGroupBy === "Platform" ? "Type" : "Status"}</span>
@@ -1780,68 +1515,20 @@ export default function AdminCampaignsPage() {
                 >
                   <Download className="h-3.5 w-3.5 text-blue-600" />
                 </button>
-                <CampaignDateRangePicker
-                  label={dateRangePickerLabel}
-                  customRangeStartDraft={customRangeStartDraft}
-                  customRangeEndDraft={customRangeEndDraft}
-                  onStartDraftChange={handleDateRangeStartChange}
-                  onEndDraftChange={handleDateRangeEndChange}
-                  onOpen={handleDateRangeOpen}
-                  onReset={handleDateRangeReset}
-                  onApply={handleDateRangeApply}
-                  canApply={dateRangeCanApply}
+                <DateRangePicker
+                  value={appliedCustomRange}
+                  onChange={handleDateRangeChange}
+                  emptyLabel={todayStr}
                 />
-                <div className="relative">
-                  <button
-                    type="button"
-                    ref={breakdownCampaignBtnRef}
-                    onClick={() => openPositionedMenu(breakdownCampaignBtnRef, setBreakdownCampaignMenuPos, setBreakdownCampaignMenuOpen, "right", 200)}
-                    className="flex items-center gap-2 bg-white border border-slate-300/80 rounded-xl px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
-                  >
-                    <span>
-                      {breakdownCampaignFilters.length === 0
-                        ? "Campaigns"
-                        : breakdownCampaignFilters.length === 1
-                          ? breakdownCampaignFilters[0]
-                          : `${breakdownCampaignFilters.length} campaigns`}
-                    </span>
-                    <ChevronDown className={`h-3.5 w-3.5 text-slate-400 transition-transform ${breakdownCampaignMenuOpen ? "rotate-180" : ""}`} />
-                  </button>
-                  {breakdownCampaignMenuOpen && breakdownCampaignMenuPos && createPortal(
-                    <>
-                      <div className="fixed inset-0 z-[60]" onClick={() => setBreakdownCampaignMenuOpen(false)} />
-                      <div
-                        data-scroll-panel="true"
-                        className="fixed z-[70] w-56 max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 text-xs font-medium"
-                        style={{ top: breakdownCampaignMenuPos.top, left: breakdownCampaignMenuPos.left }}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => setBreakdownCampaignFilters([])}
-                          className="w-full flex items-center gap-1.5 text-left px-3 py-1.5 text-slate-500 font-bold hover:bg-slate-50 border-b border-slate-100 transition-colors"
-                        >
-                          <Minus className="h-3 w-3" />
-                          All Campaigns
-                        </button>
-                        {campaignsList.map(c => (
-                          <label
-                            key={c.id}
-                            className="flex items-center gap-2 px-3 py-1.5 text-slate-700 font-semibold hover:bg-slate-50 cursor-pointer transition-colors truncate"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={breakdownCampaignFilters.includes(c.name)}
-                              onChange={() => toggleBreakdownCampaignFilter(c.name)}
-                              className="h-3.5 w-3.5 rounded border-slate-300 text-[#0B1E6E] focus:ring-0 focus:ring-offset-0 shrink-0"
-                            />
-                            <span className="truncate">{c.name}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </>,
-                    document.body
-                  )}
-                </div>
+                <SearchableMultiSelect
+                  options={breakdownCampaignOptions}
+                  selected={breakdownCampaignFilters}
+                  onChange={setBreakdownCampaignFilters}
+                  placeholder="All Campaigns"
+                  searchPlaceholder="Search campaigns..."
+                  panelWidth={240}
+                  align="right"
+                />
                 <button
                   type="button"
                   onClick={() => setIsBreakdownFilterOpen(true)}
@@ -1881,7 +1568,7 @@ export default function AdminCampaignsPage() {
                           <td colSpan={BREAKDOWN_COLUMNS.filter(c => breakdownVisibleColumns[c.key]).length || 1} className="px-5 py-8 text-center text-slate-400 italic">No campaign/ad-spend data yet.</td>
                         </tr>
                       ) : (
-                        propertyBreakdown.map(row => {
+                        propertyPagination.pageRows.map(row => {
                           const isExpanded = expandedProperties.has(row.property);
                           return (
                             <React.Fragment key={row.property}>
@@ -1980,7 +1667,7 @@ export default function AdminCampaignsPage() {
                           <td colSpan={STATUS_COLUMNS.filter(c => statusVisibleColumns[c.key]).length || 1} className="px-5 py-8 text-center text-slate-400 italic">No ad-spend data yet.</td>
                         </tr>
                       ) : (
-                        statusDateBreakdown.map(row => (
+                        statusPagination.pageRows.map(row => (
                           <tr key={row.id} className="hover:bg-slate-50/50 transition-colors">
                             {statusVisibleColumns.date && <td className="px-5 py-3 text-slate-700 whitespace-nowrap">{row.dateLabel}</td>}
                             {statusVisibleColumns.campaign && <td className="px-5 py-3 text-slate-900 font-semibold">{row.campaign}</td>}
@@ -2005,6 +1692,11 @@ export default function AdminCampaignsPage() {
                 )}
               </table>
             </div>
+            {breakdownTab === "Property" ? (
+              <TablePagination {...propertyPagination.paginationProps} rowLabel="Property" />
+            ) : (
+              <TablePagination {...statusPagination.paginationProps} rowLabel="Row" />
+            )}
           </div>
 
           {/* Filter button's column-visibility drawer for the Property/Status
@@ -2128,47 +1820,15 @@ export default function AdminCampaignsPage() {
                       )}
                     </th>
                     <th className="px-5 py-3 whitespace-nowrap">
-                      <div className="relative inline-block">
-                        <button
-                          type="button"
-                          ref={deepDiveSourceBtnRef}
-                          onClick={() => openPositionedMenu(deepDiveSourceBtnRef, setDeepDiveSourceMenuPos, setDeepDiveSourceMenuOpen, "left", 160)}
-                          className="flex items-center gap-1 hover:text-blue-600 transition-colors"
-                        >
-                          <span>Source</span>
-                          <ChevronDown className={`h-3 w-3 text-slate-800 transition-transform ${deepDiveSourceMenuOpen ? "rotate-180" : ""}`} />
-                        </button>
-                        {deepDiveSourceMenuOpen && deepDiveSourceMenuPos && createPortal(
-                          <>
-                            <div className="fixed inset-0 z-[60]" onClick={() => setDeepDiveSourceMenuOpen(false)} />
-                            <div
-                              className="fixed z-[70] w-40 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 text-xs font-medium overflow-hidden"
-                              style={{ top: deepDiveSourceMenuPos.top, left: deepDiveSourceMenuPos.left }}
-                            >
-                              <button
-                                type="button"
-                                onClick={() => setDeepDiveSourceFilters([])}
-                                className="w-full flex items-center gap-1.5 text-left px-3 py-1.5 text-slate-500 font-bold hover:bg-slate-50 border-b border-slate-100 transition-colors"
-                              >
-                                <Minus className="h-3 w-3" />
-                                All Sources
-                              </button>
-                              {deepDiveSourceOptions.map(src => (
-                                <label key={src} className="flex items-center gap-2 px-3 py-1.5 text-slate-700 font-semibold hover:bg-slate-50 cursor-pointer transition-colors">
-                                  <input
-                                    type="checkbox"
-                                    checked={deepDiveSourceFilters.includes(src)}
-                                    onChange={() => setDeepDiveSourceFilters(prev => prev.includes(src) ? prev.filter(s => s !== src) : [...prev, src])}
-                                    className="h-3.5 w-3.5 rounded border-slate-300 text-[#0B1E6E] focus:ring-0 focus:ring-offset-0"
-                                  />
-                                  {src}
-                                </label>
-                              ))}
-                            </div>
-                          </>,
-                          document.body
-                        )}
-                      </div>
+                      <SearchableMultiSelect
+                        variant="inline"
+                        label="Source"
+                        options={deepDiveSourceOptions}
+                        selected={deepDiveSourceFilters}
+                        onChange={setDeepDiveSourceFilters}
+                        renderLabel={(l) => <PlatformLabel text={l} />}
+                        panelWidth={180}
+                      />
                     </th>
                     <th className="px-5 py-3 whitespace-nowrap">Ad Set Name</th>
                     <th className="px-5 py-3 whitespace-nowrap">Ad creative Name</th>
@@ -2185,7 +1845,7 @@ export default function AdminCampaignsPage() {
                       <td colSpan={7} className="px-5 py-8 text-center text-slate-400 italic">No campaigns found matching filter.</td>
                     </tr>
                   ) : (
-                    deepDiveCampaigns.map(c => {
+                    deepDivePagination.pageRows.map(c => {
                       const adRows = adRowsByCampaign[c.name.toLowerCase()] || [];
                       const topAd = adRows[0];
                       return (
@@ -2227,6 +1887,7 @@ export default function AdminCampaignsPage() {
                 </tbody>
               </table>
             </div>
+            <TablePagination {...deepDivePagination.paginationProps} rowLabel="Campaign" />
           </div>
         </div>
         )
@@ -2235,16 +1896,10 @@ export default function AdminCampaignsPage() {
           {/* Action Toolbar (Date Picker Pill, Campaigns Dropdown, Filter Button) */}
           <div className="flex flex-wrap items-center justify-end gap-2.5 pt-1">
             {/* Date Range Picker Pill */}
-            <CampaignDateRangePicker
-              label={dateRangePickerLabel}
-              customRangeStartDraft={customRangeStartDraft}
-              customRangeEndDraft={customRangeEndDraft}
-              onStartDraftChange={handleDateRangeStartChange}
-              onEndDraftChange={handleDateRangeEndChange}
-              onOpen={handleDateRangeOpen}
-              onReset={handleDateRangeReset}
-              onApply={handleDateRangeApply}
-              canApply={dateRangeCanApply}
+            <DateRangePicker
+              value={appliedCustomRange}
+              onChange={handleDateRangeChange}
+              emptyLabel={todayStr}
             />
 
             {/* Filter Button → column-visibility Settings drawer */}
@@ -2293,50 +1948,14 @@ export default function AdminCampaignsPage() {
                     <th className="px-5 py-3.5 whitespace-nowrap">Total Leads</th>
                     {campaignVisibleColumns.status && (
                       <th className="px-5 py-3.5 whitespace-nowrap">
-                        <div className="relative inline-block">
-                          <button
-                            type="button"
-                            ref={statusColumnBtnRef}
-                            onClick={() => openPositionedMenu(statusColumnBtnRef, setStatusColumnMenuPos, setStatusColumnMenuOpen, "left", 180)}
-                            className="flex items-center gap-1 hover:text-blue-600 transition-colors"
-                          >
-                            <span>Campaign Status</span>
-                            <ChevronDown className={`h-3 w-3 text-slate-800 transition-transform ${statusColumnMenuOpen ? "rotate-180" : ""}`} />
-                          </button>
-                          {statusColumnMenuOpen && statusColumnMenuPos && createPortal(
-                            <>
-                              <div className="fixed inset-0 z-[60]" onClick={() => setStatusColumnMenuOpen(false)} />
-                              <div
-                                className="fixed z-[70] w-44 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 text-xs font-medium overflow-hidden"
-                                style={{ top: statusColumnMenuPos.top, left: statusColumnMenuPos.left }}
-                              >
-                                <button
-                                  type="button"
-                                  onClick={toggleSelectAllStatuses}
-                                  className="w-full flex items-center gap-1.5 text-left px-3 py-1.5 text-slate-500 font-bold hover:bg-slate-50 border-b border-slate-100 transition-colors"
-                                >
-                                  <Minus className="h-3 w-3" />
-                                  Select All
-                                </button>
-                                {CAMPAIGN_STATUSES.map(st => (
-                                  <label
-                                    key={st}
-                                    className="flex items-center gap-2 px-3 py-1.5 text-slate-700 font-semibold hover:bg-slate-50 cursor-pointer transition-colors"
-                                  >
-                                    <input
-                                      type="checkbox"
-                                      checked={selectedStatuses[st]}
-                                      onChange={() => toggleStatusFilter(st)}
-                                      className="h-3.5 w-3.5 rounded border-slate-300 text-[#0B1E6E] focus:ring-0 focus:ring-offset-0"
-                                    />
-                                    {st}
-                                  </label>
-                                ))}
-                              </div>
-                            </>,
-                            document.body
-                          )}
-                        </div>
+                        <SearchableMultiSelect
+                          variant="inline"
+                          label="Campaign Status"
+                          options={CAMPAIGN_STATUSES}
+                          selected={selectedStatuses}
+                          onChange={(next) => { setSelectedStatuses(next); setCurrentPage(1); }}
+                          panelWidth={180}
+                        />
                       </th>
                     )}
                     {campaignVisibleColumns.qualifiedLeads && <th className="px-5 py-3.5 whitespace-nowrap">Qualified Leads</th>}
@@ -2386,45 +2005,14 @@ export default function AdminCampaignsPage() {
             </div>
 
             {/* Table Footer / Pagination Controls */}
-            <div className="px-5 py-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3 text-[11px] text-slate-500 font-medium">
-              <span className="font-bold text-slate-700">{filteredCampaigns.length} Rows</span>
-
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-1.5">
-                  <span>Rows per page:</span>
-                  <select
-                    value={rowsPerPage}
-                    onChange={(e) => { setRowsPerPage(Number(e.target.value)); setCurrentPage(1); }}
-                    className="bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5 text-xs font-semibold text-slate-700 focus:outline-none"
-                  >
-                    {[10, 25, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
-                  </select>
-                </div>
-
-                <span>
-                  {filteredCampaigns.length === 0
-                    ? "0-0 of 0"
-                    : `${(currentPageClamped - 1) * rowsPerPage + 1}-${Math.min(currentPageClamped * rowsPerPage, filteredCampaigns.length)} of ${filteredCampaigns.length}`}
-                </span>
-
-                <div className="flex items-center gap-1 text-slate-400">
-                  <button
-                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                    disabled={currentPageClamped <= 1}
-                    className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed text-slate-600"
-                  >
-                    ‹
-                  </button>
-                  <button
-                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                    disabled={currentPageClamped >= totalPages}
-                    className="p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed text-slate-600"
-                  >
-                    ›
-                  </button>
-                </div>
-              </div>
-            </div>
+            <TablePagination
+              totalRows={filteredCampaigns.length}
+              page={currentPageClamped}
+              rowsPerPage={rowsPerPage}
+              onPageChange={setCurrentPage}
+              onRowsPerPageChange={setRowsPerPage}
+              rowLabel="Campaign"
+            />
           </div>
         </>
       )}

@@ -1,11 +1,12 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Bell, UserPlus, AlarmClock, Briefcase, DollarSign, ChevronLeft, ChevronDown, Repeat, AlertTriangle } from "lucide-react";
 import { useApp, getAvailableSystems, Notification, NotificationCategory, SystemType } from "@/context/AppContext";
 import { CardListSkeleton } from "@/components/ui/Skeletons";
+import TablePagination, { usePagination } from "@/components/ui/TablePagination";
 
 function timeAgo(iso: string): string {
   const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
@@ -38,6 +39,8 @@ function categoryIcon(category: NotificationCategory) {
       return Bell;
   }
 }
+
+const NO_NOTIFICATIONS: Notification[] = [];
 
 const sortDesc = (a: Notification, b: Notification) =>
   new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
@@ -136,6 +139,19 @@ export default function NotificationBell() {
   }, [effectiveScope, isOpen]);
 
   const activeGroup = groups.find(g => g.key === activeGroupKey) || groups[0];
+
+  // The active tab's list is unbounded, so it's paged 10 at a time — back to
+  // page 1 on a scope/tab switch or when the drawer is reopened.
+  const { pageRows: pagedItems, page, rowsPerPage, setPage } = usePagination(
+    activeGroup?.items || NO_NOTIFICATIONS,
+    10,
+    `${effectiveScope}|${activeGroup?.key}|${isOpen}`
+  );
+  const listScrollRef = useRef<HTMLDivElement>(null);
+  const goToPage = (p: number) => {
+    setPage(p);
+    listScrollRef.current?.scrollTo(0, 0);
+  };
 
   const handleItemClick = (n: Notification) => {
     markNotificationRead(n.id);
@@ -267,7 +283,7 @@ export default function NotificationBell() {
             )}
 
             {/* Active group content */}
-            <div className="flex-1 overflow-y-auto">
+            <div ref={listScrollRef} className="flex-1 overflow-y-auto">
               {isDataLoading && (!activeGroup || activeGroup.items.length === 0) ? (
                 <div className="px-4 py-3">
                   <CardListSkeleton count={4} />
@@ -277,9 +293,20 @@ export default function NotificationBell() {
                   {activeGroup?.emptyText || "No notifications."}
                 </p>
               ) : (
-                activeGroup.items.map(renderItem)
+                pagedItems.map(renderItem)
               )}
             </div>
+            {/* Compact footer — no Rows per page picker in the narrow drawer */}
+            {activeGroup && activeGroup.items.length > 0 && (
+              <TablePagination
+                totalRows={activeGroup.items.length}
+                page={page}
+                rowsPerPage={rowsPerPage}
+                onPageChange={goToPage}
+                rowLabel="Notification"
+                className="shrink-0"
+              />
+            )}
           </div>
         </div>,
         document.body
