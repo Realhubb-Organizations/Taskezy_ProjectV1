@@ -695,13 +695,18 @@ export function apiMarkAllNotificationsRead(system?: "CRM" | "HRMS" | "FINANCE" 
   return request<{ read: boolean }>(`/api/v1/notifications/read-all${query}`, { method: "PATCH" });
 }
 
-// EventSource can't set an Authorization header, so the access token travels
-// as a query param on this one endpoint (see notifications.routes.ts).
-// Returns null when there's no session yet — caller should not open a stream.
-export function getNotificationStreamUrl(): string | null {
-  const token = getAccessToken();
-  if (!token) return null;
-  return `${API_BASE_URL}/api/v1/notifications/stream?access_token=${encodeURIComponent(token)}`;
+// EventSource can't set an Authorization header, so opening the stream goes
+// through a one-time ticket instead of the real access token (see
+// notifications.routes.ts / utils/sseTickets.ts) — mint one with a normal
+// authenticated request right before opening the EventSource, since a
+// ticket is single-use and expires in ~45s (so mint a fresh one on every
+// reconnect too, not just the first connect).
+export function apiCreateNotificationStreamTicket(): Promise<{ ticket: string }> {
+  return request<{ ticket: string }>("/api/v1/notifications/stream-ticket", { method: "POST" });
+}
+
+export function buildNotificationStreamUrl(ticket: string): string {
+  return `${API_BASE_URL}/api/v1/notifications/stream?ticket=${encodeURIComponent(ticket)}`;
 }
 
 // --- Calendar events ---

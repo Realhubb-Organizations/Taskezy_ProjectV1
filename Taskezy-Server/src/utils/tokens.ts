@@ -33,10 +33,17 @@ export function hashRefreshToken(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex");
 }
 
-export function refreshTokenExpiryDate(): Date {
+// Shared by refreshTokenExpiryDate() (DB row expiry) and the refresh cookie's
+// maxAge (auth.controller.ts) — a single source of truth so the two can never
+// drift out of sync the way a second hardcoded literal previously did.
+export function refreshTokenMaxAgeMs(): number {
   const match = /^(\d+)([dhm])$/.exec(env.JWT_REFRESH_EXPIRES_IN);
-  const amount = match ? Number(match[1]) : 30;
+  const amount = match ? Number(match[1]) : 7;
   const unit = match ? match[2] : "d";
   const msPerUnit = unit === "d" ? 86400000 : unit === "h" ? 3600000 : 60000;
-  return new Date(Date.now() + amount * msPerUnit);
+  return amount * msPerUnit;
+}
+
+export function refreshTokenExpiryDate(): Date {
+  return new Date(Date.now() + refreshTokenMaxAgeMs());
 }

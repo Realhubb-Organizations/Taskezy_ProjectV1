@@ -2,19 +2,24 @@ import { Request, Response } from "express";
 import { env } from "../../config/env";
 import { ApiError } from "../../utils/ApiError";
 import { sendOk } from "../../utils/apiResponse";
+import { refreshTokenMaxAgeMs } from "../../utils/tokens";
 import * as authService from "./auth.service";
 
 const REFRESH_COOKIE_NAME = "taskezy_refresh_token";
 
 // httpOnly + sameSite=strict so the refresh token is inaccessible to JS
 // (mitigates XSS token theft) and never sent cross-site (mitigates CSRF).
+// maxAge is derived from JWT_REFRESH_EXPIRES_IN (env.ts default: 7d) via the
+// same helper the DB row's own expiry uses — previously a second, independent
+// hardcoded 30-day literal lived here and could silently drift from the env
+// value.
 function setRefreshCookie(res: Response, token: string): void {
   res.cookie(REFRESH_COOKIE_NAME, token, {
     httpOnly: true,
     secure: env.isProduction,
     sameSite: "strict",
     path: "/api/v1/auth",
-    maxAge: 30 * 24 * 60 * 60 * 1000
+    maxAge: refreshTokenMaxAgeMs()
   });
 }
 
