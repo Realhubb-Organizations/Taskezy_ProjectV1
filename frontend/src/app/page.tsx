@@ -5,9 +5,11 @@ import HeroBackgroundLottie from "@/components/HeroBackgroundLottie";
 import LeadIngestionAnimation from "@/components/LeadIngestionAnimation";
 import EnterpriseModulesShowcase from "@/components/EnterpriseModulesShowcase";
 import LogoLottie from "@/components/LogoLottie";
+import HomeGate from "@/components/HomeGate";
 
 export default function Home() {
   return (
+    <HomeGate>
     <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col justify-between overflow-x-hidden relative">
       {/* Pro UI/UX Header */}
       <header className="sticky top-4 z-50 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 transition-all duration-300">
@@ -135,6 +137,7 @@ export default function Home() {
         </div>
       </footer>
     </div>
+    </HomeGate>
   );
 }
 

@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Every push that includes changes under frontend/ asks whether to bump the
+# Android app's version and rebuild the APK/AAB (see
+# frontend/scripts/bump-and-build.sh for what that actually does).
+#
+# One-time setup per machine (this repo doesn't auto-enable a committed
+# hooks folder — that's a git limitation, not something forgotten here):
+#   git config core.hooksPath .githooks
+set -eu
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+any_frontend_changes=false
+while read -r local_ref local_oid remote_ref remote_oid; do
+  [ "$local_oid" = "0000000000000000000000000000000000000000" ] && continue
+  if [ "$remote_oid" = "0000000000000000000000000000000000000000" ]; then
+    # New branch on the remote — diff against its merge-base with main
+    # instead of "nothing" (which would flag the branch's entire history).
+    base="$(git merge-base "$local_oid" origin/main 2>/dev/null || echo "$local_oid~1")"
+  else
+    base="$remote_oid"
+  fi
+  if git diff --name-only "$base" "$local_oid" -- frontend/ 2>/dev/null | grep -q .; then
+    any_frontend_changes=true
+    break
+  fi
+done
+
+if [ "$any_frontend_changes" != "true" ]; then
+  exit 0
+fi
+
+# The prompt reads from the real terminal, not this hook's own stdin (git
+# uses that for the ref-update lines read above) — if there's no attached
+# TTY (a GUI git client, CI), skip the prompt rather than hang the push.
+if [ ! -e /dev/tty ]; then
+  echo "pre-push: frontend changes detected, but no interactive terminal is attached to ask about a version bump — skipping." >&2
+  exit 0
+fi
+
+read -r -p "Frontend changes detected. Bump app version and rebuild APK/AAB? [y/N] " answer < /dev/tty
+case "$answer" in
+  [yY]|[yY][eE][sS])
+    bash frontend/scripts/bump-and-build.sh
+    echo "" >&2
+    echo "Push aborted so the version-bump commit can be included — run 'git push' again now." >&2
+    exit 1
+    ;;
+  *)
+    exit 0
+    ;;
+esac
