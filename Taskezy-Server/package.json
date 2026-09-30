@@ -6,7 +6,8 @@
   "main": "dist/server.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "tsc -p tsconfig.json",
+    "guard:logs": "tsx scripts/check-log-redaction.ts",
+    "build": "npm run guard:logs && tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit"
   },

@@ -3,11 +3,10 @@ import cookieParser from "cookie-parser";
 import cors from "cors";
 import express, { Express } from "express";
 import helmet from "helmet";
-import pinoHttp from "pino-http";
 import { env } from "./config/env";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
+import { createHttpLogger } from "./middleware/httpLogger";
 import { apiRateLimiter } from "./middleware/rateLimiter";
-import { logger } from "./utils/logger";
 import { ApiError } from "./utils/ApiError";
 import { authRouter } from "./modules/auth/auth.routes";
 import { leadsRouter } from "./modules/leads/leads.routes";
@@ -68,7 +67,7 @@ export function createApp(): Express {
     })
   );
   app.use(cookieParser());
-  app.use(pinoHttp({ logger, autoLogging: { ignore: (req) => req.url === "/health" } }));
+  app.use(createHttpLogger());
 
   app.use("/api", apiRateLimiter);
 

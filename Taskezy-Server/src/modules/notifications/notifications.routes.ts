@@ -6,7 +6,7 @@ import { asyncHandler } from "../../utils/asyncHandler";
 import { sendOk } from "../../utils/apiResponse";
 import { ApiError } from "../../utils/ApiError";
 import { pool, query } from "../../db/pool";
-import { verifyAccessToken } from "../../utils/tokens";
+import { consumeTicket, issueTicket } from "../../utils/sseTickets";
 import { subscribe } from "../../utils/sseHub";
 
 export const notificationsRouter = Router();
@@ -14,18 +14,18 @@ export const notificationsRouter = Router();
 const HEARTBEAT_MS = 25000;
 
 // Registered BEFORE requireAuth below: the browser's EventSource API cannot
-// set an Authorization header, so the access token travels as a query param
-// on this one route instead and is verified here directly.
+// set an Authorization header, so this route is authenticated by a one-time
+// ticket (see utils/sseTickets.ts) instead of the normal Bearer token — mint
+// one via POST /stream-ticket (which does require the normal Bearer header)
+// immediately before opening the EventSource.
 notificationsRouter.get("/stream", (req, res) => {
-  const token = req.query.access_token;
-  if (typeof token !== "string") {
+  const ticket = req.query.ticket;
+  if (typeof ticket !== "string") {
     res.sendStatus(401);
     return;
   }
-  let userId: string;
-  try {
-    userId = verifyAccessToken(token).sub;
-  } catch {
+  const userId = consumeTicket(ticket);
+  if (!userId) {
     res.sendStatus(401);
     return;
   }
@@ -50,6 +50,15 @@ notificationsRouter.get("/stream", (req, res) => {
 });
 
 notificationsRouter.use(requireAuth);
+
+// Mints a one-time, ~45s-lived ticket for the caller (a real Bearer-token
+// request, unlike /stream itself) — the frontend calls this immediately
+// before opening the EventSource and on every reconnect, since a ticket
+// cannot be reused. See utils/sseTickets.ts for why this exists instead of
+// putting the real access token in the stream URL.
+notificationsRouter.post("/stream-ticket", (req, res) => {
+  sendOk(res, { ticket: issueTicket(req.user!.sub) });
+});
 
 // Scoped to the caller: rows with recipient_user_id = them, OR broadcast rows
 // (recipient_user_id IS NULL) — see DATA_DICTIONARY.md's notifications table.

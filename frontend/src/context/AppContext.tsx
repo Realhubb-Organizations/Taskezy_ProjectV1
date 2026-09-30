@@ -41,7 +41,8 @@ import {
   apiMarkInvoicePaid,
   apiDeleteInvoice,
   apiListNotifications,
-  getNotificationStreamUrl,
+  apiCreateNotificationStreamTicket,
+  buildNotificationStreamUrl,
   apiMarkNotificationRead,
   apiMarkAllNotificationsRead,
   apiListCalendarEvents,
@@ -1117,36 +1118,65 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Live notifications (Meta leads, etc.) over Server-Sent Events — one
   // connection per session, reopened whenever the signed-in user changes.
+  // Each connection attempt mints a fresh one-time ticket first (see
+  // apiClient's buildNotificationStreamUrl comment) — a ticket is single-use,
+  // so EventSource's own built-in auto-reconnect (which just re-opens the
+  // *same* URL) would fail every time after the first drop. onerror below
+  // closes the dead connection and reconnects manually with a new ticket
+  // instead of relying on that native behaviour.
   useEffect(() => {
     if (!currentUser) return;
-    const url = getNotificationStreamUrl();
-    if (!url) return;
+    let cancelled = false;
+    let source: EventSource | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
-    const source = new EventSource(url);
-    source.addEventListener("notification", (event) => {
-      const row = JSON.parse((event as MessageEvent).data) as ApiNotificationRow;
-      const notif = mapApiNotificationToFrontend(row);
-      setNotifications(prev => (prev.some(n => n.id === notif.id) ? prev : [notif, ...prev]));
-      playNotificationSound(notif.category, notif.system);
-
-      // The notification itself was real-time, but until now nothing made the
-      // CRM's actual leads list (table, KPI counts) catch up — a new Meta
-      // lead wouldn't appear there until a manual page refresh. Fetch just
-      // that one lead and merge it in instead of a full reload.
-      if (notif.category === "NEW_LEAD" && notif.leadId) {
-        apiGetLead(notif.leadId)
-          .then((leadRow) => {
-            const mapped = mapApiLeadToFrontendLead(leadRow);
-            setAllLeads(prev => (prev.some(l => l.id === mapped.id) ? prev : [mapped, ...prev]));
-          })
-          .catch((err) => console.warn("Could not fetch the new lead for live update:", err));
+    const connect = async () => {
+      if (cancelled) return;
+      let ticket: string;
+      try {
+        ({ ticket } = await apiCreateNotificationStreamTicket());
+      } catch {
+        // Not signed in yet, or a transient failure — retry shortly rather
+        // than leaving live notifications dead for the rest of the session.
+        if (!cancelled) reconnectTimer = setTimeout(connect, 5000);
+        return;
       }
-    });
-    // EventSource auto-reconnects on transient errors — nothing to do here
-    // beyond not letting a stray error tear down the app.
-    source.onerror = () => {};
+      if (cancelled) return;
 
-    return () => source.close();
+      source = new EventSource(buildNotificationStreamUrl(ticket));
+      source.addEventListener("notification", (event) => {
+        const row = JSON.parse((event as MessageEvent).data) as ApiNotificationRow;
+        const notif = mapApiNotificationToFrontend(row);
+        setNotifications(prev => (prev.some(n => n.id === notif.id) ? prev : [notif, ...prev]));
+        playNotificationSound(notif.category, notif.system);
+
+        // The notification itself was real-time, but until now nothing made the
+        // CRM's actual leads list (table, KPI counts) catch up — a new Meta
+        // lead wouldn't appear there until a manual page refresh. Fetch just
+        // that one lead and merge it in instead of a full reload.
+        if (notif.category === "NEW_LEAD" && notif.leadId) {
+          apiGetLead(notif.leadId)
+            .then((leadRow) => {
+              const mapped = mapApiLeadToFrontendLead(leadRow);
+              setAllLeads(prev => (prev.some(l => l.id === mapped.id) ? prev : [mapped, ...prev]));
+            })
+            .catch((err) => console.warn("Could not fetch the new lead for live update:", err));
+        }
+      });
+      source.onerror = () => {
+        source?.close();
+        source = null;
+        if (!cancelled) reconnectTimer = setTimeout(connect, 3000);
+      };
+    };
+
+    connect();
+
+    return () => {
+      cancelled = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      source?.close();
+    };
   }, [currentUser?.id]);
 
   // Notification actions
