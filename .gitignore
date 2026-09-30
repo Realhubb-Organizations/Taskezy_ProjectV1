@@ -45,9 +45,12 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 
-# internal docs — kept locally only, not on GitHub (README.md is the only doc that stays public)
-/credentials.md
-/IMPLEMENTATIONS.md
-/ARCHITECTURAL_BLUEPRINT.md
-/SDLC_MANUAL.md
-/Taskezy-Server/API_TESTING.md
+# internal docs — kept locally only, not on GitHub. Every markdown file is
+# ignored (subproject READMEs, generated schema docs, internal notes) except
+# the root README.md, which is the only one that stays public.
+*.md
+!/README.md
+/TASKEZY_Developer_Guide.pdf
+
+# generated deliverables (Data Dictionary / DFD Word docs) — kept locally only
+/docs/
