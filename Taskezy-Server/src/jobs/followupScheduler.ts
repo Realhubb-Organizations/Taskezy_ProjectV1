@@ -16,10 +16,19 @@ interface DueFollowup {
 
 /** Fires a "reminder due" notification the moment a scheduled follow-up's time arrives. */
 async function notifyDueFollowups(): Promise<void> {
+  // Claim-before-send: the candidate SELECT and the due_notified_at marker are
+  // merged into one atomic UPDATE ... RETURNING so a row is claimed (and thus
+  // invisible to any overlapping run of this same query) before we ever send a
+  // notification for it. If the process crashes after this claim but before
+  // createNotification below actually sends, that one reminder is silently
+  // missed — a low-cost outcome we accept in exchange for making duplicate
+  // sends impossible, since duplicates erode trust and teach users to ignore
+  // alerts, which is worse than rarely missing one.
   const { rows } = await pool.query<DueFollowup>(
-    `SELECT id, lead_id, lead_name, call_type, assigned_to_id
-     FROM followup_calls
-     WHERE status = 'UPCOMING' AND scheduled_at <= now() AND due_notified_at IS NULL`
+    `UPDATE followup_calls
+     SET due_notified_at = now()
+     WHERE status = 'UPCOMING' AND scheduled_at <= now() AND due_notified_at IS NULL
+     RETURNING id, lead_id, lead_name, call_type, assigned_to_id`
   );
 
   for (const row of rows) {
@@ -32,7 +41,6 @@ async function notifyDueFollowups(): Promise<void> {
       leadId: row.lead_id ?? undefined,
       link: "/dashboard/crm"
     });
-    await pool.query(`UPDATE followup_calls SET due_notified_at = now() WHERE id = $1`, [row.id]);
   }
 }
 
@@ -51,17 +59,24 @@ interface OverdueFollowup {
  * keeps a handled follow-up out of this query.
  */
 async function notifySlaViolations(): Promise<void> {
+  // Claim-before-send, same reasoning as notifyDueFollowups above: the candidate
+  // query (including the agent_name join) and the violation marker + MISSED
+  // status transition are merged into one atomic UPDATE ... FROM ... RETURNING
+  // so a row is claimed before any admin notification is sent for it. Worst case
+  // on a crash mid-send is a missed one-time escalation, not a duplicate one.
   const { rows } = await pool.query<OverdueFollowup>(
     // VIOLATION_WINDOW_MS above must match this literal — kept as a fixed
     // SQL interval rather than a bound parameter since it's a constant, not
     // user input.
-    `SELECT fc.id, fc.lead_id, fc.lead_name, u.first_name || COALESCE(' ' || u.last_name, '') AS agent_name
-     FROM followup_calls fc
-     JOIN users u ON u.id = fc.assigned_to_id
-     WHERE fc.status = 'UPCOMING'
+    `UPDATE followup_calls fc
+     SET violation_notified_at = now(), status = 'MISSED'
+     FROM users u
+     WHERE u.id = fc.assigned_to_id
+       AND fc.status = 'UPCOMING'
        AND fc.due_notified_at IS NOT NULL
        AND fc.due_notified_at <= now() - interval '10 minutes'
-       AND fc.violation_notified_at IS NULL`
+       AND fc.violation_notified_at IS NULL
+     RETURNING fc.id, fc.lead_id, fc.lead_name, u.first_name || COALESCE(' ' || u.last_name, '') AS agent_name`
   );
   if (rows.length === 0) return;
 
@@ -79,25 +94,32 @@ async function notifySlaViolations(): Promise<void> {
         link: "/dashboard/crm"
       });
     }
-    await pool.query(
-      `UPDATE followup_calls SET violation_notified_at = now(), status = 'MISSED' WHERE id = $1`,
-      [row.id]
-    );
   }
 }
 
 /**
  * Single-process, in-memory poller — matches the same tradeoff already
  * accepted for the SSE hub (utils/sseHub.ts): fine as long as the API runs
- * as one container. If this ever runs as more than one instance, every
- * instance polls independently and could double-fire notifications; would
- * need a DB-level lock (e.g. `SELECT ... FOR UPDATE SKIP LOCKED`) or to move
- * to a dedicated job runner at that point.
+ * as one container. The candidate queries in notifyDueFollowups and
+ * notifySlaViolations above are each a single atomic `UPDATE ... RETURNING`
+ * (claim-then-read), so Postgres row-locks the claim itself — this is safe
+ * even if this job ever runs as more than one process against the same
+ * database, not just within one. The in-flight guard below closes the
+ * separate, currently-exploitable gap: a single process whose cycle runs
+ * long enough that the next `setInterval` tick would start overlapping it.
  */
 export function startFollowupScheduler(): void {
-  setInterval(() => {
-    notifyDueFollowups().catch((err) => logger.error({ err }, "Follow-up due-notification poll failed"));
-    notifySlaViolations().catch((err) => logger.error({ err }, "Follow-up SLA-violation poll failed"));
-  }, POLL_INTERVAL_MS).unref();
+  let running = false;
+  const tick = async () => {
+    if (running) return;
+    running = true;
+    try {
+      await notifyDueFollowups().catch((err) => logger.error({ err }, "Follow-up due-notification poll failed"));
+      await notifySlaViolations().catch((err) => logger.error({ err }, "Follow-up SLA-violation poll failed"));
+    } finally {
+      running = false;
+    }
+  };
+  setInterval(tick, POLL_INTERVAL_MS).unref();
   logger.info(`Follow-up SLA scheduler started (poll every ${POLL_INTERVAL_MS / 1000}s, violation window ${VIOLATION_WINDOW_MS / 60_000}min)`);
 }
