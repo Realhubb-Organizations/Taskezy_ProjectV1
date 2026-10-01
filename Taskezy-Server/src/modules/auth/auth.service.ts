@@ -1,5 +1,6 @@
 import { query } from "../../db/pool";
 import { ApiError } from "../../utils/ApiError";
+import { logger } from "../../utils/logger";
 import { verifyPassword } from "../../utils/password";
 import {
   generateRefreshToken,
@@ -32,7 +33,15 @@ function stripPasswordHash(user: UserRow): Omit<UserRow, "password_hash"> {
   return rest;
 }
 
-async function issueTokenPair(user: UserRow): Promise<{ accessToken: string; refreshToken: string }> {
+// familyId links every refresh token descended from one login together —
+// omit it (e.g. at login) to start a new family; pass the prior token's
+// family_id (e.g. at rotation) to keep extending the same one. This is what
+// lets refresh() tell "a legitimate next rotation" apart from "a replay of a
+// token that's already been rotated past" (see refresh() below).
+async function issueTokenPair(
+  user: UserRow,
+  familyId?: string
+): Promise<{ accessToken: string; refreshToken: string }> {
   const accessToken = signAccessToken({
     sub: user.id,
     name: `${user.first_name}${user.last_name ? " " + user.last_name : ""}`,
@@ -43,8 +52,12 @@ async function issueTokenPair(user: UserRow): Promise<{ accessToken: string; ref
   const refreshToken = generateRefreshToken();
 
   await query(
-    `INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)`,
-    [user.id, hashRefreshToken(refreshToken), refreshTokenExpiryDate()]
+    familyId
+      ? `INSERT INTO refresh_tokens (user_id, token_hash, expires_at, family_id) VALUES ($1, $2, $3, $4)`
+      : `INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)`,
+    familyId
+      ? [user.id, hashRefreshToken(refreshToken), refreshTokenExpiryDate(), familyId]
+      : [user.id, hashRefreshToken(refreshToken), refreshTokenExpiryDate()]
   );
 
   return { accessToken, refreshToken };
@@ -79,32 +92,62 @@ export async function login(email: string, password: string): Promise<AuthResult
 export async function refresh(refreshToken: string): Promise<AuthResult> {
   const tokenHash = hashRefreshToken(refreshToken);
 
-  const { rows } = await query<{ id: string; user_id: string; expires_at: string; revoked_at: string | null }>(
-    `SELECT id, user_id, expires_at, revoked_at FROM refresh_tokens WHERE token_hash = $1`,
+  // Atomic check-and-claim, not a SELECT followed by a separate UPDATE: the
+  // old two-step version let two concurrent requests with the same token
+  // both pass the validity check before either had revoked it, each then
+  // minting its own new token pair from the same original (a classic
+  // check-then-act race). Collapsing it into one UPDATE closes that —
+  // Postgres row-locks the statement, so of two concurrent callers, only
+  // the first can ever match `revoked_at IS NULL`; the second gets zero
+  // rows back here, full stop, no window for both to succeed.
+  const { rows: claimed } = await query<{ id: string; user_id: string; family_id: string }>(
+    `UPDATE refresh_tokens
+     SET revoked_at = now()
+     WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > now()
+     RETURNING id, user_id, family_id`,
     [tokenHash]
   );
-  const stored = rows[0];
+  const claim = claimed[0];
 
-  if (!stored || stored.revoked_at || new Date(stored.expires_at) < new Date()) {
+  if (!claim) {
+    // Didn't claim it. Could be a forged/garbage token, an expired one, or —
+    // the interesting case — a token that WAS valid but has already been
+    // rotated past. That last case is a replay: the strongest signal
+    // available that this token was stolen and used by someone other than
+    // whoever is holding it now. Reuse of an already-used token should
+    // never be treated as "just reject this one request" — if it's really
+    // theft, the thief already has a valid rotated session from whenever
+    // they first used it, rejecting only the replay leaves them in control.
+    // Revoking the whole family forces both the thief and the legitimate
+    // client to re-authenticate.
+    const { rows: existing } = await query<{ family_id: string }>(
+      `SELECT family_id FROM refresh_tokens WHERE token_hash = $1 AND revoked_at IS NOT NULL`,
+      [tokenHash]
+    );
+    if (existing[0]) {
+      await query(
+        `UPDATE refresh_tokens SET revoked_at = now() WHERE family_id = $1 AND revoked_at IS NULL`,
+        [existing[0].family_id]
+      );
+      logger.warn(
+        { familyId: existing[0].family_id },
+        "Refresh token reuse detected — revoked every active token in the session family"
+      );
+    }
     throw ApiError.unauthorized("Invalid or expired refresh token");
   }
 
   const { rows: userRows } = await query<UserRow>(
     `SELECT id, first_name, last_name, email, role, department, role_type, designation, status, password_hash
      FROM users WHERE id = $1`,
-    [stored.user_id]
+    [claim.user_id]
   );
   const user = userRows[0];
   if (!user || user.status !== "ACTIVE") {
     throw ApiError.unauthorized("Account is no longer active");
   }
 
-  // Rotate: revoke the used refresh token and issue a fresh pair. A refresh
-  // token that's been used once is never valid again — this limits the
-  // damage if a token is ever leaked/stolen.
-  await query(`UPDATE refresh_tokens SET revoked_at = now() WHERE id = $1`, [stored.id]);
-
-  const { accessToken, refreshToken: newRefreshToken } = await issueTokenPair(user);
+  const { accessToken, refreshToken: newRefreshToken } = await issueTokenPair(user, claim.family_id);
   return { accessToken, refreshToken: newRefreshToken, user: stripPasswordHash(user) };
 }
 
