@@ -33,13 +33,16 @@ fi
 
 # The prompt reads from the real terminal, not this hook's own stdin (git
 # uses that for the ref-update lines read above) — if there's no attached
-# TTY (a GUI git client, CI), skip the prompt rather than hang the push.
-if [ ! -e /dev/tty ]; then
+# TTY (a GUI git client, CI, or a non-interactive shell), skip the prompt
+# rather than fail the push. /dev/tty can EXIST as a path with no
+# controlling terminal attached (opening it then fails with ENXIO) — so
+# this has to actually attempt the read, not just check the path exists;
+# `set -e` would otherwise abort the whole hook on that failed read.
+answer=""
+if ! read -r -p "Frontend changes detected. Bump app version and rebuild APK/AAB? [y/N] " answer < /dev/tty 2>/dev/null; then
   echo "pre-push: frontend changes detected, but no interactive terminal is attached to ask about a version bump — skipping." >&2
   exit 0
 fi
-
-read -r -p "Frontend changes detected. Bump app version and rebuild APK/AAB? [y/N] " answer < /dev/tty
 case "$answer" in
   [yY]|[yY][eE][sS])
     bash frontend/scripts/bump-and-build.sh
