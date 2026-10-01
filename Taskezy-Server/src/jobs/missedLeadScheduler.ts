@@ -23,16 +23,27 @@ interface MissedLead {
  * stays untouched doesn't re-notify every poll cycle.
  */
 async function notifyMissedLeads(): Promise<void> {
+  // Claim-before-send, not send-before-claim: folding the candidate SELECT
+  // and the missed_notified_at UPDATE into one statement means Postgres
+  // row-locks the claim itself, so two overlapping runs can never both pick
+  // up the same lead the way a separate SELECT-then-UPDATE could. The
+  // tradeoff is that if the process crashes after this claim commits but
+  // before a notification actually sends, that one reminder is silently
+  // missed — low cost, one-time — versus the alternative of risking
+  // duplicate sends, which is the wrong tradeoff for a notification system:
+  // duplicates erode trust and train users to ignore alerts.
   const { rows } = await pool.query<MissedLead>(
-    `SELECT l.id, l.name, l.assigned_agent_id,
-            u.first_name || COALESCE(' ' || u.last_name, '') AS agent_name,
-            u.manager_id
-     FROM leads l
-     JOIN users u ON u.id = l.assigned_agent_id
-     WHERE l.first_response_at IS NULL
+    `UPDATE leads l
+     SET missed_notified_at = now()
+     FROM users u
+     WHERE u.id = l.assigned_agent_id
+       AND l.first_response_at IS NULL
        AND l.assigned_at IS NOT NULL
        AND l.assigned_at <= now() - interval '${SLA_MINUTES} minutes'
-       AND l.missed_notified_at IS NULL`
+       AND l.missed_notified_at IS NULL
+     RETURNING l.id, l.name, l.assigned_agent_id,
+               u.first_name || COALESCE(' ' || u.last_name, '') AS agent_name,
+               u.manager_id`
   );
   if (rows.length === 0) return;
 
@@ -71,8 +82,6 @@ async function notifyMissedLeads(): Promise<void> {
         link: "/dashboard/reports"
       });
     }
-
-    await pool.query(`UPDATE leads SET missed_notified_at = now() WHERE id = $1`, [row.id]);
   }
 
   // Admin also gets a running same-day total whenever it changes — a
@@ -121,10 +130,26 @@ async function notifyAdminDailyDigest(adminIds: string[]): Promise<void> {
   }
 }
 
-/** Single-process in-memory poller — same scaling caveat as followupScheduler.ts and utils/sseHub.ts. */
+/**
+ * The atomic UPDATE...RETURNING claim in notifyMissedLeads() already gives
+ * DB-level locking that's safe across multiple separate processes (Postgres
+ * row-locks the UPDATE statement itself, so two instances polling at once
+ * can't double-claim the same lead). The `running` guard below closes the
+ * other gap — a single process whose cycle runs long enough to still be in
+ * flight when the next setInterval tick fires — which is exploitable today
+ * even with no second instance in the picture.
+ */
 export function startMissedLeadScheduler(): void {
-  setInterval(() => {
-    notifyMissedLeads().catch((err) => logger.error({ err }, "Missed-lead SLA poll failed"));
-  }, POLL_INTERVAL_MS).unref();
+  let running = false;
+  const tick = async () => {
+    if (running) return;
+    running = true;
+    try {
+      await notifyMissedLeads().catch((err) => logger.error({ err }, "Missed-lead SLA poll failed"));
+    } finally {
+      running = false;
+    }
+  };
+  setInterval(tick, POLL_INTERVAL_MS).unref();
   logger.info(`Missed-lead SLA scheduler started (poll every ${POLL_INTERVAL_MS / 1000}s, ${SLA_MINUTES}min threshold)`);
 }
