@@ -25,6 +25,9 @@ export const apiRateLimiter = rateLimit({
 export const authRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
+  // Only failed attempts count: a successful login is not a guess, so normal
+  // logins (including repeated logins while testing) must never lock a user out.
+  skipSuccessfulRequests: true,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => {
