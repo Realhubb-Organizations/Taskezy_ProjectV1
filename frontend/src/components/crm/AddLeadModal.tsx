@@ -190,7 +190,7 @@ export default function AddLeadModal({
           below) is what normally keeps the header/tabs/footer pinned while
           only the form fields scroll. */}
       <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center overflow-y-auto p-0 sm:p-4">
-        <div className="w-full sm:max-w-3xl h-[95vh] sm:h-auto sm:max-h-[90vh] my-0 sm:my-8 bg-white border-0 sm:border border-slate-200 rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-fade-in">
+        <div className="w-full sm:max-w-3xl h-[95vh] h-[95dvh] sm:h-auto sm:max-h-[90vh] my-0 sm:my-8 bg-white border-0 sm:border border-slate-200 rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-fade-in">
           {/* Header */}
           <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 bg-slate-50/50 shrink-0">
             <h3 className="text-sm font-extrabold text-slate-805">

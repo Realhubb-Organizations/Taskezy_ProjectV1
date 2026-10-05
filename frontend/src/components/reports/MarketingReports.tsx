@@ -168,7 +168,7 @@ export default function MarketingReports({ dateRange }: { dateRange: DateRange }
             </div>
           </div>
 
-          <div className="p-4 flex items-center justify-between gap-2">
+          <div className="p-4 flex items-center justify-between gap-2 sm:col-span-3 lg:col-span-1">
             <div className="space-y-1">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Visit/Meeting Conversion</span>
               {isDataLoading ? <LineSkeleton width={50} height={24} /> : <p className="text-xl font-black text-slate-800">{visitConversion.conversionPercent.toFixed(1)}%</p>}

@@ -10,15 +10,22 @@ export function useCloseOnScroll(open: boolean, onClose: () => void, panelRef?: 
 
   useEffect(() => {
     if (!open) return;
-    const handler = (e: Event) => {
+    let lastWidth = window.innerWidth;
+    const onScroll = (e: Event) => {
       if (panelRef?.current && e.target instanceof Node && panelRef.current.contains(e.target)) return;
       onCloseRef.current();
     };
-    window.addEventListener("scroll", handler, true);
-    window.addEventListener("resize", handler);
+    // Phones resize the viewport height when the on-screen keyboard or address bar appears; only a width change (rotation) should close.
+    const onResize = () => {
+      if (window.innerWidth === lastWidth) return;
+      lastWidth = window.innerWidth;
+      onCloseRef.current();
+    };
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onResize);
     return () => {
-      window.removeEventListener("scroll", handler, true);
-      window.removeEventListener("resize", handler);
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onResize);
     };
   }, [open, panelRef]);
 }

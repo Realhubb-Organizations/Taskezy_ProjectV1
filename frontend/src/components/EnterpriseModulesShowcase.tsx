@@ -228,7 +228,7 @@ export default function EnterpriseModulesShowcase() {
         {/* TAB 0: CRM PIPELINE */}
         {activeTab === 0 && (
           <div className="relative z-10 space-y-4 animate-fade-in">
-            <div className="grid grid-cols-5 gap-1.5 sm:gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 sm:gap-2">
               {stages.map((stg) => {
                 const isActive = activeStage === stg.id;
                 return (

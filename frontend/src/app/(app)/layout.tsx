@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useEffect, Suspense } from "react";
+import React, { useState, useEffect, useRef, Suspense } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useApp, SystemType } from "@/context/AppContext";
@@ -31,7 +32,6 @@ import {
   Video,
   LifeBuoy,
   Calendar,
-  MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen
 } from "lucide-react";
@@ -234,12 +234,54 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     { name: "Organization", href: "/dashboard/organization", activeCheck: (p: string) => p === "/dashboard/organization", icon: Building }
   ].filter(item => checkUserAccess(currentUser, item.href));
 
-  const activeGroupForMobile = sidebarGroups.find(g => g.key === activeSystem) || sidebarGroups[0];
+  const groupForCurrentPage = sidebarGroups.find(g => g.items.some(i => i.activeCheck(pathname, activeTabParam)));
+  const activeGroupForMobile = groupForCurrentPage || sidebarGroups.find(g => g.key === activeSystem) || sidebarGroups[0];
   // Mobile bottom tab bar: whichever system's group is currently active, its
   // first 4 items become fixed tabs (mirrors a native app's tab bar);
   // anything beyond that — plus the other groups/Organization/Help/Logout —
   // lives behind the "More" tab (the same drawer used on desktop-hidden screens).
-  const primaryMobileNav = activeGroupForMobile ? activeGroupForMobile.items.slice(0, 4) : [];
+  const mobileNavLayout: Record<string, { left: string[]; right: string[] }> = {
+    CRM: { left: ["Properties", "Leads", "Data Calling"], right: ["Campaigns", "Reports", "Calendar"] },
+    HRMS: { left: ["Teams", "Attendance"], right: ["Calendar", "Reports"] },
+    FINANCE: { left: ["Billing", "Reimbursements"], right: ["Calendar", "Reports"] }
+  };
+  const mobileSlots = activeGroupForMobile ? mobileNavLayout[activeGroupForMobile.key] : undefined;
+  const findMobileItem = (name: string) => activeGroupForMobile?.items.find(i => i.name === name);
+  const mobileLeftItems = (mobileSlots?.left ?? []).map(findMobileItem).filter((i): i is NonNullable<typeof i> => !!i);
+  const mobileRightItems = (mobileSlots?.right ?? []).map(findMobileItem).filter((i): i is NonNullable<typeof i> => !!i);
+  const mobileDashboardItem = activeGroupForMobile?.items.find(i => i.name.endsWith("Dashboard"));
+  const mobileNavColumns = mobileLeftItems.length + mobileRightItems.length + 1;
+
+  const [pressTip, setPressTip] = useState<{ label: string; x: number; y: number } | null>(null);
+  const pressTimer = useRef<number | null>(null);
+  const pressFired = useRef(false);
+  const cancelPress = () => {
+    if (pressTimer.current !== null) window.clearTimeout(pressTimer.current);
+    pressTimer.current = null;
+    setPressTip(null);
+  };
+  const pressHandlers = (label: string) => ({
+    onPointerDown: (e: { currentTarget: EventTarget & HTMLElement }) => {
+      const rect = e.currentTarget.getBoundingClientRect();
+      pressFired.current = false;
+      pressTimer.current = window.setTimeout(() => {
+        pressFired.current = true;
+        const x = Math.max(44, Math.min(rect.left + rect.width / 2, window.innerWidth - 44));
+        setPressTip({ label, x, y: rect.top });
+        navigator.vibrate?.(10);
+      }, 400);
+    },
+    onPointerUp: cancelPress,
+    onPointerLeave: cancelPress,
+    onPointerCancel: cancelPress,
+    onContextMenu: (e: { preventDefault: () => void }) => e.preventDefault(),
+    onClick: (e: { preventDefault: () => void }) => {
+      if (pressFired.current) {
+        e.preventDefault();
+        pressFired.current = false;
+      }
+    }
+  });
 
   const handleLogout = () => {
     logout();
@@ -428,7 +470,20 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
       <div className={`flex flex-col flex-1 w-full min-h-screen transition-all duration-200 ${isSidebarCollapsed ? "md:pl-20" : "md:pl-64"}`}>
         {/* Top Header Bar */}
         <header className="sticky top-0 z-10 flex-shrink-0 h-14 md:h-16 border-b border-slate-200 bg-white/70 backdrop-blur-md flex items-center justify-between px-3 sm:px-6 lg:px-8 gap-2">
-          <h1 className="text-sm font-bold text-slate-900 truncate">{getActiveTabName()}</h1>
+          <div className="flex items-center gap-2 min-w-0">
+            <button
+              type="button"
+              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+              aria-label={isMobileMenuOpen ? "Close menu" : "Open menu"}
+              aria-expanded={isMobileMenuOpen}
+              className="md:hidden relative h-10 w-10 -ml-2 shrink-0 flex items-center justify-center rounded-lg hover:bg-slate-100 active:bg-slate-200 transition-colors"
+            >
+              <span className={`absolute h-0.5 w-5 rounded-full bg-slate-700 transition-all duration-300 ease-out ${isMobileMenuOpen ? "translate-y-0 rotate-45" : "-translate-y-1.5"}`} />
+              <span className={`absolute h-0.5 w-5 rounded-full bg-slate-700 transition-all duration-300 ease-out ${isMobileMenuOpen ? "opacity-0 scale-x-0" : "opacity-100"}`} />
+              <span className={`absolute h-0.5 w-5 rounded-full bg-slate-700 transition-all duration-300 ease-out ${isMobileMenuOpen ? "translate-y-0 -rotate-45" : "translate-y-1.5"}`} />
+            </button>
+            <h1 className="text-sm font-bold text-slate-900 truncate">{getActiveTabName()}</h1>
+          </div>
 
           <div className="flex items-center gap-3 sm:gap-4 shrink-0">
             <NotificationBell />
@@ -437,7 +492,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
             <div className="relative">
               <button
                 onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
-                className="flex items-center gap-1.5"
+                className="flex items-center justify-center sm:justify-start gap-1.5 min-h-10 min-w-10 sm:min-h-0 sm:min-w-0"
               >
                 <span className="h-8 w-8 rounded-full bg-brand-800 text-white text-xs font-bold flex items-center justify-center shrink-0">
                   {initialsFor(currentUser?.name)}
@@ -447,7 +502,11 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
 
               {isUserMenuOpen && (
                 <>
-                  <div className="fixed inset-0 z-30" onClick={() => setIsUserMenuOpen(false)} />
+                  {/* Portaled to <body>: the header's backdrop-blur makes it the containing block for fixed children, which would confine this to the 56px header. z-[9] keeps it above page content but below the header (z-10), so the menu inside the header stays clickable. */}
+                  {typeof document !== "undefined" && createPortal(
+                    <div className="fixed inset-0 z-[9]" onClick={() => setIsUserMenuOpen(false)} />,
+                    document.body
+                  )}
                   <div className="absolute right-0 mt-2 w-56 bg-white border border-slate-200 rounded-xl shadow-xl z-40 overflow-hidden animate-fade-in">
                     <div className="px-4 py-3 border-b border-slate-100">
                       <p className="text-xs font-bold text-slate-800 truncate">{currentUser?.name}</p>
@@ -471,13 +530,16 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
         </header>
 
         {/* Mobile Sidebar drawer */}
-        {isMobileMenuOpen && (
-          <>
+        <>
             <div
-              className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-30 md:hidden"
+              aria-hidden={!isMobileMenuOpen}
+              className={`fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-30 md:hidden transition-[opacity,visibility] duration-300 ${isMobileMenuOpen ? "opacity-100 visible" : "opacity-0 invisible"}`}
               onClick={() => setIsMobileMenuOpen(false)}
             />
-            <div className="fixed inset-y-0 left-0 w-[82vw] max-w-72 bg-white border-r border-slate-200 p-5 flex flex-col z-40 md:hidden overflow-y-auto">
+            <div
+              aria-hidden={!isMobileMenuOpen}
+              className={`fixed inset-y-0 left-0 w-[82vw] max-w-72 bg-white border-r border-slate-200 p-5 flex flex-col z-40 md:hidden overflow-y-auto transition-[transform,opacity,visibility] duration-300 ease-out ${isMobileMenuOpen ? "translate-x-0 opacity-100 visible" : "-translate-x-full opacity-0 invisible"}`}
+            >
               <div className="flex items-center justify-between mb-4 border-b border-slate-100 pb-4">
                 <Link href="/home" className="flex items-center">
                   <img
@@ -488,7 +550,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                 </Link>
                 <button
                   onClick={() => setIsMobileMenuOpen(false)}
-                  className="p-1 rounded-lg text-slate-500 hover:text-slate-800"
+                  className="inline-flex items-center justify-center min-h-10 min-w-10 sm:min-h-0 sm:min-w-0 p-1 rounded-lg text-slate-500 hover:text-slate-800"
                 >
                   <X className="h-5 w-5" />
                 </button>
@@ -509,7 +571,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                 <div className="flex items-center justify-between text-[10px] pt-2 border-t border-slate-200">
                   <button
                     onClick={() => setOnlineStatus(!isOnline)}
-                    className={`flex items-center gap-1.5 font-bold ${isOnline ? "text-emerald-600" : "text-amber-600"}`}
+                    className={`flex items-center gap-1.5 font-bold min-h-10 -my-3 px-2 -mx-2 ${isOnline ? "text-emerald-600" : "text-amber-600"}`}
                   >
                     {isOnline ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5 animate-pulse" />}
                     {isOnline ? "Online" : "Offline"}
@@ -518,7 +580,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                     <button
                       onClick={triggerSync}
                       disabled={isSyncing || !isOnline}
-                      className={`flex items-center gap-1 text-brand-600 font-semibold disabled:opacity-40 ${isSyncing ? "animate-spin" : ""}`}
+                      className={`flex items-center gap-1 text-brand-600 font-semibold min-h-10 -my-3 px-2 -mx-2 disabled:opacity-40 ${isSyncing ? "animate-spin" : ""}`}
                     >
                       <RefreshCw className="h-3 w-3" />
                       Sync ({pendingSyncCount})
@@ -550,7 +612,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                               <Link
                                 key={item.name}
                                 href={item.href}
-                                className={`flex items-center px-3 py-2 text-xs font-semibold rounded-lg ${
+                                className={`flex items-center min-h-10 sm:min-h-0 px-3 py-2 text-xs font-semibold rounded-lg ${
                                   isActive ? "bg-brand-700 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50"
                                 }`}
                                 onClick={() => {
@@ -591,7 +653,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                         <Link
                           key={item.name}
                           href={item.href}
-                          className={`flex items-center px-4 py-1.5 text-xs font-semibold rounded-lg ${
+                          className={`flex items-center min-h-10 sm:min-h-0 px-4 py-1.5 text-xs font-semibold rounded-lg ${
                             isActive ? "bg-brand-700 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50"
                           }`}
                           onClick={() => setIsMobileMenuOpen(false)}
@@ -609,19 +671,19 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                 <div className="space-y-1 pt-2 border-t border-slate-100 text-[11px] font-bold text-slate-450">
                   <button
                     onClick={() => setActiveModal("help")}
-                    className="w-full flex items-center px-4 py-1.5 hover:text-slate-800 transition-colors"
+                    className="w-full flex items-center min-h-10 sm:min-h-0 px-4 py-1.5 hover:text-slate-800 transition-colors"
                   >
                     <HelpCircle className="mr-2 h-3.5 w-3.5" /> Help &amp; Support
                   </button>
                   <button
                     onClick={() => setActiveModal("tutorials")}
-                    className="w-full flex items-center px-4 py-1.5 hover:text-slate-800 transition-colors"
+                    className="w-full flex items-center min-h-10 sm:min-h-0 px-4 py-1.5 hover:text-slate-800 transition-colors"
                   >
                     <Video className="mr-2 h-3.5 w-3.5" /> CRM Tutorials
                   </button>
                   <button
                     onClick={() => setActiveModal("contact")}
-                    className="w-full flex items-center px-4 py-1.5 hover:text-slate-800 transition-colors"
+                    className="w-full flex items-center min-h-10 sm:min-h-0 px-4 py-1.5 hover:text-slate-800 transition-colors"
                   >
                     <LifeBuoy className="mr-2 h-3.5 w-3.5" /> Contact Support
                   </button>
@@ -637,7 +699,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                     setIsMobileMenuOpen(false);
                     handleLogout();
                   }}
-                  className="w-full flex items-center gap-2 px-4 py-2 text-xs font-bold text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                  className="w-full flex items-center gap-2 min-h-10 sm:min-h-0 px-4 py-2 text-xs font-bold text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                 >
                   <LogOut className="h-4 w-4" />
                   Sign Out
@@ -648,42 +710,83 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                 </div>
               </div>
             </div>
-          </>
-        )}
+        </>
 
         {/* Mobile bottom tab bar — the primary navigation surface on phones,
             matching a native app's tab bar. "More" opens the drawer above,
             which holds everything that doesn't fit as a fixed tab. */}
         <nav
-          className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-slate-200 shadow-[0_-2px_8px_rgba(0,0,0,0.04)]"
-          style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+          className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-slate-200 shadow-[0_-2px_8px_rgba(0,0,0,0.04)] select-none"
+          style={{ paddingBottom: "env(safe-area-inset-bottom)", WebkitTouchCallout: "none" }}
         >
-          <div className="flex items-stretch">
-            {primaryMobileNav.map((item) => {
+          <div
+            className="grid items-end"
+            style={{ gridTemplateColumns: `repeat(${mobileNavColumns}, minmax(0, 1fr))` }}
+          >
+            {mobileLeftItems.map((item) => {
               const isActive = item.activeCheck(pathname, activeTabParam);
               return (
                 <Link
                   key={item.name}
                   href={item.href}
-                  className={`flex-1 flex flex-col items-center justify-center gap-0.5 py-2 min-w-0 ${
+                  aria-label={item.name}
+                  title={item.name}
+                  {...pressHandlers(item.name)}
+                  className={`flex flex-col items-center justify-center gap-0.5 py-2.5 min-w-0 ${
                     isActive ? "text-brand-700" : "text-slate-400"
                   }`}
                 >
                   <item.icon className={`h-5 w-5 ${isActive ? "text-brand-700" : "text-slate-400"}`} />
-                  <span className="text-[10px] font-bold truncate max-w-full px-1">{item.name}</span>
                 </Link>
               );
             })}
-            <button
-              onClick={() => setIsMobileMenuOpen(true)}
-              className={`flex-1 flex flex-col items-center justify-center gap-0.5 py-2 min-w-0 ${
-                isMobileMenuOpen ? "text-brand-700" : "text-slate-400"
-              }`}
-            >
-              <MoreHorizontal className={`h-5 w-5 ${isMobileMenuOpen ? "text-brand-700" : "text-slate-400"}`} />
-              <span className="text-[10px] font-bold">More</span>
-            </button>
+            {mobileDashboardItem && (() => {
+              const isActive = mobileDashboardItem.activeCheck(pathname, activeTabParam);
+              return (
+                <Link
+                  key={mobileDashboardItem.name}
+                  href={mobileDashboardItem.href}
+                  aria-label={mobileDashboardItem.name}
+                  title={mobileDashboardItem.name}
+                  {...pressHandlers(mobileDashboardItem.name)}
+                  className="flex flex-col items-center justify-end min-w-0 -mt-5"
+                >
+                  <span
+                    className={`h-14 w-14 rounded-full flex items-center justify-center text-white shadow-lg ring-4 ring-white ${
+                      isActive ? "bg-brand-800" : "bg-brand-700"
+                    }`}
+                  >
+                    <mobileDashboardItem.icon className="h-6 w-6" />
+                  </span>
+                </Link>
+              );
+            })()}
+            {mobileRightItems.map((item) => {
+              const isActive = item.activeCheck(pathname, activeTabParam);
+              return (
+                <Link
+                  key={item.name}
+                  href={item.href}
+                  aria-label={item.name}
+                  title={item.name}
+                  {...pressHandlers(item.name)}
+                  className={`flex flex-col items-center justify-center gap-0.5 py-2.5 min-w-0 ${
+                    isActive ? "text-brand-700" : "text-slate-400"
+                  }`}
+                >
+                  <item.icon className={`h-5 w-5 ${isActive ? "text-brand-700" : "text-slate-400"}`} />
+                </Link>
+              );
+            })}
           </div>
+          {pressTip && (
+            <div
+              className="fixed z-50 pointer-events-none -translate-x-1/2 -translate-y-full px-2.5 py-1 mb-2 rounded-md bg-slate-900 text-white text-[11px] font-bold whitespace-nowrap shadow-lg"
+              style={{ left: pressTip.x, top: pressTip.y - 8 }}
+            >
+              {pressTip.label}
+            </div>
+          )}
         </nav>
 
         {/* Core Container — bottom padding on mobile clears the fixed tab bar */}

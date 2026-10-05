@@ -313,21 +313,22 @@ export default function UploadLeadsModal({ isOpen, onClose, onSubmit, properties
     <>
       <div className="fixed inset-0 bg-slate-900/60 z-50 transition-opacity" onClick={onClose} />
       <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center overflow-y-auto p-0 sm:p-4">
-        <div className="w-full sm:max-w-2xl bg-white border-0 sm:border border-slate-200 rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-fade-in">
-          <div className="flex justify-between items-start px-6 pt-6 pb-3">
+        <div className="w-full sm:max-w-2xl max-h-[90vh] max-h-[90dvh] flex flex-col bg-white border-0 sm:border border-slate-200 rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-hidden animate-fade-in">
+          <div className="flex justify-between items-start px-6 pt-6 pb-3 shrink-0">
             <div>
               <h3 className="text-base font-extrabold text-slate-900">Upload Bulk Leads</h3>
               <p className="text-xs text-slate-500 mt-1">Upload multiple leads using an Excel file upload template.</p>
             </div>
             <button
               onClick={onClose}
-              className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors shrink-0"
+              className="-m-2 sm:m-0 flex items-center justify-center min-h-10 min-w-10 sm:min-h-0 sm:min-w-0 sm:p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors shrink-0"
             >
               <X className="h-4.5 w-4.5" />
             </button>
           </div>
-          <div className="border-t border-slate-100" />
+          <div className="border-t border-slate-100 shrink-0" />
 
+          <div className="flex-1 min-h-0 overflow-y-auto">
           {result ? (
             <div className="px-6 py-6 space-y-4">
               <div className="flex items-center gap-3">
@@ -464,6 +465,7 @@ export default function UploadLeadsModal({ isOpen, onClose, onSubmit, properties
               </div>
             </div>
           )}
+          </div>
 
           <div className="shrink-0 flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-t border-slate-100">
             <p className="text-[11px] text-slate-400">

@@ -246,7 +246,7 @@ export default function FinancePage() {
                     <th className="p-4">Tax (18% GST)</th>
                     <th className="p-4">Total Amount</th>
                     <th className="p-4">Status</th>
-                    <th className="p-4 text-right">Actions</th>
+                    <th className="p-4 text-right sticky right-0 bg-slate-50 z-10">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
@@ -269,7 +269,7 @@ export default function FinancePage() {
                           {inv.status}
                         </span>
                       </td>
-                      <td className="p-4 text-right space-x-2">
+                      <td className="p-4 text-right space-x-2 sticky right-0 bg-white z-10">
                         {inv.status !== "Paid" ? (
                           <button
                             onClick={() => {
@@ -347,7 +347,7 @@ export default function FinancePage() {
                     <th className="p-4">Category</th>
                     <th className="p-4">Amount</th>
                     <th className="p-4">Status</th>
-                    <th className="p-4 text-right">Actions</th>
+                    <th className="p-4 text-right sticky right-0 bg-slate-50 z-10">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
@@ -374,20 +374,20 @@ export default function FinancePage() {
                           {c.status}
                         </span>
                       </td>
-                      <td className="p-4 text-right">
+                      <td className="p-4 text-right sticky right-0 bg-white z-10">
                         <div className="flex gap-2 justify-end items-center">
                           {c.status === "Pending" ? (
                             <>
                               <button
                                 onClick={() => approveClaim(c.id)}
-                                className="p-1 rounded bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700"
+                                className="min-h-9 px-2.5 sm:min-h-0 sm:px-1 py-1 rounded bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700"
                                 title="Release reimbursement claim"
                               >
                                 <Check className="h-3.5 w-3.5" />
                               </button>
                               <button
                                 onClick={() => rejectClaim(c.id)}
-                                className="p-1 rounded bg-red-50 hover:bg-red-100 border border-red-200 text-red-700"
+                                className="min-h-9 px-2.5 sm:min-h-0 sm:px-1 py-1 rounded bg-red-50 hover:bg-red-100 border border-red-200 text-red-700"
                                 title="Reject claim"
                               >
                                 <X className="h-3.5 w-3.5" />

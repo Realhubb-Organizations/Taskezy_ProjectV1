@@ -350,7 +350,6 @@ export default function SettingsPage() {
 
   // --- Manage Users ---
   const [searchQuery, setSearchQuery] = useState("");
-  const [revealedUserId, setRevealedUserId] = useState<string | null>(null);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [successMsg, setSuccessMsg] = useState("");
 
@@ -1256,7 +1255,6 @@ export default function SettingsPage() {
               </div>
             ) : (
               serverUsers.map(user => {
-                const isRevealed = revealedUserId === user.id;
                 const deptKey = user.role === "ADMIN" ? "ADMIN" : (user.department || "SALES");
                 return (
                   <div key={user.id} className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
@@ -1273,7 +1271,7 @@ export default function SettingsPage() {
                         </div>
                         <p className="text-[10px] text-slate-500 truncate">{user.designation || "—"}</p>
                         <p className="text-[10px] text-slate-500 font-mono truncate">{user.email}</p>
-                        <p className="text-[10px] text-slate-500 font-mono">+91-{user.phone_number || "9876543210"}</p>
+                        <p className="text-[10px] text-slate-500 font-mono">{user.phone_number ? `+91-${user.phone_number}` : "—"}</p>
                         {user.managerName && (
                           <p className="text-[10px] text-brand-600 font-semibold truncate">Reports to {user.managerName}</p>
                         )}
@@ -1281,21 +1279,6 @@ export default function SettingsPage() {
                     </div>
 
                     <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
-                      {isRevealed && (
-                        <div className="text-right bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 animate-fade-in">
-                          <span className="block text-[8px] font-bold text-slate-400 uppercase">Login Password</span>
-                          <span className="font-mono font-black text-brand-700 text-xs">
-                            {user.password_hash || user.tempPassword || "password123"}
-                          </span>
-                        </div>
-                      )}
-                      <button
-                        onClick={() => setRevealedUserId(isRevealed ? null : user.id)}
-                        className="p-2 rounded-lg text-slate-500 hover:text-brand-700 hover:bg-slate-50 border border-slate-200 transition-colors"
-                        title={isRevealed ? "Hide login credentials" : "Show login credentials"}
-                      >
-                        {isRevealed ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </button>
                       {user.role !== "ADMIN" || activeRole === "ADMIN" ? (
                         <button
                           onClick={() => handleEditClick(user)}

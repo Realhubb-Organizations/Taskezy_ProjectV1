@@ -215,7 +215,7 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                     )}
                     <span className="text-[9px] text-slate-450">SLA: 20 min response window</span>
                   </div>
-                  <div className="p-4">
+                  <div className="p-4 sm:col-span-2 lg:col-span-1">
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Missed Follow-ups</span>
                     {isDataLoading ? (
                       <LineSkeleton width={30} height={24} />

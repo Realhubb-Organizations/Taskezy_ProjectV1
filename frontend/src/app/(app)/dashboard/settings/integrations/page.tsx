@@ -770,7 +770,7 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
               </p>
               <div className="flex items-center gap-2 bg-slate-50 border border-slate-150 rounded-lg px-3 py-2">
                 <Info className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                <code className="text-[11px] font-mono text-slate-700 truncate">{webhookUrl}</code>
+                <code className="text-[11px] font-mono text-slate-700 truncate min-w-0">{webhookUrl}</code>
               </div>
             </div>
           )}

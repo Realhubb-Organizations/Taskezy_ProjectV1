@@ -445,7 +445,7 @@ export default function HRMSPage() {
                           <th className="p-3">Punch Out</th>
                           <th className="p-3">Duration</th>
                           <th className="p-3">Status</th>
-                          <th className="p-3 text-right">Action</th>
+                          <th className="p-3 text-right sticky right-0 bg-slate-50 z-10">Action</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
@@ -481,11 +481,11 @@ export default function HRMSPage() {
                                   {log.status}
                                 </span>
                               </td>
-                              <td className="p-3 text-right">
+                              <td className="p-3 text-right sticky right-0 bg-white z-10">
                                 {log.status !== "Regularized" && log.status !== "Regularization Pending" && (
                                   <button
                                     onClick={() => setSelectedLog(log)}
-                                    className="text-[10px] text-brand-700 hover:underline font-bold"
+                                    className="inline-flex items-center min-h-9 px-2 sm:min-h-0 sm:px-0 text-[10px] text-brand-700 hover:underline font-bold"
                                   >
                                     Request correction
                                   </button>

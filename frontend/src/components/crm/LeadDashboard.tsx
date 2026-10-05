@@ -1161,7 +1161,7 @@ export default function LeadDashboard() {
                   <colgroup>
                     {/* Bulk-select checkbox (Admin/Manager) */}
                     {canBulkAssign && <col className="w-[40px]" />}
-                    {/* Pinned: Lead Name, Email, Assigned To */}
+                    {/* Lead Name is sticky left on all sizes; Email and Assigned To scroll */}
                     <col className="w-[150px]" />
                     <col className="w-[170px]" />
                     <col className="w-[130px]" />
@@ -1183,7 +1183,7 @@ export default function LeadDashboard() {
                           />
                         </th>
                       )}
-                      <th className="px-4 py-2.5">
+                      <th className="px-4 py-2.5 sticky left-0 z-20 bg-white">
                         {adminSearchOpen ? (
                           <div className="flex items-center gap-1">
                             <input
@@ -1213,7 +1213,6 @@ export default function LeadDashboard() {
                         )}
                       </th>
                       <th className="px-4 py-2.5 whitespace-nowrap">Email</th>
-                      {/* Pinned */}
                       <th className="px-4 py-2.5">
                         <SearchableMultiSelect
                           variant="inline"
@@ -1293,7 +1292,7 @@ export default function LeadDashboard() {
                               />
                             </td>
                           )}
-                          <td className="px-4 py-3 align-top overflow-hidden">
+                          <td className="px-4 py-3 align-top overflow-hidden sticky left-0 z-10 bg-white">
                             <button
                               onClick={() => setSelectedLead(l)}
                               className="font-bold text-[#0B1E6E] hover:underline text-left truncate block max-w-full"
@@ -1337,14 +1336,14 @@ export default function LeadDashboard() {
                                 href={`https://wa.me/${l.phone.replace(/[^0-9]/g, "")}`}
                                 target="_blank"
                                 rel="noreferrer"
-                                className="inline-flex items-center justify-center h-7 w-7 rounded-lg bg-slate-100 text-slate-700 hover:bg-emerald-50 hover:text-emerald-600 transition-colors"
+                                className="inline-flex items-center justify-center h-10 w-10 sm:h-7 sm:w-7 rounded-lg bg-slate-100 text-slate-700 hover:bg-emerald-50 hover:text-emerald-600 transition-colors"
                                 title="WhatsApp"
                               >
                                 <WhatsAppIcon className="h-4 w-4" />
                               </a>
                               <a
                                 href={`tel:${l.phone}`}
-                                className="inline-flex items-center justify-center h-7 w-7 rounded-lg bg-slate-100 text-slate-700 hover:bg-brand-50 hover:text-brand-700 transition-colors ml-1.5"
+                                className="inline-flex items-center justify-center h-10 w-10 sm:h-7 sm:w-7 rounded-lg bg-slate-100 text-slate-700 hover:bg-brand-50 hover:text-brand-700 transition-colors ml-1.5"
                                 title="Call"
                               >
                                 <CallIcon className="h-3.5 w-3.5" />
@@ -1353,7 +1352,7 @@ export default function LeadDashboard() {
                                 <button
                                   type="button"
                                   onClick={() => openSingleDelete(l)}
-                                  className="inline-flex items-center justify-center h-7 w-7 rounded-lg bg-slate-100 text-red-600 hover:bg-red-50 transition-colors ml-1.5"
+                                  className="inline-flex items-center justify-center h-10 w-10 sm:h-7 sm:w-7 rounded-lg bg-slate-100 text-red-600 hover:bg-red-50 transition-colors ml-1.5"
                                   title="Delete lead"
                                 >
                                   <Trash2 className="h-3.5 w-3.5" />

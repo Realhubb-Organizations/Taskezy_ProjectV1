@@ -199,14 +199,14 @@ export default function LoginPage() {
                 <h1 className="text-xl xl:text-2xl font-bold text-gray-900 tracking-tight">Sign in to your account</h1>
                 <p className="text-xs xl:text-sm text-gray-500 mt-1 font-light">
                   Don&apos;t have an account?{" "}
-                  <Link href="/checkout" className="text-blue-500 hover:underline font-normal font-sans">
+                  <Link href="/checkout" className="inline-flex items-center py-2.5 sm:py-0 text-blue-500 hover:underline font-normal font-sans">
                     Sign Up
                   </Link>
                 </p>
               </div>
 
               {error && (
-                <div className="flex gap-2 p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-650">
+                <div className="flex gap-2 p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-600">
                   <AlertCircle className="h-4 w-4 flex-shrink-0" />
                   <span>{error}</span>
                 </div>
@@ -215,7 +215,7 @@ export default function LoginPage() {
               {/* Google OAuth Button */}
               <button
                 type="button"
-                className="w-full flex items-center justify-center gap-2 border border-blue-500 rounded-md py-2.5 text-sm font-medium text-blue-500 hover:bg-blue-50/50 transition-colors"
+                className="w-full min-h-11 sm:min-h-0 flex items-center justify-center gap-2 border border-blue-500 rounded-md py-2.5 text-sm font-medium text-blue-500 hover:bg-blue-50/50 transition-colors"
               >
                 <svg className="w-4 h-4" viewBox="0 0 24 24">
                   <path
@@ -256,7 +256,7 @@ export default function LoginPage() {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="abc@example.com"
-                    className="w-full px-3.5 py-2.5 border border-gray-300 rounded-md text-xs placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full px-3.5 py-2.5 border border-gray-300 rounded-md text-base sm:text-xsplaceholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
                   />
                 </div>
 
@@ -270,12 +270,12 @@ export default function LoginPage() {
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       placeholder="••••••••"
-                      className="w-full px-3.5 py-2.5 border border-gray-300 rounded-l-md text-xs placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                      className="w-full px-3.5 py-2.5 border border-gray-300 rounded-l-md text-base sm:text-xsplaceholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
                     />
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
-                      className="px-3.5 py-3.5 bg-gray-100 border-y border-r border-gray-300 rounded-r-md text-gray-400 hover:text-gray-600 focus:outline-none transition-colors"
+                      className="h-11 w-11 sm:h-auto sm:w-auto sm:px-3.5 sm:py-3.5 flex items-center justify-center bg-gray-100 border-y border-r border-gray-300 rounded-r-md text-gray-400 hover:text-gray-600 focus:outline-none transition-colors"
                     >
                       {showPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
                     </button>
@@ -283,7 +283,7 @@ export default function LoginPage() {
                 </div>
 
                 <div className="text-left">
-                  <Link href="#" className="text-xs text-blue-500 hover:underline font-normal">
+                  <Link href="#" className="inline-flex items-center py-2.5 sm:py-0 text-xs text-blue-500 hover:underline font-normal">
                     Forgot Password?
                   </Link>
                 </div>
@@ -291,7 +291,7 @@ export default function LoginPage() {
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="w-full bg-[#7CA8F6] hover:bg-blue-500 disabled:opacity-60 text-white font-medium py-2.5 rounded-md text-sm transition-colors mt-8 shadow-sm"
+                  className="w-full min-h-11 sm:min-h-0 bg-[#7CA8F6] hover:bg-blue-500 disabled:opacity-60 text-white font-medium py-2.5 rounded-md text-sm transition-colors mt-8 shadow-sm"
                 >
                   {isSubmitting ? "Signing in..." : "Continue"}
                 </button>
@@ -299,7 +299,7 @@ export default function LoginPage() {
                 <div className="text-center mt-4">
                   <p className="text-[11px] sm:text-xs text-gray-500 font-light">
                     Need to create a new tenant?{" "}
-                    <Link href="/checkout" className="text-blue-500 hover:underline font-normal">
+                    <Link href="/checkout" className="inline-flex items-center py-2.5 sm:py-0 text-blue-500 hover:underline font-normal">
                       Configure a subscription plan
                     </Link>
                   </p>
@@ -328,7 +328,7 @@ export default function LoginPage() {
               </div>
 
               {resetError && (
-                <div className="flex gap-2 p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-650">
+                <div className="flex gap-2 p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-600">
                   <AlertCircle className="h-4 w-4 flex-shrink-0" />
                   <span>{resetError}</span>
                 </div>
@@ -344,7 +344,7 @@ export default function LoginPage() {
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
                     placeholder="At least 8 characters"
-                    className="w-full px-3.5 py-2.5 border border-gray-300 rounded-md text-xs placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full px-3.5 py-2.5 border border-gray-300 rounded-md text-base sm:text-xsplaceholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
                   />
                 </div>
 
@@ -357,7 +357,7 @@ export default function LoginPage() {
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     placeholder="Repeat new password"
-                    className="w-full px-3.5 py-2.5 border border-gray-300 rounded-md text-xs placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full px-3.5 py-2.5 border border-gray-300 rounded-md text-base sm:text-xsplaceholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
                   />
                 </div>
 
