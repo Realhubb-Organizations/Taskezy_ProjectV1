@@ -61,7 +61,7 @@ export async function fixSheetLeadTimestampsHandler(_req: Request, res: Response
 }
 
 export async function deleteLeadHandler(req: Request, res: Response): Promise<void> {
-  await leadsService.deleteLead(req.params.id);
+  await leadsService.deleteLead({ userId: req.user!.sub, name: req.user!.name }, req.params.id);
   sendOk(res, { deleted: true });
 }
 

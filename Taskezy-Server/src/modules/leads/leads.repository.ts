@@ -1,5 +1,5 @@
 import { PoolClient } from "pg";
-import { pool, query } from "../../db/pool";
+import { pool, query, withTransaction } from "../../db/pool";
 
 /** leads.phone is CHECK'd to a bare 10-digit Indian mobile — strip formatting/country code before insert. Shared by every external lead-ingest source (Meta webhook, sheet import). */
 export function normalizeIndianMobile(raw: string): string | undefined {
@@ -413,9 +413,37 @@ export async function reassign(client: PoolClient, leadId: string, previousAgent
   );
 }
 
-export async function remove(id: string): Promise<boolean> {
-  const { rowCount } = await pool.query(`DELETE FROM leads WHERE id = $1`, [id]);
-  return (rowCount ?? 0) > 0;
+/**
+ * Snapshots the lead and its lead_logs into lead_deletion_archive, then deletes
+ * the lead — all in one transaction (withTransaction rolls back on any error,
+ * so a failed step leaves both the lead and the archive untouched). Returns
+ * false if the lead no longer exists. Errors are rethrown unchanged so the
+ * service's FK-violation mapping still applies.
+ */
+export async function archiveAndRemove(id: string, actor: { userId: string; name: string }): Promise<boolean> {
+  return withTransaction(async (client) => {
+    const { rows: leadRows } = await client.query<{ lead: unknown }>(
+      `SELECT to_jsonb(l) AS lead FROM leads l WHERE l.id = $1 FOR UPDATE`,
+      [id]
+    );
+    if (leadRows.length === 0) return false;
+
+    const { rows: logRows } = await client.query<{ logs: unknown }>(
+      `SELECT coalesce(jsonb_agg(to_jsonb(lg) ORDER BY lg.created_at), '[]'::jsonb) AS logs
+       FROM lead_logs lg WHERE lg.lead_id = $1`,
+      [id]
+    );
+
+    // Stringified explicitly: node-pg would turn a JS array param into a Postgres array literal, not JSON.
+    await client.query(
+      `INSERT INTO lead_deletion_archive (lead_id, lead_snapshot, logs_snapshot, deleted_by_user_id, deleted_by_name_snapshot)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [id, JSON.stringify(leadRows[0].lead), JSON.stringify(logRows[0].logs), actor.userId, actor.name]
+    );
+
+    const { rowCount } = await client.query(`DELETE FROM leads WHERE id = $1`, [id]);
+    return (rowCount ?? 0) > 0;
+  });
 }
 
 export async function setKycVerified(id: string): Promise<boolean> {
