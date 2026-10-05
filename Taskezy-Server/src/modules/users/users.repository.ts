@@ -26,6 +26,47 @@ export async function findAllActive(): Promise<UserDirectoryRow[]> {
   return rows;
 }
 
+export interface UserListFilter {
+  page: number;
+  pageSize: number;
+  /** ILIKE across first/last name, email, and phone — matches the Settings "Manage Users" search box. */
+  search?: string;
+}
+
+// Paginated counterpart to findAllActive() for the admin Settings "Manage
+// Users" table specifically — same ACTIVE-only scope and column set/order so
+// a page of this looks identical to a slice of the old full array, just
+// fetched one page at a time instead of loading every user to slice
+// client-side.
+export async function findManyActive(filter: UserListFilter): Promise<{ rows: UserDirectoryRow[]; totalCount: number }> {
+  const conditions: string[] = [`u.status = 'ACTIVE'`];
+  const params: unknown[] = [];
+
+  if (filter.search) {
+    params.push(`%${filter.search}%`);
+    conditions.push(`(u.first_name ILIKE $${params.length} OR u.last_name ILIKE $${params.length} OR u.email ILIKE $${params.length} OR u.phone_number ILIKE $${params.length})`);
+  }
+
+  const whereClause = `WHERE ${conditions.join(" AND ")}`;
+
+  const countResult = await query<{ count: string }>(`SELECT count(*) FROM users u ${whereClause}`, params);
+  const totalCount = Number(countResult.rows[0]?.count ?? 0);
+
+  const offset = (filter.page - 1) * filter.pageSize;
+  const dataParams = [...params, filter.pageSize, offset];
+  const { rows } = await query<UserDirectoryRow>(
+    `SELECT u.id, u.first_name, u.last_name, u.email, u.role, u.department, u.role_type, u.designation,
+            u.manager_id, m.first_name || COALESCE(' ' || m.last_name, '') AS manager_name
+     FROM users u
+     LEFT JOIN users m ON m.id = u.manager_id
+     ${whereClause}
+     ORDER BY u.first_name, u.last_name
+     LIMIT $${dataParams.length - 1} OFFSET $${dataParams.length}`,
+    dataParams
+  );
+  return { rows, totalCount };
+}
+
 export interface FullUserRow extends UserDirectoryRow {
   phone_number: string | null;
   employment_type: string | null;

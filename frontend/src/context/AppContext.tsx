@@ -612,7 +612,10 @@ function mapApiUserToFrontendUser(apiUser: ApiUser): User {
   };
 }
 
-function mapApiLeadToFrontendLead(row: ApiLeadRow): Lead {
+// Exported so LeadDashboard's server-paginated table can map its own
+// directly-fetched pages without duplicating this logic — every other
+// caller still goes through the full-array AppContext load.
+export function mapApiLeadToFrontendLead(row: ApiLeadRow): Lead {
   return {
     id: row.id,
     name: row.name,
@@ -638,7 +641,12 @@ function mapApiLeadToFrontendLead(row: ApiLeadRow): Lead {
   };
 }
 
-function mapApiUserDirectoryEntryToFrontendUser(row: ApiUserDirectoryEntry): User {
+// Exported so the Settings "Manage Users" table's server-paginated fetch can
+// map its own directly-fetched page without duplicating this logic — same
+// convention as mapApiLeadToFrontendLead/mapApiCalendarEventToFrontend above.
+// Every other users consumer (dropdowns, name resolution, this file's own
+// bulk load) still goes through the full-array AppContext load.
+export function mapApiUserDirectoryEntryToFrontendUser(row: ApiUserDirectoryEntry): User {
   return {
     id: row.id,
     name: `${row.first_name}${row.last_name ? " " + row.last_name : ""}`,
@@ -664,7 +672,7 @@ function formatPriceValue(value: string | null, priceType: string | null): strin
   return priceType === "STARTING_FROM" ? `${formatted}+` : formatted;
 }
 
-function mapApiPropertyToFrontend(row: ApiPropertyRow): Property {
+export function mapApiPropertyToFrontend(row: ApiPropertyRow): Property {
   return {
     id: row.id,
     name: row.name,
@@ -712,7 +720,7 @@ function parsePriceToValue(price?: string): number | undefined {
   return Number.isFinite(crores) ? crores * 10000000 : undefined;
 }
 
-function mapApiResaleUnitToFrontend(row: ApiResaleUnitRow): ResaleUnit {
+export function mapApiResaleUnitToFrontend(row: ApiResaleUnitRow): ResaleUnit {
   return {
     id: row.id,
     property: row.property_name,
@@ -744,7 +752,12 @@ function mapApiFollowupToFrontend(row: ApiFollowupRow): FollowupCall {
   };
 }
 
-function mapApiAttendanceToFrontend(row: ApiAttendanceRow): AttendanceRecord {
+// Exported (same convention as mapApiLeadToFrontendLead) so the HRMS page's
+// server-paginated attendance table can map a fetched page's rows itself,
+// the same way LeadDashboard.tsx does for apiListLeadsPage, instead of
+// needing the full attendanceRecords array AppContext still bulk-loads for
+// other consumers' simple derived counts.
+export function mapApiAttendanceToFrontend(row: ApiAttendanceRow): AttendanceRecord {
   return {
     employeeName: row.employee_name,
     email: row.email,
@@ -758,7 +771,7 @@ function mapApiAttendanceToFrontend(row: ApiAttendanceRow): AttendanceRecord {
 
 const CLAIM_STATUS_MAP: Record<string, ReimbursementClaim["status"]> = { PENDING: "Pending", PAID: "Paid", REJECTED: "Rejected" };
 
-function mapApiReimbursementToFrontend(row: ApiReimbursementRow): ReimbursementClaim {
+export function mapApiReimbursementToFrontend(row: ApiReimbursementRow): ReimbursementClaim {
   return {
     id: row.id,
     title: row.title,
@@ -776,7 +789,7 @@ const COLLECTION_STATUS_MAP: Record<string, NonNullable<Invoice["collectionStatu
   PENDING: "Pending", PARTIALLY_COLLECTED: "Partially Collected", COLLECTED: "Collected"
 };
 
-function mapApiInvoiceToFrontend(row: ApiInvoiceRow): Invoice {
+export function mapApiInvoiceToFrontend(row: ApiInvoiceRow): Invoice {
   return {
     id: row.id,
     invoiceNumber: row.invoice_number || undefined,
@@ -800,7 +813,10 @@ function mapApiInvoiceToFrontend(row: ApiInvoiceRow): Invoice {
   };
 }
 
-function mapApiNotificationToFrontend(row: ApiNotificationRow): Notification {
+// Exported so NotificationBell can map its own server-fetched pages
+// (apiListNotificationsPage) the same way AppContext's bulk load does — see
+// LeadDashboard's equivalent use of mapApiLeadToFrontendLead.
+export function mapApiNotificationToFrontend(row: ApiNotificationRow): Notification {
   return {
     id: row.id,
     system: row.system,
@@ -814,7 +830,12 @@ function mapApiNotificationToFrontend(row: ApiNotificationRow): Notification {
   };
 }
 
-function mapApiCalendarEventToFrontend(row: ApiCalendarEventRow): CalendarEvent {
+// Exported so the CRM/Admin calendar pages' server-range-fetched pages can
+// map their own directly-fetched rows without duplicating this logic — same
+// convention as mapApiLeadToFrontendLead above. Every other calendar
+// consumer (HRMS/Finance pages, this file's own bulk load) still goes
+// through the full-array AppContext load.
+export function mapApiCalendarEventToFrontend(row: ApiCalendarEventRow): CalendarEvent {
   return {
     id: row.id,
     system: row.system,
@@ -834,7 +855,10 @@ const TIMESHEET_STATUS_MAP: Record<string, TimesheetLog["status"]> = {
   FULL_DAY: "Full Day", HALF_DAY: "Half Day", REGULARIZATION_PENDING: "Regularization Pending", REGULARIZED: "Regularized"
 };
 
-function mapApiTimesheetToFrontend(row: ApiTimesheetRow): TimesheetLog {
+// Exported for the same reason as mapApiAttendanceToFrontend above — the
+// HRMS page's server-paginated timesheet tables map each fetched page
+// themselves rather than needing the full timesheets array.
+export function mapApiTimesheetToFrontend(row: ApiTimesheetRow): TimesheetLog {
   return {
     id: row.id,
     userId: row.user_id,

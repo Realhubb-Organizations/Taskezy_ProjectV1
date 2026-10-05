@@ -1,11 +1,13 @@
 "use client";
 
-import React, { useState } from "react";
-import { useApp, Invoice, ReimbursementClaim, Lead, CalendarEventType } from "@/context/AppContext";
+import React, { useEffect, useState } from "react";
+import { useApp, Invoice, ReimbursementClaim, Lead, CalendarEventType, mapApiInvoiceToFrontend, mapApiReimbursementToFrontend } from "@/context/AppContext";
 import { useSearchParams } from "next/navigation";
 import MonthCalendar from "@/components/calendar/MonthCalendar";
 import AddCalendarEventModal from "@/components/calendar/AddCalendarEventModal";
 import { LineSkeleton, TableRowsSkeleton, CardListSkeleton } from "@/components/ui/Skeletons";
+import TablePagination from "@/components/ui/TablePagination";
+import { apiListInvoicesPage, apiListReimbursementsPage } from "@/lib/apiClient";
 import {
   CreditCard,
   DollarSign,
@@ -51,6 +53,85 @@ export default function FinancePage() {
   // Invoices list state
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
 
+  // ---- Server-paginated Billing tab (real fetch-per-page, mirrors the
+  // Leads tab's admin table fix) — the invoices table's own rows are
+  // fetched directly from the server for exactly the current page, instead
+  // of rendering the full `invoices` array AppContext still bulk-loads for
+  // other consumers (Dashboard/Reports tabs' aggregates, the "Create
+  // Invoice" lead lookup) that genuinely need the whole dataset. 10 matches
+  // this codebase's own default-page-size convention (TablePagination's
+  // DEFAULT_ROWS_PER_PAGE_OPTIONS[0]) since the Billing tab had no rows-
+  // per-page control of its own before this fix.
+  const [invoicesPage, setInvoicesPage] = useState(1);
+  const [invoicesRowsPerPage, setInvoicesRowsPerPage] = useState(10);
+  const [serverInvoices, setServerInvoices] = useState<Invoice[]>([]);
+  const [serverInvoicesTotalCount, setServerInvoicesTotalCount] = useState(0);
+  const [serverInvoicesLoading, setServerInvoicesLoading] = useState(true);
+
+  const fetchInvoicesPage = (page: number, rowsPerPage: number) => {
+    setServerInvoicesLoading(true);
+    apiListInvoicesPage(page, rowsPerPage)
+      .then((result) => {
+        setServerInvoices(result.rows.map(mapApiInvoiceToFrontend));
+        setServerInvoicesTotalCount(result.totalCount);
+      })
+      .catch((err) => console.error("Could not load the invoices list page:", err))
+      .finally(() => setServerInvoicesLoading(false));
+  };
+
+  useEffect(() => {
+    if (activeTabParam !== "billing") return;
+    fetchInvoicesPage(invoicesPage, invoicesRowsPerPage);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTabParam, invoicesPage, invoicesRowsPerPage]);
+
+  // Row-level mutations (generate/mark-paid/delete) update AppContext's
+  // `invoices` optimistically — overlay those onto the server-fetched page
+  // so a status/amount change or delete shows immediately without waiting
+  // for the next page fetch, while the row SET and pagination itself still
+  // come from the server, bounded to one page at a time.
+  const displayedInvoices = serverInvoices
+    .filter(si => invoices.some(i => i.id === si.id))
+    .map(si => invoices.find(i => i.id === si.id)!);
+
+  // ---- Server-paginated Reimbursements tab (same pattern) ----
+  const REIMB_STATUS_TO_API: Record<string, "PENDING" | "PAID" | "REJECTED"> = {
+    Pending: "PENDING", Paid: "PAID", Rejected: "REJECTED"
+  };
+  const [reimbPage, setReimbPage] = useState(1);
+  const [reimbRowsPerPage, setReimbRowsPerPage] = useState(10);
+  const [serverReimbursements, setServerReimbursements] = useState<ReimbursementClaim[]>([]);
+  const [serverReimbTotalCount, setServerReimbTotalCount] = useState(0);
+  const [serverReimbLoading, setServerReimbLoading] = useState(true);
+
+  useEffect(() => {
+    if (activeTabParam !== "reimbursements") return;
+    let cancelled = false;
+    setServerReimbLoading(true);
+    apiListReimbursementsPage(reimbPage, reimbRowsPerPage, {
+      status: reimbFilter === "All" ? undefined : REIMB_STATUS_TO_API[reimbFilter]
+    })
+      .then((result) => {
+        if (cancelled) return;
+        setServerReimbursements(result.rows.map(mapApiReimbursementToFrontend));
+        setServerReimbTotalCount(result.totalCount);
+      })
+      .catch((err) => {
+        if (!cancelled) console.error("Could not load the reimbursements list page:", err);
+      })
+      .finally(() => {
+        if (!cancelled) setServerReimbLoading(false);
+      });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTabParam, reimbPage, reimbRowsPerPage, reimbFilter]);
+
+  // Same overlay as displayedInvoices — approve/reject/delete update
+  // AppContext's `reimbursements` optimistically, reflected immediately.
+  const displayedReimbursements = serverReimbursements
+    .filter(sr => reimbursements.some(r => r.id === sr.id))
+    .map(sr => reimbursements.find(r => r.id === sr.id)!);
+
   // New Invoice form state
   const [isNewInvoiceOpen, setIsNewInvoiceOpen] = useState(false);
   const [clientName, setClientName] = useState("");
@@ -84,6 +165,12 @@ export default function FinancePage() {
     setBaseAmount("");
     setProjectName("");
     setLeadId("");
+    // A brand-new invoice is the newest row (ORDER BY created_at DESC) so it
+    // lands on page 1 — the overlay in displayedInvoices only re-syncs rows
+    // already present on the currently-fetched page, so a genuinely new row
+    // needs its own refetch to appear at all.
+    setInvoicesPage(1);
+    fetchInvoicesPage(1, invoicesRowsPerPage);
   };
 
   const handleApproveBooking = (leadId: string) => {
@@ -104,11 +191,6 @@ export default function FinancePage() {
       deleteInvoice(id);
     }
   };
-
-  const filteredReimbursements = reimbursements.filter(r => {
-    if (reimbFilter === "All") return true;
-    return r.status === reimbFilter;
-  });
 
   // Calculate stats
   const totalInvoiced = invoices.reduce((sum, inv) => sum + inv.totalAmount, 0);
@@ -168,9 +250,9 @@ export default function FinancePage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
-                  {isDataLoading && invoices.length === 0 ? (
+                  {serverInvoicesLoading && serverInvoices.length === 0 ? (
                     <TableRowsSkeleton rows={6} columns={8} />
-                  ) : invoices.map((inv) => (
+                  ) : displayedInvoices.map((inv) => (
                     <tr key={inv.id} className="hover:bg-slate-50/50">
                       <td className="p-4 font-mono font-bold text-brand-700">{inv.invoiceNumber || "Draft (Pending)"}</td>
                       <td className="p-4 font-bold text-slate-800">{inv.clientName}</td>
@@ -219,6 +301,14 @@ export default function FinancePage() {
                 </tbody>
               </table>
             </div>
+            <TablePagination
+              totalRows={serverInvoicesTotalCount}
+              page={invoicesPage}
+              rowsPerPage={invoicesRowsPerPage}
+              onPageChange={setInvoicesPage}
+              onRowsPerPageChange={(n) => { setInvoicesRowsPerPage(n); setInvoicesPage(1); }}
+              rowLabel="Invoice"
+            />
           </div>
         </div>
       )}
@@ -233,7 +323,7 @@ export default function FinancePage() {
               {["All", "Pending", "Paid", "Rejected"].map(status => (
                 <button
                   key={status}
-                  onClick={() => setReimbFilter(status)}
+                  onClick={() => { setReimbFilter(status); setReimbPage(1); }}
                   className={`px-3 py-1 rounded-lg text-[10px] font-bold border transition-all ${
                     reimbFilter === status
                       ? "bg-brand-50 border-brand-200 text-brand-700"
@@ -261,9 +351,9 @@ export default function FinancePage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
-                  {isDataLoading && filteredReimbursements.length === 0 ? (
+                  {serverReimbLoading && serverReimbursements.length === 0 ? (
                     <TableRowsSkeleton rows={6} columns={7} />
-                  ) : filteredReimbursements.map((c) => (
+                  ) : displayedReimbursements.map((c) => (
                     <tr key={c.id} className="hover:bg-slate-50/50">
                       <td className="p-4 text-slate-500 font-mono">{c.date}</td>
                       <td className="p-4 font-bold text-slate-800">{c.agentName}</td>
@@ -326,6 +416,14 @@ export default function FinancePage() {
                 </tbody>
               </table>
             </div>
+            <TablePagination
+              totalRows={serverReimbTotalCount}
+              page={reimbPage}
+              rowsPerPage={reimbRowsPerPage}
+              onPageChange={setReimbPage}
+              onRowsPerPageChange={(n) => { setReimbRowsPerPage(n); setReimbPage(1); }}
+              rowLabel="Claim"
+            />
           </div>
         </div>
       )}

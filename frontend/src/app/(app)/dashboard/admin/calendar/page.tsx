@@ -1,8 +1,9 @@
 "use client";
 
-import React, { Suspense, useState } from "react";
+import React, { Suspense, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useApp, CalendarEvent, SystemType } from "@/context/AppContext";
+import { CalendarEvent, SystemType, mapApiCalendarEventToFrontend } from "@/context/AppContext";
+import { apiListCalendarEventsPage } from "@/lib/apiClient";
 import MonthCalendar from "@/components/calendar/MonthCalendar";
 import { CalendarDays } from "lucide-react";
 import { CardListSkeleton } from "@/components/ui/Skeletons";
@@ -15,12 +16,48 @@ const SYSTEM_COLOR: Record<string, string> = {
 
 const SYSTEMS: SystemType[] = ["CRM", "HRMS", "FINANCE"];
 
+// Plain YYYY-MM-DD bounds for the whole month a given cursor date falls in —
+// matches leads' dateFrom/dateTo convention. Shared shape with the CRM
+// calendar page (kept duplicated rather than a shared util, same as the rest
+// of this small per-page date-bound logic elsewhere in the app).
+function monthBounds(cursor: Date): { dateFrom: string; dateTo: string } {
+  const toYMD = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const start = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+  const end = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0);
+  return { dateFrom: toYMD(start), dateTo: toYMD(end) };
+}
+
 function AdminCalendarContent() {
-  const { calendarEvents, isDataLoading } = useApp();
   const router = useRouter();
 
   const todayKey = new Date().toISOString().split("T")[0];
   const [selectedDate, setSelectedDate] = useState<string>(todayKey);
+
+  // Global Operations Calendar fetches every system's events (ADMIN sees
+  // all — see calendar-events.routes.ts) for just the currently-visible
+  // month, instead of filtering AppContext's full bulk-loaded calendarEvents
+  // array. Refetches whenever the visible month changes.
+  const [cursor, setCursor] = useState(() => new Date());
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
+  const [eventsLoading, setEventsLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setEventsLoading(true);
+    const { dateFrom, dateTo } = monthBounds(cursor);
+    apiListCalendarEventsPage(1, 500, { dateFrom, dateTo })
+      .then((result) => {
+        if (cancelled) return;
+        setCalendarEvents(result.rows.map(mapApiCalendarEventToFrontend));
+      })
+      .catch((err) => {
+        if (!cancelled) console.error("Could not load the global calendar's events for this month:", err);
+      })
+      .finally(() => {
+        if (!cancelled) setEventsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [cursor]);
 
   const dayEvents = calendarEvents
     .filter(e => e.date === selectedDate)
@@ -58,6 +95,8 @@ function AdminCalendarContent() {
             selectedDate={selectedDate}
             onSelectDate={setSelectedDate}
             colorForEvent={(e) => SYSTEM_COLOR[e.system] || "bg-slate-400"}
+            cursor={cursor}
+            onCursorChange={setCursor}
           />
         </div>
 
@@ -65,7 +104,7 @@ function AdminCalendarContent() {
           <h3 className="text-xs font-bold text-slate-700 border-b border-slate-100 pb-2">
             {new Date(selectedDate + "T00:00:00").toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
           </h3>
-          {isDataLoading && dayEvents.length === 0 ? (
+          {eventsLoading && dayEvents.length === 0 ? (
             <CardListSkeleton count={4} />
           ) : dayEvents.length === 0 ? (
             <p className="text-[11px] text-slate-400 italic py-4 text-center">No scheduled activity across any partition.</p>

@@ -9,6 +9,14 @@ interface MonthCalendarProps {
   selectedDate: string | null;
   onSelectDate: (date: string) => void;
   colorForEvent?: (event: CalendarEvent) => string;
+  // Optional controlled month cursor — when the caller passes both, this
+  // component defers to them instead of tracking its own `cursor` state, so
+  // the caller can know which month is on screen (e.g. to fetch just that
+  // month's events from the server) and drive navigation itself. Omitting
+  // either prop keeps the old self-contained behavior (HRMS/Finance calendars
+  // still do this, since they render from the full in-memory event list).
+  cursor?: Date;
+  onCursorChange?: (date: Date) => void;
 }
 
 const DEFAULT_DOT_COLORS: Record<string, string> = {
@@ -23,8 +31,10 @@ function toDateKey(year: number, month: number, day: number): string {
   return `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
-export default function MonthCalendar({ events, selectedDate, onSelectDate, colorForEvent }: MonthCalendarProps) {
-  const [cursor, setCursor] = useState(() => new Date());
+export default function MonthCalendar({ events, selectedDate, onSelectDate, colorForEvent, cursor: controlledCursor, onCursorChange }: MonthCalendarProps) {
+  const [internalCursor, setInternalCursor] = useState(() => new Date());
+  const cursor = controlledCursor ?? internalCursor;
+  const setCursor = onCursorChange ?? setInternalCursor;
   const year = cursor.getFullYear();
   const month = cursor.getMonth();
 

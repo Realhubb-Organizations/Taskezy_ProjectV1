@@ -24,16 +24,22 @@ function scopeForCaller(caller: AccessTokenPayload): string | undefined {
 export async function listLeads(caller: AccessTokenPayload, filter: {
   page: number;
   pageSize: number;
-  status?: string;
-  assignedAgentId?: string;
+  status?: string[];
+  assignedAgentId?: string[];
+  campaign?: string[];
+  dateFrom?: string;
+  dateTo?: string;
   search?: string;
 }) {
   const scopedToAgentId = scopeForCaller(caller);
   const { rows, totalCount } = await repo.findMany({
     page: filter.page,
     pageSize: filter.pageSize,
-    statusCode: filter.status,
+    statusCodes: filter.status,
     assignedAgentId: filter.assignedAgentId,
+    campaign: filter.campaign,
+    dateFrom: filter.dateFrom,
+    dateTo: filter.dateTo,
     search: filter.search,
     scopedToAgentId
   });
@@ -45,6 +51,77 @@ export async function listLeads(caller: AccessTokenPayload, filter: {
       totalCount,
       totalPages: Math.max(1, Math.ceil(totalCount / filter.pageSize))
     }
+  };
+}
+
+// Maps lead_statuses.code -> the 7 admin CRM stat-card buckets. Mirrors
+// frontend/src/lib/leadStatusMapping.ts's DB_CODE_TO_FRONTEND_STATUS combined
+// with frontend/src/lib/leadSummaryStats.ts's computeLeadSummaryStats, i.e.
+// "New Lead" -> NEW, "RNR" -> RNR, "Call Back" -> CALL_BACK,
+// "Follow-ups" -> FOLLOW_UP, "Visit Schedule" -> SITE_VISIT_SCHEDULED,
+// "Site Visit" -> SITE_VISIT_DONE. Kept here (not imported from the frontend)
+// since this is backend code operating on DB codes, not frontend display
+// strings, but the bucket names/semantics must stay in lockstep with that file.
+const NEW_LEADS_CODE = "NEW";
+const RNR_CODE = "RNR";
+const CALL_BACKS_CODE = "CALL_BACK";
+const FOLLOW_UPS_CODE = "FOLLOW_UP";
+const SITE_VISIT_SCHEDULED_CODE = "SITE_VISIT_SCHEDULED";
+const SITE_VISIT_DONE_CODE = "SITE_VISIT_DONE";
+
+export interface LeadSummaryStats {
+  totalLeads: number;
+  newLeads: number;
+  rnr: number;
+  callBacks: number;
+  followUps: number;
+  siteVisitScheduled: number;
+  siteVisitDone: number;
+}
+
+/**
+ * Backend counterpart to the frontend's computeLeadSummaryStats — the admin
+ * CRM Leads tab's 7 stat cards, computed as a single grouped aggregate query
+ * instead of over the full in-memory leads array (which stops being
+ * available once the leads list is properly paginated). Accepts the exact
+ * same filters as listLeads (minus page/pageSize) so a caller applying a
+ * campaign/date-range/status filter sees the list and the stat cards agree.
+ * `totalLeads` sums every group — i.e. "every lead matching the current
+ * filters", not literally every lead in the table — matching how the
+ * frontend's adminStats is already scoped by campaign/date range before the
+ * 7 numbers are computed from it.
+ */
+export async function getLeadStats(caller: AccessTokenPayload, filter: {
+  status?: string[];
+  assignedAgentId?: string[];
+  campaign?: string[];
+  dateFrom?: string;
+  dateTo?: string;
+  search?: string;
+}): Promise<LeadSummaryStats> {
+  const scopedToAgentId = scopeForCaller(caller);
+  const grouped = await repo.getStats({
+    statusCodes: filter.status,
+    assignedAgentId: filter.assignedAgentId,
+    campaign: filter.campaign,
+    dateFrom: filter.dateFrom,
+    dateTo: filter.dateTo,
+    search: filter.search,
+    scopedToAgentId
+  });
+
+  const countFor = (code: string): number =>
+    grouped.filter(g => g.status_code === code).reduce((sum, g) => sum + Number(g.count), 0);
+  const totalLeads = grouped.reduce((sum, g) => sum + Number(g.count), 0);
+
+  return {
+    totalLeads,
+    newLeads: countFor(NEW_LEADS_CODE),
+    rnr: countFor(RNR_CODE),
+    callBacks: countFor(CALL_BACKS_CODE),
+    followUps: countFor(FOLLOW_UPS_CODE),
+    siteVisitScheduled: countFor(SITE_VISIT_SCHEDULED_CODE),
+    siteVisitDone: countFor(SITE_VISIT_DONE_CODE)
   };
 }
 

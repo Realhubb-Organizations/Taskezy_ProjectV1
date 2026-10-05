@@ -2,6 +2,11 @@
 // one-shot refresh-and-retry on 401. See Taskezy-Server/README.md for the
 // API's shape — every response is { success, data } or { success, data, meta }.
 
+// Type-only import — erased at compile time, so this can't create a runtime
+// circular dependency even though leadSummaryStats.ts itself imports a type
+// from AppContext.tsx, which imports functions from this very file.
+import type { LeadSummaryStats } from "@/lib/leadSummaryStats";
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
 const ACCESS_TOKEN_STORAGE_KEY = "taskezy_access_token";
 
@@ -220,6 +225,69 @@ export async function apiListAllLeads(): Promise<ApiLeadRow[]> {
   return all;
 }
 
+// Real server-side pagination for the admin Leads table — the thing the
+// comment above this function was always meant to be replaced by once the
+// "fetch everything" loop stopped being viable. Mirrors
+// leads.schema.ts's listLeadsQuerySchema exactly: status/assignedAgentId/
+// campaign are repeated-query-param multi-selects, dateFrom/dateTo are
+// plain YYYY-MM-DD bounds the caller computes from whichever date-range
+// preset is active, search is a single string (name/phone ILIKE).
+export interface LeadListFilters {
+  status?: string[];
+  assignedAgentId?: string[];
+  campaign?: string[];
+  dateFrom?: string;
+  dateTo?: string;
+  search?: string;
+}
+
+function buildLeadFilterParams(filters: LeadListFilters): URLSearchParams {
+  const params = new URLSearchParams();
+  filters.status?.forEach(s => params.append("status", s));
+  filters.assignedAgentId?.forEach(a => params.append("assignedAgentId", a));
+  filters.campaign?.forEach(c => params.append("campaign", c));
+  if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
+  if (filters.dateTo) params.set("dateTo", filters.dateTo);
+  if (filters.search) params.set("search", filters.search);
+  return params;
+}
+
+export interface LeadsPageResult {
+  rows: ApiLeadRow[];
+  page: number;
+  pageSize: number;
+  totalCount: number;
+  totalPages: number;
+}
+
+export async function apiListLeadsPage(
+  page: number,
+  pageSize: number,
+  filters: LeadListFilters = {}
+): Promise<LeadsPageResult> {
+  const params = buildLeadFilterParams(filters);
+  params.set("page", String(page));
+  params.set("pageSize", String(pageSize));
+  const { data, meta } = await requestWithMeta<ApiLeadRow>(`/api/v1/leads?${params.toString()}`);
+  return {
+    rows: data,
+    page: meta?.page ?? page,
+    pageSize: meta?.pageSize ?? pageSize,
+    totalCount: meta?.totalCount ?? data.length,
+    totalPages: meta?.totalPages ?? 1
+  };
+}
+
+// Same filter shape as apiListLeadsPage, matching leads.schema.ts's
+// leadStatsQuerySchema (identical filters, no page/pageSize — an aggregate
+// has no "page"). Lets the admin Leads tab's 7 stat cards reflect the
+// currently-applied filters without needing the full lead list in memory.
+export function apiGetLeadStats(filters: LeadListFilters = {}): Promise<LeadSummaryStats> {
+  const params = buildLeadFilterParams(filters);
+  const qs = params.toString();
+  return request<LeadSummaryStats>(`/api/v1/leads/stats${qs ? `?${qs}` : ""}`);
+}
+
 export function apiGetLead(leadId: string): Promise<ApiLeadRow> {
   return request<ApiLeadRow>(`/api/v1/leads/${leadId}`);
 }
@@ -316,6 +384,42 @@ export function apiListUsers(): Promise<ApiUserDirectoryEntry[]> {
   return request<ApiUserDirectoryEntry[]>("/api/v1/users");
 }
 
+// Real server-side pagination for the admin Settings "Manage Users" table —
+// mirrors apiListLeadsPage's shape. Passing page/pageSize is what opts the
+// backend into the paginated response at all (see users.routes.ts); every
+// other consumer of users (dropdowns, name resolution, AppContext's bulk
+// load) keeps calling the bare apiListUsers() above and is untouched.
+export interface UserListFilters {
+  search?: string;
+}
+
+export interface UsersPageResult {
+  rows: ApiUserDirectoryEntry[];
+  page: number;
+  pageSize: number;
+  totalCount: number;
+  totalPages: number;
+}
+
+export async function apiListUsersPage(
+  page: number,
+  pageSize: number,
+  filters: UserListFilters = {}
+): Promise<UsersPageResult> {
+  const params = new URLSearchParams();
+  params.set("page", String(page));
+  params.set("pageSize", String(pageSize));
+  if (filters.search) params.set("search", filters.search);
+  const { data, meta } = await requestWithMeta<ApiUserDirectoryEntry>(`/api/v1/users?${params.toString()}`);
+  return {
+    rows: data,
+    page: meta?.page ?? page,
+    pageSize: meta?.pageSize ?? pageSize,
+    totalCount: meta?.totalCount ?? data.length,
+    totalPages: meta?.totalPages ?? 1
+  };
+}
+
 export interface ApiFullUser extends ApiUserDirectoryEntry {
   phone_number: string | null;
   employment_type: string | null;
@@ -396,8 +500,73 @@ export interface ApiPropertyRow {
   created_at: string;
   team_members: { userId: string; name: string; percentage: number | null }[];
 }
-export function apiListProperties(): Promise<ApiPropertyRow[]> {
-  return request<ApiPropertyRow[]>("/api/v1/properties");
+// Server caps pageSize at 500 (see properties.schema.ts) — a real safety
+// limit, not something to raise just to fetch everything in one request.
+const MAX_PROPERTY_PAGE_SIZE = 500;
+
+// Pages through every property and concatenates the results — the same
+// "fetch everything" bridge apiListAllLeads is for leads, kept for
+// AppContext's bulk load, which other features (AddLeadModal's property
+// picker, LeadDashboard's property filter, AddPropertyModal) still read as
+// one full array. Properties are headcount/inventory-bounded (far smaller
+// than leads), so this is expected to resolve in a single round trip in
+// practice; it still loops instead of assuming that, so it keeps working
+// if that ever stops being true.
+export async function apiListProperties(): Promise<ApiPropertyRow[]> {
+  const all: ApiPropertyRow[] = [];
+  let page = 1;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const { data, meta } = await requestWithMeta<ApiPropertyRow>(`/api/v1/properties?page=${page}&pageSize=${MAX_PROPERTY_PAGE_SIZE}`);
+    all.push(...data);
+    if (!meta || page >= meta.totalPages) break;
+    page += 1;
+  }
+  return all;
+}
+
+// Real server-side pagination for the admin Properties table — mirrors
+// apiListLeadsPage's shape. search matches name/developer/location;
+// propertyType is a repeated-query-param multi-select matching ANY of a
+// property's own (comma-joined) types; sortDir controls created_at order.
+export interface PropertyListFilters {
+  search?: string;
+  propertyType?: string[];
+  sortDir?: "asc" | "desc";
+}
+
+function buildPropertyFilterParams(filters: PropertyListFilters): URLSearchParams {
+  const params = new URLSearchParams();
+  if (filters.search) params.set("search", filters.search);
+  filters.propertyType?.forEach(t => params.append("propertyType", t));
+  if (filters.sortDir) params.set("sortDir", filters.sortDir);
+  return params;
+}
+
+export interface PropertiesPageResult {
+  rows: ApiPropertyRow[];
+  page: number;
+  pageSize: number;
+  totalCount: number;
+  totalPages: number;
+}
+
+export async function apiListPropertiesPage(
+  page: number,
+  pageSize: number,
+  filters: PropertyListFilters = {}
+): Promise<PropertiesPageResult> {
+  const params = buildPropertyFilterParams(filters);
+  params.set("page", String(page));
+  params.set("pageSize", String(pageSize));
+  const { data, meta } = await requestWithMeta<ApiPropertyRow>(`/api/v1/properties?${params.toString()}`);
+  return {
+    rows: data,
+    page: meta?.page ?? page,
+    pageSize: meta?.pageSize ?? pageSize,
+    totalCount: meta?.totalCount ?? data.length,
+    totalPages: meta?.totalPages ?? 1
+  };
 }
 
 export interface PropertyApiInput {
@@ -513,8 +682,66 @@ export interface ApiResaleUnitRow {
   description: string | null;
   listed_by: string | null;
 }
-export function apiListResaleUnits(): Promise<ApiResaleUnitRow[]> {
-  return request<ApiResaleUnitRow[]>("/api/v1/resale-units");
+// Server caps pageSize at 500 (see resale-units.routes.ts) — a real safety
+// limit, not something to raise just to fetch everything in one request.
+const MAX_RESALE_UNIT_PAGE_SIZE = 500;
+
+// Pages through every resale unit and concatenates the results — same
+// "fetch everything" bridge as apiListProperties, kept for AppContext's bulk
+// load (other features read the full resaleUnits array from context).
+export async function apiListResaleUnits(): Promise<ApiResaleUnitRow[]> {
+  const all: ApiResaleUnitRow[] = [];
+  let page = 1;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const { data, meta } = await requestWithMeta<ApiResaleUnitRow>(`/api/v1/resale-units?page=${page}&pageSize=${MAX_RESALE_UNIT_PAGE_SIZE}`);
+    all.push(...data);
+    if (!meta || page >= meta.totalPages) break;
+    page += 1;
+  }
+  return all;
+}
+
+// Real server-side pagination for the admin Resale Units table — mirrors
+// apiListLeadsPage's shape. search matches property/builder/location,
+// builder matches the page's existing Builder dropdown exactly ("All" means
+// omit this field entirely).
+export interface ResaleUnitListFilters {
+  search?: string;
+  builder?: string;
+}
+
+function buildResaleUnitFilterParams(filters: ResaleUnitListFilters): URLSearchParams {
+  const params = new URLSearchParams();
+  if (filters.search) params.set("search", filters.search);
+  if (filters.builder) params.set("builder", filters.builder);
+  return params;
+}
+
+export interface ResaleUnitsPageResult {
+  rows: ApiResaleUnitRow[];
+  page: number;
+  pageSize: number;
+  totalCount: number;
+  totalPages: number;
+}
+
+export async function apiListResaleUnitsPage(
+  page: number,
+  pageSize: number,
+  filters: ResaleUnitListFilters = {}
+): Promise<ResaleUnitsPageResult> {
+  const params = buildResaleUnitFilterParams(filters);
+  params.set("page", String(page));
+  params.set("pageSize", String(pageSize));
+  const { data, meta } = await requestWithMeta<ApiResaleUnitRow>(`/api/v1/resale-units?${params.toString()}`);
+  return {
+    rows: data,
+    page: meta?.page ?? page,
+    pageSize: meta?.pageSize ?? pageSize,
+    totalCount: meta?.totalCount ?? data.length,
+    totalPages: meta?.totalPages ?? 1
+  };
 }
 
 export interface CreateResaleUnitApiInput {
@@ -544,8 +771,65 @@ export interface ApiFollowupRow {
   due_notified_at: string | null;
   violation_notified_at: string | null;
 }
-export function apiListFollowups(): Promise<ApiFollowupRow[]> {
-  return request<ApiFollowupRow[]>("/api/v1/followups");
+// Pages through every follow-up and concatenates the results — same bridge
+// pattern as apiListAllLeads, now that GET /followups has real LIMIT/OFFSET
+// pagination (see followups.routes.ts) instead of one unbounded SELECT.
+// Still the right shape for AppContext's bulk load: TeamTasksTable/
+// SalesPendingTasksTable's buildSalesPendingTasks merges followupCalls with
+// leads and buckets them by elapsed time (missed/pending/upcoming), which
+// needs the *whole* dataset in memory to compute correctly — it can't be
+// switched to a single fetched page without reimplementing that time-bucket
+// logic server-side, so this keeps delivering the full array exactly as
+// apiListFollowups() always did, just via capped page-sized round trips.
+export async function apiListFollowups(): Promise<ApiFollowupRow[]> {
+  const all: ApiFollowupRow[] = [];
+  let page = 1;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const { data, meta } = await requestWithMeta<ApiFollowupRow>(`/api/v1/followups?page=${page}&pageSize=${MAX_PAGE_SIZE}`);
+    all.push(...data);
+    if (!meta || page >= meta.totalPages) break;
+    page += 1;
+  }
+  return all;
+}
+
+// Real server-side pagination for a dedicated, specifically-filtered
+// followups list — not used by the dashboard's merged task queues (see
+// apiListFollowups above) but available for any future table that renders
+// raw follow-up rows (e.g. a single-status "Upcoming" or "Missed" list)
+// instead of the derived, cross-referenced task view. Mirrors
+// followups.schema's listFollowupsQuerySchema: `status` is a repeated-query-
+// param multi-select over MISSED/UPCOMING/COMPLETED.
+export interface FollowupListFilters {
+  status?: ("MISSED" | "UPCOMING" | "COMPLETED")[];
+}
+
+export interface FollowupsPageResult {
+  rows: ApiFollowupRow[];
+  page: number;
+  pageSize: number;
+  totalCount: number;
+  totalPages: number;
+}
+
+export async function apiListFollowupsPage(
+  page: number,
+  pageSize: number,
+  filters: FollowupListFilters = {}
+): Promise<FollowupsPageResult> {
+  const params = new URLSearchParams();
+  filters.status?.forEach(s => params.append("status", s));
+  params.set("page", String(page));
+  params.set("pageSize", String(pageSize));
+  const { data, meta } = await requestWithMeta<ApiFollowupRow>(`/api/v1/followups?${params.toString()}`);
+  return {
+    rows: data,
+    page: meta?.page ?? page,
+    pageSize: meta?.pageSize ?? pageSize,
+    totalCount: meta?.totalCount ?? data.length,
+    totalPages: meta?.totalPages ?? 1
+  };
 }
 
 export interface CreateFollowupApiInput {
@@ -572,8 +856,50 @@ export interface ApiAttendanceRow {
   on_time_days: string;
   late_days: string;
 }
-export function apiListAttendance(): Promise<ApiAttendanceRow[]> {
-  return request<ApiAttendanceRow[]>("/api/v1/attendance");
+// Server caps pageSize at 500 (see attendance.schema.ts) — a real safety
+// limit, not something to raise just to fetch everything in one request.
+const MAX_ATTENDANCE_PAGE_SIZE = 500;
+
+// Pages through every attendance_view row and concatenates the results —
+// same "fetch everything" bridge as apiListAllLeads/apiListResaleUnits, kept
+// for AppContext's bulk load (other features, e.g. home/page.tsx's simple
+// counts, read the full attendanceRecords array from context). The HRMS
+// page's own attendance report table uses apiListAttendancePage below
+// instead, which fetches exactly one page at a time.
+export async function apiListAttendance(): Promise<ApiAttendanceRow[]> {
+  const all: ApiAttendanceRow[] = [];
+  let page = 1;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const { data, meta } = await requestWithMeta<ApiAttendanceRow>(`/api/v1/attendance?page=${page}&pageSize=${MAX_ATTENDANCE_PAGE_SIZE}`);
+    all.push(...data);
+    if (!meta || page >= meta.totalPages) break;
+    page += 1;
+  }
+  return all;
+}
+
+// Real server-side pagination for the HRMS attendance report table — mirrors
+// apiListLeadsPage. attendance_view has no filters today (just a page/size
+// over every employee's tally, ordered by employee_name), so this skips the
+// filters param apiListLeadsPage carries.
+export interface AttendancePageResult {
+  rows: ApiAttendanceRow[];
+  page: number;
+  pageSize: number;
+  totalCount: number;
+  totalPages: number;
+}
+
+export async function apiListAttendancePage(page: number, pageSize: number): Promise<AttendancePageResult> {
+  const { data, meta } = await requestWithMeta<ApiAttendanceRow>(`/api/v1/attendance?page=${page}&pageSize=${pageSize}`);
+  return {
+    rows: data,
+    page: meta?.page ?? page,
+    pageSize: meta?.pageSize ?? pageSize,
+    totalCount: meta?.totalCount ?? data.length,
+    totalPages: meta?.totalPages ?? 1
+  };
 }
 
 // --- Reimbursement claims ---
@@ -590,6 +916,40 @@ export interface ApiReimbursementRow {
 }
 export function apiListReimbursements(): Promise<ApiReimbursementRow[]> {
   return request<ApiReimbursementRow[]>("/api/v1/reimbursements");
+}
+
+export interface ReimbursementListFilters {
+  status?: "PENDING" | "PAID" | "REJECTED";
+}
+
+export interface ReimbursementsPageResult {
+  rows: ApiReimbursementRow[];
+  page: number;
+  pageSize: number;
+  totalCount: number;
+  totalPages: number;
+}
+
+// Real server-side pagination for the Finance page's Reimbursements tab —
+// same shape as apiListLeadsPage, mirroring reimbursements.routes.ts's
+// listReimbursementsQuerySchema (page/pageSize/status).
+export async function apiListReimbursementsPage(
+  page: number,
+  pageSize: number,
+  filters: ReimbursementListFilters = {}
+): Promise<ReimbursementsPageResult> {
+  const params = new URLSearchParams();
+  params.set("page", String(page));
+  params.set("pageSize", String(pageSize));
+  if (filters.status) params.set("status", filters.status);
+  const { data, meta } = await requestWithMeta<ApiReimbursementRow>(`/api/v1/reimbursements?${params.toString()}`);
+  return {
+    rows: data,
+    page: meta?.page ?? page,
+    pageSize: meta?.pageSize ?? pageSize,
+    totalCount: meta?.totalCount ?? data.length,
+    totalPages: meta?.totalPages ?? 1
+  };
 }
 
 export interface CreateReimbursementApiInput {
@@ -641,6 +1001,32 @@ export function apiListInvoices(): Promise<ApiInvoiceRow[]> {
   return request<ApiInvoiceRow[]>("/api/v1/invoices");
 }
 
+export interface InvoicesPageResult {
+  rows: ApiInvoiceRow[];
+  page: number;
+  pageSize: number;
+  totalCount: number;
+  totalPages: number;
+}
+
+// Real server-side pagination for the Finance page's Billing tab — same
+// shape as apiListLeadsPage, mirroring invoices.routes.ts's
+// listInvoicesQuerySchema (page/pageSize only — the Billing tab has no
+// filter UI to mirror server-side).
+export async function apiListInvoicesPage(page: number, pageSize: number): Promise<InvoicesPageResult> {
+  const params = new URLSearchParams();
+  params.set("page", String(page));
+  params.set("pageSize", String(pageSize));
+  const { data, meta } = await requestWithMeta<ApiInvoiceRow>(`/api/v1/invoices?${params.toString()}`);
+  return {
+    rows: data,
+    page: meta?.page ?? page,
+    pageSize: meta?.pageSize ?? pageSize,
+    totalCount: meta?.totalCount ?? data.length,
+    totalPages: meta?.totalPages ?? 1
+  };
+}
+
 export interface CreateInvoiceApiInput {
   leadId: string;
   clientName: string;
@@ -682,8 +1068,71 @@ export interface ApiNotificationRow {
   link: string | null;
   created_at: string;
 }
-export function apiListNotifications(): Promise<ApiNotificationRow[]> {
-  return request<ApiNotificationRow[]>("/api/v1/notifications");
+// Pages through every notification and concatenates the results — same
+// bridge pattern as apiListAllLeads/apiListFollowups, now that GET
+// /notifications has real LIMIT/OFFSET pagination (see notifications.routes.ts)
+// instead of one unbounded SELECT. notifications is one of the fastest-
+// growing, zero-cap tables in this schema (broadcast rows accumulate
+// forever for every user), but AppContext's bulk load still needs the full
+// array for its own unread-badge/notification-bell tracking and other
+// simple in-memory counts elsewhere — this keeps delivering that full array,
+// just via capped page-sized round trips instead of one unbounded query.
+export async function apiListNotifications(): Promise<ApiNotificationRow[]> {
+  const all: ApiNotificationRow[] = [];
+  let page = 1;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const { data, meta } = await requestWithMeta<ApiNotificationRow>(`/api/v1/notifications?page=${page}&pageSize=${MAX_PAGE_SIZE}`);
+    all.push(...data);
+    if (!meta || page >= meta.totalPages) break;
+    page += 1;
+  }
+  return all;
+}
+
+// Real server-side pagination for NotificationBell's dropdown — each of its
+// category tabs (New Leads / Reminder Alerts / Activity Alerts / HRMS /
+// Finance) fetches its own page instead of slicing AppContext's full,
+// bulk-loaded `notifications` array client-side. Mirrors
+// notifications.routes.ts's listNotificationsQuerySchema: `system` is a
+// single-select (a tab is always scoped to exactly one system), `category`
+// is an include multi-select (e.g. ["NEW_LEAD"] for the New Leads tab) and
+// `excludeCategory` is the complementary exclude multi-select (the Activity
+// Alerts tab's "everything else" catch-all). Omitting all three reproduces
+// today's unfiltered list, same as apiListNotifications() above.
+export interface NotificationListFilters {
+  system?: "CRM" | "HRMS" | "FINANCE" | "ADMIN";
+  category?: string[];
+  excludeCategory?: string[];
+}
+
+export interface NotificationsPageResult {
+  rows: ApiNotificationRow[];
+  page: number;
+  pageSize: number;
+  totalCount: number;
+  totalPages: number;
+}
+
+export async function apiListNotificationsPage(
+  page: number,
+  pageSize: number,
+  filters: NotificationListFilters = {}
+): Promise<NotificationsPageResult> {
+  const params = new URLSearchParams();
+  if (filters.system) params.set("system", filters.system);
+  filters.category?.forEach(c => params.append("category", c));
+  filters.excludeCategory?.forEach(c => params.append("excludeCategory", c));
+  params.set("page", String(page));
+  params.set("pageSize", String(pageSize));
+  const { data, meta } = await requestWithMeta<ApiNotificationRow>(`/api/v1/notifications?${params.toString()}`);
+  return {
+    rows: data,
+    page: meta?.page ?? page,
+    pageSize: meta?.pageSize ?? pageSize,
+    totalCount: meta?.totalCount ?? data.length,
+    totalPages: meta?.totalPages ?? 1
+  };
 }
 
 export function apiMarkNotificationRead(notificationId: string): Promise<{ read: boolean }> {
@@ -726,6 +1175,47 @@ export interface ApiCalendarEventRow {
 }
 export function apiListCalendarEvents(): Promise<ApiCalendarEventRow[]> {
   return request<ApiCalendarEventRow[]>("/api/v1/calendar-events");
+}
+
+// Real server-side range fetch for the CRM/Admin calendar pages' own month
+// grid — a calendar UI naturally scopes by "the range currently on screen"
+// rather than a generic page/pageSize, so dateFrom/dateTo (plain YYYY-MM-DD,
+// same convention as leads) is the primary filter here; page/pageSize is
+// just the backend's secondary safety cap (see calendar-events.routes.ts).
+// AppContext's own bulk apiListCalendarEvents() above is untouched — every
+// other consumer (HRMS/Finance calendars, dashboards) keeps reading the full
+// array from context.
+export interface CalendarEventListFilters {
+  dateFrom?: string;
+  dateTo?: string;
+}
+
+export interface CalendarEventsPageResult {
+  rows: ApiCalendarEventRow[];
+  page: number;
+  pageSize: number;
+  totalCount: number;
+  totalPages: number;
+}
+
+export async function apiListCalendarEventsPage(
+  page: number,
+  pageSize: number,
+  filters: CalendarEventListFilters = {}
+): Promise<CalendarEventsPageResult> {
+  const params = new URLSearchParams();
+  params.set("page", String(page));
+  params.set("pageSize", String(pageSize));
+  if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
+  if (filters.dateTo) params.set("dateTo", filters.dateTo);
+  const { data, meta } = await requestWithMeta<ApiCalendarEventRow>(`/api/v1/calendar-events?${params.toString()}`);
+  return {
+    rows: data,
+    page: meta?.page ?? page,
+    pageSize: meta?.pageSize ?? pageSize,
+    totalCount: meta?.totalCount ?? data.length,
+    totalPages: meta?.totalPages ?? 1
+  };
 }
 
 export interface CreateCalendarEventApiInput {
@@ -891,8 +1381,59 @@ export interface ApiTimesheetRow {
   submitted_at: string | null;
 }
 
-export function apiListTimesheets(): Promise<ApiTimesheetRow[]> {
-  return request<ApiTimesheetRow[]>("/api/v1/timesheets");
+// Server caps pageSize at 500 (see timesheets.schema.ts) — a real safety
+// limit, not something to raise just to fetch everything in one request.
+const MAX_TIMESHEET_PAGE_SIZE = 500;
+
+// Pages through every timesheet row (every employee's, for ADMIN/FINANCE —
+// same role-based scoping the endpoint always enforced) and concatenates the
+// results — same "fetch everything" bridge as apiListAllLeads/
+// apiListAttendance, kept for AppContext's bulk load (other features, e.g.
+// home/page.tsx's presentTodayCount/pendingRegularizations, read the full
+// timesheets array from context). The HRMS page's own detailed tables use
+// apiListTimesheetsPage below instead, which fetches exactly one page at a
+// time.
+export async function apiListTimesheets(): Promise<ApiTimesheetRow[]> {
+  const all: ApiTimesheetRow[] = [];
+  let page = 1;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const { data, meta } = await requestWithMeta<ApiTimesheetRow>(`/api/v1/timesheets?page=${page}&pageSize=${MAX_TIMESHEET_PAGE_SIZE}`);
+    all.push(...data);
+    if (!meta || page >= meta.totalPages) break;
+    page += 1;
+  }
+  return all;
+}
+
+// Real server-side pagination for the HRMS timesheets tables — mirrors
+// apiListLeadsPage. Used for both the admin "everyone's timesheets"
+// regularization queue and the personal "my timesheet history" table; pass
+// userId to scope to one employee (required for the personal view so a
+// non-admin never pulls every employee's punch history — including GPS
+// coordinates — just to show their own page; ADMIN/FINANCE may omit it to
+// see everyone, which is also hard-enforced server-side).
+export interface TimesheetsPageResult {
+  rows: ApiTimesheetRow[];
+  page: number;
+  pageSize: number;
+  totalCount: number;
+  totalPages: number;
+}
+
+export async function apiListTimesheetsPage(page: number, pageSize: number, userId?: string): Promise<TimesheetsPageResult> {
+  const params = new URLSearchParams();
+  params.set("page", String(page));
+  params.set("pageSize", String(pageSize));
+  if (userId) params.set("userId", userId);
+  const { data, meta } = await requestWithMeta<ApiTimesheetRow>(`/api/v1/timesheets?${params.toString()}`);
+  return {
+    rows: data,
+    page: meta?.page ?? page,
+    pageSize: meta?.pageSize ?? pageSize,
+    totalCount: meta?.totalCount ?? data.length,
+    totalPages: meta?.totalPages ?? 1
+  };
 }
 
 export function apiPunchIn(lat: number, lng: number): Promise<ApiTimesheetRow> {

@@ -1,12 +1,23 @@
 "use client";
 
-import React, { Suspense, useState } from "react";
+import React, { Suspense, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useApp, CalendarEvent, CalendarEventType } from "@/context/AppContext";
+import { CalendarEvent, CalendarEventType, mapApiCalendarEventToFrontend } from "@/context/AppContext";
+import { apiListCalendarEventsPage } from "@/lib/apiClient";
 import MonthCalendar from "@/components/calendar/MonthCalendar";
 import { CalendarDays, MapPin, PhoneCall, Handshake, FileSignature, LucideIcon } from "lucide-react";
 import { CardListSkeleton } from "@/components/ui/Skeletons";
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
+
+// Plain YYYY-MM-DD bounds for the whole month a given cursor date falls in —
+// what the server-range fetch below asks for, matching leads' date-range
+// filter convention (see leads.schema.ts's dateFrom/dateTo).
+function monthBounds(cursor: Date): { dateFrom: string; dateTo: string } {
+  const toYMD = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const start = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+  const end = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0);
+  return { dateFrom: toYMD(start), dateTo: toYMD(end) };
+}
 
 const TYPE_META: Record<string, { label: string; color: string; icon: LucideIcon }> = {
   SITE_VISIT: { label: "Site Visit", color: "bg-blue-500", icon: MapPin },
@@ -16,12 +27,37 @@ const TYPE_META: Record<string, { label: string; color: string; icon: LucideIcon
 };
 
 function CRMCalendarContent() {
-  const { calendarEvents, isDataLoading } = useApp();
   const router = useRouter();
-  const crmEvents = calendarEvents.filter(e => e.system === "CRM");
 
   const todayKey = new Date().toISOString().split("T")[0];
   const [selectedDate, setSelectedDate] = useState<string>(todayKey);
+
+  // The month grid only ever needs the events in the currently-visible month
+  // — fetched directly from the server for that range instead of filtering
+  // AppContext's full bulk-loaded calendarEvents array (see
+  // Taskezy-Server/src/modules/calendar-events/calendar-events.routes.ts's
+  // dateFrom/dateTo filter). Refetches whenever the visible month changes.
+  const [cursor, setCursor] = useState(() => new Date());
+  const [crmEvents, setCrmEvents] = useState<CalendarEvent[]>([]);
+  const [eventsLoading, setEventsLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setEventsLoading(true);
+    const { dateFrom, dateTo } = monthBounds(cursor);
+    apiListCalendarEventsPage(1, 500, { dateFrom, dateTo })
+      .then((result) => {
+        if (cancelled) return;
+        setCrmEvents(result.rows.map(mapApiCalendarEventToFrontend).filter(e => e.system === "CRM"));
+      })
+      .catch((err) => {
+        if (!cancelled) console.error("Could not load the CRM calendar's events for this month:", err);
+      })
+      .finally(() => {
+        if (!cancelled) setEventsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [cursor]);
 
   const dayEvents = crmEvents
     .filter(e => e.date === selectedDate)
@@ -59,6 +95,8 @@ function CRMCalendarContent() {
             selectedDate={selectedDate}
             onSelectDate={setSelectedDate}
             colorForEvent={(e) => TYPE_META[e.type]?.color || "bg-slate-400"}
+            cursor={cursor}
+            onCursorChange={setCursor}
           />
         </div>
 
@@ -66,7 +104,7 @@ function CRMCalendarContent() {
           <h3 className="text-xs font-bold text-slate-700 border-b border-slate-100 pb-2">
             {new Date(selectedDate + "T00:00:00").toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
           </h3>
-          {isDataLoading && dayEvents.length === 0 ? (
+          {eventsLoading && dayEvents.length === 0 ? (
             <CardListSkeleton count={4} />
           ) : dayEvents.length === 0 ? (
             <p className="text-[11px] text-slate-400 italic py-4 text-center">No scheduled activity on this date.</p>

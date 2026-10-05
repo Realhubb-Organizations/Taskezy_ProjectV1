@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requireAuth } from "../../middleware/auth";
 import { validate } from "../../middleware/validate";
 import { asyncHandler } from "../../utils/asyncHandler";
-import { sendOk } from "../../utils/apiResponse";
+import { sendOk, sendPaginated } from "../../utils/apiResponse";
 import { ApiError } from "../../utils/ApiError";
 import { pool, query } from "../../db/pool";
 
@@ -19,6 +19,31 @@ const SELECT = `
   JOIN users u ON u.id = fc.assigned_to_id
 `;
 
+// followup_calls is another zero-cap, ever-growing table (one row per
+// scheduled callback/meeting/site visit, never pruned) — page/pageSize give
+// real LIMIT/OFFSET instead of the previous unbounded SELECT. Default
+// pageSize of 10 matches the sales dashboard's own pagination convention
+// (SalesPendingTasksTable/TeamTasksTable/NotificationBell all page 10 at a
+// time); max 500 is the same bridge-pattern cap leads.schema.ts uses so
+// apiListFollowups()'s page-loop (which reconstructs the full array for
+// AppContext's bulk load — still needed by TeamTasksTable/
+// SalesPendingTasksTable's cross-referenced, time-bucketed task queue and by
+// home/page.tsx's pendingFollowUps count) stays a reasonable handful of
+// round trips. `status` is an optional filter for any future dedicated
+// per-status followups list (e.g. a pure "Upcoming" or "Missed" table) —
+// the existing dashboard components all derive a merged leads+follow-ups
+// view via buildSalesPendingTasks that needs the *whole* dataset to compute
+// its time-based buckets correctly, so none of them can safely be switched
+// to a single filtered server page today; this keeps that door open without
+// changing any of their behavior.
+const listFollowupsQuerySchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().positive().max(500).default(10),
+  status: z.union([z.enum(["MISSED", "UPCOMING", "COMPLETED"]), z.array(z.enum(["MISSED", "UPCOMING", "COMPLETED"]))])
+    .optional()
+    .transform(v => v === undefined ? undefined : (Array.isArray(v) ? v : [v]))
+});
+
 // Mirrors leads.service.ts's scopeForCaller rule: a SALES department
 // "Member" only ever sees their own follow-ups (lead names/phone numbers
 // included); everyone else (Managers, Finance, Admin) sees all of them.
@@ -26,15 +51,40 @@ const SELECT = `
 // Member, could list every follow-up call for every agent in the company.
 followupsRouter.get(
   "/",
+  validate({ query: listFollowupsQuerySchema }),
   asyncHandler(async (req, res) => {
+    const { page, pageSize, status } = req.query as unknown as {
+      page: number; pageSize: number; status?: ("MISSED" | "UPCOMING" | "COMPLETED")[];
+    };
     const isSalesMember = req.user!.role === "AGENT" && req.user!.roleType === "MEMBER";
+
+    const conditions: string[] = [];
+    const params: unknown[] = [];
     if (isSalesMember) {
-      const { rows } = await query(`${SELECT} WHERE fc.assigned_to_id = $1 ORDER BY fc.scheduled_at`, [req.user!.sub]);
-      sendOk(res, rows);
-      return;
+      params.push(req.user!.sub);
+      conditions.push(`fc.assigned_to_id = $${params.length}`);
     }
-    const { rows } = await query(`${SELECT} ORDER BY fc.scheduled_at`);
-    sendOk(res, rows);
+    if (status && status.length > 0) {
+      if (status.length === 1) {
+        params.push(status[0]);
+        conditions.push(`fc.status = $${params.length}`);
+      } else {
+        params.push(status);
+        conditions.push(`fc.status = ANY($${params.length}::text[])`);
+      }
+    }
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+    const countResult = await query<{ count: string }>(`SELECT count(*) FROM followup_calls fc ${whereClause}`, params);
+    const totalCount = Number(countResult.rows[0]?.count ?? 0);
+
+    const offset = (page - 1) * pageSize;
+    const dataParams = [...params, pageSize, offset];
+    const { rows } = await query(
+      `${SELECT} ${whereClause} ORDER BY fc.scheduled_at LIMIT $${dataParams.length - 1} OFFSET $${dataParams.length}`,
+      dataParams
+    );
+    sendPaginated(res, rows, { page, pageSize, totalCount, totalPages: Math.max(1, Math.ceil(totalCount / pageSize)) });
   })
 );
 

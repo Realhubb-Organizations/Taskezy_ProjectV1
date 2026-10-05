@@ -2,6 +2,34 @@ import { z } from "zod";
 
 export const propertyIdParamSchema = z.object({ id: z.string().uuid() });
 
+// Same normalization as leads.schema.ts's stringToArray — Express's default
+// `qs` parser turns a single `?propertyType=A` into a bare string but
+// repeated `?propertyType=A&propertyType=B` into an array; this folds either
+// shape into one plain array (or undefined if omitted).
+const stringToArray = z.union([z.string(), z.array(z.string())])
+  .optional()
+  .transform(v => v === undefined ? undefined : (Array.isArray(v) ? v : [v]));
+
+export const listPropertiesQuerySchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  // 100 matches the Properties admin page's own default rowsPerPage (see
+  // frontend/.../dashboard/properties/page.tsx) — most tenants' full
+  // property list already fits on one page at that size. Capped at 500 as a
+  // real safety bound (same convention as leads.schema.ts), and reused by
+  // apiListProperties()'s "fetch everything" bridge for AppContext's other
+  // (dropdown-picker) consumers, which pages through at that same cap.
+  pageSize: z.coerce.number().int().positive().max(500).default(100),
+  // Matches the admin table's search box (name/developer/location).
+  search: z.string().trim().max(200).optional(),
+  // Matches the admin table's Property Type column filter. A property can
+  // have several types stored as one comma-joined string column
+  // ("Apartment, Villa") — matches if ANY selected type is one of a
+  // property's own types, mirroring the frontend's splitPropertyTypes().some(...).
+  propertyType: stringToArray,
+  // Matches the admin table's Date column sort toggle.
+  sortDir: z.enum(["asc", "desc"]).optional()
+});
+
 const basePropertyFields = {
   name: z.string().trim().min(1).max(200),
   developer: z.string().trim().min(1).max(200),

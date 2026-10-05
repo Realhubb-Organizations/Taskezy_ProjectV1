@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requireAuth, requireRole } from "../../middleware/auth";
 import { validate } from "../../middleware/validate";
 import { asyncHandler } from "../../utils/asyncHandler";
-import { sendOk } from "../../utils/apiResponse";
+import { sendOk, sendPaginated } from "../../utils/apiResponse";
 import { ApiError } from "../../utils/ApiError";
 import { pool, query } from "../../db/pool";
 import { createNotification } from "../notifications/notifications.service";
@@ -27,11 +27,29 @@ async function findLeadAgentId(leadId: string): Promise<string | undefined> {
   return rows[0]?.assigned_agent_id;
 }
 
+// Finance page's Billing tab had no page-size control of its own before this
+// fix (the whole `invoices` table — no LIMIT at all — was rendered
+// unconditionally from AppContext's bulk load). 10 is this codebase's own
+// convention for a table's first page absent a pre-existing control (see
+// TablePagination's DEFAULT_ROWS_PER_PAGE_OPTIONS[0] and usePagination's own
+// default), not a number carried over from existing Finance UI. There's no
+// status/date-range filter UI on the Billing tab today, so this endpoint
+// only paginates — no filter params to match.
+const listInvoicesQuerySchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().positive().max(500).default(10)
+});
+
 invoicesRouter.get(
   "/",
-  asyncHandler(async (_req, res) => {
-    const { rows } = await query(`${SELECT} ORDER BY created_at DESC`);
-    sendOk(res, rows);
+  validate({ query: listInvoicesQuerySchema }),
+  asyncHandler(async (req, res) => {
+    const { page, pageSize } = req.query as unknown as { page: number; pageSize: number };
+    const countResult = await query<{ count: string }>(`SELECT count(*) FROM invoices`);
+    const totalCount = Number(countResult.rows[0]?.count ?? 0);
+    const offset = (page - 1) * pageSize;
+    const { rows } = await query(`${SELECT} ORDER BY created_at DESC LIMIT $1 OFFSET $2`, [pageSize, offset]);
+    sendPaginated(res, rows, { page, pageSize, totalCount, totalPages: Math.max(1, Math.ceil(totalCount / pageSize)) });
   })
 );
 

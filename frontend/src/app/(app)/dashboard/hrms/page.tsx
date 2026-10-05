@@ -1,10 +1,12 @@
 "use client";
 
-import React, { useState } from "react";
-import { useApp, AttendanceRecord, TimesheetLog, CalendarEventType } from "@/context/AppContext";
+import React, { useEffect, useState } from "react";
+import { useApp, AttendanceRecord, TimesheetLog, CalendarEventType, mapApiTimesheetToFrontend, mapApiAttendanceToFrontend } from "@/context/AppContext";
+import { apiListTimesheetsPage, apiListAttendancePage } from "@/lib/apiClient";
 import { useSearchParams } from "next/navigation";
 import MonthCalendar from "@/components/calendar/MonthCalendar";
 import AddCalendarEventModal from "@/components/calendar/AddCalendarEventModal";
+import TablePagination from "@/components/ui/TablePagination";
 import { LineSkeleton, TableRowsSkeleton, CardListSkeleton } from "@/components/ui/Skeletons";
 import {
   Users,
@@ -28,7 +30,6 @@ import {
 export default function HRMSPage() {
   const {
     users,
-    attendanceRecords,
     activeRole,
     currentUser,
     timesheets,
@@ -88,8 +89,108 @@ export default function HRMSPage() {
   // Check if current user is admin
   const isAdmin = currentUser?.role === "ADMIN" || activeRole === "ADMIN";
 
-  // Filter timesheets for personal view (non-admin)
+  // Filter timesheets for personal view (non-admin) — this stays reading the
+  // full `timesheets` array AppContext bulk-loads (unchanged, see
+  // AppContext.tsx), since it backs the punch station's "am I punched in
+  // today" check and the Reports tab's own summary stat cards (Present
+  // Days/Regularized/Pending Correction), both of which need the true full
+  // history, not just whatever page the detail table below happens to show.
   const myLogs = timesheets.filter(ts => ts.userId === currentUser?.id);
+
+  // --- Server-paginated HRMS detail tables ---
+  // Real fetch-per-page (mirrors LeadDashboard.tsx's serverLeads pattern,
+  // see apiListTimesheetsPage/apiListAttendancePage in apiClient.ts) instead
+  // of rendering the full timesheets/attendanceRecords arrays AppContext
+  // still bulk-loads for other consumers. Only the three literal "browse
+  // every row" tables below switch to this — myLogs/activePunch/the Reports
+  // tab's own stat cards above are untouched.
+  const DEFAULT_HRMS_ROWS_PER_PAGE = 25;
+
+  // 1. Personal "My Timesheet History" (Attendance tab) / "My Attendance
+  // Report" (Reports tab) tables — same data, shown in two tabs, one fetch.
+  const [myTimesheetsPage, setMyTimesheetsPage] = useState(1);
+  const [myTimesheetsRowsPerPage, setMyTimesheetsRowsPerPage] = useState(DEFAULT_HRMS_ROWS_PER_PAGE);
+  const [myTimesheetsRows, setMyTimesheetsRows] = useState<TimesheetLog[]>([]);
+  const [myTimesheetsTotalCount, setMyTimesheetsTotalCount] = useState(0);
+  const [myTimesheetsLoading, setMyTimesheetsLoading] = useState(true);
+  const [myTimesheetsRefreshKey, setMyTimesheetsRefreshKey] = useState(0);
+
+  useEffect(() => {
+    if (isAdmin || !currentUser?.id) return;
+    let cancelled = false;
+    setMyTimesheetsLoading(true);
+    apiListTimesheetsPage(myTimesheetsPage, myTimesheetsRowsPerPage, currentUser.id)
+      .then((result) => {
+        if (cancelled) return;
+        setMyTimesheetsRows(result.rows.map(mapApiTimesheetToFrontend));
+        setMyTimesheetsTotalCount(result.totalCount);
+      })
+      .catch((err) => {
+        if (!cancelled) console.error("Could not load your timesheet history:", err);
+      })
+      .finally(() => {
+        if (!cancelled) setMyTimesheetsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [isAdmin, currentUser?.id, myTimesheetsPage, myTimesheetsRowsPerPage, myTimesheetsRefreshKey]);
+
+  // 2. Admin "everyone's timesheets" regularization audit queue — a real
+  // page of every employee's timesheets (same ADMIN/FINANCE-sees-all
+  // scoping the endpoint already enforced), filtered down to pending
+  // requests for display. There's no server-side "pending only" filter
+  // (out of scope here), so paging further back still works — it just finds
+  // more/fewer pending items per page depending on when they were raised.
+  const [adminTimesheetsPage, setAdminTimesheetsPage] = useState(1);
+  const [adminTimesheetsRowsPerPage, setAdminTimesheetsRowsPerPage] = useState(DEFAULT_HRMS_ROWS_PER_PAGE);
+  const [adminTimesheetsRows, setAdminTimesheetsRows] = useState<TimesheetLog[]>([]);
+  const [adminTimesheetsTotalCount, setAdminTimesheetsTotalCount] = useState(0);
+  const [adminTimesheetsLoading, setAdminTimesheetsLoading] = useState(true);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    let cancelled = false;
+    setAdminTimesheetsLoading(true);
+    apiListTimesheetsPage(adminTimesheetsPage, adminTimesheetsRowsPerPage)
+      .then((result) => {
+        if (cancelled) return;
+        setAdminTimesheetsRows(result.rows.map(mapApiTimesheetToFrontend));
+        setAdminTimesheetsTotalCount(result.totalCount);
+      })
+      .catch((err) => {
+        if (!cancelled) console.error("Could not load the timesheets page:", err);
+      })
+      .finally(() => {
+        if (!cancelled) setAdminTimesheetsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [isAdmin, adminTimesheetsPage, adminTimesheetsRowsPerPage]);
+  const adminPendingTimesheets = adminTimesheetsRows.filter(ts => ts.status === "Regularization Pending");
+
+  // 3. Admin "Departmental Roster Attendance Records" report table.
+  const [attendancePage, setAttendancePage] = useState(1);
+  const [attendanceRowsPerPage, setAttendanceRowsPerPage] = useState(DEFAULT_HRMS_ROWS_PER_PAGE);
+  const [attendancePageRows, setAttendancePageRows] = useState<AttendanceRecord[]>([]);
+  const [attendanceTotalCount, setAttendanceTotalCount] = useState(0);
+  const [attendanceLoading, setAttendanceLoading] = useState(true);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    let cancelled = false;
+    setAttendanceLoading(true);
+    apiListAttendancePage(attendancePage, attendanceRowsPerPage)
+      .then((result) => {
+        if (cancelled) return;
+        setAttendancePageRows(result.rows.map(mapApiAttendanceToFrontend));
+        setAttendanceTotalCount(result.totalCount);
+      })
+      .catch((err) => {
+        if (!cancelled) console.error("Could not load the attendance report page:", err);
+      })
+      .finally(() => {
+        if (!cancelled) setAttendanceLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [isAdmin, attendancePage, attendanceRowsPerPage]);
 
   // Check if currently punched in today
   const todayStr = new Date().toISOString().split("T")[0];
@@ -107,8 +208,10 @@ export default function HRMSPage() {
       setIsPunching(true);
       punchOut()
         .then((res) => {
-          if (res.success) setPunchStatusMsg("Successfully punched out for the day.");
-          else setPunchErrorMsg(res.error || "Punch out failed.");
+          if (res.success) {
+            setPunchStatusMsg("Successfully punched out for the day.");
+            setMyTimesheetsRefreshKey(k => k + 1);
+          } else setPunchErrorMsg(res.error || "Punch out failed.");
         })
         .finally(() => {
           setIsPunching(false);
@@ -129,8 +232,10 @@ export default function HRMSPage() {
     navigator.geolocation.getCurrentPosition(
       async (position) => {
         const res = await punchIn(position.coords.latitude, position.coords.longitude);
-        if (res.success) setPunchStatusMsg("Successfully punched in! Geofenced telemetry checked.");
-        else setPunchErrorMsg(res.error || "Punch In failed.");
+        if (res.success) {
+          setPunchStatusMsg("Successfully punched in! Geofenced telemetry checked.");
+          setMyTimesheetsRefreshKey(k => k + 1);
+        } else setPunchErrorMsg(res.error || "Punch In failed.");
         setIsPunching(false);
         setTimeout(() => {
           setPunchStatusMsg("");
@@ -344,16 +449,16 @@ export default function HRMSPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                        {isDataLoading && myLogs.length === 0 ? (
+                        {myTimesheetsLoading && myTimesheetsRows.length === 0 ? (
                           <TableRowsSkeleton rows={6} columns={6} />
-                        ) : myLogs.length === 0 ? (
+                        ) : myTimesheetsRows.length === 0 ? (
                           <tr>
                             <td colSpan={6} className="p-6 text-center text-slate-400 font-semibold italic">
                               No attendance punches recorded yet. Use the punch clock.
                             </td>
                           </tr>
                         ) : (
-                          myLogs.map((log) => (
+                          myTimesheetsRows.map((log) => (
                             <tr key={log.id} className="hover:bg-slate-50/50">
                               <td className="p-3 font-mono font-semibold">{log.date}</td>
                               <td className="p-3 font-mono text-slate-500">
@@ -392,6 +497,14 @@ export default function HRMSPage() {
                       </tbody>
                     </table>
                   </div>
+                  <TablePagination
+                    totalRows={myTimesheetsTotalCount}
+                    page={myTimesheetsPage}
+                    rowsPerPage={myTimesheetsRowsPerPage}
+                    onPageChange={setMyTimesheetsPage}
+                    onRowsPerPageChange={(n) => { setMyTimesheetsRowsPerPage(n); setMyTimesheetsPage(1); }}
+                    rowLabel="Entry"
+                  />
                 </div>
               </div>
             </div>
@@ -413,14 +526,14 @@ export default function HRMSPage() {
                 </div>
 
                 <div className="space-y-3">
-                  {isDataLoading && timesheets.length === 0 ? (
+                  {adminTimesheetsLoading && adminTimesheetsRows.length === 0 ? (
                     <CardListSkeleton count={4} />
-                  ) : timesheets.filter(ts => ts.status === "Regularization Pending").length === 0 ? (
+                  ) : adminPendingTimesheets.length === 0 ? (
                     <div className="text-center py-6 text-xs text-slate-400 border border-dashed border-slate-200 rounded-xl">
-                      No pending timesheet regularization requests from team members.
+                      No pending timesheet regularization requests on this page of records — use pagination below to check earlier timesheet records.
                     </div>
                   ) : (
-                    timesheets.filter(ts => ts.status === "Regularization Pending").map((ts) => (
+                    adminPendingTimesheets.map((ts) => (
                       <div key={ts.id} className="p-4 rounded-xl border border-slate-200 bg-slate-50 flex flex-col sm:flex-row justify-between sm:items-center gap-4 text-xs">
                         <div>
                           <p className="font-bold text-slate-800">{ts.userName}</p>
@@ -453,6 +566,14 @@ export default function HRMSPage() {
                     ))
                   )}
                 </div>
+                <TablePagination
+                  totalRows={adminTimesheetsTotalCount}
+                  page={adminTimesheetsPage}
+                  rowsPerPage={adminTimesheetsRowsPerPage}
+                  onPageChange={setAdminTimesheetsPage}
+                  onRowsPerPageChange={(n) => { setAdminTimesheetsRowsPerPage(n); setAdminTimesheetsPage(1); }}
+                  rowLabel="Timesheet record"
+                />
               </div>
 
             </div>
@@ -460,10 +581,12 @@ export default function HRMSPage() {
         </div>
       )}
 
-      {/* HRMS Reports tab — all-employees attendance report for Admin,
-          a personal attendance summary for everyone else. Reuses the same
-          real attendanceRecords/timesheets data as the Attendance tab; this
-          is a distinct nav destination so it doesn't collide with it. */}
+      {/* HRMS Reports tab — all-employees attendance report for Admin
+          (server-paginated, see attendancePageRows/attendancePage above),
+          a personal attendance summary for everyone else (reuses the same
+          server-paginated myTimesheetsRows state as the Attendance tab's
+          personal table); this is a distinct nav destination so it doesn't
+          collide with it. */}
       {activeTabParam === "reports" && (
         <div className="space-y-6 animate-fade-in">
           {isAdmin ? (
@@ -489,16 +612,16 @@ export default function HRMSPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
-                      {isDataLoading && attendanceRecords.length === 0 ? (
+                      {attendanceLoading && attendancePageRows.length === 0 ? (
                         <TableRowsSkeleton rows={6} columns={5} />
-                      ) : attendanceRecords.length === 0 ? (
+                      ) : attendancePageRows.length === 0 ? (
                         <tr>
                           <td colSpan={5} className="p-6 text-center text-slate-400 font-semibold italic">
                             No attendance records yet.
                           </td>
                         </tr>
                       ) : (
-                        attendanceRecords.map((item, idx) => (
+                        attendancePageRows.map((item, idx) => (
                           <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
                             <td className="p-4">
                               <p className="font-bold text-slate-800">{item.employeeName}</p>
@@ -514,6 +637,14 @@ export default function HRMSPage() {
                     </tbody>
                   </table>
                 </div>
+                <TablePagination
+                  totalRows={attendanceTotalCount}
+                  page={attendancePage}
+                  rowsPerPage={attendanceRowsPerPage}
+                  onPageChange={setAttendancePage}
+                  onRowsPerPageChange={(n) => { setAttendanceRowsPerPage(n); setAttendancePage(1); }}
+                  rowLabel="Employee"
+                />
               </div>
             </div>
           ) : (
@@ -554,16 +685,16 @@ export default function HRMSPage() {
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                            {isDataLoading && myLogs.length === 0 ? (
+                            {myTimesheetsLoading && myTimesheetsRows.length === 0 ? (
                               <TableRowsSkeleton rows={6} columns={5} />
-                            ) : myLogs.length === 0 ? (
+                            ) : myTimesheetsRows.length === 0 ? (
                               <tr>
                                 <td colSpan={5} className="p-6 text-center text-slate-400 font-semibold italic">
                                   No attendance punches recorded yet.
                                 </td>
                               </tr>
                             ) : (
-                              myLogs.map((log) => (
+                              myTimesheetsRows.map((log) => (
                                 <tr key={log.id} className="hover:bg-slate-50/50">
                                   <td className="p-3 font-mono font-semibold">{log.date}</td>
                                   <td className="p-3 font-mono text-slate-500">
@@ -592,6 +723,14 @@ export default function HRMSPage() {
                           </tbody>
                         </table>
                       </div>
+                      <TablePagination
+                        totalRows={myTimesheetsTotalCount}
+                        page={myTimesheetsPage}
+                        rowsPerPage={myTimesheetsRowsPerPage}
+                        onPageChange={setMyTimesheetsPage}
+                        onRowsPerPageChange={(n) => { setMyTimesheetsRowsPerPage(n); setMyTimesheetsPage(1); }}
+                        rowLabel="Entry"
+                      />
                     </div>
                   </div>
                 </>

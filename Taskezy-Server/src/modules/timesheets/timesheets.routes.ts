@@ -3,37 +3,38 @@ import { z } from "zod";
 import { requireAuth, requireRole } from "../../middleware/auth";
 import { validate } from "../../middleware/validate";
 import { asyncHandler } from "../../utils/asyncHandler";
-import { sendOk } from "../../utils/apiResponse";
+import { sendOk, sendPaginated } from "../../utils/apiResponse";
 import { ApiError } from "../../utils/ApiError";
 import { pool, query } from "../../db/pool";
 import { createNotification } from "../notifications/notifications.service";
 import { listActiveAdminIds } from "../users/users.repository";
 import { getTenantSettings, distanceMeters } from "../tenant-settings/tenant-settings.repository";
+import { listTimesheetsQuerySchema } from "./timesheets.schema";
+import { TIMESHEET_SELECT, findMany as findManyTimesheets } from "./timesheets.repository";
 
 export const timesheetsRouter = Router();
 
 timesheetsRouter.use(requireAuth);
 
-const SELECT = `
-  SELECT t.id, t.user_id, u.first_name || COALESCE(' ' || u.last_name, '') AS user_name,
-         t.work_date, t.punch_in, t.punch_out, t.punch_in_lat, t.punch_in_lng,
-         t.duration_hours, t.status,
-         r.id AS regularization_id, r.requested_in, r.requested_out, r.reason, r.submitted_at
-  FROM timesheet_logs t
-  JOIN users u ON u.id = t.user_id
-  LEFT JOIN timesheet_regularization_requests r ON r.timesheet_id = t.id AND r.decision = 'PENDING'
-`;
+const SELECT = TIMESHEET_SELECT;
 
 // Sales/HR staff only ever see their own punch history; ADMIN/FINANCE see
-// everyone's — mirrors the read-scoping already enforced on leads.
+// everyone's — mirrors the read-scoping already enforced on leads. Now a
+// real server-side page (LIMIT/OFFSET) instead of every punch record —
+// including punch_in_lat/punch_in_lng GPS coordinates — for an employee's
+// (or, for ADMIN/FINANCE, every employee's) entire history in one query.
 timesheetsRouter.get(
   "/",
+  validate({ query: listTimesheetsQuerySchema }),
   asyncHandler(async (req, res) => {
+    const { page, pageSize, userId } = req.query as unknown as { page: number; pageSize: number; userId?: string };
     const isManager = req.user!.role === "ADMIN" || req.user!.role === "FINANCE";
-    const { rows } = isManager
-      ? await query(`${SELECT} ORDER BY t.work_date DESC`)
-      : await query(`${SELECT} WHERE t.user_id = $1 ORDER BY t.work_date DESC`, [req.user!.sub]);
-    sendOk(res, rows);
+    // Security: a non-manager is always hard-scoped to their own rows,
+    // regardless of any userId they pass — only ADMIN/FINANCE can use
+    // userId to drill into a specific employee's history.
+    const scopedToUserId = isManager ? userId : req.user!.sub;
+    const { rows, totalCount } = await findManyTimesheets({ page, pageSize, scopedToUserId });
+    sendPaginated(res, rows, { page, pageSize, totalCount, totalPages: Math.max(1, Math.ceil(totalCount / pageSize)) });
   })
 );
 

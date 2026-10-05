@@ -2,10 +2,10 @@ import { Router } from "express";
 import { requireAuth, requireRole } from "../../middleware/auth";
 import { validate } from "../../middleware/validate";
 import { asyncHandler } from "../../utils/asyncHandler";
-import { sendOk } from "../../utils/apiResponse";
+import { sendOk, sendPaginated } from "../../utils/apiResponse";
 import { ApiError } from "../../utils/ApiError";
 import { hashPassword } from "../../utils/password";
-import { createUserSchema, editUserSchema, resetPasswordSchema, userIdParamSchema } from "./users.schema";
+import { createUserSchema, editUserSchema, listUsersQuerySchema, resetPasswordSchema, userIdParamSchema } from "./users.schema";
 import * as repo from "./users.repository";
 
 export const usersRouter = Router();
@@ -14,9 +14,31 @@ usersRouter.use(requireAuth);
 
 usersRouter.get(
   "/",
-  asyncHandler(async (_req, res) => {
-    const users = await repo.findAllActive();
-    sendOk(res, users);
+  validate({ query: listUsersQuerySchema }),
+  asyncHandler(async (req, res) => {
+    const { page, pageSize, search } = req.query as unknown as { page?: number; pageSize?: number; search?: string };
+
+    // Bare `GET /users` (no page/pageSize) stays the original full-directory
+    // fetch — every dropdown/name-resolution consumer across the app
+    // (assign-to, reassign, team pickers) and AppContext's own bulk load
+    // depend on getting back the complete active-user array, not one page of
+    // it. Only a caller that explicitly asks for a page (the admin Settings
+    // "Manage Users" table) gets the paginated shape.
+    if (page === undefined && pageSize === undefined) {
+      const users = await repo.findAllActive();
+      sendOk(res, users);
+      return;
+    }
+
+    const effectivePage = page ?? 1;
+    const effectivePageSize = pageSize ?? 20;
+    const { rows, totalCount } = await repo.findManyActive({ page: effectivePage, pageSize: effectivePageSize, search });
+    sendPaginated(res, rows, {
+      page: effectivePage,
+      pageSize: effectivePageSize,
+      totalCount,
+      totalPages: Math.max(1, Math.ceil(totalCount / effectivePageSize))
+    });
   })
 );
 

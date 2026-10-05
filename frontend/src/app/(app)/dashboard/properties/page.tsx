@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
-import { useApp, Property, PropertyTeamAssignmentMode, LeadAssignmentMode, PropertyTeamMember } from "@/context/AppContext";
+import React, { useEffect, useState } from "react";
+import { useApp, mapApiPropertyToFrontend, Property, PropertyTeamAssignmentMode, LeadAssignmentMode, PropertyTeamMember } from "@/context/AppContext";
+import { apiListPropertiesPage, type PropertyListFilters } from "@/lib/apiClient";
 import {
   Search,
   ArrowUp,
@@ -44,7 +45,7 @@ function formatDateTime(iso?: string): string {
 }
 
 export default function PropertiesPage() {
-  const { properties, users, leads, deleteProperty, editProperty, activeRole, isDataLoading } = useApp();
+  const { properties, users, leads, deleteProperty, editProperty, activeRole } = useApp();
   const isAdmin = activeRole === "ADMIN";
 
   // Drawer (view/edit) state
@@ -176,30 +177,65 @@ export default function PropertiesPage() {
     URL.revokeObjectURL(url);
   };
 
-  const filteredProperties = useMemo(() => {
-    const q = searchQuery.toLowerCase();
-    const filtered = properties.filter(p => {
-      const matchesSearch =
-        !q ||
-        p.name.toLowerCase().includes(q) ||
-        p.developer.toLowerCase().includes(q) ||
-        p.location.toLowerCase().includes(q);
-      // A multi-type property ("Apartment, Villa") matches if ANY of its types is picked.
-      const matchesType = selectedTypes.length === 0 || splitPropertyTypes(p.type || "").some(t => selectedTypes.includes(t));
-      return matchesSearch && matchesType;
-    });
-    return filtered.sort((a, b) => {
-      const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-      const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-      return sortDir === "asc" ? aTime - bTime : bTime - aTime;
-    });
-  }, [properties, searchQuery, selectedTypes, sortDir]);
+  // ---- Server-paginated Properties admin table (real fetch-per-page,
+  // not the old "read the full `properties` array AppContext bulk-loads"
+  // pattern) ----
+  // The table's own rows are fetched directly from the server for exactly
+  // the current page/filters, instead of slicing the full `properties`
+  // array AppContext still bulk-loads for other consumers (AddLeadModal's
+  // property picker, LeadDashboard's property filter, AddPropertyModal,
+  // and the Property Type filter options below, which stay derived from
+  // that full array since it's small/inventory-bounded) — that full load
+  // stays for those, this just stops the admin Properties LIST specifically
+  // from needing it for its own table.
+  const [serverProperties, setServerProperties] = useState<Property[]>([]);
+  const [serverTotalCount, setServerTotalCount] = useState(0);
+  const [serverPropertiesLoading, setServerPropertiesLoading] = useState(true);
+  const [propertiesRefreshNonce, setPropertiesRefreshNonce] = useState(0);
 
-  const totalRows = filteredProperties.length;
+  // Search fires on every keystroke locally but is debounced before it
+  // becomes a real network request — same convention as LeadDashboard's
+  // debouncedAdminSearch.
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearchQuery(searchQuery.trim()), 350);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
+
+  const propertyListFilters: PropertyListFilters = {
+    search: debouncedSearchQuery || undefined,
+    propertyType: selectedTypes.length > 0 ? selectedTypes : undefined,
+    sortDir
+  };
+  const propertyFiltersKey = JSON.stringify(propertyListFilters);
+
+  useEffect(() => {
+    let cancelled = false;
+    setServerPropertiesLoading(true);
+    apiListPropertiesPage(currentPage, rowsPerPage, propertyListFilters)
+      .then((result) => {
+        if (cancelled) return;
+        setServerProperties(result.rows.map(mapApiPropertyToFrontend));
+        setServerTotalCount(result.totalCount);
+      })
+      .catch((err) => {
+        if (!cancelled) console.error("Could not load the properties list page:", err);
+      })
+      .finally(() => {
+        if (!cancelled) setServerPropertiesLoading(false);
+      });
+    return () => { cancelled = true; };
+    // propertyFiltersKey captures every filter input in one stable string so
+    // this effect re-fires exactly when a real filter value changes, without
+    // needing every individual filter piece listed separately.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPage, rowsPerPage, propertyFiltersKey, propertiesRefreshNonce]);
+
+  const totalRows = serverTotalCount;
   const totalPages = Math.max(1, Math.ceil(totalRows / rowsPerPage));
   const clampedPage = Math.min(currentPage, totalPages);
-  const pageStart = (clampedPage - 1) * rowsPerPage;
-  const pageRows = filteredProperties.slice(pageStart, pageStart + rowsPerPage);
+  // serverProperties already *is* the current page — no slicing needed.
+  const pageRows = serverProperties;
 
   const handleRegisterInterest = (e: React.FormEvent) => {
     e.preventDefault();
@@ -214,10 +250,21 @@ export default function PropertiesPage() {
     setTimeout(() => setInterestSuccess(""), 5000);
   };
 
+  // Table rows now come from their own server fetch (serverProperties), not
+  // the context's `properties` array directly — editProperty/deleteProperty
+  // persist to the database fire-and-forget (see AppContext.tsx), so bumping
+  // this nonce (on a short delay, giving that write time to land) re-fires
+  // the fetch effect to pick up the change, same idea as LeadDashboard's
+  // refetch-on-mutation handling.
+  const refreshPropertiesTable = () => {
+    setTimeout(() => setPropertiesRefreshNonce(n => n + 1), 500);
+  };
+
   const handlePropertyCreated = (name: string) => {
     setDuplicateSource(null);
     setSuccessMsg(`Successfully created property: ${name}`);
     setTimeout(() => setSuccessMsg(""), 4000);
+    refreshPropertiesTable();
   };
 
   const handleSavePropertyEdit = (e: React.FormEvent) => {
@@ -270,6 +317,7 @@ export default function PropertiesPage() {
     setSuccessMsg(`Successfully updated property: ${editName}`);
     closeDrawer();
     setTimeout(() => setSuccessMsg(""), 4000);
+    refreshPropertiesTable();
   };
 
   const handleDeleteProperty = (p: Property) => {
@@ -278,6 +326,7 @@ export default function PropertiesPage() {
       setSuccessMsg("Property deleted successfully.");
       if (selectedProperty?.id === p.id) closeDrawer();
       setTimeout(() => setSuccessMsg(""), 4000);
+      refreshPropertiesTable();
     }
   };
 
@@ -350,7 +399,7 @@ export default function PropertiesPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {isDataLoading && pageRows.length === 0 ? (
+              {serverPropertiesLoading && pageRows.length === 0 ? (
                 <TableRowsSkeleton rows={6} columns={8} />
               ) : pageRows.length === 0 ? (
                 <tr>

@@ -3,11 +3,19 @@ import { z } from "zod";
 import { requireAuth } from "../../middleware/auth";
 import { validate } from "../../middleware/validate";
 import { asyncHandler } from "../../utils/asyncHandler";
-import { sendOk } from "../../utils/apiResponse";
+import { sendOk, sendPaginated } from "../../utils/apiResponse";
 import { ApiError } from "../../utils/ApiError";
 import { pool, query } from "../../db/pool";
 import { consumeTicket, issueTicket } from "../../utils/sseTickets";
 import { subscribe } from "../../utils/sseHub";
+
+// Express's `qs` query parser turns a single `?category=A` into a bare string
+// but repeated `?category=A&category=B` into an array — normalize either
+// shape into a plain array (or undefined if omitted), same helper leads.schema.ts
+// uses for its own multi-select filters.
+const stringToArray = z.union([z.string(), z.array(z.string())])
+  .optional()
+  .transform(v => v === undefined ? undefined : (Array.isArray(v) ? v : [v]));
 
 export const notificationsRouter = Router();
 
@@ -60,19 +68,75 @@ notificationsRouter.post("/stream-ticket", (req, res) => {
   sendOk(res, { ticket: issueTicket(req.user!.sub) });
 });
 
+// notifications is one of the fastest-growing, zero-cap tables in this
+// schema — broadcast rows (recipient_user_id IS NULL) accumulate forever for
+// every user, so an unbounded SELECT here only gets more expensive over
+// time. page/pageSize give real LIMIT/OFFSET pagination; pageSize defaults
+// to 10 to match NotificationBell's own usePagination(..., 10, ...) call
+// (its dropdown lists 10 at a time) but can go up to 500 — the same bridge
+// pattern leads.schema.ts uses — for apiListNotifications()'s page-loop that
+// reconstructs the full array for AppContext's bulk load (still needed
+// there for simple in-memory counts elsewhere in the app).
+//
+// system/category/excludeCategory are optional, additive filters on top of
+// the exact same recipient-scoping WHERE clause as before — they exist so
+// NotificationBell's category tabs (New Leads / Reminder Alerts / Activity
+// Alerts / HRMS / Finance), which each render their own independently
+// paginated slice, can ask the server for exactly their own tab's page
+// instead of over-fetching everything and re-slicing client-side. Omitting
+// them (as apiListNotifications() does) reproduces today's unfiltered list.
+const listNotificationsQuerySchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().positive().max(500).default(10),
+  system: z.enum(["CRM", "HRMS", "FINANCE", "ADMIN"]).optional(),
+  // Include filter — e.g. ["NEW_LEAD"] for the New Leads tab.
+  category: stringToArray,
+  // Exclude filter — e.g. ["NEW_LEAD", "REMINDER"] for the CRM Activity
+  // Alerts tab's "everything else" catch-all.
+  excludeCategory: stringToArray
+});
+
 // Scoped to the caller: rows with recipient_user_id = them, OR broadcast rows
 // (recipient_user_id IS NULL) — see DATA_DICTIONARY.md's notifications table.
 notificationsRouter.get(
   "/",
+  validate({ query: listNotificationsQuerySchema }),
   asyncHandler(async (req, res) => {
+    const { page, pageSize, system, category, excludeCategory } = req.query as unknown as {
+      page: number; pageSize: number; system?: string; category?: string[]; excludeCategory?: string[];
+    };
+
+    const conditions = ["(recipient_user_id IS NULL OR recipient_user_id = $1)"];
+    const params: unknown[] = [req.user!.sub];
+
+    if (system) {
+      params.push(system);
+      conditions.push(`system = $${params.length}`);
+    }
+    if (category && category.length > 0) {
+      params.push(category);
+      conditions.push(`category = ANY($${params.length}::text[])`);
+    }
+    if (excludeCategory && excludeCategory.length > 0) {
+      params.push(excludeCategory);
+      conditions.push(`category <> ALL($${params.length}::text[])`);
+    }
+    const whereClause = `WHERE ${conditions.join(" AND ")}`;
+
+    const countResult = await query<{ count: string }>(`SELECT count(*) FROM notifications ${whereClause}`, params);
+    const totalCount = Number(countResult.rows[0]?.count ?? 0);
+
+    const offset = (page - 1) * pageSize;
+    const dataParams = [...params, pageSize, offset];
     const { rows } = await query(
       `SELECT id, system, category, title, message, read, lead_id, link, created_at
        FROM notifications
-       WHERE recipient_user_id IS NULL OR recipient_user_id = $1
-       ORDER BY created_at DESC`,
-      [req.user!.sub]
+       ${whereClause}
+       ORDER BY created_at DESC
+       LIMIT $${dataParams.length - 1} OFFSET $${dataParams.length}`,
+      dataParams
     );
-    sendOk(res, rows);
+    sendPaginated(res, rows, { page, pageSize, totalCount, totalPages: Math.max(1, Math.ceil(totalCount / pageSize)) });
   })
 );
 
