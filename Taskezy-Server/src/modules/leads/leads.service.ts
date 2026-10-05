@@ -606,6 +606,26 @@ export async function deleteLead(actor: { userId: string; name: string }, leadId
   if (!removed) throw ApiError.notFound("Lead not found");
 }
 
+// Sequential on purpose: each lead is its own transaction, so one blocked lead must not roll back the others.
+export async function bulkDeleteLeads(actor: { userId: string; name: string }, leadIds: string[]) {
+  const ids = Array.from(new Set(leadIds));
+  let deleted = 0;
+  let notFound = 0;
+  const blocked: { id: string; reason: string }[] = [];
+
+  for (const id of ids) {
+    try {
+      if (await repo.archiveAndRemove(id, actor)) deleted++;
+      else notFound++;
+    } catch (err) {
+      if (!isForeignKeyViolation(err)) throw err;
+      blocked.push({ id, reason: "Has an associated invoice; delete the invoice first" });
+    }
+  }
+
+  return { requested: ids.length, deleted, notFound, blocked };
+}
+
 // KYC verification is ADMIN/FINANCE-only — enforced by requireRole at the
 // route level (see leads.routes.ts), matching the frontend's verifyKYC action
 // which only ever appears in the Finance module UI.

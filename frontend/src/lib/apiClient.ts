@@ -363,6 +363,20 @@ export function apiDeleteLead(leadId: string): Promise<{ deleted: boolean }> {
   return request<{ deleted: boolean }>(`/api/v1/leads/${leadId}`, { method: "DELETE" });
 }
 
+export function apiBulkDeleteLeads(leadIds: string[]): Promise<{
+  requested: number;
+  deleted: number;
+  notFound: number;
+  blocked: { id: string; reason: string }[];
+}> {
+  return request<{
+    requested: number;
+    deleted: number;
+    notFound: number;
+    blocked: { id: string; reason: string }[];
+  }>("/api/v1/leads/bulk-delete", { method: "POST", body: JSON.stringify({ leadIds }) });
+}
+
 export function apiVerifyLeadKyc(leadId: string): Promise<ApiLeadRow> {
   return request<ApiLeadRow>(`/api/v1/leads/${leadId}/kyc`, { method: "PATCH" });
 }

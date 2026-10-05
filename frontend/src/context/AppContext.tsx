@@ -567,6 +567,7 @@ interface AppActions {
   addTeamMember: (user: Omit<User, "id" | "created_at" | "updated_at">) => void;
   deleteTeamMember: (userId: string) => void;
   deleteLead: (leadId: string) => void;
+  removeLeadsLocally: (leadIds: string[]) => void;
   editLead: (leadId: string, updatedFields: Partial<Lead>) => void;
   deleteProperty: (propertyId: string) => void;
   editProperty: (propertyId: string, updatedFields: Partial<Property>) => void;
@@ -2031,6 +2032,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const removeLeadsLocally = (leadIds: string[]) => {
+    const removed = new Set(leadIds);
+    setAllLeads(prev => prev.filter(l => !removed.has(l.id)));
+  };
+
   const editLead = (id: string, updatedFields: Partial<Lead>) => {
     setAllLeads(prev => prev.map(l => l.id === id ? { ...l, ...updatedFields } : l));
     if (isApiSessionActive() && isRealLeadId(id)) {
@@ -2209,6 +2215,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addTeamMember,
         deleteTeamMember,
         deleteLead,
+        removeLeadsLocally,
         editLead,
         deleteProperty,
         editProperty,
