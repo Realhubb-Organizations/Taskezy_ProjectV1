@@ -1779,7 +1779,7 @@ export default function AdminCampaignsPage() {
               platform rate limits bound how fast that happens — see the
               Sync button below), never as an invented value. */}
           <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden">
-            <div className="px-5 py-3.5 border-b border-slate-200/80 flex items-center justify-between gap-3">
+            <div className="px-5 py-3.5 border-b border-slate-200/80 flex flex-wrap items-center justify-between gap-3">
               <h3 className="text-sm font-bold text-slate-900">Campaign Deep Dive</h3>
               <div className="flex items-center gap-2">
                 {adSyncNote && <span className="text-[11px] text-slate-500 max-w-[320px] text-right">{adSyncNote}</span>}

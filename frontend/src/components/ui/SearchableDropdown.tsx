@@ -59,6 +59,9 @@ const TRIGGER_BASE: Record<DropdownVariant, string> = {
   inline: "inline-flex items-center gap-1 font-bold hover:text-brand-700 whitespace-nowrap"
 };
 
+// Autofocusing the search box on touch screens opens the keyboard and shuts the panel.
+const finePointer = () => typeof window === "undefined" || window.matchMedia("(pointer: fine)").matches;
+
 function useDropdownPanel(align: "left" | "right", minWidth: number) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -145,7 +148,7 @@ function Panel({
           <div className="relative">
             <Search className="h-3 w-3 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2" />
             <input
-              autoFocus
+              autoFocus={finePointer()}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder={searchPlaceholder}

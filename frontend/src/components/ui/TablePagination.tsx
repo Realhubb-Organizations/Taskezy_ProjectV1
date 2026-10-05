@@ -55,7 +55,7 @@ export default function TablePagination({
   const rangeEnd = Math.min(current * rowsPerPage, totalRows);
   const go = (p: number) => onPageChange(Math.min(Math.max(1, p), totalPages));
 
-  const navBtn = "p-1 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent";
+  const navBtn = "p-1 h-9 w-9 sm:h-auto sm:w-auto rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent";
 
   return (
     <div className={`px-5 py-3 flex flex-wrap justify-between items-center gap-3 border-t border-slate-100 text-[11px] text-slate-500 font-semibold ${className}`}>
@@ -92,7 +92,7 @@ export default function TablePagination({
                 key={p}
                 type="button"
                 onClick={() => go(p)}
-                className={`min-w-[24px] h-6 px-1.5 rounded-md tabular-nums transition-colors ${
+                className={`min-w-[36px] h-9 sm:min-w-[24px] sm:h-6 px-1.5 rounded-md tabular-nums transition-colors ${
                   p === current ? "bg-[#0B1E6E] text-white font-bold" : "text-slate-600 hover:bg-slate-100"
                 }`}
               >

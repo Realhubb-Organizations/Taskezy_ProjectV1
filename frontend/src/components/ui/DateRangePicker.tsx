@@ -131,7 +131,7 @@ function MonthGrid({
               disabled={disabled}
               onClick={() => onPick(iso)}
               onMouseEnter={() => onHover?.(iso)}
-              className={`h-9 text-[13px] tabular-nums transition-colors ${
+              className={`h-11 sm:h-9 text-[13px] tabular-nums transition-colors ${
                 end
                   ? "bg-[#3370E8] text-white font-semibold"
                   : between
@@ -199,6 +199,7 @@ function HeaderDateInput({
   };
   return (
     <input
+      inputMode="numeric"
       value={text}
       onFocus={onFocus}
       onChange={(e) => setText(e.target.value)}

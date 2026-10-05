@@ -1,6 +1,8 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+
+const DESKTOP_PEAK_SCALE = 3.8;
 
 interface LoginAnimationOverlayProps {
   onComplete: () => void;
@@ -12,6 +14,22 @@ export default function LoginAnimationOverlay({
   durationMs = 2600
 }: LoginAnimationOverlayProps) {
   const [step, setStep] = useState<"initial" | "zooming" | "fading">("initial");
+  const logoRef = useRef<HTMLImageElement>(null);
+  const [peakScale, setPeakScale] = useState(DESKTOP_PEAK_SCALE);
+
+  const fitToScreen = useCallback(() => {
+    const logo = logoRef.current;
+    if (!logo) return;
+    const baseWidth = logo.offsetWidth;
+    if (!baseWidth) return;
+    setPeakScale(Math.min(DESKTOP_PEAK_SCALE, (window.innerWidth * 0.8) / baseWidth));
+  }, []);
+
+  useEffect(() => {
+    fitToScreen();
+    window.addEventListener("resize", fitToScreen);
+    return () => window.removeEventListener("resize", fitToScreen);
+  }, [fitToScreen]);
 
   useEffect(() => {
     // Start smooth forward zoom immediately after mount
@@ -54,14 +72,16 @@ export default function LoginAnimationOverlay({
             step === "initial"
               ? "scale(0.85)"
               : step === "zooming"
-              ? "scale(3.2)"
-              : "scale(3.8)",
+              ? `scale(${peakScale * (3.2 / DESKTOP_PEAK_SCALE)})`
+              : `scale(${peakScale})`,
           opacity: step === "initial" ? 0 : step === "zooming" ? 1 : 0
         }}
       >
         {/* Clean, 100% Uncropped Taskezy Logo (Zero clipping, full blue arrow visible, zero unwanted N artifacts) */}
         <div className="relative flex items-center justify-center p-2">
           <img
+            ref={logoRef}
+            onLoad={fitToScreen}
             src="/taskezy-logo-clean.png"
             alt="TASKEZY Logo"
             className="h-14 sm:h-16 w-auto max-w-none object-contain select-none pointer-events-none"
