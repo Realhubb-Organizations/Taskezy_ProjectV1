@@ -65,6 +65,11 @@ export async function deleteLeadHandler(req: Request, res: Response): Promise<vo
   sendOk(res, { deleted: true });
 }
 
+export async function bulkDeleteLeadsHandler(req: Request, res: Response): Promise<void> {
+  const result = await leadsService.bulkDeleteLeads({ userId: req.user!.sub, name: req.user!.name }, req.body.leadIds);
+  sendOk(res, result);
+}
+
 export async function verifyLeadKycHandler(req: Request, res: Response): Promise<void> {
   const lead = await leadsService.verifyLeadKyc(req.params.id);
   sendOk(res, lead);

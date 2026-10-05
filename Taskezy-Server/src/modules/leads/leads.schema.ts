@@ -87,6 +87,10 @@ export const reassignLeadSchema = z.object({
   newAgentId: z.string().uuid()
 });
 
+export const bulkDeleteLeadsSchema = z.object({
+  leadIds: z.array(z.string().uuid()).min(1).max(500)
+});
+
 // Bulk upload rows are deliberately NOT phone-regex-validated here the way
 // createLeadSchema is — an admin's Excel sheet is messy (formatting,
 // +91 prefixes, stray spaces), so invalid rows are normalized/validated

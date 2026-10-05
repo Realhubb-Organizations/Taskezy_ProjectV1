@@ -3,6 +3,7 @@ import { requireAuth, requireRole } from "../../middleware/auth";
 import { validate } from "../../middleware/validate";
 import { asyncHandler } from "../../utils/asyncHandler";
 import {
+  bulkDeleteLeadsSchema,
   bulkImportLeadsSchema,
   createLeadSchema,
   editLeadSchema,
@@ -13,6 +14,7 @@ import {
   updateLeadStatusSchema
 } from "./leads.schema";
 import {
+  bulkDeleteLeadsHandler,
   bulkImportLeadsHandler,
   createLeadHandler,
   deleteLeadHandler,
@@ -48,6 +50,13 @@ leadsRouter.post(
   requireRole("ADMIN"),
   validate({ body: bulkImportLeadsSchema }),
   asyncHandler(bulkImportLeadsHandler)
+);
+// Bulk counterpart to DELETE /:id — ADMIN-only, same archive-then-delete per lead.
+leadsRouter.post(
+  "/bulk-delete",
+  requireRole("ADMIN"),
+  validate({ body: bulkDeleteLeadsSchema }),
+  asyncHandler(bulkDeleteLeadsHandler)
 );
 leadsRouter.patch(
   "/:id/status",

@@ -4,10 +4,10 @@ import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useApp, Lead, LeadStatus, mapApiLeadToFrontendLead } from "@/context/AppContext";
-import { Sliders, Sparkles, Plus, Check, ChevronDown, Search, X, Minus, Download, RotateCcw, Users } from "lucide-react";
+import { Sliders, Sparkles, Plus, Check, ChevronDown, Search, X, Minus, Download, RotateCcw, Users, Trash2, AlertTriangle } from "lucide-react";
 import { STATUS_OPTIONS, frontendStatusToDbCode } from "@/lib/leadStatusMapping";
 import { type LeadSummaryStats } from "@/lib/leadSummaryStats";
-import { apiListLeadsPage, apiGetLeadStats, type LeadListFilters } from "@/lib/apiClient";
+import { apiListLeadsPage, apiGetLeadStats, apiDeleteLead, apiBulkDeleteLeads, type LeadListFilters } from "@/lib/apiClient";
 import { WhatsAppIcon, CallIcon, PlatformLabel } from "@/components/icons/ContactIcons";
 import { LineSkeleton, TableRowsSkeleton } from "@/components/ui/Skeletons";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
@@ -115,7 +115,8 @@ export default function LeadDashboard() {
     users,
     followupCalls,
     reassignLead,
-    isDataLoading
+    isDataLoading,
+    removeLeadsLocally
   } = useApp();
 
   const router = useRouter();
@@ -323,6 +324,8 @@ export default function LeadDashboard() {
   const [serverTotalCount, setServerTotalCount] = useState(0);
   const [serverLeadsLoading, setServerLeadsLoading] = useState(true);
   const [serverStats, setServerStats] = useState<LeadSummaryStats | null>(null);
+  // Bumped after a delete to re-run the list + stats fetch with unchanged filters.
+  const [leadsRefreshKey, setLeadsRefreshKey] = useState(0);
   // Search fires on every keystroke locally but is debounced before it
   // becomes a real network request — otherwise every character typed would
   // fire its own full server round trip.
@@ -427,7 +430,7 @@ export default function LeadDashboard() {
     // so this effect re-fires exactly when a real filter value changes,
     // without needing every individual filter piece listed separately.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adminTab, adminPage, adminRowsPerPage, adminServerFiltersKey]);
+  }, [adminTab, adminPage, adminRowsPerPage, adminServerFiltersKey, leadsRefreshKey]);
 
   // Filter button → Settings panel for which table columns are shown — both
   // roles get the full-height right-docked drawer (same pattern as the lead
@@ -763,6 +766,48 @@ export default function LeadDashboard() {
     setTimeout(() => setSuccessMsg(""), 4000);
   };
 
+  // ---- Admin delete (single from row, bulk from toolbar) ----
+  const [deleteTarget, setDeleteTarget] = useState<{ ids: string[]; names: string[] } | null>(null);
+  const [deleteSubmitting, setDeleteSubmitting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+  const closeDeleteDialog = () => { if (!deleteSubmitting) { setDeleteTarget(null); setDeleteError(""); } };
+  const openSingleDelete = (l: Lead) => { setDeleteError(""); setDeleteTarget({ ids: [l.id], names: [l.name] }); };
+  const openBulkDelete = () => { setDeleteError(""); setDeleteTarget({ ids: Array.from(selectedLeadIds), names: [] }); };
+  const confirmDelete = async () => {
+    if (!deleteTarget || deleteSubmitting) return;
+    setDeleteSubmitting(true);
+    setDeleteError("");
+    const ids = deleteTarget.ids;
+    try {
+      let removedIds = ids;
+      if (ids.length === 1) {
+        await apiDeleteLead(ids[0]);
+        setSuccessMsg(`Deleted lead${deleteTarget.names[0] ? `: ${deleteTarget.names[0]}` : ""}.`);
+      } else {
+        const res = await apiBulkDeleteLeads(ids);
+        removedIds = ids.filter(id => !res.blocked.some(b => b.id === id));
+        const skippedMsg = res.blocked.length > 0
+          ? ` ${res.blocked.length} skipped because they have invoices.`
+          : "";
+        setSuccessMsg(`Deleted ${res.deleted} lead${res.deleted === 1 ? "" : "s"}.${skippedMsg}`);
+      }
+      removeLeadsLocally(removedIds);
+      setTimeout(() => setSuccessMsg(""), 4000);
+      setSelectedLeadIds(prev => {
+        const next = new Set(prev);
+        ids.forEach(id => next.delete(id));
+        return next;
+      });
+      if (selectedLead && ids.includes(selectedLead.id)) setSelectedLead(null);
+      setDeleteTarget(null);
+      setLeadsRefreshKey(k => k + 1);
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Could not delete the lead(s). Please try again.");
+    } finally {
+      setDeleteSubmitting(false);
+    }
+  };
+
   // All rows render continuously in the scroll container (not just the
   // current page's slice) so scrolling moves smoothly across page
   // boundaries instead of stopping dead at the end of each page. Each
@@ -1052,6 +1097,16 @@ export default function LeadDashboard() {
                   Reshuffle ({selectedAssignedLeads.length})
                 </button>
               )}
+              {isAdmin && selectedLeadIds.size > 0 && (
+                <button
+                  type="button"
+                  onClick={openBulkDelete}
+                  className="flex items-center gap-2 border border-slate-200 bg-white rounded-lg px-3 py-1.5 text-xs text-red-600 font-bold shadow-sm hover:bg-red-50 transition-all"
+                >
+                  <Trash2 className="h-4 w-4 text-red-600" />
+                  Delete ({selectedLeadIds.size})
+                </button>
+              )}
               <DateRangePicker
                 value={adminDateRange === "custom" ? adminCustomRange : null}
                 onChange={(range) => {
@@ -1294,6 +1349,16 @@ export default function LeadDashboard() {
                               >
                                 <CallIcon className="h-3.5 w-3.5" />
                               </a>
+                              {isAdmin && (
+                                <button
+                                  type="button"
+                                  onClick={() => openSingleDelete(l)}
+                                  className="inline-flex items-center justify-center h-7 w-7 rounded-lg bg-slate-100 text-red-600 hover:bg-red-50 transition-colors ml-1.5"
+                                  title="Delete lead"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              )}
                             </td>
                           )}
                           {adminVisibleColumns.adSetName && (
@@ -1851,6 +1916,55 @@ export default function LeadDashboard() {
                   }`}
                 >
                   {assignFlowMode === "reshuffle" ? "Reshuffle" : "Assign"}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
+        {/* Delete confirmation — same modal shell as the Assign/Reshuffle flow. */}
+        {isAdmin && deleteTarget && createPortal(
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <div className="fixed inset-0 bg-slate-900/40" onClick={closeDeleteDialog} />
+            <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md">
+              <div className="px-6 pt-6 pb-4 border-b border-slate-100">
+                <h3 className="text-xl font-extrabold text-slate-900">
+                  {deleteTarget.ids.length === 1 ? "Delete Lead" : "Delete Leads"}
+                </h3>
+              </div>
+              <div className="px-6 py-5 space-y-3">
+                <p className="text-sm text-slate-700">
+                  {deleteTarget.ids.length === 1
+                    ? `Permanently delete ${deleteTarget.names[0] ? `"${deleteTarget.names[0]}"` : "this lead"}? This cannot be undone.`
+                    : `Permanently delete ${deleteTarget.ids.length} selected lead${deleteTarget.ids.length === 1 ? "" : "s"}? This cannot be undone.`}
+                </p>
+                {deleteTarget.ids.length > 1 && (
+                  <p className="text-[11px] text-slate-400">Leads with invoices cannot be deleted and will be skipped.</p>
+                )}
+                {deleteError && (
+                  <div className="p-2.5 bg-red-50 border border-red-100 text-[11px] text-red-700 rounded-xl font-bold flex items-center gap-2">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                    <span>{deleteError}</span>
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100">
+                <button
+                  type="button"
+                  disabled={deleteSubmitting}
+                  onClick={closeDeleteDialog}
+                  className="px-5 py-2 rounded-xl border border-slate-300 font-bold text-slate-700 text-sm hover:bg-slate-50 transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={deleteSubmitting}
+                  onClick={confirmDelete}
+                  className="px-5 py-2 rounded-xl font-bold text-sm text-white bg-red-600 hover:bg-red-700 transition-colors disabled:bg-slate-300 disabled:cursor-not-allowed"
+                >
+                  {deleteSubmitting ? "Deleting..." : "Delete"}
                 </button>
               </div>
             </div>
