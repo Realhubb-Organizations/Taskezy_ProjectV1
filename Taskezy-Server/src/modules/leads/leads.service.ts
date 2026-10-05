@@ -587,12 +587,13 @@ export async function fixSheetLeadTimestamps(): Promise<{ fixed: number; already
   return { fixed, alreadyCorrect, total: leads.length };
 }
 
-export async function deleteLead(leadId: string): Promise<void> {
+export async function deleteLead(actor: { userId: string; name: string }, leadId: string): Promise<void> {
   const existing = await repo.findById(leadId);
   if (!existing) throw ApiError.notFound("Lead not found");
 
+  let removed: boolean;
   try {
-    await repo.remove(leadId);
+    removed = await repo.archiveAndRemove(leadId, actor);
   } catch (err) {
     // invoices.lead_id is ON DELETE RESTRICT (see DATA_DICTIONARY.md) —
     // deliberately so a lead with billing history can't vanish silently.
@@ -601,6 +602,8 @@ export async function deleteLead(leadId: string): Promise<void> {
     }
     throw err;
   }
+  // Lead was removed by someone else between the findById check and the delete.
+  if (!removed) throw ApiError.notFound("Lead not found");
 }
 
 // KYC verification is ADMIN/FINANCE-only — enforced by requireRole at the
