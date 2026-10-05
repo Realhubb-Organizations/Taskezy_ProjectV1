@@ -117,6 +117,9 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   // Desktop-only sidebar collapse (icon rail) — the mobile drawer/bottom tab
   // bar are separate, `md:hidden`-gated UI and are unaffected by this.
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [pressTip, setPressTip] = useState<{ label: string; x: number; y: number } | null>(null);
+  const pressTimer = useRef<number | null>(null);
+  const pressFired = useRef(false);
   const [expandedGroups, setExpandedGroups] = useState<Set<SystemType>>(new Set());
   const toggleGroup = (key: SystemType) => {
     setExpandedGroups(prev => {
@@ -252,9 +255,6 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   const mobileDashboardItem = activeGroupForMobile?.items.find(i => i.name.endsWith("Dashboard"));
   const mobileNavColumns = mobileLeftItems.length + mobileRightItems.length + 1;
 
-  const [pressTip, setPressTip] = useState<{ label: string; x: number; y: number } | null>(null);
-  const pressTimer = useRef<number | null>(null);
-  const pressFired = useRef(false);
   const cancelPress = () => {
     if (pressTimer.current !== null) window.clearTimeout(pressTimer.current);
     pressTimer.current = null;
