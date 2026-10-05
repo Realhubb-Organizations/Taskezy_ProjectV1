@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requireAuth } from "../../middleware/auth";
 import { validate } from "../../middleware/validate";
 import { asyncHandler } from "../../utils/asyncHandler";
-import { sendOk } from "../../utils/apiResponse";
+import { sendOk, sendPaginated } from "../../utils/apiResponse";
 import { ApiError } from "../../utils/ApiError";
 import { pool, query, withTransaction } from "../../db/pool";
 import { createNotification } from "../notifications/notifications.service";
@@ -28,6 +28,35 @@ const SELECT = `
   LEFT JOIN users cb ON cb.id = ce.created_by_id
 `;
 
+// Calendar UIs render a month/week/day grid, not a flat table — so the real
+// fix here is letting the frontend ask for "just the events in the visible
+// range" via dateFrom/dateTo (same plain YYYY-MM-DD bound convention as
+// leads.schema.ts), rather than a generic page/pageSize the UI would have no
+// natural use for. page/pageSize are kept as a secondary safety cap (default
+// pageSize 500) in case a single visible range still returns a lot of rows
+// (e.g. ADMIN's global calendar with no range selected), not the primary
+// mechanism.
+const listEventsQuerySchema = z.object({
+  dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateFrom must be YYYY-MM-DD").optional(),
+  dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateTo must be YYYY-MM-DD").optional(),
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().positive().max(500).default(500)
+});
+
+/** Pushes dateFrom/dateTo conditions onto `params` (continuing whatever indices are already in it) and returns the SQL fragments — shared by both role branches below so a date range filters identically either way. */
+function buildDateConditions(params: unknown[], dateFrom?: string, dateTo?: string): string[] {
+  const conditions: string[] = [];
+  if (dateFrom) {
+    params.push(dateFrom);
+    conditions.push(`ce.event_date >= $${params.length}::date`);
+  }
+  if (dateTo) {
+    params.push(dateTo);
+    conditions.push(`ce.event_date <= $${params.length}::date`);
+  }
+  return conditions;
+}
+
 // CRM events (site visits/follow-ups/bookings/EOI) are role-scoped by who
 // created them — a sales agent's own calendar, a manager's team's calendar,
 // or everything for ADMIN. HRMS/FINANCE/ADMIN-system events (company
@@ -36,10 +65,27 @@ const SELECT = `
 // authenticated role saw every CRM event regardless of who scheduled it.
 calendarEventsRouter.get(
   "/",
+  validate({ query: listEventsQuerySchema }),
   asyncHandler(async (req, res) => {
+    const { dateFrom, dateTo, page, pageSize } = req.query as unknown as {
+      dateFrom?: string; dateTo?: string; page: number; pageSize: number;
+    };
+    const offset = (page - 1) * pageSize;
+
     if (req.user!.role === "ADMIN") {
-      const { rows } = await query(`${SELECT} ORDER BY ce.event_date`);
-      sendOk(res, rows);
+      const params: unknown[] = [];
+      const conditions = buildDateConditions(params, dateFrom, dateTo);
+      const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+      const countResult = await query<{ count: string }>(`SELECT count(*) FROM calendar_events ce ${whereClause}`, params);
+      const totalCount = Number(countResult.rows[0]?.count ?? 0);
+
+      const dataParams = [...params, pageSize, offset];
+      const { rows } = await query(
+        `${SELECT} ${whereClause} ORDER BY ce.event_date LIMIT $${dataParams.length - 1} OFFSET $${dataParams.length}`,
+        dataParams
+      );
+      sendPaginated(res, rows, { page, pageSize, totalCount, totalPages: Math.max(1, Math.ceil(totalCount / pageSize)) });
       return;
     }
 
@@ -48,12 +94,19 @@ calendarEventsRouter.get(
       req.user!.roleType === "MANAGER"
         ? `ce.created_by_id = $1 OR ce.created_by_id IN (SELECT id FROM users WHERE manager_id = $1)`
         : `ce.created_by_id = $1`;
+    const dateConditions = buildDateConditions(params, dateFrom, dateTo);
+    const dateClause = dateConditions.length > 0 ? ` AND ${dateConditions.join(" AND ")}` : "";
+    const whereClause = `WHERE (ce.system != 'CRM' OR (${crmVisibility}))${dateClause}`;
 
+    const countResult = await query<{ count: string }>(`SELECT count(*) FROM calendar_events ce ${whereClause}`, params);
+    const totalCount = Number(countResult.rows[0]?.count ?? 0);
+
+    const dataParams = [...params, pageSize, offset];
     const { rows } = await query(
-      `${SELECT} WHERE ce.system != 'CRM' OR (${crmVisibility}) ORDER BY ce.event_date`,
-      params
+      `${SELECT} ${whereClause} ORDER BY ce.event_date LIMIT $${dataParams.length - 1} OFFSET $${dataParams.length}`,
+      dataParams
     );
-    sendOk(res, rows);
+    sendPaginated(res, rows, { page, pageSize, totalCount, totalPages: Math.max(1, Math.ceil(totalCount / pageSize)) });
   })
 );
 

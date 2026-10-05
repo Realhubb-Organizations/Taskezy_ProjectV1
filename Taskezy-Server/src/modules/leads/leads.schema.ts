@@ -5,6 +5,18 @@ import { z } from "zod";
 // 400 before it ever reaches the database.
 const phoneRegex = /^[6-9][0-9]{9}$/;
 
+// Express's default `qs` query parser turns a single `?status=A` into a bare
+// string but repeated `?status=A&status=B` into an array — these two helpers
+// normalize either shape into a plain array (or undefined if omitted) so the
+// repository only ever has to deal with one shape.
+const stringToArray = z.union([z.string(), z.array(z.string())])
+  .optional()
+  .transform(v => v === undefined ? undefined : (Array.isArray(v) ? v : [v]));
+
+const uuidToArray = z.union([z.string().uuid(), z.array(z.string().uuid())])
+  .optional()
+  .transform(v => v === undefined ? undefined : (Array.isArray(v) ? v : [v]));
+
 export const listLeadsQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   // 500 (was 100) — apiListAllLeads() pages through this endpoint to
@@ -15,10 +27,28 @@ export const listLeadsQuerySchema = z.object({
   // everything in one query" — just sized to cut that round-trip count by
   // 5x for the common "fetch everything" case.
   pageSize: z.coerce.number().int().positive().max(500).default(25),
-  status: z.string().optional(),
-  assignedAgentId: z.string().uuid().optional(),
+  // Admin CRM's leads table lets admins check multiple statuses at once —
+  // accepts either a single value or repeated query params and normalizes
+  // both to an array.
+  status: stringToArray,
+  assignedAgentId: uuidToArray,
+  // Matches lead.campaign || lead.source in the frontend's client-side
+  // filter (see leads.repository.ts's findMany) — same multi-select shape
+  // as status/assignedAgentId.
+  campaign: stringToArray,
+  // Plain ISO calendar-date bounds (YYYY-MM-DD) on created_at. The frontend
+  // computes the actual boundaries from its date-range presets
+  // (today/yesterday/week/month/custom) before sending the request.
+  dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateFrom must be YYYY-MM-DD").optional(),
+  dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateTo must be YYYY-MM-DD").optional(),
   search: z.string().trim().max(200).optional()
 });
+
+// Same filter shape as listLeadsQuerySchema (status/assignedAgentId/campaign/
+// dateFrom/dateTo/search) minus page/pageSize, which are meaningless for an
+// aggregate — a caller can pass the exact same filter query params to both
+// `GET /` and `GET /stats` and get consistent, filter-matching results.
+export const leadStatsQuerySchema = listLeadsQuerySchema.omit({ page: true, pageSize: true });
 
 export const leadIdParamSchema = z.object({
   id: z.string().uuid()

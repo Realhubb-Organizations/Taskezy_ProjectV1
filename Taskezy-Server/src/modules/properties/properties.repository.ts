@@ -55,9 +55,55 @@ const SELECT = `
   FROM properties p
 `;
 
-export async function findAll(): Promise<PropertyRow[]> {
-  const { rows } = await query<PropertyRow>(`${SELECT} ORDER BY p.name`);
-  return rows;
+/** Filters for the paginated admin list (findMany) — kept as its own interface in case other callers need the predicate without page/pageSize later, same convention as leads.repository.ts's LeadFilterConditions/LeadListFilter split. */
+export interface PropertyFilterConditions {
+  /** Matches name/developer/location, mirroring the frontend's client-side search. */
+  search?: string;
+  /** Multi-select; matches if ANY selected type is one of a property's own (comma-joined) types. */
+  propertyType?: string[];
+}
+
+export interface PropertyListFilter extends PropertyFilterConditions {
+  page: number;
+  pageSize: number;
+  /** Sort direction on created_at — defaults to DESC (newest first), matching the admin table's own default. */
+  sortDir?: "asc" | "desc";
+}
+
+function buildPropertyWhereClause(filter: PropertyFilterConditions): { whereClause: string; params: unknown[] } {
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+
+  if (filter.search) {
+    params.push(`%${filter.search}%`);
+    conditions.push(`(p.name ILIKE $${params.length} OR p.developer ILIKE $${params.length} OR p.location ILIKE $${params.length})`);
+  }
+
+  if (filter.propertyType && filter.propertyType.length > 0) {
+    const orConditions = filter.propertyType.map((t) => {
+      params.push(`%${t}%`);
+      return `p.property_type ILIKE $${params.length}`;
+    });
+    conditions.push(`(${orConditions.join(" OR ")})`);
+  }
+
+  return { whereClause: conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "", params };
+}
+
+export async function findMany(filter: PropertyListFilter): Promise<{ rows: PropertyRow[]; totalCount: number }> {
+  const { whereClause, params } = buildPropertyWhereClause(filter);
+
+  const countResult = await query<{ count: string }>(`SELECT count(*) FROM properties p ${whereClause}`, params);
+
+  const offset = (filter.page - 1) * filter.pageSize;
+  const orderDir = filter.sortDir === "asc" ? "ASC" : "DESC";
+  params.push(filter.pageSize, offset);
+  const dataResult = await query<PropertyRow>(
+    `${SELECT} ${whereClause} ORDER BY p.created_at ${orderDir} LIMIT $${params.length - 1} OFFSET $${params.length}`,
+    params
+  );
+
+  return { rows: dataResult.rows, totalCount: Number(countResult.rows[0]?.count ?? 0) };
 }
 
 export async function findById(id: string): Promise<PropertyRow | undefined> {

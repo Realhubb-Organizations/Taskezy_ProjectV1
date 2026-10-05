@@ -3,10 +3,11 @@
 import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useApp, Lead, LeadStatus } from "@/context/AppContext";
+import { useApp, Lead, LeadStatus, mapApiLeadToFrontendLead } from "@/context/AppContext";
 import { Sliders, Sparkles, Plus, Check, ChevronDown, Search, X, Minus, Download, RotateCcw, Users } from "lucide-react";
-import { STATUS_OPTIONS } from "@/lib/leadStatusMapping";
-import { computeLeadSummaryStats } from "@/lib/leadSummaryStats";
+import { STATUS_OPTIONS, frontendStatusToDbCode } from "@/lib/leadStatusMapping";
+import { type LeadSummaryStats } from "@/lib/leadSummaryStats";
+import { apiListLeadsPage, apiGetLeadStats, type LeadListFilters } from "@/lib/apiClient";
 import { WhatsAppIcon, CallIcon, PlatformLabel } from "@/components/icons/ContactIcons";
 import { LineSkeleton, TableRowsSkeleton } from "@/components/ui/Skeletons";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
@@ -309,6 +310,125 @@ export default function LeadDashboard() {
   const [adminPage, setAdminPage] = useState(1);
   const [adminRowsPerPage, setAdminRowsPerPage] = useState(100);
 
+  // ---- Server-paginated Leads tab data (real fetch-per-page, not the old
+  // "load every lead into the browser" pattern) ----
+  // The table's own rows + stat cards are fetched directly from the server
+  // for exactly the current page/filters, instead of deriving from the full
+  // `leads` array AppContext still bulk-loads for other consumers (Reports,
+  // Analytics, Data Calling, Dashboards) that genuinely need the whole
+  // dataset for their own cross-lead aggregations — that full-load stays
+  // for now (a separate, larger piece of work), this just stops the admin
+  // Leads LIST specifically from needing or exposing it.
+  const [serverLeads, setServerLeads] = useState<Lead[]>([]);
+  const [serverTotalCount, setServerTotalCount] = useState(0);
+  const [serverLeadsLoading, setServerLeadsLoading] = useState(true);
+  const [serverStats, setServerStats] = useState<LeadSummaryStats | null>(null);
+  // Search fires on every keystroke locally but is debounced before it
+  // becomes a real network request — otherwise every character typed would
+  // fire its own full server round trip.
+  const [debouncedAdminSearch, setDebouncedAdminSearch] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedAdminSearch(adminSearch.trim()), 350);
+    return () => clearTimeout(t);
+  }, [adminSearch]);
+
+  // Plain YYYY-MM-DD bounds for whichever date-range preset is active —
+  // mirrors the boundary logic dateInRange already uses for the old
+  // client-side filter, just emitting dates instead of a predicate, since
+  // the server does the actual comparison now.
+  const adminServerDateBounds = (): { dateFrom?: string; dateTo?: string } => {
+    const toYMD = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    if (adminDateRange === "all") return {};
+    const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    if (adminDateRange === "today") return { dateFrom: toYMD(startOfToday), dateTo: toYMD(startOfToday) };
+    if (adminDateRange === "yesterday") {
+      const y = new Date(startOfToday);
+      y.setDate(y.getDate() - 1);
+      return { dateFrom: toYMD(y), dateTo: toYMD(y) };
+    }
+    if (adminDateRange === "week") {
+      const weekAgo = new Date(startOfToday);
+      weekAgo.setDate(weekAgo.getDate() - 6);
+      return { dateFrom: toYMD(weekAgo), dateTo: toYMD(startOfToday) };
+    }
+    if (adminDateRange === "custom") {
+      if (!adminCustomRange) return {};
+      return { dateFrom: adminCustomRange.start.split("T")[0], dateTo: adminCustomRange.end.split("T")[0] };
+    }
+    // month
+    const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+    const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+    return { dateFrom: toYMD(monthStart), dateTo: toYMD(monthEnd) };
+  };
+
+  // Non-admin's stat-card quick-filter (adminMetric) maps onto the same
+  // server status filter rather than a separate client-side predicate — see
+  // adminMetricPredicate below for the equivalent labels.
+  const ADMIN_METRIC_TO_STATUS: Record<string, LeadStatus> = {
+    new: "New Lead", rnr: "RNR", callbacks: "Call Back", followups: "Follow-ups",
+    sitevisit_sched: "Visit Schedule", sitevisit_done: "Site Visit"
+  };
+
+  const buildAdminServerFilters = (): LeadListFilters => {
+    const { dateFrom, dateTo } = adminServerDateBounds();
+    const statusCodes = new Set<string>();
+    if (!isAdmin && adminMetric && adminMetric !== "total") {
+      const mappedStatus = ADMIN_METRIC_TO_STATUS[adminMetric];
+      const code = mappedStatus && frontendStatusToDbCode(mappedStatus);
+      if (code) statusCodes.add(code);
+    }
+    adminStatusFilter.forEach(s => {
+      const code = frontendStatusToDbCode(s as LeadStatus);
+      if (code) statusCodes.add(code);
+    });
+    // Assigned-agent filter is tracked by display name (matches the
+    // dropdown's existing options, sourced from the same name strings
+    // leads already carry) — resolved to the real id the API needs via the
+    // user roster already loaded in context.
+    const nameToId = new Map(users.map(u => [u.name, u.id] as const));
+    const assignedAgentIds = adminAssignedFilter
+      .map(name => nameToId.get(name))
+      .filter((id): id is string => !!id);
+    return {
+      status: statusCodes.size > 0 ? Array.from(statusCodes) : undefined,
+      assignedAgentId: assignedAgentIds.length > 0 ? assignedAgentIds : undefined,
+      campaign: adminCampaignFilter.length > 0 ? adminCampaignFilter : undefined,
+      dateFrom,
+      dateTo,
+      search: debouncedAdminSearch || undefined
+    };
+  };
+
+  const adminServerFiltersKey = JSON.stringify(buildAdminServerFilters());
+
+  useEffect(() => {
+    if (adminTab !== "leads") return;
+    let cancelled = false;
+    setServerLeadsLoading(true);
+    const filters = buildAdminServerFilters();
+    Promise.all([
+      apiListLeadsPage(adminPage, adminRowsPerPage, filters),
+      apiGetLeadStats(filters)
+    ])
+      .then(([pageResult, stats]) => {
+        if (cancelled) return;
+        setServerLeads(pageResult.rows.map(mapApiLeadToFrontendLead));
+        setServerTotalCount(pageResult.totalCount);
+        setServerStats(stats);
+      })
+      .catch((err) => {
+        if (!cancelled) console.error("Could not load the leads list page:", err);
+      })
+      .finally(() => {
+        if (!cancelled) setServerLeadsLoading(false);
+      });
+    return () => { cancelled = true; };
+    // adminServerFiltersKey captures every filter input in one stable string
+    // so this effect re-fires exactly when a real filter value changes,
+    // without needing every individual filter piece listed separately.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminTab, adminPage, adminRowsPerPage, adminServerFiltersKey]);
+
   // Filter button → Settings panel for which table columns are shown — both
   // roles get the full-height right-docked drawer (same pattern as the lead
   // quick-view drawer elsewhere in this app); a Sales Member/Manager's
@@ -522,11 +642,14 @@ export default function LeadDashboard() {
     : scopedLeads.filter(l => !!l.campaign && adminCampaignFilter.includes(l.campaign));
 
   const adminRangeLeads = adminCampaignScopedLeads.filter(l => adminDateInRange(l.createdAtStr, adminDateRange, today));
-  // Same shared predicates the CRM Dashboard and the Campaigns page's top
-  // bar use — a same-named card can never drift into a different real
-  // number per page. Every field respects Date Range now, including RNR/
-  // Call Backs/Follow Ups/Site Visit Scheduled/Site Visit Done.
-  const adminStats = computeLeadSummaryStats(adminCampaignScopedLeads, l => adminDateInRange(l.createdAtStr, adminDateRange, today));
+  // Real counts from the server (same filters as the table itself), not a
+  // computation over the full in-memory array — see the serverStats fetch
+  // effect above. adminRangeLeads/adminCampaignScopedLeads stay exactly as
+  // they were purely for the admin drill-down panel below (adminDrillMetric),
+  // which still needs real lead rows to display, not just a count.
+  const adminStats: LeadSummaryStats = serverStats ?? {
+    totalLeads: 0, newLeads: 0, rnr: 0, callBacks: 0, followUps: 0, siteVisitScheduled: 0, siteVisitDone: 0
+  };
 
   const adminStatCards: { key: string; label: string; value: number; color: string }[] = [
     { key: "total", label: "Total Leads", value: adminStats.totalLeads, color: "text-slate-900" },
@@ -568,15 +691,13 @@ export default function LeadDashboard() {
     );
   const adminCampaignOptions = groupCampaignOptions(adminCampaignsList);
 
-  const adminFilteredLeads = (!isAdmin && adminMetric ? adminRangeLeads.filter(adminMetricPredicate[adminMetric]) : adminRangeLeads).filter(l => {
-    const matchesSearch = !adminSearch || l.name.toLowerCase().includes(adminSearch.toLowerCase()) || l.phone.includes(adminSearch);
-    const matchesStatus = adminStatusFilter.length === 0 || adminStatusFilter.includes(l.status);
-    const matchesAssigned = adminAssignedFilter.length === 0 || adminAssignedFilter.includes(l.assignedAgent);
-    const matchesCampaign = adminCampaignFilter.length === 0 || (!!l.campaign && adminCampaignFilter.includes(l.campaign));
-    return matchesSearch && matchesStatus && matchesAssigned && matchesCampaign;
-  });
-
-  const adminTotalPages = Math.max(1, Math.ceil(adminFilteredLeads.length / adminRowsPerPage));
+  // The table itself now renders exactly one server-fetched page (serverLeads)
+  // instead of filtering/slicing the full array — adminFilteredLeads/
+  // adminTotalPages/adminCurrentPage below are thin aliases kept so the JSX
+  // further down (and anything still reading them) doesn't need a sweeping
+  // rename; they just point at server state now instead of a derived array.
+  const adminFilteredLeads = serverLeads;
+  const adminTotalPages = Math.max(1, Math.ceil(serverTotalCount / adminRowsPerPage));
   const adminCurrentPage = Math.min(adminPage, adminTotalPages);
 
   // ---- Bulk Assign / Reshuffle (Admin + Manager) ----
@@ -588,7 +709,8 @@ export default function LeadDashboard() {
     if (next.has(id)) next.delete(id); else next.add(id);
     return next;
   });
-  const currentPageLeads = adminFilteredLeads.slice((adminCurrentPage - 1) * adminRowsPerPage, adminCurrentPage * adminRowsPerPage);
+  // serverLeads already *is* the current page — no slicing needed anymore.
+  const currentPageLeads = serverLeads;
   const allOnPageSelected = currentPageLeads.length > 0 && currentPageLeads.every(l => selectedLeadIds.has(l.id));
   const toggleSelectAllOnPage = () => setSelectedLeadIds(prev => {
     const next = new Set(prev);
@@ -652,32 +774,17 @@ export default function LeadDashboard() {
   const adminPageRowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
   const adminProgrammaticScroll = useRef(false);
 
-  const handleAdminTableScroll = () => {
-    if (adminProgrammaticScroll.current) return;
-    const container = adminScrollRef.current;
-    if (!container) return;
-    const scrollTop = container.scrollTop;
-    let current = 1;
-    for (let i = 0; i < adminPageRowRefs.current.length; i++) {
-      const row = adminPageRowRefs.current[i];
-      if (row && row.offsetTop - container.offsetTop <= scrollTop + 4) {
-        current = i + 1;
-      }
-    }
-    setAdminPage(prev => (prev !== current ? current : prev));
-  };
+  // Scroll-spy is moot now that the table renders exactly one server-fetched
+  // page at a time (there's only ever one "page" of rows in the DOM to spy
+  // on) — left as a no-op rather than torn out, since the JSX below still
+  // wires onScroll={handleAdminTableScroll} and removing that wiring isn't
+  // worth the extra diff for what's already a large change.
+  const handleAdminTableScroll = () => {};
 
   const goToAdminPage = (page: number) => {
     const clamped = Math.max(1, Math.min(adminTotalPages, page));
     setAdminPage(clamped);
-    const row = adminPageRowRefs.current[clamped - 1];
-    const container = adminScrollRef.current;
-    if (!row || !container) return;
-    adminProgrammaticScroll.current = true;
-    container.scrollTop = clamped === 1 ? 0 : row.offsetTop - container.offsetTop;
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => { adminProgrammaticScroll.current = false; });
-    });
+    adminScrollRef.current?.scrollTo(0, 0);
   };
 
   // Leads Analytics tab's own filtered lead set — independent of the Leads
@@ -1106,7 +1213,7 @@ export default function LeadDashboard() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-xs">
-                    {isDataLoading && adminFilteredLeads.length === 0 ? (
+                    {serverLeadsLoading && adminFilteredLeads.length === 0 ? (
                       <TableRowsSkeleton rows={8} columns={(canBulkAssign ? 4 : 3) + adminVisibleColumnList.length} />
                     ) : adminFilteredLeads.length === 0 ? (
                       <tr>
@@ -1211,7 +1318,7 @@ export default function LeadDashboard() {
               </div>
 
               <TablePagination
-                totalRows={adminFilteredLeads.length}
+                totalRows={serverTotalCount}
                 page={adminCurrentPage}
                 rowsPerPage={adminRowsPerPage}
                 onPageChange={goToAdminPage}

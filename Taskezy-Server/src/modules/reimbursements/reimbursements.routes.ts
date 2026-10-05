@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requireAuth, requireRole } from "../../middleware/auth";
 import { validate } from "../../middleware/validate";
 import { asyncHandler } from "../../utils/asyncHandler";
-import { sendOk } from "../../utils/apiResponse";
+import { sendOk, sendPaginated } from "../../utils/apiResponse";
 import { ApiError } from "../../utils/ApiError";
 import { pool, query } from "../../db/pool";
 import { createNotification } from "../notifications/notifications.service";
@@ -20,11 +20,36 @@ const SELECT = `
   JOIN users u ON u.id = rc.agent_id
 `;
 
+// Finance page's Reimbursements tab had no page-size control of its own
+// before this fix (the whole `reimbursement_claims` table was rendered
+// unconditionally from AppContext's bulk load, filtered only client-side).
+// 10 is this codebase's own convention for a table's first page absent a
+// pre-existing control (see TablePagination's
+// DEFAULT_ROWS_PER_PAGE_OPTIONS[0] and usePagination's own default), not a
+// number carried over from existing Finance UI. `status` mirrors the tab's
+// existing All/Pending/Paid/Rejected filter buttons, moved server-side.
+const listReimbursementsQuerySchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().positive().max(500).default(10),
+  status: z.enum(["PENDING", "PAID", "REJECTED"]).optional()
+});
+
 reimbursementsRouter.get(
   "/",
-  asyncHandler(async (_req, res) => {
-    const { rows } = await query(`${SELECT} ORDER BY rc.claim_date DESC`);
-    sendOk(res, rows);
+  validate({ query: listReimbursementsQuerySchema }),
+  asyncHandler(async (req, res) => {
+    const { page, pageSize, status } = req.query as unknown as { page: number; pageSize: number; status?: "PENDING" | "PAID" | "REJECTED" };
+    const whereClause = status ? `WHERE rc.status = $1` : "";
+    const countParams: unknown[] = status ? [status] : [];
+    const countResult = await query<{ count: string }>(`SELECT count(*) FROM reimbursement_claims rc ${whereClause}`, countParams);
+    const totalCount = Number(countResult.rows[0]?.count ?? 0);
+    const offset = (page - 1) * pageSize;
+    const dataParams = [...countParams, pageSize, offset];
+    const { rows } = await query(
+      `${SELECT} ${whereClause} ORDER BY rc.claim_date DESC LIMIT $${dataParams.length - 1} OFFSET $${dataParams.length}`,
+      dataParams
+    );
+    sendPaginated(res, rows, { page, pageSize, totalCount, totalPages: Math.max(1, Math.ceil(totalCount / pageSize)) });
   })
 );
 

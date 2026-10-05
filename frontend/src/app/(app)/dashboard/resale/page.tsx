@@ -1,18 +1,28 @@
 "use client";
 
-import React, { useState } from "react";
-import { useApp, ResaleUnit } from "@/context/AppContext";
+import React, { useEffect, useState } from "react";
+import { useApp, mapApiResaleUnitToFrontend, ResaleUnit } from "@/context/AppContext";
+import { apiListResaleUnitsPage, type ResaleUnitListFilters } from "@/lib/apiClient";
 import { Plus, X, Search, Landmark, PhoneCall, Link2, CheckCircle } from "lucide-react";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
+import TablePagination, { DEFAULT_ROWS_PER_PAGE_OPTIONS } from "@/components/ui/TablePagination";
 
 export default function ResalePage() {
-  const { resaleUnits, addResaleUnit, leads, isDataLoading } = useApp();
+  const { resaleUnits, addResaleUnit, leads } = useApp();
 
   // Filters state
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedBuilder, setSelectedBuilder] = useState("All");
   const [minPrice, setMinPrice] = useState("");
   const [maxPrice, setMaxPrice] = useState("");
+
+  // Pagination state. No prior pagination existed on this page (it rendered
+  // every resaleUnits row client-side with no page size at all) — 10 is
+  // TablePagination's own built-in default (DEFAULT_ROWS_PER_PAGE_OPTIONS[0],
+  // see components/ui/TablePagination.tsx), reused here as the most
+  // defensible "house" default in the absence of an existing one.
+  const [currentPage, setCurrentPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(DEFAULT_ROWS_PER_PAGE_OPTIONS[0]);
 
   // Post Resale modal state
   const [isPostOpen, setIsPostOpen] = useState(false);
@@ -27,16 +37,67 @@ export default function ResalePage() {
   const [matchingLeads, setMatchingLeads] = useState<any[]>([]);
   const [activeUnit, setActiveUnit] = useState<ResaleUnit | null>(null);
 
-  // Extract unique builders
+  // Extract unique builders — kept derived from the full `resaleUnits` array
+  // AppContext still bulk-loads (same convention as the Properties page's
+  // Property Type filter options), so the dropdown always lists every
+  // builder regardless of which page the table itself is currently showing.
   const builders = ["All", ...Array.from(new Set(resaleUnits.map(r => r.builder)))];
 
-  const filteredUnits = resaleUnits.filter(r => {
-    const matchesSearch = r.property.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                          r.builder.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          r.location.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesBuilder = selectedBuilder === "All" || r.builder === selectedBuilder;
-    return matchesSearch && matchesBuilder;
-  });
+  // ---- Server-paginated Resale Units table (real fetch-per-page, not the
+  // old "read the full `resaleUnits` array AppContext bulk-loads and filter
+  // client-side with no page size" pattern) ----
+  const [serverUnits, setServerUnits] = useState<ResaleUnit[]>([]);
+  const [serverTotalCount, setServerTotalCount] = useState(0);
+  const [serverUnitsLoading, setServerUnitsLoading] = useState(true);
+
+  // Search fires on every keystroke locally but is debounced before it
+  // becomes a real network request — same convention as LeadDashboard's
+  // debouncedAdminSearch / the Properties page's debouncedSearchQuery.
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearchQuery(searchQuery.trim()), 350);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
+
+  const resaleUnitListFilters: ResaleUnitListFilters = {
+    search: debouncedSearchQuery || undefined,
+    builder: selectedBuilder !== "All" ? selectedBuilder : undefined
+  };
+  const resaleUnitFiltersKey = JSON.stringify(resaleUnitListFilters);
+
+  // Resale units are added via addResaleUnit (AppContext), which persists to
+  // the database fire-and-forget rather than returning a promise this page
+  // can await — bumping this nonce (on a short delay, giving that write time
+  // to land) re-fires the fetch effect to pick up the new row, same idea as
+  // the Properties page's refreshPropertiesTable.
+  const [unitsRefreshNonce, setUnitsRefreshNonce] = useState(0);
+  const refreshUnitsTable = () => {
+    setTimeout(() => setUnitsRefreshNonce(n => n + 1), 500);
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    setServerUnitsLoading(true);
+    apiListResaleUnitsPage(currentPage, rowsPerPage, resaleUnitListFilters)
+      .then((result) => {
+        if (cancelled) return;
+        setServerUnits(result.rows.map(mapApiResaleUnitToFrontend));
+        setServerTotalCount(result.totalCount);
+      })
+      .catch((err) => {
+        if (!cancelled) console.error("Could not load the resale units list page:", err);
+      })
+      .finally(() => {
+        if (!cancelled) setServerUnitsLoading(false);
+      });
+    return () => { cancelled = true; };
+    // resaleUnitFiltersKey captures every filter input in one stable string
+    // so this effect re-fires exactly when a real filter value changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPage, rowsPerPage, resaleUnitFiltersKey, unitsRefreshNonce]);
+
+  // serverUnits already *is* the current page — no client-side slicing/filtering needed.
+  const filteredUnits = serverUnits;
 
   const handlePostResale = (e: React.FormEvent) => {
     e.preventDefault();
@@ -58,6 +119,7 @@ export default function ResalePage() {
     setResalePrice("");
     setResaleDesc("");
     setIsPostOpen(false);
+    refreshUnitsTable();
   };
 
   const handleFindLeads = (unit: ResaleUnit) => {
@@ -102,7 +164,7 @@ export default function ResalePage() {
               type="text"
               placeholder="Search listings, builders, amenities..."
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
               className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-9 pr-4 py-2 text-xs text-slate-800 focus:outline-none"
             />
           </div>
@@ -111,7 +173,7 @@ export default function ResalePage() {
           <div>
             <select
               value={selectedBuilder}
-              onChange={(e) => setSelectedBuilder(e.target.value)}
+              onChange={(e) => { setSelectedBuilder(e.target.value); setCurrentPage(1); }}
               className="w-full bg-slate-55 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none"
             >
               <option value="All">All Builders</option>
@@ -139,7 +201,7 @@ export default function ResalePage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {isDataLoading && filteredUnits.length === 0 ? (
+                {serverUnitsLoading && filteredUnits.length === 0 ? (
                   <TableRowsSkeleton rows={6} columns={6} />
                 ) : (
                   filteredUnits.map((u) => (
@@ -174,6 +236,15 @@ export default function ResalePage() {
               </tbody>
             </table>
           </div>
+
+          <TablePagination
+            totalRows={serverTotalCount}
+            page={currentPage}
+            rowsPerPage={rowsPerPage}
+            onPageChange={setCurrentPage}
+            onRowsPerPageChange={setRowsPerPage}
+            rowLabel="Listing"
+          />
         </div>
       </div>
 

@@ -47,14 +47,76 @@ export interface LeadListRow {
   logs: { message: string; timestamp: string; user: string }[];
 }
 
-export interface LeadListFilter {
-  page: number;
-  pageSize: number;
-  statusCode?: string;
-  assignedAgentId?: string;
+/** Filter fields shared by findMany (the paginated list) and getStats (the dashboard aggregate) — kept as one interface so the two can never silently drift onto different WHERE clauses for "the same filters". */
+export interface LeadFilterConditions {
+  /** Multi-select — admin CRM lets admins check multiple statuses at once. */
+  statusCodes?: string[];
+  /** Multi-select, ignored when scopedToAgentId is set (see findMany). */
+  assignedAgentId?: string[];
+  /** Matches lead.campaign || lead.source, mirroring the frontend's client-side filter. */
+  campaign?: string[];
+  /** Inclusive calendar-date bounds (YYYY-MM-DD) on created_at. */
+  dateFrom?: string;
+  dateTo?: string;
   search?: string;
   /** When set (non-admin/manager caller), results are hard-restricted to this agent's own leads. */
   scopedToAgentId?: string;
+}
+
+export interface LeadListFilter extends LeadFilterConditions {
+  page: number;
+  pageSize: number;
+}
+
+/** Builds the `WHERE ...` clause (or "" if no filters apply) plus its positional params, shared by findMany and getStats so "pass the same filters to both endpoints" actually means the same SQL predicate both times. */
+function buildLeadWhereClause(filter: LeadFilterConditions): { whereClause: string; params: unknown[] } {
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+
+  if (filter.scopedToAgentId) {
+    params.push(filter.scopedToAgentId);
+    conditions.push(`l.assigned_agent_id = $${params.length}`);
+  } else if (filter.assignedAgentId && filter.assignedAgentId.length > 0) {
+    if (filter.assignedAgentId.length === 1) {
+      params.push(filter.assignedAgentId[0]);
+      conditions.push(`l.assigned_agent_id = $${params.length}`);
+    } else {
+      params.push(filter.assignedAgentId);
+      conditions.push(`l.assigned_agent_id = ANY($${params.length}::uuid[])`);
+    }
+  }
+
+  if (filter.statusCodes && filter.statusCodes.length > 0) {
+    if (filter.statusCodes.length === 1) {
+      params.push(filter.statusCodes[0]);
+      conditions.push(`l.status_code = $${params.length}`);
+    } else {
+      params.push(filter.statusCodes);
+      conditions.push(`l.status_code = ANY($${params.length}::text[])`);
+    }
+  }
+
+  if (filter.campaign && filter.campaign.length > 0) {
+    params.push(filter.campaign);
+    conditions.push(`COALESCE(l.campaign, l.source) = ANY($${params.length}::text[])`);
+  }
+
+  if (filter.dateFrom) {
+    params.push(filter.dateFrom);
+    conditions.push(`l.created_at >= $${params.length}::date`);
+  }
+
+  if (filter.dateTo) {
+    params.push(filter.dateTo);
+    conditions.push(`l.created_at < $${params.length}::date + interval '1 day'`);
+  }
+
+  if (filter.search) {
+    params.push(`%${filter.search}%`);
+    conditions.push(`(l.name ILIKE $${params.length} OR l.phone ILIKE $${params.length})`);
+  }
+
+  return { whereClause: conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "", params };
 }
 
 const LIST_SELECT = `
@@ -78,28 +140,7 @@ const LIST_SELECT = `
 `;
 
 export async function findMany(filter: LeadListFilter): Promise<{ rows: LeadListRow[]; totalCount: number }> {
-  const conditions: string[] = [];
-  const params: unknown[] = [];
-
-  if (filter.scopedToAgentId) {
-    params.push(filter.scopedToAgentId);
-    conditions.push(`l.assigned_agent_id = $${params.length}`);
-  } else if (filter.assignedAgentId) {
-    params.push(filter.assignedAgentId);
-    conditions.push(`l.assigned_agent_id = $${params.length}`);
-  }
-
-  if (filter.statusCode) {
-    params.push(filter.statusCode);
-    conditions.push(`l.status_code = $${params.length}`);
-  }
-
-  if (filter.search) {
-    params.push(`%${filter.search}%`);
-    conditions.push(`(l.name ILIKE $${params.length} OR l.phone ILIKE $${params.length})`);
-  }
-
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  const { whereClause, params } = buildLeadWhereClause(filter);
 
   const countResult = await query<{ count: string }>(
     `SELECT count(*) FROM leads l ${whereClause}`,
@@ -114,6 +155,31 @@ export async function findMany(filter: LeadListFilter): Promise<{ rows: LeadList
   );
 
   return { rows: dataResult.rows, totalCount: Number(countResult.rows[0]?.count ?? 0) };
+}
+
+export interface StatusCodeCount {
+  status_code: string;
+  count: string;
+}
+
+/**
+ * Backend aggregate for the admin CRM Leads tab's 7 stat cards (Total,
+ * New, RNR, Call Backs, Follow Ups, Site Visit Scheduled, Site Visit
+ * Done) — a dedicated `GROUP BY status_code` instead of fetching any
+ * actual lead rows, since the paginated list (findMany) only ever holds
+ * one page in memory now. Uses the exact same WHERE-building as findMany
+ * (via buildLeadWhereClause) so a caller passing identical filter query
+ * params to GET /leads and GET /leads/stats gets numbers that agree with
+ * each other. The service layer sums/picks specific status_codes out of
+ * the grouped result into the 7 named buckets.
+ */
+export async function getStats(filter: LeadFilterConditions): Promise<StatusCodeCount[]> {
+  const { whereClause, params } = buildLeadWhereClause(filter);
+  const { rows } = await query<StatusCodeCount>(
+    `SELECT l.status_code, count(*) FROM leads l ${whereClause} GROUP BY l.status_code`,
+    params
+  );
+  return rows;
 }
 
 export async function findById(id: string, scopedToAgentId?: string): Promise<LeadListRow | undefined> {

@@ -3,11 +3,20 @@ import { sendOk, sendPaginated } from "../../utils/apiResponse";
 import * as leadsService from "./leads.service";
 
 export async function listLeadsHandler(req: Request, res: Response): Promise<void> {
-  const { page, pageSize, status, assignedAgentId, search } = req.query as unknown as {
-    page: number; pageSize: number; status?: string; assignedAgentId?: string; search?: string;
+  const { page, pageSize, status, assignedAgentId, campaign, dateFrom, dateTo, search } = req.query as unknown as {
+    page: number; pageSize: number; status?: string[]; assignedAgentId?: string[]; campaign?: string[];
+    dateFrom?: string; dateTo?: string; search?: string;
   };
-  const { rows, meta } = await leadsService.listLeads(req.user!, { page, pageSize, status, assignedAgentId, search });
+  const { rows, meta } = await leadsService.listLeads(req.user!, { page, pageSize, status, assignedAgentId, campaign, dateFrom, dateTo, search });
   sendPaginated(res, rows, meta);
+}
+
+export async function getLeadStatsHandler(req: Request, res: Response): Promise<void> {
+  const { status, assignedAgentId, campaign, dateFrom, dateTo, search } = req.query as unknown as {
+    status?: string[]; assignedAgentId?: string[]; campaign?: string[]; dateFrom?: string; dateTo?: string; search?: string;
+  };
+  const stats = await leadsService.getLeadStats(req.user!, { status, assignedAgentId, campaign, dateFrom, dateTo, search });
+  sendOk(res, stats);
 }
 
 export async function getLeadHandler(req: Request, res: Response): Promise<void> {

@@ -3,9 +3,9 @@ import { z } from "zod";
 import { requireAuth, requireRole } from "../../middleware/auth";
 import { validate } from "../../middleware/validate";
 import { asyncHandler } from "../../utils/asyncHandler";
-import { sendOk } from "../../utils/apiResponse";
+import { sendOk, sendPaginated } from "../../utils/apiResponse";
 import { ApiError } from "../../utils/ApiError";
-import { createPropertySchema, editPropertySchema, propertyIdParamSchema } from "./properties.schema";
+import { createPropertySchema, editPropertySchema, listPropertiesQuerySchema, propertyIdParamSchema } from "./properties.schema";
 import * as repo from "./properties.repository";
 
 export const propertiesRouter = Router();
@@ -32,9 +32,22 @@ propertiesRouter.get(
   asyncHandler(async (_req, res) => sendOk(res, await repo.listUnlinkedSheetSourceNames()))
 );
 
+// Real server-side pagination, same shape as GET /leads — page/pageSize
+// required (defaulted by listPropertiesQuerySchema), with search/propertyType
+// filters matching the admin table's own search box and Property Type
+// column filter. apiListProperties() (AppContext's full "fetch everything"
+// bridge for dropdown-picker consumers elsewhere in the app) pages through
+// this same endpoint rather than needing a separate unbounded query.
 propertiesRouter.get(
   "/",
-  asyncHandler(async (_req, res) => sendOk(res, await repo.findAll()))
+  validate({ query: listPropertiesQuerySchema }),
+  asyncHandler(async (req, res) => {
+    const { page, pageSize, search, propertyType, sortDir } = req.query as unknown as {
+      page: number; pageSize: number; search?: string; propertyType?: string[]; sortDir?: "asc" | "desc";
+    };
+    const { rows, totalCount } = await repo.findMany({ page, pageSize, search, propertyType, sortDir });
+    sendPaginated(res, rows, { page, pageSize, totalCount, totalPages: Math.max(1, Math.ceil(totalCount / pageSize)) });
+  })
 );
 
 propertiesRouter.get(

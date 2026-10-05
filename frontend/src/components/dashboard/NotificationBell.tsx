@@ -4,9 +4,10 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Bell, UserPlus, AlarmClock, Briefcase, DollarSign, ChevronLeft, ChevronDown, Repeat, AlertTriangle } from "lucide-react";
-import { useApp, getAvailableSystems, Notification, NotificationCategory, SystemType } from "@/context/AppContext";
+import { useApp, getAvailableSystems, mapApiNotificationToFrontend, Notification, NotificationCategory, SystemType } from "@/context/AppContext";
+import { apiListNotificationsPage, type NotificationListFilters } from "@/lib/apiClient";
 import { CardListSkeleton } from "@/components/ui/Skeletons";
-import TablePagination, { usePagination } from "@/components/ui/TablePagination";
+import TablePagination from "@/components/ui/TablePagination";
 
 function timeAgo(iso: string): string {
   const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
@@ -39,8 +40,6 @@ function categoryIcon(category: NotificationCategory) {
       return Bell;
   }
 }
-
-const NO_NOTIFICATIONS: Notification[] = [];
 
 const sortDesc = (a: Notification, b: Notification) =>
   new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
@@ -140,13 +139,83 @@ export default function NotificationBell() {
 
   const activeGroup = groups.find(g => g.key === activeGroupKey) || groups[0];
 
-  // The active tab's list is unbounded, so it's paged 10 at a time — back to
-  // page 1 on a scope/tab switch or when the drawer is reopened.
-  const { pageRows: pagedItems, page, rowsPerPage, setPage } = usePagination(
-    activeGroup?.items || NO_NOTIFICATIONS,
-    10,
-    `${effectiveScope}|${activeGroup?.key}|${isOpen}`
-  );
+  // ---- Server-fetched dropdown list (replaces client-side slicing of the
+  // full, bulk-loaded `notifications` array AppContext keeps for other
+  // consumers — see AppContext's loadAllRealData and home/page.tsx's own
+  // notification-derived counts, which still need that full array and are
+  // untouched here) ----
+  // The active tab's list is unbounded, so it's paged 10 at a time from the
+  // server, scoped to exactly that tab's system/category — back to page 1 on
+  // a scope/tab switch or when the drawer is reopened.
+  const ROWS_PER_PAGE = 10;
+  const [page, setPage] = useState(1);
+  const [serverRows, setServerRows] = useState<Notification[]>([]);
+  const [serverTotalCount, setServerTotalCount] = useState(0);
+  const [serverLoading, setServerLoading] = useState(false);
+
+  const fetchResetKey = `${effectiveScope}|${activeGroup?.key}|${isOpen}`;
+  useEffect(() => {
+    // Also clears the previous tab's server rows so they can't flash/leak
+    // into the newly selected tab while its own fetch is still in flight.
+    setPage(1);
+    setServerRows([]);
+    setServerTotalCount(0);
+  }, [fetchResetKey]);
+
+  useEffect(() => {
+    if (!isOpen || !activeGroup) return;
+    let cancelled = false;
+    setServerLoading(true);
+    // Mirrors each group's own client-side filter above (system + category),
+    // just evaluated server-side — see notifications.routes.ts's
+    // listNotificationsQuerySchema for the matching system/category/
+    // excludeCategory params.
+    const filters: NotificationListFilters =
+      activeGroup.key === "new-leads" ? { system: "CRM", category: ["NEW_LEAD"] } :
+      activeGroup.key === "reminders" ? { system: "CRM", category: ["REMINDER"] } :
+      activeGroup.key === "activity" ? { system: "CRM", excludeCategory: ["NEW_LEAD", "REMINDER"] } :
+      activeGroup.key === "hrms" ? { system: "HRMS" } :
+      activeGroup.key === "finance" ? { system: "FINANCE" } :
+      {};
+    apiListNotificationsPage(page, ROWS_PER_PAGE, filters)
+      .then((result) => {
+        if (cancelled) return;
+        setServerRows(result.rows.map(mapApiNotificationToFrontend));
+        setServerTotalCount(result.totalCount);
+      })
+      .catch((err) => {
+        if (!cancelled) console.warn("Could not load the notifications page:", err);
+      })
+      .finally(() => {
+        if (!cancelled) setServerLoading(false);
+      });
+    return () => { cancelled = true; };
+    // fetchResetKey already captures effectiveScope/activeGroup.key/isOpen —
+    // this just adds `page` on top of that same key.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fetchResetKey, page]);
+
+  // A notification pushed in live over SSE (see AppContext's setNotifications
+  // call in its EventSource handler) lands in the full `notifications` array
+  // immediately, but the dropdown's own page-1 fetch above won't know about
+  // it until its next re-fetch. On page 1 only, merge in anything from this
+  // tab's full (context-derived) item list that's newer than the newest
+  // server-fetched row and isn't already in it, so a live push still appears
+  // at the top instantly — older pages are purely server-fetched history.
+  const liveNewItems = useMemo(() => {
+    if (page !== 1 || !activeGroup) return [];
+    const existingIds = new Set(serverRows.map(r => r.id));
+    const newestServerTs = serverRows.length > 0 ? new Date(serverRows[0].timestamp).getTime() : 0;
+    return activeGroup.items.filter(
+      n => !existingIds.has(n.id) && new Date(n.timestamp).getTime() > newestServerTs
+    );
+  }, [activeGroup, serverRows, page]);
+
+  const pagedItems = page === 1 ? [...liveNewItems, ...serverRows].slice(0, ROWS_PER_PAGE) : serverRows;
+  // Live items haven't been counted by the server yet — add them on top of
+  // its totalCount so the footer never under-reports what's actually shown.
+  const pagedTotalCount = serverTotalCount + (page === 1 ? liveNewItems.length : 0);
+
   const listScrollRef = useRef<HTMLDivElement>(null);
   const goToPage = (p: number) => {
     setPage(p);
@@ -155,6 +224,7 @@ export default function NotificationBell() {
 
   const handleItemClick = (n: Notification) => {
     markNotificationRead(n.id);
+    setServerRows(prev => prev.map(r => (r.id === n.id ? { ...r, read: true } : r)));
     setIsOpen(false);
     if (n.system === "CRM" && n.leadId) {
       router.push(`/dashboard/crm?openLead=${n.leadId}`);
@@ -284,11 +354,11 @@ export default function NotificationBell() {
 
             {/* Active group content */}
             <div ref={listScrollRef} className="flex-1 overflow-y-auto">
-              {isDataLoading && (!activeGroup || activeGroup.items.length === 0) ? (
+              {(isDataLoading || serverLoading) && pagedItems.length === 0 ? (
                 <div className="px-4 py-3">
                   <CardListSkeleton count={4} />
                 </div>
-              ) : !activeGroup || activeGroup.items.length === 0 ? (
+              ) : !activeGroup || pagedItems.length === 0 ? (
                 <p className="px-4 py-6 text-center text-[11px] text-slate-400 italic">
                   {activeGroup?.emptyText || "No notifications."}
                 </p>
@@ -297,11 +367,11 @@ export default function NotificationBell() {
               )}
             </div>
             {/* Compact footer — no Rows per page picker in the narrow drawer */}
-            {activeGroup && activeGroup.items.length > 0 && (
+            {pagedTotalCount > 0 && (
               <TablePagination
-                totalRows={activeGroup.items.length}
+                totalRows={pagedTotalCount}
                 page={page}
-                rowsPerPage={rowsPerPage}
+                rowsPerPage={ROWS_PER_PAGE}
                 onPageChange={goToPage}
                 rowLabel="Notification"
                 className="shrink-0"

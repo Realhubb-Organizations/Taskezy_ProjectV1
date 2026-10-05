@@ -2,6 +2,21 @@ import { z } from "zod";
 
 export const userIdParamSchema = z.object({ id: z.string().uuid() });
 
+// Both page/pageSize are optional (unlike leads' listLeadsQuerySchema) so a
+// bare `GET /users` with neither keeps returning the full active-user array
+// exactly as before — every dropdown/name-resolution consumer across the app
+// (assign-to, reassign, team pickers, AppContext's bulk load) depends on
+// that. Only the admin Settings "Manage Users" table's own fetch passes
+// page/pageSize to opt into real server-side pagination. Headcount here is
+// realistically tens to low hundreds, so the cap is generous compared to
+// leads' 500.
+export const listUsersQuerySchema = z.object({
+  page: z.coerce.number().int().positive().optional(),
+  pageSize: z.coerce.number().int().positive().max(200).optional(),
+  // Matches the Settings "Manage Users" search box (name/email/phone).
+  search: z.string().trim().max(200).optional()
+});
+
 export const createUserSchema = z.object({
   firstName: z.string().trim().min(1).max(100),
   lastName: z.string().trim().max(100).optional(),

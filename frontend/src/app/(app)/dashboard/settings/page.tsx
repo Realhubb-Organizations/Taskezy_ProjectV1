@@ -3,8 +3,16 @@
 import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useApp, User, Role } from "@/context/AppContext";
-import { apiDisconnectMeta, apiGetMetaConnectUrl, apiListMetaConnections, ApiMetaConnection, apiListGoogleAdsAccounts, ApiGoogleAdsAccount } from "@/lib/apiClient";
+import { useApp, User, Role, mapApiUserDirectoryEntryToFrontendUser } from "@/context/AppContext";
+import {
+  apiDisconnectMeta,
+  apiGetMetaConnectUrl,
+  apiListMetaConnections,
+  ApiMetaConnection,
+  apiListGoogleAdsAccounts,
+  ApiGoogleAdsAccount,
+  apiListUsersPage
+} from "@/lib/apiClient";
 import { isNotificationSoundMuted, setNotificationSoundMuted } from "@/lib/notificationSound";
 import {
   Settings,
@@ -386,16 +394,58 @@ export default function SettingsPage() {
     salesAgents: users.filter(u => u.department === "SALES" && u.role_type !== "Manager" && u.role !== "ADMIN").length
   }), [users]);
 
-  const filteredUsers = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return users;
-    return users.filter(u =>
-      u.name.toLowerCase().includes(q) ||
-      (u.email || "").toLowerCase().includes(q) ||
-      (u.phone_number || "").includes(q)
-    );
-  }, [users, searchQuery]);
-  const userPagination = usePagination(filteredUsers, 10, searchQuery);
+  // ---- Server-paginated "Manage Users" table (real fetch-per-page, not the
+  // old "slice the full users array in the browser" pattern) ----
+  // The table's own rows are fetched directly from the server for exactly
+  // the current page/search, instead of deriving from the full `users` array
+  // AppContext still bulk-loads for every other consumer (managerOptions and
+  // userCounts above, plus every assign-to/reassign/team-picker dropdown
+  // elsewhere in the app) — that full load stays for now since those
+  // genuinely need the complete roster, this just stops the Manage Users
+  // LIST specifically from needing or exposing it.
+  const [usersPage, setUsersPage] = useState(1);
+  const [usersRowsPerPage, setUsersRowsPerPage] = useState(10);
+  const [serverUsers, setServerUsers] = useState<User[]>([]);
+  const [serverUsersTotalCount, setServerUsersTotalCount] = useState(0);
+  const [serverUsersLoading, setServerUsersLoading] = useState(true);
+
+  // Search fires on every keystroke locally but is debounced before it
+  // becomes a real network request, same convention as the admin Leads tab.
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearchQuery(searchQuery.trim()), 350);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    setUsersPage(1);
+  }, [debouncedSearchQuery]);
+
+  // Bumped after this page's own add/edit/delete actions so the table
+  // refetches and doesn't keep showing a since-deleted/renamed row — those
+  // writes go through AppContext's updateUserFields/addTeamMember/
+  // deleteTeamMember, which patch the full `users` array (for every other
+  // consumer) but not this table's separately-fetched serverUsers snapshot.
+  const [usersRefreshKey, setUsersRefreshKey] = useState(0);
+
+  useEffect(() => {
+    if (activeTab !== "Manage Users") return;
+    let cancelled = false;
+    setServerUsersLoading(true);
+    apiListUsersPage(usersPage, usersRowsPerPage, { search: debouncedSearchQuery || undefined })
+      .then((result) => {
+        if (cancelled) return;
+        setServerUsers(result.rows.map(mapApiUserDirectoryEntryToFrontendUser));
+        setServerUsersTotalCount(result.totalCount);
+      })
+      .catch((err) => {
+        if (!cancelled) console.error("Could not load the Manage Users list page:", err);
+      })
+      .finally(() => {
+        if (!cancelled) setServerUsersLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [activeTab, usersPage, usersRowsPerPage, debouncedSearchQuery, usersRefreshKey]);
 
   const handleEditClick = (user: User) => {
     setSelectedUser(user);
@@ -420,6 +470,9 @@ export default function SettingsPage() {
     setSuccessMsg(`Successfully updated credentials and profile for ${firstName} ${lastName}.`);
     setSelectedUser(null);
     setTimeout(() => setSuccessMsg(""), 5000);
+    // Small delay so the refetch lands after updateUserFields' fire-and-forget
+    // PATCH has had a moment to land server-side, rather than racing it.
+    setTimeout(() => setUsersRefreshKey(k => k + 1), 400);
   };
 
   const handleAddSubmit = (e: React.FormEvent) => {
@@ -460,6 +513,8 @@ export default function SettingsPage() {
     setAddShowPassword(false);
     setAddManagerId("");
     setTimeout(() => setSuccessMsg(""), 5000);
+    // Same race-avoidance delay as handleEditorSubmit above.
+    setTimeout(() => setUsersRefreshKey(k => k + 1), 400);
   };
 
   const handleSignOut = () => {
@@ -1193,14 +1248,14 @@ export default function SettingsPage() {
 
           {/* User records */}
           <div className="space-y-2.5">
-            {isDataLoading && filteredUsers.length === 0 ? (
+            {serverUsersLoading && serverUsers.length === 0 ? (
               <CardListSkeleton count={4} />
-            ) : filteredUsers.length === 0 ? (
+            ) : serverUsers.length === 0 ? (
               <div className="text-center py-10 text-xs text-slate-400 border border-dashed border-slate-200 rounded-xl">
                 No users match &quot;{searchQuery}&quot;.
               </div>
             ) : (
-              userPagination.pageRows.map(user => {
+              serverUsers.map(user => {
                 const isRevealed = revealedUserId === user.id;
                 const deptKey = user.role === "ADMIN" ? "ADMIN" : (user.department || "SALES");
                 return (
@@ -1256,9 +1311,17 @@ export default function SettingsPage() {
               })
             )}
           </div>
-          {filteredUsers.length > 0 && (
+          {serverUsersTotalCount > 0 && (
             <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-              <TablePagination {...userPagination.paginationProps} rowLabel="User" className="!border-t-0" />
+              <TablePagination
+                totalRows={serverUsersTotalCount}
+                page={usersPage}
+                rowsPerPage={usersRowsPerPage}
+                onPageChange={setUsersPage}
+                onRowsPerPageChange={(n) => { setUsersRowsPerPage(n); setUsersPage(1); }}
+                rowLabel="User"
+                className="!border-t-0"
+              />
             </div>
           )}
         </div>
@@ -1611,6 +1674,8 @@ export default function SettingsPage() {
                       setSelectedUser(null);
                       setSuccessMsg(`Removed ${selectedUser.name} from the roster.`);
                       setTimeout(() => setSuccessMsg(""), 5000);
+                      // Same race-avoidance delay as handleEditorSubmit above.
+                      setTimeout(() => setUsersRefreshKey(k => k + 1), 400);
                     }
                   }}
                   className="w-full flex items-center justify-center gap-1.5 text-red-600 hover:text-red-700 text-[11px] font-bold"

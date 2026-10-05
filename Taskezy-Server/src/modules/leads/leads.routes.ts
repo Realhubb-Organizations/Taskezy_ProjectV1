@@ -7,6 +7,7 @@ import {
   createLeadSchema,
   editLeadSchema,
   leadIdParamSchema,
+  leadStatsQuerySchema,
   listLeadsQuerySchema,
   reassignLeadSchema,
   updateLeadStatusSchema
@@ -18,6 +19,7 @@ import {
   editLeadHandler,
   fixSheetLeadTimestampsHandler,
   getLeadHandler,
+  getLeadStatsHandler,
   listLeadsHandler,
   reassignLeadHandler,
   reassignUnassignedSheetLeadsHandler,
@@ -30,6 +32,13 @@ export const leadsRouter = Router();
 leadsRouter.use(requireAuth);
 
 leadsRouter.get("/", validate({ query: listLeadsQuerySchema }), asyncHandler(listLeadsHandler));
+// Admin CRM Leads tab's 7 stat cards (Total/New/RNR/Call Backs/Follow Ups/
+// Site Visit Scheduled/Site Visit Done) as one lightweight grouped aggregate
+// — registered before "/:id" so "stats" is never swallowed as a lead id.
+// Same auth/scoping as the list endpoint above (no extra requireRole):
+// leadsService.getLeadStats applies the same sales-member -> own-leads-only
+// scoping as listLeads, just not a role gate beyond being logged in.
+leadsRouter.get("/stats", validate({ query: leadStatsQuerySchema }), asyncHandler(getLeadStatsHandler));
 leadsRouter.get("/:id", validate({ params: leadIdParamSchema }), asyncHandler(getLeadHandler));
 leadsRouter.post("/", validate({ body: createLeadSchema }), asyncHandler(createLeadHandler));
 // Admin CRM Data Calling's bulk Excel upload (Name + Mobile Number only) —
