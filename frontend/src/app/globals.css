@@ -175,12 +175,24 @@ body {
   }
 }
 
-/* Phone app only: leave room for the device status bar above the header and
-   the notifications drawer, so their content never sits under the clock. */
-.native-app .app-header {
-  height: calc(3.5rem + 2rem);
+/* Phone app only: a solid brand-blue band covers the device status bar, so
+   scrolled content slides under it instead of under the clock and signal
+   icons. Side drawers also get top room so their titles stay below the band. */
+.native-app body::before {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2rem;
+  background: #0077b6;
+  z-index: 2000;
+  pointer-events: none;
+}
+.native-app .fixed.inset-y-0 {
   padding-top: 2rem;
 }
-.native-app .notif-drawer {
+.native-app .app-header {
+  height: calc(3.5rem + 2rem);
   padding-top: 2rem;
 }
