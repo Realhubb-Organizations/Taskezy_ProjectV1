@@ -49,7 +49,10 @@ const envSchema = z.object({
   // Google Ads lead-form sheet import (see src/modules/sheet-import) — a
   // static shared secret the Apps Script sends as `Authorization: Bearer
   // <key>`. Generate with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-  SHEET_IMPORT_API_KEY: z.string().min(16, "SHEET_IMPORT_API_KEY must be at least 16 characters")
+  SHEET_IMPORT_API_KEY: z.string().min(16, "SHEET_IMPORT_API_KEY must be at least 16 characters"),
+
+  // Optional: Firebase service-account JSON, base64-encoded. Without it, push is disabled and the server still starts.
+  FIREBASE_SERVICE_ACCOUNT_B64: z.string().min(1).optional()
 });
 
 const parsed = envSchema.safeParse(process.env);
