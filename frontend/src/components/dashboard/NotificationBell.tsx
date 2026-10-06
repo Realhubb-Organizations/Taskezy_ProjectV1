@@ -1,11 +1,11 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Bell, UserPlus, AlarmClock, Briefcase, DollarSign, ChevronLeft, ChevronDown, Repeat, AlertTriangle } from "lucide-react";
 import { useApp, getAvailableSystems, mapApiNotificationToFrontend, Notification, NotificationCategory, SystemType } from "@/context/AppContext";
-import { apiListNotificationsPage, type NotificationListFilters } from "@/lib/apiClient";
+import { apiGetNotificationCounts, apiListNotificationsPage, type NotificationCounts, type NotificationListFilters } from "@/lib/apiClient";
 import { CardListSkeleton } from "@/components/ui/Skeletons";
 
 function timeAgo(iso: string): string {
@@ -48,6 +48,7 @@ interface NotificationGroup {
   label: string;
   emptyText: string;
   items: Notification[];
+  count: number;
 }
 
 export default function NotificationBell() {
@@ -81,10 +82,24 @@ export default function NotificationBell() {
 
   const effectiveScope: SystemType = showScopePicker ? systemScope : (availableScopes[0] || activeSystem);
 
-  const scopedNotifications = showScopePicker
-    ? notifications.filter(n => availableScopes.includes(n.system as Exclude<SystemType, "ADMIN">))
-    : notifications.filter(n => n.system === effectiveScope);
-  const unreadCount = scopedNotifications.filter(n => !n.read).length;
+  // Unread/tab totals come from the server (`notifications` is live-only now).
+  const [counts, setCounts] = useState<NotificationCounts | null>(null);
+  const refreshCounts = useCallback(() => {
+    apiGetNotificationCounts()
+      .then(setCounts)
+      .catch((err) => console.warn("Could not load notification counts:", err));
+  }, []);
+
+  useEffect(() => {
+    if (currentUser) refreshCounts();
+  }, [currentUser, notifications.length, refreshCounts]);
+
+  useEffect(() => {
+    if (isOpen && currentUser) refreshCounts();
+  }, [isOpen, currentUser, refreshCounts]);
+
+  const badgeScopes = (showScopePicker ? availableScopes : [effectiveScope]) as (keyof NotificationCounts["unreadBySystem"])[];
+  const unreadCount = counts ? badgeScopes.reduce((sum, s) => sum + counts.unreadBySystem[s], 0) : 0;
 
   const newLeads = useMemo(
     () => notifications.filter(n => n.system === "CRM" && n.category === "NEW_LEAD").sort(sortDesc),
@@ -115,18 +130,19 @@ export default function NotificationBell() {
   // the only scope with real sub-categories, so it's the only one that gets
   // a second-level tab row; HRMS/Finance are a single flat list each.
   const groups: NotificationGroup[] = useMemo(() => {
+    const g = counts?.groups;
     if (effectiveScope === "CRM") {
       return [
-        { key: "new-leads", label: "New Leads", emptyText: "No new leads right now.", items: newLeads },
-        { key: "reminders", label: "Reminder Alerts", emptyText: "No reminders scheduled.", items: reminders },
-        { key: "activity", label: "Activity Alerts", emptyText: "No other alerts.", items: crmActivity }
+        { key: "new-leads", label: "New Leads", emptyText: "No new leads right now.", items: newLeads, count: g?.newLeads ?? 0 },
+        { key: "reminders", label: "Reminder Alerts", emptyText: "No reminders scheduled.", items: reminders, count: g?.reminders ?? 0 },
+        { key: "activity", label: "Activity Alerts", emptyText: "No other alerts.", items: crmActivity, count: g?.activity ?? 0 }
       ];
     }
     if (effectiveScope === "HRMS") {
-      return [{ key: "hrms", label: "HRMS", emptyText: "No HRMS notifications.", items: hrmsNotifs }];
+      return [{ key: "hrms", label: "HRMS", emptyText: "No HRMS notifications.", items: hrmsNotifs, count: g?.hrms ?? 0 }];
     }
-    return [{ key: "finance", label: "Finance", emptyText: "No finance notifications.", items: financeNotifs }];
-  }, [effectiveScope, newLeads, reminders, crmActivity, hrmsNotifs, financeNotifs]);
+    return [{ key: "finance", label: "Finance", emptyText: "No finance notifications.", items: financeNotifs, count: g?.finance ?? 0 }];
+  }, [effectiveScope, counts, newLeads, reminders, crmActivity, hrmsNotifs, financeNotifs]);
 
   // Keep the selected sub-tab valid whenever the scope (or panel) changes
   useEffect(() => {
@@ -198,20 +214,12 @@ export default function NotificationBell() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchResetKey, page]);
 
-  // A notification pushed in live over SSE (see AppContext's setNotifications
-  // call in its EventSource handler) lands in the full `notifications` array
-  // immediately, but the dropdown's own page-1 fetch above won't know about
-  // it until its next re-fetch. On page 1 only, merge in anything from this
-  // tab's full (context-derived) item list that's newer than the newest
-  // server-fetched row and isn't already in it, so a live push still appears
-  // at the top instantly — older pages are purely server-fetched history.
+  // On page 1, merge in live (SSE-pushed) items for this tab that the server
+  // list doesn't have yet; older pages are purely server-fetched history.
   const liveNewItems = useMemo(() => {
     if (page !== 1 || !activeGroup) return [];
     const existingIds = new Set(serverRows.map(r => r.id));
-    const newestServerTs = serverRows.length > 0 ? new Date(serverRows[0].timestamp).getTime() : 0;
-    return activeGroup.items.filter(
-      n => !existingIds.has(n.id) && new Date(n.timestamp).getTime() > newestServerTs
-    );
+    return activeGroup.items.filter(n => !existingIds.has(n.id));
   }, [activeGroup, serverRows, page]);
 
   const pagedItems = [...liveNewItems, ...serverRows];
@@ -234,6 +242,13 @@ export default function NotificationBell() {
   }, [isOpen, hasMore, serverLoading, serverRows.length]);
 
   const handleItemClick = (n: Notification) => {
+    if (!n.read && n.system !== "ADMIN") {
+      const sys = n.system;
+      setCounts(prev => prev && {
+        ...prev,
+        unreadBySystem: { ...prev.unreadBySystem, [sys]: Math.max(0, prev.unreadBySystem[sys] - 1) }
+      });
+    }
     markNotificationRead(n.id);
     setServerRows(prev => prev.map(r => (r.id === n.id ? { ...r, read: true } : r)));
     setIsOpen(false);
@@ -356,7 +371,7 @@ export default function NotificationBell() {
                         activeGroupKey === g.key ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-800"
                       }`}
                     >
-                      {g.label}{g.items.length > 0 ? ` (${g.items.length})` : ""}
+                      {g.label}{g.count > 0 ? ` (${g.count})` : ""}
                     </button>
                   ))}
                 </div>

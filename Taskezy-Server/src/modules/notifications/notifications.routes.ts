@@ -140,6 +140,46 @@ notificationsRouter.get(
   })
 );
 
+// One aggregate over the same recipient-scoped WHERE as GET "/", powering
+// NotificationBell's tab badges. Group definitions mirror the frontend tabs:
+// newLeads = CRM NEW_LEAD, reminders = CRM REMINDER, activity = the rest of CRM.
+// Registered alongside the other static GET routes (no GET "/:id" exists, so
+// nothing can shadow it).
+notificationsRouter.get(
+  "/counts",
+  asyncHandler(async (req, res) => {
+    const { rows } = await query<Record<string, string | number>>(
+      `SELECT
+         count(*) FILTER (WHERE system = 'CRM' AND read = false) AS unread_crm,
+         count(*) FILTER (WHERE system = 'HRMS' AND read = false) AS unread_hrms,
+         count(*) FILTER (WHERE system = 'FINANCE' AND read = false) AS unread_finance,
+         count(*) FILTER (WHERE system = 'CRM' AND category = 'NEW_LEAD') AS new_leads,
+         count(*) FILTER (WHERE system = 'CRM' AND category = 'REMINDER') AS reminders,
+         count(*) FILTER (WHERE system = 'CRM' AND category NOT IN ('NEW_LEAD', 'REMINDER')) AS activity,
+         count(*) FILTER (WHERE system = 'HRMS') AS hrms,
+         count(*) FILTER (WHERE system = 'FINANCE') AS finance
+       FROM notifications
+       WHERE (recipient_user_id IS NULL OR recipient_user_id = $1)`,
+      [req.user!.sub]
+    );
+    const r = rows[0] ?? {};
+    sendOk(res, {
+      unreadBySystem: {
+        CRM: Number(r.unread_crm ?? 0),
+        HRMS: Number(r.unread_hrms ?? 0),
+        FINANCE: Number(r.unread_finance ?? 0)
+      },
+      groups: {
+        newLeads: Number(r.new_leads ?? 0),
+        reminders: Number(r.reminders ?? 0),
+        activity: Number(r.activity ?? 0),
+        hrms: Number(r.hrms ?? 0),
+        finance: Number(r.finance ?? 0)
+      }
+    });
+  })
+);
+
 const idParamSchema = z.object({ id: z.string().uuid() });
 
 // A notification can only be marked read by its recipient, or by anyone for a

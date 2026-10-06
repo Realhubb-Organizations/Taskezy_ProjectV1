@@ -2,7 +2,7 @@
 # compiled JS in a minimal one — the final image never contains dev
 # dependencies, TypeScript source, or the compiler itself.
 
-FROM node:20-alpine AS build
+FROM node:22-alpine AS build
 WORKDIR /app
 COPY package*.json ./
 # bcrypt (native addon, replacing the pure-JS bcryptjs — see utils/password.ts)
@@ -42,7 +42,7 @@ ENV DATABASE_URL=postgres://build:build@localhost:5432/build \
   SHEET_IMPORT_API_KEY=build-time-placeholder-16chars
 RUN npm run build
 
-FROM node:20-alpine AS runtime
+FROM node:22-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 

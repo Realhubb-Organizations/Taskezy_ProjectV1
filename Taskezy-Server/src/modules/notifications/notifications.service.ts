@@ -1,5 +1,6 @@
 import { pool } from "../../db/pool";
 import { publishToUser } from "../../utils/sseHub";
+import { sendPushToUser } from "./push.service";
 
 export interface CreateNotificationInput {
   system: "CRM" | "HRMS" | "FINANCE" | "ADMIN";
@@ -20,4 +21,12 @@ export async function createNotification(input: CreateNotificationInput): Promis
     [input.system, input.category, input.title, input.message, input.recipientUserId, input.leadId ?? null, input.link ?? null]
   );
   publishToUser(input.recipientUserId, "notification", rows[0]);
+  if (input.recipientUserId) {
+    sendPushToUser(input.recipientUserId, {
+      title: input.title,
+      body: input.message,
+      link: input.link ?? null,
+      notificationId: rows[0].id
+    }).catch(() => {});
+  }
 }

@@ -1087,21 +1087,15 @@ export interface ApiNotificationRow {
 // /notifications has real LIMIT/OFFSET pagination (see notifications.routes.ts)
 // instead of one unbounded SELECT. notifications is one of the fastest-
 // growing, zero-cap tables in this schema (broadcast rows accumulate
-// forever for every user), but AppContext's bulk load still needs the full
-// array for its own unread-badge/notification-bell tracking and other
-// simple in-memory counts elsewhere — this keeps delivering that full array,
-// just via capped page-sized round trips instead of one unbounded query.
-export async function apiListNotifications(): Promise<ApiNotificationRow[]> {
-  const all: ApiNotificationRow[] = [];
-  let page = 1;
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
-    const { data, meta } = await requestWithMeta<ApiNotificationRow>(`/api/v1/notifications?page=${page}&pageSize=${MAX_PAGE_SIZE}`);
-    all.push(...data);
-    if (!meta || page >= meta.totalPages) break;
-    page += 1;
-  }
-  return all;
+// forever for every user). Counts give the bell its unread badge and tab totals
+// without downloading any notification rows.
+export interface NotificationCounts {
+  unreadBySystem: { CRM: number; HRMS: number; FINANCE: number };
+  groups: { newLeads: number; reminders: number; activity: number; hrms: number; finance: number };
+}
+
+export function apiGetNotificationCounts(): Promise<NotificationCounts> {
+  return request<NotificationCounts>("/api/v1/notifications/counts");
 }
 
 // Real server-side pagination for NotificationBell's dropdown — each of its
