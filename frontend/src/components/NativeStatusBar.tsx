@@ -4,14 +4,14 @@ import { useEffect } from "react";
 import { Capacitor } from "@capacitor/core";
 import { StatusBar, Style } from "@capacitor/status-bar";
 
-// The app's header is light, so the phone's status bar must use dark icons
-// regardless of the phone's theme. Otherwise a dark-mode phone draws white
-// icons on the white header and they disappear.
+// Solid brand-blue status bar with its own strip above the app, so content
+// never draws under the clock, signal and battery icons.
 export default function NativeStatusBar() {
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
-    StatusBar.setOverlaysWebView({ overlay: true });
-    StatusBar.setStyle({ style: Style.Dark });
+    StatusBar.setOverlaysWebView({ overlay: false });
+    StatusBar.setBackgroundColor({ color: "#0077b6" });
+    StatusBar.setStyle({ style: Style.Light });
   }, []);
 
   return null;
