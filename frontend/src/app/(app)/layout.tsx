@@ -469,7 +469,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
       {/* Main content wrapper */}
       <div className={`flex flex-col flex-1 w-full min-h-screen transition-all duration-200 ${isSidebarCollapsed ? "md:pl-20" : "md:pl-64"}`}>
         {/* Top Header Bar */}
-        <header className="sticky top-0 z-10 flex-shrink-0 h-14 md:h-16 border-b border-slate-200 bg-white/70 backdrop-blur-md flex items-center justify-between px-3 sm:px-6 lg:px-8 gap-2">
+        <header className="sticky top-0 z-10 flex-shrink-0 h-[calc(3.5rem_+_env(safe-area-inset-top))] pt-[env(safe-area-inset-top)] md:h-16 md:pt-0 border-b border-slate-200 bg-white/70 backdrop-blur-md flex items-center justify-between px-3 sm:px-6 lg:px-8 gap-2">
           <div className="flex items-center gap-2 min-w-0">
             <button
               type="button"
@@ -538,7 +538,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
             />
             <div
               aria-hidden={!isMobileMenuOpen}
-              className={`fixed inset-y-0 left-0 w-[82vw] max-w-72 bg-white border-r border-slate-200 p-5 flex flex-col z-40 md:hidden overflow-y-auto transition-[transform,opacity,visibility] duration-300 ease-out ${isMobileMenuOpen ? "translate-x-0 opacity-100 visible" : "-translate-x-full opacity-0 invisible"}`}
+              className={`fixed inset-y-0 left-0 w-[82vw] max-w-72 bg-white border-r border-slate-200 p-5 pt-[calc(1.25rem_+_env(safe-area-inset-top))] flex flex-col z-40 md:hidden overflow-y-auto transition-[transform,opacity,visibility] duration-300 ease-out ${isMobileMenuOpen ? "translate-x-0 opacity-100 visible" : "-translate-x-full opacity-0 invisible"}`}
             >
               <div className="flex items-center justify-between mb-4 border-b border-slate-100 pb-4">
                 <Link href="/home" className="flex items-center">
