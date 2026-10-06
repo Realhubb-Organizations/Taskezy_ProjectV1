@@ -285,7 +285,7 @@ export default function NotificationBell() {
       {isOpen && createPortal(
         <div className="fixed inset-0 z-[100]">
           <div className="fixed inset-0 bg-slate-900/20" onClick={() => setIsOpen(false)} />
-          <div className="fixed inset-y-0 right-0 w-full max-w-sm bg-white border-l border-slate-200 shadow-2xl flex flex-col animate-slide-in">
+          <div className="notif-drawer fixed inset-y-0 right-0 w-full max-w-sm bg-white border-l border-slate-200 shadow-2xl flex flex-col animate-slide-in">
             {/* Header */}
             <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-slate-100 shrink-0 gap-2">
               <div className="flex items-center gap-1.5 min-w-0">

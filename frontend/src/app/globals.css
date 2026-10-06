@@ -174,3 +174,13 @@ body {
     }
   }
 }
+
+/* Phone app only: leave room for the device status bar above the header and
+   the notifications drawer, so their content never sits under the clock. */
+.native-app .app-header {
+  height: calc(3.5rem + 2rem);
+  padding-top: 2rem;
+}
+.native-app .notif-drawer {
+  padding-top: 2rem;
+}
