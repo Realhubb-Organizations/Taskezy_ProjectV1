@@ -12,6 +12,7 @@
   "dependencies": {
     "@capacitor/android": "^8.5.2",
     "@capacitor/core": "^8.5.2",
+    "@capacitor/status-bar": "8.0.4",
     "@lottiefiles/dotlottie-react": "^0.19.15",
     "exceljs": "^4.4.0",
     "lucide-react": "^1.23.0",

@@ -285,7 +285,7 @@ export default function NotificationBell() {
       {isOpen && createPortal(
         <div className="fixed inset-0 z-[100]">
           <div className="fixed inset-0 bg-slate-900/20" onClick={() => setIsOpen(false)} />
-          <div className="fixed inset-y-0 right-0 w-full max-w-sm bg-white border-l border-slate-200 shadow-2xl flex flex-col animate-slide-in">
+          <div className="fixed inset-y-0 right-0 w-full max-w-sm bg-white border-l border-slate-200 shadow-2xl flex flex-col animate-slide-in pt-[env(safe-area-inset-top)]">
             {/* Header */}
             <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-slate-100 shrink-0 gap-2">
               <div className="flex items-center gap-1.5 min-w-0">
@@ -336,12 +336,12 @@ export default function NotificationBell() {
                 Calling page's tab bar, instead of a native select. */}
             {groups.length > 1 && (
               <div className="px-5 pt-3 pb-1 shrink-0">
-                <div className="bg-slate-200/70 p-1 rounded-xl flex items-center gap-1">
+                <div className="bg-slate-200/70 p-1 rounded-xl flex items-center gap-1 overflow-x-auto">
                   {groups.map(g => (
                     <button
                       key={g.key}
                       onClick={() => setActiveGroupKey(g.key)}
-                      className={`flex-1 min-w-0 px-1.5 py-1.5 rounded-lg text-[9px] font-semibold whitespace-nowrap overflow-hidden text-ellipsis transition-all ${
+                      className={`flex-none px-3 py-1.5 rounded-lg text-[11px] font-semibold whitespace-nowrap transition-all ${
                         activeGroupKey === g.key ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-800"
                       }`}
                     >
