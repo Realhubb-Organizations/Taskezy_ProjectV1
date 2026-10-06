@@ -7,7 +7,6 @@ import { Bell, UserPlus, AlarmClock, Briefcase, DollarSign, ChevronLeft, Chevron
 import { useApp, getAvailableSystems, mapApiNotificationToFrontend, Notification, NotificationCategory, SystemType } from "@/context/AppContext";
 import { apiListNotificationsPage, type NotificationListFilters } from "@/lib/apiClient";
 import { CardListSkeleton } from "@/components/ui/Skeletons";
-import TablePagination from "@/components/ui/TablePagination";
 
 function timeAgo(iso: string): string {
   const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
@@ -144,9 +143,8 @@ export default function NotificationBell() {
   // consumers — see AppContext's loadAllRealData and home/page.tsx's own
   // notification-derived counts, which still need that full array and are
   // untouched here) ----
-  // The active tab's list is unbounded, so it's paged 10 at a time from the
-  // server, scoped to exactly that tab's system/category — back to page 1 on
-  // a scope/tab switch or when the drawer is reopened.
+  // Loads 10 at a time as the list is scrolled, scoped to that tab's
+  // system/category; restarts at page 1 on a scope/tab switch or reopen.
   const ROWS_PER_PAGE = 10;
   const [page, setPage] = useState(1);
   const [serverRows, setServerRows] = useState<Notification[]>([]);
@@ -180,7 +178,12 @@ export default function NotificationBell() {
     apiListNotificationsPage(page, ROWS_PER_PAGE, filters)
       .then((result) => {
         if (cancelled) return;
-        setServerRows(result.rows.map(mapApiNotificationToFrontend));
+        const rows = result.rows.map(mapApiNotificationToFrontend);
+        setServerRows(prev => {
+          if (page === 1) return rows;
+          const seen = new Set(prev.map(r => r.id));
+          return [...prev, ...rows.filter(r => !seen.has(r.id))];
+        });
         setServerTotalCount(result.totalCount);
       })
       .catch((err) => {
@@ -211,16 +214,24 @@ export default function NotificationBell() {
     );
   }, [activeGroup, serverRows, page]);
 
-  const pagedItems = page === 1 ? [...liveNewItems, ...serverRows].slice(0, ROWS_PER_PAGE) : serverRows;
-  // Live items haven't been counted by the server yet — add them on top of
-  // its totalCount so the footer never under-reports what's actually shown.
-  const pagedTotalCount = serverTotalCount + (page === 1 ? liveNewItems.length : 0);
+  const pagedItems = [...liveNewItems, ...serverRows];
+  const hasMore = serverRows.length < serverTotalCount;
 
   const listScrollRef = useRef<HTMLDivElement>(null);
-  const goToPage = (p: number) => {
-    setPage(p);
-    listScrollRef.current?.scrollTo(0, 0);
-  };
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const root = listScrollRef.current;
+    const target = sentinelRef.current;
+    if (!isOpen || !hasMore || !root || !target) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && !serverLoading) setPage(p => p + 1);
+      },
+      { root, rootMargin: "120px" }
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [isOpen, hasMore, serverLoading, serverRows.length]);
 
   const handleItemClick = (n: Notification) => {
     markNotificationRead(n.id);
@@ -363,20 +374,17 @@ export default function NotificationBell() {
                   {activeGroup?.emptyText || "No notifications."}
                 </p>
               ) : (
-                pagedItems.map(renderItem)
+                <>
+                  {pagedItems.map(renderItem)}
+                  {serverLoading && (
+                    <div className="px-4 py-3">
+                      <CardListSkeleton count={3} />
+                    </div>
+                  )}
+                  <div ref={sentinelRef} className="h-px" />
+                </>
               )}
             </div>
-            {/* Compact footer — no Rows per page picker in the narrow drawer */}
-            {pagedTotalCount > 0 && (
-              <TablePagination
-                totalRows={pagedTotalCount}
-                page={page}
-                rowsPerPage={ROWS_PER_PAGE}
-                onPageChange={goToPage}
-                rowLabel="Notification"
-                className="shrink-0"
-              />
-            )}
           </div>
         </div>,
         document.body
