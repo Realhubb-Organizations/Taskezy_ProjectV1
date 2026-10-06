@@ -40,7 +40,6 @@ import {
   apiGenerateInvoice,
   apiMarkInvoicePaid,
   apiDeleteInvoice,
-  apiListNotifications,
   apiCreateNotificationStreamTicket,
   buildNotificationStreamUrl,
   apiMarkNotificationRead,
@@ -983,7 +982,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const loadAllRealData = async (role?: Role) => {
     setIsDataLoading(true);
     try {
-      const [apiLeads, apiUsers, apiProperties, apiResaleUnits, apiFollowups, apiAttendance, apiReimbursements, apiInvoices, apiNotifications, apiCalendarEvents, apiAdSpend, apiAdLevelSpend, apiTimesheets, apiTenantSettings] = await Promise.all([
+      const [apiLeads, apiUsers, apiProperties, apiResaleUnits, apiFollowups, apiAttendance, apiReimbursements, apiInvoices, apiCalendarEvents, apiAdSpend, apiAdLevelSpend, apiTimesheets, apiTenantSettings] = await Promise.all([
         apiListAllLeads(),
         apiListUsers(),
         apiListProperties(),
@@ -992,7 +991,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         apiListAttendance(),
         apiListReimbursements(),
         apiListInvoices(),
-        apiListNotifications(),
         apiListCalendarEvents(),
         apiListAdSpend(),
         apiListAdLevelSpend(),
@@ -1007,7 +1005,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setAttendanceRecords(apiAttendance.map(mapApiAttendanceToFrontend));
       setReimbursements(apiReimbursements.map(mapApiReimbursementToFrontend));
       setInvoices(apiInvoices.map(mapApiInvoiceToFrontend));
-      setNotifications(apiNotifications.map(mapApiNotificationToFrontend));
       setCalendarEvents(apiCalendarEvents.map(mapApiCalendarEventToFrontend));
       setAdSpendRecords(apiAdSpend.map(mapApiAdSpendToFrontend));
       setAdLevelSpendRecords(apiAdLevelSpend.map(mapApiAdLevelSpendToFrontend));
