@@ -6,6 +6,7 @@ import { asyncHandler } from "../../utils/asyncHandler";
 import { sendOk, sendPaginated } from "../../utils/apiResponse";
 import { ApiError } from "../../utils/ApiError";
 import { pool, query } from "../../db/pool";
+import { businessToday, toBusinessDate } from "../../utils/businessDate";
 import { createNotification } from "../notifications/notifications.service";
 import { listActiveAdminIds } from "../users/users.repository";
 import { getTenantSettings, distanceMeters } from "../tenant-settings/tenant-settings.repository";
@@ -49,7 +50,7 @@ timesheetsRouter.post(
   asyncHandler(async (req, res) => {
     const { lat, lng } = req.body;
     const now = new Date();
-    const workDate = now.toISOString().split("T")[0];
+    const workDate = toBusinessDate(now);
 
     // Server-side geofence enforcement — previously the punch-in location
     // check only ever happened client-side (a scripted API call could punch
@@ -84,7 +85,7 @@ timesheetsRouter.post(
 timesheetsRouter.patch(
   "/punch-out",
   asyncHandler(async (req, res) => {
-    const workDate = new Date().toISOString().split("T")[0];
+    const workDate = businessToday();
     const { rows: open } = await pool.query(
       `SELECT id, punch_in FROM timesheet_logs WHERE user_id = $1 AND work_date = $2 AND punch_out IS NULL`,
       [req.user!.sub, workDate]

@@ -4,7 +4,7 @@ import { ApiError } from "../../utils/ApiError";
 import * as repo from "./leads.repository";
 import { CreateLeadInput } from "./leads.repository";
 import * as usersRepo from "../users/users.repository";
-import { createNotification } from "../notifications/notifications.service";
+import { createNotification, deleteLeadActivityNotifications } from "../notifications/notifications.service";
 import { findPropertyIdBySheetSource } from "../properties/properties.repository";
 import { pickAgentForProperty, createPropertyAgentPicker } from "../properties/properties.assignment";
 
@@ -424,6 +424,10 @@ export async function updateLeadStatus(
     }
     throw err;
   }
+
+  // The lead has been acted on, so its reminders/SLA/reassignment alerts are
+  // stale for everyone who received them.
+  await deleteLeadActivityNotifications(leadId);
 
   return repo.findById(leadId, scopedToAgentId);
 }

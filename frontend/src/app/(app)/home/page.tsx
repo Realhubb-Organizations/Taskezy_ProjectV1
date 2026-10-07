@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useApp } from "@/context/AppContext";
 import { Activity, Users, TrendingUp, ArrowRight } from "lucide-react";
 import { LineSkeleton } from "@/components/ui/Skeletons";
+import { toIsoDate } from "@/components/ui/DateRangePicker";
 
 // The universal post-login landing page — a lightweight, module-summary
 // front door (CRM/HRMS/Finance), distinct from each module's own dashboard
@@ -50,7 +51,7 @@ export default function HomePage() {
   // schema (no leave-request table, no remote-work flag) — shown honestly
   // as 0 rather than invented, matching how every other unavailable metric
   // in this app is handled (e.g. Talk Time: "No data").
-  const todayStr = now.toISOString().split("T")[0];
+  const todayStr = toIsoDate(now);
   const presentTodayCount = timesheets.filter(ts => ts.date === todayStr).length;
   const pendingRegularizations = timesheets.filter(ts => ts.status === "Regularization Pending").length;
   const leavesAppliedLast7Days = 0;

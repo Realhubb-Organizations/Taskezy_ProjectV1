@@ -1,14 +1,13 @@
 import { logger } from "../utils/logger";
 import { listLinkedAccounts, listCampaigns, getAccountDailyStats, listAdGroups, listAds, getAdDailyStats } from "../modules/google-ads/google-ads-client";
 import * as googleAdsRepo from "../modules/google-ads/google-ads.repository";
+import { businessDateOffset } from "../utils/businessDate";
 
 const POLL_INTERVAL_MS = 6 * 60 * 60 * 1000; // matches metaAdSpendSync.ts — spend doesn't need per-minute freshness
 const LOOKBACK_DAYS = 35; // covers the Reports page's "Last 30 Days" preset with buffer for late-arriving data
 
 function isoDateNDaysAgo(n: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  return d.toISOString().slice(0, 10);
+  return businessDateOffset(-n);
 }
 
 /**

@@ -6,6 +6,7 @@ import { asyncHandler } from "../../utils/asyncHandler";
 import { sendOk, sendPaginated } from "../../utils/apiResponse";
 import { ApiError } from "../../utils/ApiError";
 import { pool, query } from "../../db/pool";
+import { businessDateOffset } from "../../utils/businessDate";
 import { createNotification } from "../notifications/notifications.service";
 import { listActiveAdminAndFinanceIds } from "../users/users.repository";
 import { getTenantSettings } from "../tenant-settings/tenant-settings.repository";
@@ -84,7 +85,7 @@ invoicesRouter.post(
   validate({ body: createInvoiceSchema }),
   asyncHandler(async (req, res) => {
     const { invoice_due_days: dueDays } = await getTenantSettings();
-    const dueDate = req.body.dueDate ?? new Date(Date.now() + dueDays * 86400000).toISOString().slice(0, 10);
+    const dueDate = req.body.dueDate ?? businessDateOffset(dueDays);
     let insertedId: string;
     try {
       const { rows } = await pool.query(

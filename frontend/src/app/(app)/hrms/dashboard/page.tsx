@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useApp } from "@/context/AppContext";
 import { Cpu, Server, Users, Globe } from "lucide-react";
 import { LineSkeleton, TableRowsSkeleton, CardListSkeleton } from "@/components/ui/Skeletons";
+import { todayIso } from "@/components/ui/DateRangePicker";
 
 // HRMS's own overview — moved out of the old bare /dashboard route (which
 // branched its content by department/activeSystem, so the same URL showed a
@@ -198,7 +199,7 @@ export default function HrmsDashboardPage() {
   }
 
   // Otherwise, render general HRMS Overview Dashboard
-  const todayStr = new Date().toISOString().split("T")[0];
+  const todayStr = todayIso();
   const presentTodayCount = timesheets.filter(ts => ts.date === todayStr).length;
   const totalPresentDays = attendanceRecords.reduce((sum, r) => sum + r.presentDays, 0);
   const totalOnTimeDays = attendanceRecords.reduce((sum, r) => sum + r.onTime, 0);

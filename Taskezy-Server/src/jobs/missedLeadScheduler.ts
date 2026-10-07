@@ -2,6 +2,7 @@ import { pool } from "../db/pool";
 import { logger } from "../utils/logger";
 import { createNotification } from "../modules/notifications/notifications.service";
 import { listActiveAdminIds } from "../modules/users/users.repository";
+import { BUSINESS_TIMEZONE } from "../utils/businessDate";
 
 const POLL_INTERVAL_MS = 60_000;
 const SLA_MINUTES = 20; // matches Reports' isMissedLead / getMissedInfo rule (reportMetrics.ts)
@@ -107,9 +108,10 @@ async function notifyAdminDailyDigest(adminIds: string[]): Promise<void> {
      FROM leads l
      JOIN users u ON u.id = l.assigned_agent_id
      LEFT JOIN users m ON m.id = u.manager_id
-     WHERE l.missed_notified_at::date = CURRENT_DATE
+     WHERE (l.missed_notified_at AT TIME ZONE $1)::date = (now() AT TIME ZONE $1)::date
      GROUP BY u.id, u.first_name, u.last_name, m.first_name, m.last_name
-     ORDER BY count(*) DESC`
+     ORDER BY count(*) DESC`,
+    [BUSINESS_TIMEZONE]
   );
   if (rows.length === 0) return;
 

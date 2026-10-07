@@ -52,7 +52,21 @@ const envSchema = z.object({
   SHEET_IMPORT_API_KEY: z.string().min(16, "SHEET_IMPORT_API_KEY must be at least 16 characters"),
 
   // Optional: Firebase service-account JSON, base64-encoded. Without it, push is disabled and the server still starts.
-  FIREBASE_SERVICE_ACCOUNT_B64: z.string().min(1).optional()
+  FIREBASE_SERVICE_ACCOUNT_B64: z.string().min(1).optional(),
+
+  // IANA timezone that defines the business calendar day (attendance dates,
+  // "today" in reports and alerts). The servers and database run in UTC.
+  BUSINESS_TIMEZONE: z
+    .string()
+    .default("Asia/Kolkata")
+    .refine((tz) => {
+      try {
+        new Intl.DateTimeFormat("en-US", { timeZone: tz });
+        return true;
+      } catch {
+        return false;
+      }
+    }, "BUSINESS_TIMEZONE must be a valid IANA timezone, e.g. Asia/Kolkata")
 });
 
 const parsed = envSchema.safeParse(process.env);

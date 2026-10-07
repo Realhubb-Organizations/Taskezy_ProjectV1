@@ -6,6 +6,7 @@ import { asyncHandler } from "../../utils/asyncHandler";
 import { sendOk, sendPaginated } from "../../utils/apiResponse";
 import { ApiError } from "../../utils/ApiError";
 import { pool, query } from "../../db/pool";
+import { INFORMATIONAL_SQL, tryDeleteNotifications } from "./notifications.service";
 import { consumeTicket, issueTicket } from "../../utils/sseTickets";
 import { subscribe } from "../../utils/sseHub";
 
@@ -184,10 +185,20 @@ const idParamSchema = z.object({ id: z.string().uuid() });
 
 // A notification can only be marked read by its recipient, or by anyone for a
 // broadcast row (recipient_user_id IS NULL) — same visibility rule as GET.
+// An informational notification is deleted outright when its own recipient
+// reads it; lead activity alerts and shared broadcast rows are only marked read.
 notificationsRouter.patch(
   "/:id/read",
   validate({ params: idParamSchema }),
   asyncHandler(async (req, res) => {
+    const deleted = await tryDeleteNotifications(
+      `DELETE FROM notifications WHERE id = $1 AND recipient_user_id = $2 AND ${INFORMATIONAL_SQL}`,
+      [req.params.id, req.user!.sub]
+    );
+    if (deleted) {
+      sendOk(res, { read: true });
+      return;
+    }
     const { rows } = await pool.query(
       `UPDATE notifications SET read = true
        WHERE id = $1 AND (recipient_user_id IS NULL OR recipient_user_id = $2)
@@ -209,12 +220,34 @@ notificationsRouter.patch(
   asyncHandler(async (req, res) => {
     const { system } = req.query as { system?: string };
     const params: unknown[] = [req.user!.sub];
-    let sql = `UPDATE notifications SET read = true WHERE (recipient_user_id IS NULL OR recipient_user_id = $1)`;
-    if (system) {
-      params.push(system);
-      sql += ` AND system = $${params.length}`;
-    }
-    await pool.query(sql, params);
+    const systemFilter = system ? ` AND system = $${params.push(system)}` : "";
+    // Same rule as a single read: the caller's own informational rows go, the rest are marked read.
+    await tryDeleteNotifications(
+      `DELETE FROM notifications WHERE recipient_user_id = $1 AND ${INFORMATIONAL_SQL}${systemFilter}`,
+      params
+    );
+    await pool.query(
+      `UPDATE notifications SET read = true WHERE (recipient_user_id IS NULL OR recipient_user_id = $1)${systemFilter}`,
+      params
+    );
     sendOk(res, { read: true });
+  })
+);
+
+// "Clear all" in the notification drawer. Only ever deletes the caller's own
+// notifications (optionally one system), never another user's or a shared
+// broadcast row — so an agent can't clear a manager's alerts, or vice versa.
+notificationsRouter.delete(
+  "/",
+  validate({ query: markAllQuerySchema }),
+  asyncHandler(async (req, res) => {
+    const { system } = req.query as { system?: string };
+    const params: unknown[] = [req.user!.sub];
+    const systemFilter = system ? ` AND system = $${params.push(system)}` : "";
+    const { rowCount } = await pool.query(
+      `DELETE FROM notifications WHERE recipient_user_id = $1${systemFilter}`,
+      params
+    );
+    sendOk(res, { deleted: rowCount ?? 0 });
   })
 );

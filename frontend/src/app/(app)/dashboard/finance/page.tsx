@@ -24,6 +24,7 @@ import {
   Trash2,
   CalendarDays
 } from "lucide-react";
+import { todayIso } from "@/components/ui/DateRangePicker";
 
 export default function FinancePage() {
   const {
@@ -141,7 +142,7 @@ export default function FinancePage() {
   const [newInvoiceError, setNewInvoiceError] = useState("");
 
   // Calendar tab state
-  const todayStr0 = new Date().toISOString().split("T")[0];
+  const todayStr0 = todayIso();
   const [selectedCalDate, setSelectedCalDate] = useState<string>(todayStr0);
   const [isAddEventOpen, setIsAddEventOpen] = useState(false);
   const financeEvents = calendarEvents.filter(e => e.system === "FINANCE");
@@ -608,7 +609,7 @@ export default function FinancePage() {
       {activeTabParam === "reports" && (
         <div className="space-y-6 animate-fade-in">
           {(() => {
-            const todayStr = new Date().toISOString().slice(0, 10);
+            const todayStr = todayIso();
             const unpaid = invoices.filter(i => i.status !== "Paid");
             const overdue = unpaid.filter(i => i.dueDate < todayStr);
             const upcoming = unpaid.filter(i => i.dueDate >= todayStr);

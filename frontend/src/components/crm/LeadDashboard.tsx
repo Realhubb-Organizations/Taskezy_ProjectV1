@@ -12,7 +12,7 @@ import { WhatsAppIcon, CallIcon, PlatformLabel } from "@/components/icons/Contac
 import { LineSkeleton, TableRowsSkeleton } from "@/components/ui/Skeletons";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
 import { eligibleAssignees, isUnassignedLead } from "@/lib/leadAssignment";
-import DateRangePicker, { type DateRangeValue } from "@/components/ui/DateRangePicker";
+import DateRangePicker, { type DateRangeValue, todayIso } from "@/components/ui/DateRangePicker";
 import DateRangeSelect from "@/components/ui/DateRangeSelect";
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
 import AddLeadModal from "./AddLeadModal";
@@ -922,7 +922,7 @@ export default function LeadDashboard() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `leads-analytics-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `leads-analytics-${todayIso()}.csv`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
