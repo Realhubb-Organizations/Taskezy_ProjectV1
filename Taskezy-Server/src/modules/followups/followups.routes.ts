@@ -6,6 +6,7 @@ import { asyncHandler } from "../../utils/asyncHandler";
 import { sendOk, sendPaginated } from "../../utils/apiResponse";
 import { ApiError } from "../../utils/ApiError";
 import { pool, query } from "../../db/pool";
+import { deleteLeadActivityNotifications } from "../notifications/notifications.service";
 
 export const followupsRouter = Router();
 
@@ -131,8 +132,33 @@ followupsRouter.patch(
   "/:id/status",
   validate({ params: idParamSchema, body: updateStatusSchema }),
   asyncHandler(async (req, res) => {
-    const { rows } = await pool.query(`UPDATE followup_calls SET status = $1 WHERE id = $2 RETURNING id`, [req.body.status, req.params.id]);
+    // Only the assigned agent, that agent's manager, or an admin may change a
+    // follow-up's status — completing one also clears its reminders, so it
+    // must not be possible on someone else's follow-ups.
+    const { rows: found } = await pool.query<{ assigned_to_id: string; assignee_manager_id: string | null }>(
+      `SELECT fc.assigned_to_id, u.manager_id AS assignee_manager_id
+       FROM followup_calls fc JOIN users u ON u.id = fc.assigned_to_id
+       WHERE fc.id = $1`,
+      [req.params.id]
+    );
+    if (found.length === 0) throw ApiError.notFound("Follow-up not found");
+    const caller = req.user!;
+    const allowed =
+      caller.role === "ADMIN" ||
+      found[0].assigned_to_id === caller.sub ||
+      found[0].assignee_manager_id === caller.sub;
+    if (!allowed) throw ApiError.forbidden();
+
+    const { rows } = await pool.query<{ id: string; lead_id: string | null }>(
+      `UPDATE followup_calls SET status = $1 WHERE id = $2 RETURNING id, lead_id`,
+      [req.body.status, req.params.id]
+    );
     if (rows.length === 0) throw ApiError.notFound("Follow-up not found");
+    // A completed follow-up no longer needs its "Reminder Due Now" alerts.
+    // Notifications only carry the lead, so this clears every reminder for that lead.
+    if (req.body.status === "COMPLETED" && rows[0].lead_id) {
+      await deleteLeadActivityNotifications(rows[0].lead_id, ["REMINDER"]);
+    }
     const { rows: updated } = await query(`${SELECT} WHERE fc.id = $1`, [req.params.id]);
     sendOk(res, updated[0]);
   })

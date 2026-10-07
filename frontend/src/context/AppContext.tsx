@@ -44,6 +44,7 @@ import {
   buildNotificationStreamUrl,
   apiMarkNotificationRead,
   apiMarkAllNotificationsRead,
+  apiClearNotifications,
   apiListCalendarEvents,
   apiCreateCalendarEvent,
   apiDeleteCalendarEvent,
@@ -82,6 +83,7 @@ import {
 } from "@/lib/apiClient";
 import { dbCodeToFrontendStatus, frontendStatusToDbCode, isRealLeadId, isRealId } from "@/lib/leadStatusMapping";
 import { initNotificationSoundUnlock, playNotificationSound } from "@/lib/notificationSound";
+import { todayIso, toIsoDate } from "@/components/ui/DateRangePicker";
 
 // --- Types ---
 export type Role = "ADMIN" | "FINANCE" | "AGENT";
@@ -417,6 +419,12 @@ export interface Notification {
   link?: string; // HRMS/Finance: route to navigate to
 }
 
+// Mirrors the server (notifications.service.ts): lead-linked alerts in these
+// categories stay until the lead is acted on; every other notification is
+// informational and is deleted once read.
+const LEAD_ACTIVITY_CATEGORIES: NotificationCategory[] = ["REMINDER", "MISSED_SLA", "GENERAL", "REASSIGNMENT", "KYC"];
+const isLeadActivity = (n: Notification) => !!n.leadId && LEAD_ACTIVITY_CATEGORIES.includes(n.category);
+
 export type CalendarEventType =
   | "SITE_VISIT"
   | "FOLLOWUP"
@@ -581,6 +589,7 @@ interface AppActions {
   addNotification: (notification: Omit<Notification, "id" | "timestamp" | "read">) => void;
   markNotificationRead: (id: string) => void;
   markAllNotificationsRead: (system?: SystemType) => void;
+  clearNotifications: (system?: SystemType) => Promise<void>;
 
   // Calendar actions
   addCalendarEvent: (event: Omit<CalendarEvent, "id">) => void;
@@ -739,7 +748,7 @@ function mapApiFollowupToFrontend(row: ApiFollowupRow): FollowupCall {
   return {
     id: row.id,
     leadId: row.lead_id || undefined,
-    date: row.scheduled_at.split("T")[0],
+    date: toIsoDate(new Date(row.scheduled_at)),
     scheduledAt: row.scheduled_at,
     time: new Date(row.scheduled_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true }).toLowerCase(),
     status: FOLLOWUP_STATUS_MAP[row.status] || "Upcoming",
@@ -1213,17 +1222,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const markNotificationRead = (id: string) => {
-    setNotifications(prev => prev.map(n => (n.id === id ? { ...n, read: true } : n)));
+    setNotifications(prev =>
+      prev.flatMap(n => (n.id !== id ? [n] : isLeadActivity(n) ? [{ ...n, read: true }] : []))
+    );
     if (isApiSessionActive() && isRealId(id)) {
       apiMarkNotificationRead(id).catch((err) => console.warn("Could not persist notification read-state to the database:", err));
     }
   };
 
   const markAllNotificationsRead = (system?: SystemType) => {
-    setNotifications(prev => prev.map(n => (!system || n.system === system ? { ...n, read: true } : n)));
+    setNotifications(prev =>
+      prev.flatMap(n => (system && n.system !== system ? [n] : isLeadActivity(n) ? [{ ...n, read: true }] : []))
+    );
     if (isApiSessionActive()) {
       apiMarkAllNotificationsRead(system).catch((err) => console.warn("Could not persist mark-all-read to the database:", err));
     }
+  };
+
+  // Throws if the server delete fails, so the caller can tell the user nothing was cleared.
+  const clearNotifications = async (system?: SystemType) => {
+    if (isApiSessionActive()) await apiClearNotifications(system);
+    setNotifications(prev => prev.filter(n => system && n.system !== system));
   };
 
   // Calendar actions
@@ -1581,7 +1600,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         system: "CRM",
         type: "BOOKING",
         title: `Booking Finalized — ${lead.name}`,
-        date: new Date().toISOString().split("T")[0],
+        date: todayIso(),
         description: `${lead.property || "Property"} • Deal Value ₹${(dealValue || 0).toLocaleString("en-IN")}`,
         leadId: lead.id
       });
@@ -1590,7 +1609,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         system: "CRM",
         type: "EOI",
         title: `EOI Submitted — ${lead.name}`,
-        date: new Date().toISOString().split("T")[0],
+        date: todayIso(),
         description: `${lead.property || "Property"} • Expression of interest recorded.`,
         leadId: lead.id
       });
@@ -1605,6 +1624,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         apiUpdateLeadStatus(leadId, dbCode, dealValue, targetStatus === "Connected" ? subStatus : undefined).catch((err) =>
           console.warn("Could not persist status update to the database:", err)
         );
+        // The server deletes this lead's activity alerts on a status update; drop live copies too.
+        setNotifications(prev => prev.filter(n => !(n.leadId === leadId && isLeadActivity(n))));
       }
     }
 
@@ -1736,7 +1757,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...claimData,
       id: `claim-${Date.now()}`,
       status: "Pending",
-      date: new Date().toISOString().split("T")[0]
+      date: todayIso()
     };
     setReimbursements(prev => [newClaim, ...prev]);
     addNotification({
@@ -1791,7 +1812,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const punchOut = async (): Promise<{ success: boolean; error?: string }> => {
-    const todayStr = new Date().toISOString().split("T")[0];
+    const todayStr = todayIso();
     const active = timesheets.find(ts => ts.date === todayStr && !ts.punchOut);
     if (!active) return { success: false, error: "No active shift found to punch out." };
 
@@ -2223,6 +2244,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addNotification,
         markNotificationRead,
         markAllNotificationsRead,
+        clearNotifications,
         addCalendarEvent,
         addFollowupCall,
         deleteCalendarEvent

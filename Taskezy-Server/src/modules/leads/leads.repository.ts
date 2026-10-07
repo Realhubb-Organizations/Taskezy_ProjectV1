@@ -1,5 +1,6 @@
 import { PoolClient } from "pg";
 import { pool, query, withTransaction } from "../../db/pool";
+import { BUSINESS_TIMEZONE } from "../../utils/businessDate";
 
 /** leads.phone is CHECK'd to a bare 10-digit Indian mobile — strip formatting/country code before insert. Shared by every external lead-ingest source (Meta webhook, sheet import). */
 export function normalizeIndianMobile(raw: string): string | undefined {
@@ -101,14 +102,16 @@ function buildLeadWhereClause(filter: LeadFilterConditions): { whereClause: stri
     conditions.push(`COALESCE(l.campaign, l.source) = ANY($${params.length}::text[])`);
   }
 
+  // dateFrom/dateTo are business-calendar days, so each bound is midnight in
+  // BUSINESS_TIMEZONE, not midnight UTC (05:30 IST).
   if (filter.dateFrom) {
-    params.push(filter.dateFrom);
-    conditions.push(`l.created_at >= $${params.length}::date`);
+    params.push(filter.dateFrom, BUSINESS_TIMEZONE);
+    conditions.push(`l.created_at >= ($${params.length - 1}::date::timestamp AT TIME ZONE $${params.length})`);
   }
 
   if (filter.dateTo) {
-    params.push(filter.dateTo);
-    conditions.push(`l.created_at < $${params.length}::date + interval '1 day'`);
+    params.push(filter.dateTo, BUSINESS_TIMEZONE);
+    conditions.push(`l.created_at < (($${params.length - 1}::date + 1)::timestamp AT TIME ZONE $${params.length})`);
   }
 
   if (filter.search) {

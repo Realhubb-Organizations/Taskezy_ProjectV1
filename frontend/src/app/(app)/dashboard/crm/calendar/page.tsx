@@ -8,6 +8,7 @@ import MonthCalendar from "@/components/calendar/MonthCalendar";
 import { CalendarDays, MapPin, PhoneCall, Handshake, FileSignature, LucideIcon } from "lucide-react";
 import { CardListSkeleton } from "@/components/ui/Skeletons";
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
+import { todayIso } from "@/components/ui/DateRangePicker";
 
 // Plain YYYY-MM-DD bounds for the whole month a given cursor date falls in —
 // what the server-range fetch below asks for, matching leads' date-range
@@ -29,7 +30,7 @@ const TYPE_META: Record<string, { label: string; color: string; icon: LucideIcon
 function CRMCalendarContent() {
   const router = useRouter();
 
-  const todayKey = new Date().toISOString().split("T")[0];
+  const todayKey = todayIso();
   const [selectedDate, setSelectedDate] = useState<string>(todayKey);
 
   // The month grid only ever needs the events in the currently-visible month

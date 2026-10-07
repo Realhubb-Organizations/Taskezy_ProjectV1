@@ -52,7 +52,7 @@ interface NotificationGroup {
 }
 
 export default function NotificationBell() {
-  const { notifications, currentUser, activeSystem, markNotificationRead, isDataLoading } = useApp();
+  const { notifications, currentUser, activeSystem, markNotificationRead, clearNotifications, isDataLoading } = useApp();
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [activeGroupKey, setActiveGroupKey] = useState<string>("");
@@ -259,6 +259,33 @@ export default function NotificationBell() {
     }
   };
 
+  // Clears every notification of the caller's own in the system currently
+  // shown (all its tabs). The server only ever deletes the caller's rows.
+  const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [clearError, setClearError] = useState("");
+  const closeClearConfirm = () => {
+    if (clearing) return;
+    setClearConfirmOpen(false);
+    setClearError("");
+  };
+  const confirmClearAll = async () => {
+    setClearing(true);
+    setClearError("");
+    try {
+      await clearNotifications(effectiveScope);
+      setServerRows([]);
+      setServerTotalCount(0);
+      refreshCounts();
+      setClearConfirmOpen(false);
+    } catch (err) {
+      console.warn("Could not clear notifications:", err);
+      setClearError("Could not clear notifications. Please try again.");
+    } finally {
+      setClearing(false);
+    }
+  };
+
   const renderItem = (n: Notification) => {
     const Icon = categoryIcon(n.category);
     return (
@@ -400,7 +427,60 @@ export default function NotificationBell() {
                 </>
               )}
             </div>
+
+            {pagedItems.length > 0 && (
+              <div className="px-5 py-3 border-t border-slate-100 shrink-0 pb-[calc(0.75rem_+_env(safe-area-inset-bottom))]">
+                <button
+                  type="button"
+                  onClick={() => setClearConfirmOpen(true)}
+                  className="w-full py-2 rounded-lg text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 transition-colors"
+                >
+                  Clear all
+                </button>
+              </div>
+            )}
           </div>
+
+          {/* Clear-all confirmation — same modal shell as LeadDashboard's delete confirmation. */}
+          {clearConfirmOpen && (
+            <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+              <div className="fixed inset-0 bg-slate-900/40" onClick={closeClearConfirm} />
+              <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md">
+                <div className="px-6 pt-6 pb-4 border-b border-slate-100">
+                  <h3 className="text-xl font-extrabold text-slate-900">Clear Notifications</h3>
+                </div>
+                <div className="px-6 py-5 space-y-3">
+                  <p className="text-sm text-slate-700">
+                    Clear all your {scopeLabel(effectiveScope)} notifications? This cannot be undone.
+                  </p>
+                  {clearError && (
+                    <div className="p-2.5 bg-red-50 border border-red-100 text-[11px] text-red-700 rounded-xl font-bold flex items-center gap-2">
+                      <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                      <span>{clearError}</span>
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100">
+                  <button
+                    type="button"
+                    disabled={clearing}
+                    onClick={closeClearConfirm}
+                    className="px-5 py-2 rounded-xl border border-slate-300 font-bold text-slate-700 text-sm hover:bg-slate-50 transition-colors disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={clearing}
+                    onClick={confirmClearAll}
+                    className="px-5 py-2 rounded-xl font-bold text-sm text-white bg-red-600 hover:bg-red-700 transition-colors disabled:bg-slate-300 disabled:cursor-not-allowed"
+                  >
+                    {clearing ? "Clearing..." : "Clear all"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>,
         document.body
       )}

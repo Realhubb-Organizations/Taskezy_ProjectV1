@@ -1,4 +1,5 @@
 import { pool } from "../../db/pool";
+import { logger } from "../../utils/logger";
 import { publishToUser } from "../../utils/sseHub";
 import { sendPushToUser } from "./push.service";
 
@@ -28,5 +29,41 @@ export async function createNotification(input: CreateNotificationInput): Promis
       link: input.link ?? null,
       notificationId: rows[0].id
     }).catch(() => {});
+  }
+}
+
+// Lead-linked alerts that stay until someone acts on the lead (a status
+// update), not until they're read. Every other notification is purely
+// informational and is deleted as soon as its recipient reads it.
+export const LEAD_ACTIVITY_CATEGORIES = ["REMINDER", "MISSED_SLA", "GENERAL", "REASSIGNMENT", "KYC"] as const;
+
+// SQL condition matching an informational row — the negation of "lead-linked activity alert".
+export const INFORMATIONAL_SQL = `NOT (lead_id IS NOT NULL AND category = ANY('{${LEAD_ACTIVITY_CATEGORIES.join(",")}}'::text[]))`;
+
+/**
+ * Deletes a lead's activity alerts for every recipient (the agent and any
+ * manager/admin escalation copies) once the lead has been acted on.
+ * Best-effort and never throws: a failed cleanup (e.g. the DB role lacks
+ * DELETE before migration 023's grant) must not fail the action that triggered it.
+ */
+export async function deleteLeadActivityNotifications(
+  leadId: string,
+  categories: readonly string[] = LEAD_ACTIVITY_CATEGORIES
+): Promise<void> {
+  try {
+    await pool.query(`DELETE FROM notifications WHERE lead_id = $1 AND category = ANY($2::text[])`, [leadId, categories]);
+  } catch (err) {
+    logger.warn({ errCode: (err as { code?: string }).code, leadId }, "Could not delete a lead's activity notifications");
+  }
+}
+
+/** Runs a notification DELETE, returning the deleted count, or 0 if it failed (logged, never thrown). */
+export async function tryDeleteNotifications(sql: string, params: unknown[]): Promise<number> {
+  try {
+    const { rowCount } = await pool.query(sql, params);
+    return rowCount ?? 0;
+  } catch (err) {
+    logger.warn({ errCode: (err as { code?: string }).code }, "Could not delete notifications");
+    return 0;
   }
 }

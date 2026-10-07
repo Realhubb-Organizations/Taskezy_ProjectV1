@@ -8,6 +8,7 @@ import DateRangeFilter, { DateRange } from "@/components/reports/DateRangeFilter
 import MarketingReports from "@/components/reports/MarketingReports";
 import ManagerReports from "@/components/reports/ManagerReports";
 import AgentReports from "@/components/reports/AgentReports";
+import { todayIso, toIsoDate } from "@/components/ui/DateRangePicker";
 
 const MAIN_TABS = [
   { key: "marketing", label: "Marketing Reports", icon: Megaphone },
@@ -16,13 +17,13 @@ const MAIN_TABS = [
 ] as const;
 
 function todayStr(): string {
-  return new Date().toISOString().split("T")[0];
+  return todayIso();
 }
 
 function daysAgo(n: number): string {
   const d = new Date();
   d.setDate(d.getDate() - n);
-  return d.toISOString().split("T")[0];
+  return toIsoDate(d);
 }
 
 function ReportsPageContent() {

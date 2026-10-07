@@ -6,6 +6,7 @@ import { startFollowupScheduler } from "./jobs/followupScheduler";
 import { startMissedLeadScheduler } from "./jobs/missedLeadScheduler";
 import { startMetaAdSpendSync } from "./jobs/metaAdSpendSync";
 import { startGoogleAdsSpendSync } from "./jobs/googleAdsSpendSync";
+import { startDataRetentionJob } from "./jobs/dataRetentionJob";
 
 async function main(): Promise<void> {
   const dbOk = await checkDatabaseConnection();
@@ -23,6 +24,7 @@ async function main(): Promise<void> {
   startMissedLeadScheduler();
   startMetaAdSpendSync();
   startGoogleAdsSpendSync();
+  startDataRetentionJob();
 
   // Stateless by design (JWT auth, no in-memory session/state) — any number
   // of these processes can run behind a load balancer with zero coordination

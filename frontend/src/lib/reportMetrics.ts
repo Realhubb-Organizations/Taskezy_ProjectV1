@@ -1,4 +1,5 @@
 import { Lead, AdSpendRecord, LeadStatus, FollowupCall } from "@/context/AppContext";
+import { toIsoDate } from "@/components/ui/DateRangePicker";
 
 const BUYER_STATUSES = new Set<LeadStatus>([
   "Interested", "Follow up", "Follow-ups", "Call Back", "Meeting Scheduled", "Meeting Done",
@@ -21,8 +22,10 @@ const VISIT_OR_MEETING_STATUSES = new Set<LeadStatus>([
 
 export const SLA_MINUTES = 20;
 
+// Local calendar day of a timestamp — slicing the UTC ISO string would put
+// anything between 00:00 and 05:30 IST on the previous day.
 export function toDateKey(iso: string): string {
-  return iso.split("T")[0];
+  return toIsoDate(new Date(iso));
 }
 
 export function inRange(dateKey: string, from: string, to: string): boolean {

@@ -28,7 +28,7 @@ import {
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine } from "recharts";
 import { LineSkeleton, TableRowsSkeleton, CardListSkeleton } from "@/components/ui/Skeletons";
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
-import DateRangePicker from "@/components/ui/DateRangePicker";
+import DateRangePicker, { toIsoDate } from "@/components/ui/DateRangePicker";
 import DateRangeSelect from "@/components/ui/DateRangeSelect";
 
 import {
@@ -875,7 +875,7 @@ export default function AdminCampaignsPage() {
     return filteredRecords.map(rec => {
       const dayLeads = leads.filter(l =>
         (l.campaign || l.source)?.toLowerCase() === rec.accountName.toLowerCase()
-        && l.createdAtStr && l.createdAtStr.slice(0, 10) === rec.date
+        && l.createdAtStr && toIsoDate(new Date(l.createdAtStr)) === rec.date
       );
       const countStatus = (statuses: string[]) => dayLeads.filter(l => statuses.includes(l.status)).length;
       const d = new Date(rec.date);

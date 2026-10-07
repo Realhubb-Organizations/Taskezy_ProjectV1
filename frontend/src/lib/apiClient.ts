@@ -1152,6 +1152,12 @@ export function apiMarkAllNotificationsRead(system?: "CRM" | "HRMS" | "FINANCE" 
   return request<{ read: boolean }>(`/api/v1/notifications/read-all${query}`, { method: "PATCH" });
 }
 
+// Deletes only the caller's own notifications (optionally one system) — the drawer's "Clear all".
+export function apiClearNotifications(system?: "CRM" | "HRMS" | "FINANCE" | "ADMIN"): Promise<{ deleted: number }> {
+  const query = system ? `?system=${system}` : "";
+  return request<{ deleted: number }>(`/api/v1/notifications${query}`, { method: "DELETE" });
+}
+
 // EventSource can't set an Authorization header, so opening the stream goes
 // through a one-time ticket instead of the real access token (see
 // notifications.routes.ts / utils/sseTickets.ts) — mint one with a normal

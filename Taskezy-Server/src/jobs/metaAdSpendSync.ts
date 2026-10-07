@@ -9,14 +9,13 @@ import {
   getAdDailyInsights
 } from "../modules/meta/meta-client";
 import * as metaRepo from "../modules/meta/meta.repository";
+import { businessDateOffset } from "../utils/businessDate";
 
 const POLL_INTERVAL_MS = 6 * 60 * 60 * 1000; // spend doesn't need per-minute freshness like leads
 const LOOKBACK_DAYS = 35; // covers the Reports page's "Last 30 Days" preset with buffer for late-arriving data
 
 function isoDateNDaysAgo(n: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  return d.toISOString().slice(0, 10);
+  return businessDateOffset(-n);
 }
 
 /**

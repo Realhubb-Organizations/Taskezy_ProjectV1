@@ -3,6 +3,7 @@ import { Users, CheckCircle, Clock, Calendar, ShieldAlert } from "lucide-react";
 import SubActionsMenu, { ActionItem } from "./SubActionsMenu";
 import { useRouter } from "next/navigation";
 import { User, TimesheetLog } from "@/context/AppContext";
+import { todayIso } from "@/components/ui/DateRangePicker";
 
 interface AttendanceWidgetProps {
   users: User[];
@@ -25,7 +26,7 @@ export default function AttendanceWidget({ users, timesheets }: AttendanceWidget
   const employeeList = users.filter(u => u.role !== "ADMIN");
   const totalEmployeesCount = employeeList.length;
 
-  const todayStr = new Date().toISOString().split("T")[0];
+  const todayStr = todayIso();
   const presentEmployees = employeeList.filter(emp =>
     timesheets.some(ts => ts.userId === emp.id && ts.date === todayStr)
   );

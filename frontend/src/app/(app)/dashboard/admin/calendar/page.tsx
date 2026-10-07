@@ -7,6 +7,7 @@ import { apiListCalendarEventsPage } from "@/lib/apiClient";
 import MonthCalendar from "@/components/calendar/MonthCalendar";
 import { CalendarDays } from "lucide-react";
 import { CardListSkeleton } from "@/components/ui/Skeletons";
+import { todayIso } from "@/components/ui/DateRangePicker";
 
 const SYSTEM_COLOR: Record<string, string> = {
   CRM: "bg-blue-500",
@@ -30,7 +31,7 @@ function monthBounds(cursor: Date): { dateFrom: string; dateTo: string } {
 function AdminCalendarContent() {
   const router = useRouter();
 
-  const todayKey = new Date().toISOString().split("T")[0];
+  const todayKey = todayIso();
   const [selectedDate, setSelectedDate] = useState<string>(todayKey);
 
   // Global Operations Calendar fetches every system's events (ADMIN sees

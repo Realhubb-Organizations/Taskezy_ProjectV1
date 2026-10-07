@@ -1,6 +1,12 @@
-import { Pool, PoolClient } from "pg";
+import { Pool, PoolClient, types } from "pg";
 import { env } from "../config/env";
 import { logger } from "../utils/logger";
+
+// Return DATE columns as their "YYYY-MM-DD" text. By default pg turns them
+// into a JS Date at midnight in the *server's* timezone, which serializes to
+// the previous day's ISO string whenever the server runs ahead of UTC (IST).
+const DATE_OID = 1082;
+types.setTypeParser(DATE_OID, (value: string) => value);
 
 // One pool per process, reused across every request — never open a new
 // connection per request. This is what actually lets the API handle a high

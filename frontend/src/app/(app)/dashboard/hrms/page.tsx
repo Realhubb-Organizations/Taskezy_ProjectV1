@@ -26,6 +26,7 @@ import {
   ShieldCheck,
   CalendarDays
 } from "lucide-react";
+import { todayIso } from "@/components/ui/DateRangePicker";
 
 export default function HRMSPage() {
   const {
@@ -67,7 +68,7 @@ export default function HRMSPage() {
   const [successMsg, setSuccessMsg] = useState("");
 
   // Calendar tab state
-  const todayStr0 = new Date().toISOString().split("T")[0];
+  const todayStr0 = todayIso();
   const [selectedCalDate, setSelectedCalDate] = useState<string>(todayStr0);
   const [isAddEventOpen, setIsAddEventOpen] = useState(false);
   const hrmsEvents = calendarEvents.filter(e => e.system === "HRMS");
@@ -193,7 +194,7 @@ export default function HRMSPage() {
   }, [isAdmin, attendancePage, attendanceRowsPerPage]);
 
   // Check if currently punched in today
-  const todayStr = new Date().toISOString().split("T")[0];
+  const todayStr = todayIso();
   const activePunch = myLogs.find(ts => ts.date === todayStr && !ts.punchOut);
 
   // Real device GPS now, not a fake "office/offsite" preset toggle — the

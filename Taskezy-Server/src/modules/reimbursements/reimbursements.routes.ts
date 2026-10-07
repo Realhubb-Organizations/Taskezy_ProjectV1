@@ -6,6 +6,7 @@ import { asyncHandler } from "../../utils/asyncHandler";
 import { sendOk, sendPaginated } from "../../utils/apiResponse";
 import { ApiError } from "../../utils/ApiError";
 import { pool, query } from "../../db/pool";
+import { businessToday } from "../../utils/businessDate";
 import { createNotification } from "../notifications/notifications.service";
 import { listActiveAdminAndFinanceIds } from "../users/users.repository";
 
@@ -69,8 +70,8 @@ reimbursementsRouter.post(
     const { title, claimType, amount, notes } = req.body;
     const { rows } = await pool.query(
       `INSERT INTO reimbursement_claims (title, claim_type, amount, status, claim_date, agent_id, notes)
-       VALUES ($1,$2,$3,'PENDING',CURRENT_DATE,$4,$5) RETURNING id`,
-      [title, claimType, amount, req.user!.sub, notes ?? null]
+       VALUES ($1,$2,$3,'PENDING',$4,$5,$6) RETURNING id`,
+      [title, claimType, amount, businessToday(), req.user!.sub, notes ?? null]
     );
     const { rows: created } = await query(`${SELECT} WHERE rc.id = $1`, [rows[0].id]);
 
