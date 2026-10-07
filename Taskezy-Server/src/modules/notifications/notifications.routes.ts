@@ -115,11 +115,11 @@ notificationsRouter.get(
     }
     if (category && category.length > 0) {
       params.push(category);
-      conditions.push(`category = ANY($${params.length}::text[])`);
+      conditions.push(`category = ANY($${params.length}::notification_category[])`);
     }
     if (excludeCategory && excludeCategory.length > 0) {
       params.push(excludeCategory);
-      conditions.push(`category <> ALL($${params.length}::text[])`);
+      conditions.push(`category <> ALL($${params.length}::notification_category[])`);
     }
     const whereClause = `WHERE ${conditions.join(" AND ")}`;
 
