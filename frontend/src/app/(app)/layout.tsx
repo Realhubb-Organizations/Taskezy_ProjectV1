@@ -4,7 +4,10 @@ import React, { useState, useEffect, useRef, Suspense } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Capacitor } from "@capacitor/core";
+import { PushNotifications } from "@capacitor/push-notifications";
 import { useApp, SystemType } from "@/context/AppContext";
+import { apiRegisterDevice, apiRemoveDevice } from "@/lib/apiClient";
 import NotificationBell from "@/components/dashboard/NotificationBell";
 import LoginAnimationOverlay from "@/components/LoginAnimationOverlay";
 import {
@@ -120,6 +123,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   const [pressTip, setPressTip] = useState<{ label: string; x: number; y: number } | null>(null);
   const pressTimer = useRef<number | null>(null);
   const pressFired = useRef(false);
+  const pushTokenRef = useRef<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<SystemType>>(new Set());
   const toggleGroup = (key: SystemType) => {
     setExpandedGroups(prev => {
@@ -168,6 +172,32 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
       router.push("/auth/login");
     }
   }, [authLoading, currentUser, router]);
+
+  // Registers this phone for push notifications once logged in, so leads,
+  // reminders and missed-SLA alerts still arrive while the app is closed or
+  // the phone is locked. No-op outside the native app.
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform() || !currentUser) return;
+    const handles: Promise<{ remove: () => Promise<void> }>[] = [];
+    handles.push(PushNotifications.addListener("registration", (token) => {
+      pushTokenRef.current = token.value;
+      apiRegisterDevice(token.value, "android").catch(() => {});
+    }));
+    handles.push(PushNotifications.addListener("registrationError", (err) => {
+      console.warn("Push registration failed:", err);
+    }));
+    handles.push(PushNotifications.addListener("pushNotificationActionPerformed", (action) => {
+      const link = action.notification.data?.link;
+      if (typeof link === "string" && link) router.push(link);
+    }));
+    PushNotifications.checkPermissions().then((perm) => {
+      const granted = perm.receive === "granted"
+        ? Promise.resolve(true)
+        : PushNotifications.requestPermissions().then((r) => r.receive === "granted");
+      granted.then((ok) => { if (ok) PushNotifications.register(); });
+    });
+    return () => { handles.forEach((h) => h.then((l) => l.remove())); };
+  }, [currentUser?.id, router]);
 
   if (authLoading) {
     return (
@@ -284,6 +314,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   });
 
   const handleLogout = () => {
+    if (pushTokenRef.current) apiRemoveDevice(pushTokenRef.current).catch(() => {});
     logout();
     router.push("/auth/login");
   };

@@ -1098,6 +1098,15 @@ export function apiGetNotificationCounts(): Promise<NotificationCounts> {
   return request<NotificationCounts>("/api/v1/notifications/counts");
 }
 
+// Phone push tokens, for notifications while the app is closed or locked.
+export function apiRegisterDevice(token: string, platform: "android" | "ios" = "android"): Promise<{ registered: boolean }> {
+  return request<{ registered: boolean }>("/api/v1/devices", { method: "POST", body: JSON.stringify({ token, platform }) });
+}
+
+export function apiRemoveDevice(token: string): Promise<{ removed: boolean }> {
+  return request<{ removed: boolean }>(`/api/v1/devices/${encodeURIComponent(token)}`, { method: "DELETE" });
+}
+
 // Real server-side pagination for NotificationBell's dropdown — each of its
 // category tabs (New Leads / Reminder Alerts / Activity Alerts / HRMS /
 // Finance) fetches its own page instead of slicing AppContext's full,
