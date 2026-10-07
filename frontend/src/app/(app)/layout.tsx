@@ -92,6 +92,17 @@ function checkUserAccess(user: { role: string; department?: string; role_type?: 
   return true;
 } // Properties, Resale, Reports, Organization are open to other departments
 
+// Matches resolveNotificationSoundKind in lib/notificationSound.ts — the
+// server picks the same channel id per category/system when it sends a push
+// (see Taskezy-Server/src/modules/notifications/push.service.ts).
+const PUSH_SOUND_CHANNELS: { id: string; name: string; sound: string; importance: 4; visibility: 1 }[] = [
+  { id: "leads", name: "New Leads", sound: "leads.mp3", importance: 4, visibility: 1 },
+  { id: "reminder", name: "Reminders", sound: "reminder.mp3", importance: 4, visibility: 1 },
+  { id: "activity", name: "Activity Alerts", sound: "activity.mp3", importance: 4, visibility: 1 },
+  { id: "hrms", name: "HRMS", sound: "hrms.mp3", importance: 4, visibility: 1 },
+  { id: "finance", name: "Finance", sound: "finance.mp3", importance: 4, visibility: 1 }
+];
+
 function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -194,7 +205,14 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
       const granted = perm.receive === "granted"
         ? Promise.resolve(true)
         : PushNotifications.requestPermissions().then((r) => r.receive === "granted");
-      granted.then((ok) => { if (ok) PushNotifications.register(); });
+      granted.then((ok) => {
+        if (!ok) return;
+        // One channel per sound kind, matching the web's notificationSound.ts mapping.
+        // Android locks a channel's sound at creation — ponytail: bump the id (e.g.
+        // "leads_v2") if a sound file is ever swapped, rather than trying to update it.
+        PUSH_SOUND_CHANNELS.forEach((ch) => PushNotifications.createChannel(ch).catch(() => {}));
+        PushNotifications.register();
+      });
     });
     return () => { handles.forEach((h) => h.then((l) => l.remove())); };
   }, [currentUser?.id, router]);

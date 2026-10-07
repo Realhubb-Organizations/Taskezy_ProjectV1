@@ -12,6 +12,17 @@ export interface PushPayload {
   body: string;
   link: string | null;
   notificationId: string;
+  category: string;
+  system: string;
+}
+
+/** Mirrors frontend's notificationSound.ts resolveNotificationSoundKind mapping, for FCM channel routing. */
+function resolvePushChannelId(category: string, system: string): string {
+  if (category === "NEW_LEAD") return "leads";
+  if (category === "REMINDER") return "reminder";
+  if (system === "HRMS") return "hrms";
+  if (system === "FINANCE") return "finance";
+  return "activity";
 }
 
 /** Sends a push to every registered device of a user. Never throws; failures are logged and swallowed. */
@@ -38,7 +49,7 @@ export async function sendPushToUser(userId: string, payload: PushPayload): Prom
       tokens,
       notification: { title: payload.title, body: payload.body },
       data: { link: payload.link ?? "", notificationId: payload.notificationId },
-      android: { priority: "high", notification: { channelId: "default" } }
+      android: { priority: "high", notification: { channelId: resolvePushChannelId(payload.category, payload.system) } }
     });
 
     const deadTokens = tokens.filter((_, i) => {
