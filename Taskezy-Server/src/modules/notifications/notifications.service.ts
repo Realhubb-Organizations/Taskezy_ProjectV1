@@ -26,7 +26,9 @@ export async function createNotification(input: CreateNotificationInput): Promis
       title: input.title,
       body: input.message,
       link: input.link ?? null,
-      notificationId: rows[0].id
+      notificationId: rows[0].id,
+      category: input.category,
+      system: input.system
     }).catch(() => {});
   }
 }

@@ -31,6 +31,10 @@ GRADLE_FILE="android/app/build.gradle"
 sed -i -E "s/versionCode [0-9]+/versionCode $VERSION_CODE/" "$GRADLE_FILE"
 sed -i -E "s/versionName \"[^\"]*\"/versionName \"$NEW_VERSION\"/" "$GRADLE_FILE"
 
+echo "== Syncing notification sounds into Android raw resources =="
+mkdir -p android/app/src/main/res/raw
+cp public/sounds/*.mp3 android/app/src/main/res/raw/
+
 echo "== Building Capacitor static export =="
 npm run build:capacitor
 
