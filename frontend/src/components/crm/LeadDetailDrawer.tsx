@@ -234,7 +234,7 @@ export default function LeadDetailDrawer({
     },
     { label: "Property", value: lead.property || "Not set" },
     {
-      label: "Reassigned To",
+      label: "Reassign From",
       value: lead.previousAgent ? (
         <span className="flex flex-col">
           <span className="flex items-center gap-1">

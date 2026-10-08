@@ -192,6 +192,33 @@ body {
 .native-app .fixed.inset-y-0 {
   padding-top: 2rem;
 }
+
+/* Toast entrance + its auto-dismiss countdown bar (see components/ui/ToastHost.tsx). */
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes toast-shrink {
+  from { width: 100%; }
+  to { width: 0%; }
+}
+.animate-toast-in {
+  animation: toast-in 240ms ease-out;
+}
+.animate-toast-shrink {
+  animation-name: toast-shrink;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-toast-in {
+    animation: none;
+  }
+  .animate-toast-shrink {
+    animation: none;
+    width: 0%;
+  }
+}
 .native-app .app-header {
   height: calc(3.5rem + 2rem);
   padding-top: 2rem;

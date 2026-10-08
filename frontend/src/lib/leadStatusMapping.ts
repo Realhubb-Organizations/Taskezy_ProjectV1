@@ -148,7 +148,7 @@ function deriveLogStateLabel(message: string): string | null {
   if (/^Lead (added|assigned|captured)/i.test(message)) return "Lead Captured";
   const statusMatch = message.match(/^Status changed to "(.+)"$/i);
   if (statusMatch) return resolveStatusLabel(statusMatch[1]);
-  if (/^Reassigned( to a different agent| from .+ to .+)?$/i.test(message)) return "Reassigned";
+  if (/^Reassigned\b/i.test(message)) return "Reassigned";
   return null;
 }
 

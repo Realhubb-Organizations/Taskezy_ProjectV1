@@ -7,6 +7,7 @@ import * as usersRepo from "../users/users.repository";
 import { createNotification, deleteLeadActivityNotifications } from "../notifications/notifications.service";
 import { findPropertyIdBySheetSource } from "../properties/properties.repository";
 import { pickAgentForProperty, createPropertyAgentPicker } from "../properties/properties.assignment";
+import { broadcastLeadChanged } from "./leads.realtime";
 
 /**
  * Mirrors the frontend's isSalesMember scoping rule (AppContext.tsx /
@@ -189,6 +190,7 @@ export async function createLead(caller: AccessTokenPayload, input: CreateLeadIn
     }))
   );
 
+  broadcastLeadChanged(created.id);
   return created;
 }
 
@@ -442,6 +444,7 @@ export async function updateLeadStatus(
   // stale for everyone who received them.
   await deleteLeadActivityNotifications(leadId);
 
+  broadcastLeadChanged(leadId);
   return repo.findById(leadId, scopedToAgentId);
 }
 
@@ -453,6 +456,7 @@ export async function editLead(caller: AccessTokenPayload, leadId: string, input
   if (!existing) throw ApiError.notFound("Lead not found");
 
   await repo.update(leadId, input);
+  broadcastLeadChanged(leadId);
   return repo.findById(leadId);
 }
 
@@ -508,11 +512,14 @@ export async function reassignLead(caller: AccessTokenPayload, leadId: string, n
   }
   await assertReassignAllowed(caller, newAgentId);
 
+  const newAgent = await usersRepo.findById(newAgentId);
+  const newAgentName = newAgent ? `${newAgent.first_name}${newAgent.last_name ? " " + newAgent.last_name : ""}` : "a different agent";
+
   try {
     await withTransaction(async (client) => {
       await repo.reassign(client, leadId, previousAgentId, newAgentId);
       if (note) await repo.setNote(client, leadId, note, caller.sub);
-      await repo.insertLeadLog(client, leadId, caller.sub, caller.name, note ? `Reassigned to a different agent. Note: ${note}` : "Reassigned to a different agent");
+      await repo.insertLeadLog(client, leadId, caller.sub, caller.name, note ? `Reassigned to ${newAgentName}. Note: ${note}` : `Reassigned to ${newAgentName}`);
     });
   } catch (err) {
     // newAgentId references users(id) — a well-formed but nonexistent UUID
@@ -535,6 +542,7 @@ export async function reassignLead(caller: AccessTokenPayload, leadId: string, n
       link: "/dashboard/crm"
     });
   }
+  broadcastLeadChanged(leadId);
   return updated;
 }
 
@@ -637,6 +645,7 @@ export async function deleteLead(actor: { userId: string; name: string }, leadId
   }
   // Lead was removed by someone else between the findById check and the delete.
   if (!removed) throw ApiError.notFound("Lead not found");
+  broadcastLeadChanged(leadId);
 }
 
 // Sequential on purpose: each lead is its own transaction, so one blocked lead must not roll back the others.
@@ -648,8 +657,10 @@ export async function bulkDeleteLeads(actor: { userId: string; name: string }, l
 
   for (const id of ids) {
     try {
-      if (await repo.archiveAndRemove(id, actor)) deleted++;
-      else notFound++;
+      if (await repo.archiveAndRemove(id, actor)) {
+        deleted++;
+        broadcastLeadChanged(id);
+      } else notFound++;
     } catch (err) {
       if (!isForeignKeyViolation(err)) throw err;
       blocked.push({ id, reason: "Has an associated invoice; delete the invoice first" });
@@ -677,6 +688,7 @@ export async function verifyLeadKyc(leadId: string) {
       link: "/dashboard/crm"
     });
   }
+  broadcastLeadChanged(leadId);
   return lead;
 }
 

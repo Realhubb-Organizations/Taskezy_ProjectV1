@@ -172,7 +172,7 @@ export function LeadQuickViewDrawer({ lead, onLeadChange, onClose }: {
             <span className="text-slate-800 font-semibold">{lead.property || "Not set"}</span>
           </div>
           <div>
-            <span className="text-slate-400 font-bold text-[10px] block mb-0.5">Reassigned To :</span>
+            <span className="text-slate-400 font-bold text-[10px] block mb-0.5">Reassign From :</span>
             <span className="flex items-center gap-1 text-slate-800 font-semibold">
               {lead.previousAgent && <User className="h-3 w-3 text-slate-400" />} {lead.previousAgent || "—"}
             </span>

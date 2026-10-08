@@ -11,6 +11,7 @@ import { type LeadSummaryStats } from "@/lib/leadSummaryStats";
 import { apiListLeadsPage, apiGetLeadStats, apiDeleteLead, apiBulkDeleteLeads, apiReassignLead, apiUpdateLeadStatus, type LeadListFilters } from "@/lib/apiClient";
 import { WhatsAppIcon, CallIcon, PlatformLabel } from "@/components/icons/ContactIcons";
 import { LineSkeleton, TableRowsSkeleton } from "@/components/ui/Skeletons";
+import Tooltip from "@/components/ui/Tooltip";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
 import { canChangeLeadStatus, eligibleAssignees, isUnassignedLead, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
 import DateRangePicker, { type DateRangeValue, todayIso } from "@/components/ui/DateRangePicker";
@@ -37,7 +38,7 @@ type AdminColumnKey =
 const ADMIN_COLUMNS: { key: AdminColumnKey; label: string; width: number }[] = [
   { key: "date", label: "Date", width: 130 },
   { key: "property", label: "Property", width: 170 },
-  { key: "reassignedTo", label: "Reassigned To", width: 160 },
+  { key: "reassignedTo", label: "Reassign From", width: 160 },
   { key: "source", label: "Source", width: 170 },
   { key: "leadScore", label: "Lead Score", width: 100 },
   { key: "status", label: "Status", width: 150 },
@@ -121,6 +122,7 @@ export default function LeadDashboard() {
     followupCalls,
     reassignLead,
     isDataLoading,
+    leadsChangedSignal,
     removeLeadsLocally
   } = useApp();
   const { toast, prompt: promptDialog } = useDialog();
@@ -200,8 +202,10 @@ export default function LeadDashboard() {
         return;
       }
       updateLeadStatus(leadId, status, dealValue);
+      setServerLeads(prev => prev.map(l => (l.id === leadId ? { ...l, status, dealValue } : l)));
     } else {
       updateLeadStatus(leadId, status);
+      setServerLeads(prev => prev.map(l => (l.id === leadId ? { ...l, status } : l)));
     }
 
     // Update local drawer state if active
@@ -458,7 +462,7 @@ export default function LeadDashboard() {
     // so this effect re-fires exactly when a real filter value changes,
     // without needing every individual filter piece listed separately.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adminTab, adminPage, adminRowsPerPage, adminServerFiltersKey, leadsRefreshKey]);
+  }, [adminTab, adminPage, adminRowsPerPage, adminServerFiltersKey, leadsRefreshKey, leadsChangedSignal]);
 
   // Filter button → Settings panel for which table columns are shown — both
   // roles get the full-height right-docked drawer (same pattern as the lead
@@ -1309,7 +1313,7 @@ export default function LeadDashboard() {
                       {/* Togglable, in the same order as the Filter panel */}
                       {adminVisibleColumns.date && <th className="px-4 py-3 whitespace-nowrap">Date</th>}
                       {adminVisibleColumns.property && <th className="px-4 py-3 whitespace-nowrap">Property</th>}
-                      {adminVisibleColumns.reassignedTo && <th className="px-4 py-3 whitespace-nowrap">Reassigned To</th>}
+                      {adminVisibleColumns.reassignedTo && <th className="px-4 py-3 whitespace-nowrap">Reassign From</th>}
                       {adminVisibleColumns.source && <th className="px-4 py-3 whitespace-nowrap">Source</th>}
                       {adminVisibleColumns.leadScore && <th className="px-4 py-3 whitespace-nowrap">Lead Score</th>}
                       {adminVisibleColumns.status && (
@@ -1384,10 +1388,12 @@ export default function LeadDashboard() {
                           {adminVisibleColumns.reassignedTo && (
                             <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]">
                               {l.previousAgent ? (
-                                <>
-                                  <span className="block">{l.assignedAgent || "Unassigned"}</span>
-                                  <span className="block text-[11px] text-slate-400 font-normal">from {l.previousAgent}</span>
-                                </>
+                                <Tooltip text="Click to see activity log of this lead">
+                                  <button type="button" onClick={() => setSelectedLead(l)} className="text-left hover:text-[#0B1E6E] hover:underline">
+                                    <span className="block">{l.assignedAgent || "Unassigned"}</span>
+                                    <span className="block text-[11px] text-slate-400 font-normal">from {l.previousAgent}</span>
+                                  </button>
+                                </Tooltip>
                               ) : "—"}
                             </td>
                           )}
