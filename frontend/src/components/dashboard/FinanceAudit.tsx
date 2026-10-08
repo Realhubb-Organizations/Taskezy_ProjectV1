@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { DollarSign, FileText, CheckCircle, Search, Filter, RefreshCw, Layers } from "lucide-react";
 import SubActionsMenu, { ActionItem } from "./SubActionsMenu";
 import { useRouter } from "next/navigation";
+import { useDialog } from "@/components/ui/DialogProvider";
 import { Invoice, Property } from "@/context/AppContext";
 
 interface FinanceAuditProps {
@@ -22,6 +23,7 @@ export default function FinanceAudit({
   properties
 }: FinanceAuditProps) {
   const router = useRouter();
+  const { toast } = useDialog();
 
   // Filters State
   const [selectedProject, setSelectedProject] = useState("All");
@@ -34,8 +36,8 @@ export default function FinanceAudit({
 
   const getSubActions = (): ActionItem[] => [
     { label: "View Finance Portal", href: "/dashboard/finance" },
-    { label: "Create GST Invoice", onClick: () => alert("Redirecting to invoice builder...") },
-    { label: "Export Audit Ledger", onClick: () => alert("Exporting billing logs ledger...") }
+    { label: "Create GST Invoice", onClick: () => toast("Redirecting to invoice builder...", "info") },
+    { label: "Export Audit Ledger", onClick: () => toast("Exporting billing logs ledger...", "info") }
   ];
 
   // Dynamic filter logic

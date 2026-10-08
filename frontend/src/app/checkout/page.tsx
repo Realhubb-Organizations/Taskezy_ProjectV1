@@ -2,12 +2,14 @@
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useDialog } from "@/components/ui/DialogProvider";
 import { useApp } from "@/context/AppContext";
 import { ArrowLeft, CreditCard, CheckCircle, ShieldAlert, Sparkles } from "lucide-react";
 import Link from "next/link";
 
 export default function CheckoutPage() {
   const router = useRouter();
+  const { toast } = useDialog();
   const {
     adminSeats,
     financeSeats,
@@ -36,7 +38,7 @@ export default function CheckoutPage() {
   const handleCheckout = async (e: React.FormEvent) => {
     e.preventDefault();
     if (selectedMethod === "upi" && !upiId) {
-      alert("Please enter a UPI ID");
+      toast("Please enter a UPI ID.", "warning");
       return;
     }
     setLoading(true);

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { useApp, Lead, LeadStatus } from "@/context/AppContext";
+import { useDialog } from "@/components/ui/DialogProvider";
 import SalesPendingTasksTable from "@/components/dashboard/SalesPendingTasksTable";
 import { TAB_BUCKETS, TeamTaskTab } from "@/components/dashboard/TeamTasksTable";
 import LeadDetailDrawer from "@/components/crm/LeadDetailDrawer";
@@ -18,6 +19,7 @@ import { PendingTask } from "@/lib/salesPendingTasks";
 // the date range then narrows it by task due date.
 function AgentTasksView() {
   const { leads, followupCalls, currentUser, updateLeadStatus, isDataLoading } = useApp();
+  const { toast, prompt: promptDialog } = useDialog();
   const params = useSearchParams();
   const agent = params.get("agent") || "";
   const tab: TeamTaskTab = params.get("tab") === "pending" ? "pending" : "all";
@@ -43,12 +45,17 @@ function AgentTasksView() {
 
   // Same Booking guard as the Leads page and the dashboard: booking a lead
   // auto-generates an invoice from its deal value, so a real value is required.
-  const handleStatusChange = (leadId: string, status: LeadStatus) => {
+  const handleStatusChange = async (leadId: string, status: LeadStatus) => {
     if (status === "Booking Done" || status === "Booking Approved" || status === "Booked") {
-      const input = prompt("Enter the real deal value for this booking (INR):");
+      const input = await promptDialog({
+        title: "Enter deal value",
+        message: "Enter the real deal value for this booking (INR):",
+        label: "Deal value (INR)",
+        confirmLabel: "Mark as Booked"
+      });
       const dealValue = input ? parseFloat(input.replace(/[^0-9.]/g, "")) : NaN;
       if (!input || isNaN(dealValue) || dealValue <= 0) {
-        alert("A valid deal value is required to mark a lead as Booked.");
+        toast("A valid deal value is required to mark a lead as Booked.", "warning");
         return;
       }
       updateLeadStatus(leadId, status, dealValue);

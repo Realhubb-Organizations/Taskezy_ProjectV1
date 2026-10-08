@@ -2,6 +2,7 @@ import React from "react";
 import { Users, Calendar, Building, TrendingUp, TrendingDown, ArrowUpRight, CheckSquare } from "lucide-react";
 import SubActionsMenu, { ActionItem } from "./SubActionsMenu";
 import { useRouter } from "next/navigation";
+import { useDialog } from "@/components/ui/DialogProvider";
 
 interface KpiGridProps {
   totalLeads: number;
@@ -19,6 +20,7 @@ export default function KpiGrid({
   monthBookings
 }: KpiGridProps) {
   const router = useRouter();
+  const { toast } = useDialog();
 
   const handleCardClick = (path: string) => {
     router.push(path);
@@ -26,8 +28,8 @@ export default function KpiGrid({
 
   const getKpiActions = (title: string, path: string): ActionItem[] => [
     { label: `View ${title}`, href: path },
-    { label: "Export Report", onClick: () => alert(`Exporting ${title} report...`) },
-    { label: "Configure KPI", onClick: () => alert(`Configuring ${title} limits...`) }
+    { label: "Export Report", onClick: () => toast(`Exporting ${title} report...`, "info") },
+    { label: "Configure KPI", onClick: () => toast(`Configuring ${title} limits...`, "info") }
   ];
 
   return (

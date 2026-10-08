@@ -28,7 +28,6 @@ const formatDate = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${p
 // Columns the Filter drawer can show/hide — same toggle pattern as the
 // Campaigns page's Filter drawer.
 type ColumnKey = "team" | "count" | "taskType" | "date";
-const COLUMN_WIDTHS: Record<ColumnKey, number> = { team: 34, count: 22, taskType: 24, date: 20 };
 const columnLabel = (key: ColumnKey, tab: Tab) =>
   ({ team: "Team", count: tab === "all" ? "All Task" : "Pending Task", taskType: "Task Type", date: "Date" })[key];
 const COLUMN_KEYS: ColumnKey[] = ["team", "count", "taskType", "date"];
@@ -70,7 +69,6 @@ export default function TeamTasksTable({
   const [showIdleMembers, setShowIdleMembers] = useState(false);
 
   const shownColumns = COLUMN_KEYS.filter(k => visibleColumns[k]);
-  const shownWidthTotal = shownColumns.reduce((s, k) => s + COLUMN_WIDTHS[k], 0);
   const toggleColumn = (key: ColumnKey) => setVisibleColumns(prev => ({ ...prev, [key]: !prev[key] }));
   const toggleSelectAllColumns = () => {
     const allOn = COLUMN_KEYS.every(k => visibleColumns[k]);
@@ -144,9 +142,9 @@ export default function TeamTasksTable({
         <button
           type="button"
           onClick={() => setIsFilterOpen(true)}
-          className="mb-1 flex items-center gap-2 border border-slate-300/80 bg-white rounded-xl px-3.5 py-1.5 text-xs text-slate-700 font-semibold hover:bg-slate-50 shadow-2xs transition-colors"
+          className="mb-1 inline-flex items-center justify-center gap-2 h-9 px-3.5 border border-slate-300/80 bg-white rounded-xl text-xs text-slate-700 font-bold hover:bg-slate-50 shadow-2xs transition-colors"
         >
-          <Sliders className="h-3.5 w-3.5 text-blue-600" />
+          <Sliders className="h-4 w-4 text-blue-600" />
           Filter
         </button>
         {/* Full-height right-docked drawer: no dark backdrop, closes on an
@@ -203,18 +201,18 @@ export default function TeamTasksTable({
       </div>
 
       <div className="overflow-auto max-h-[60vh] px-5">
-        <table className="w-full text-left table-fixed min-w-[640px]">
-          {/* Visible columns keep their relative widths, rescaled to fill the table */}
+        <table className="w-full text-left table-fixed border-collapse" style={{ minWidth: shownColumns.length * 150 }}>
+          {/* Visible columns share the full table width equally */}
           <colgroup>
             {shownColumns.map(k => (
-              <col key={k} style={{ width: `${(COLUMN_WIDTHS[k] / shownWidthTotal) * 100}%` }} />
+              <col key={k} />
             ))}
           </colgroup>
           <thead>
-            <tr className="text-xs font-bold text-slate-800">
-              {visibleColumns.team && <th className="px-4 py-3 border-b border-slate-200 sticky top-0 z-10 bg-white">Team</th>}
-              {visibleColumns.count && <th className="px-4 py-3 border-b border-slate-200 sticky top-0 z-10 bg-white">{columnLabel("count", tab)}</th>}
-              {visibleColumns.taskType && <th className="px-4 py-3 border-b border-slate-200 sticky top-0 z-10 bg-white">
+            <tr className="text-left text-xs font-bold text-slate-800">
+              {visibleColumns.team && <th className="px-4 py-3 whitespace-nowrap border-b border-slate-200 sticky top-0 z-10 bg-white">Team</th>}
+              {visibleColumns.count && <th className="px-4 py-3 whitespace-nowrap border-b border-slate-200 sticky top-0 z-10 bg-white">{columnLabel("count", tab)}</th>}
+              {visibleColumns.taskType && <th className="px-4 py-3 whitespace-nowrap border-b border-slate-200 sticky top-0 z-10 bg-white">
                 <SearchableMultiSelect
                   variant="inline"
                   label="Task Type"
@@ -225,7 +223,7 @@ export default function TeamTasksTable({
                   panelWidth={220}
                 />
               </th>}
-              {visibleColumns.date && <th className="px-4 py-3 border-b border-slate-200 sticky top-0 z-10 bg-white" title="Earliest task date in this agent's queue">Date</th>}
+              {visibleColumns.date && <th className="px-4 py-3 whitespace-nowrap border-b border-slate-200 sticky top-0 z-10 bg-white" title="Earliest task date in this agent's queue">Date</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 text-xs">
@@ -246,8 +244,8 @@ export default function TeamTasksTable({
             ) : (
               pageRows.map(r => (
                 <tr key={r.name} className="hover:bg-slate-50/60 transition-colors">
-                  {visibleColumns.team && <td className="px-4 py-3.5 text-slate-800 font-medium truncate" title={r.name}>{r.name}</td>}
-                  {visibleColumns.count && <td className="px-4 py-3.5 text-slate-800 tabular-nums">
+                  {visibleColumns.team && <td className="px-4 py-3 text-slate-800 font-medium [overflow-wrap:anywhere]" title={r.name}>{r.name}</td>}
+                  {visibleColumns.count && <td className="px-4 py-3 text-slate-800 tabular-nums">
                     {/* Opens this member's task list — same tab + task type, so it lists exactly what was counted */}
                     {r.count > 0 ? (
                       <Link
@@ -259,8 +257,8 @@ export default function TeamTasksTable({
                       </Link>
                     ) : r.count}
                   </td>}
-                  {visibleColumns.taskType && <td className="px-4 py-3.5 text-slate-800 truncate" title={taskTypeLabel}>{taskTypeLabel}</td>}
-                  {visibleColumns.date && <td className="px-4 py-3.5 text-slate-800 tabular-nums">{r.earliest ? formatDate(r.earliest) : "—"}</td>}
+                  {visibleColumns.taskType && <td className="px-4 py-3 text-slate-800 [overflow-wrap:anywhere]" title={taskTypeLabel}>{taskTypeLabel}</td>}
+                  {visibleColumns.date && <td className="px-4 py-3 text-slate-800 tabular-nums">{r.earliest ? formatDate(r.earliest) : "—"}</td>}
                 </tr>
               ))
             )}

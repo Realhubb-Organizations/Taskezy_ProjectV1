@@ -30,6 +30,7 @@ export async function listLeads(caller: AccessTokenPayload, filter: {
   dateFrom?: string;
   dateTo?: string;
   search?: string;
+  excludeBulkUpload?: boolean;
 }) {
   const scopedToAgentId = scopeForCaller(caller);
   const { rows, totalCount } = await repo.findMany({
@@ -41,6 +42,7 @@ export async function listLeads(caller: AccessTokenPayload, filter: {
     dateFrom: filter.dateFrom,
     dateTo: filter.dateTo,
     search: filter.search,
+    excludeBulkUpload: filter.excludeBulkUpload,
     scopedToAgentId
   });
   return {
@@ -98,6 +100,7 @@ export async function getLeadStats(caller: AccessTokenPayload, filter: {
   dateFrom?: string;
   dateTo?: string;
   search?: string;
+  excludeBulkUpload?: boolean;
 }): Promise<LeadSummaryStats> {
   const scopedToAgentId = scopeForCaller(caller);
   const grouped = await repo.getStats({
@@ -107,6 +110,7 @@ export async function getLeadStats(caller: AccessTokenPayload, filter: {
     dateFrom: filter.dateFrom,
     dateTo: filter.dateTo,
     search: filter.search,
+    excludeBulkUpload: filter.excludeBulkUpload,
     scopedToAgentId
   });
 
@@ -367,6 +371,14 @@ export async function bulkImportLeads(_caller: AccessTokenPayload, input: BulkIm
 // be left showing a stale "Qualified" from a prior Connected visit.
 const VALID_SUB_STATUSES = new Set(["Qualified", "Not Qualified"]);
 
+/** A lead's status can be changed by the agent it's assigned to, that agent's manager, or an admin. */
+async function assertStatusChangeAllowed(caller: AccessTokenPayload, assignedAgentId: string): Promise<void> {
+  if (caller.role === "ADMIN" || assignedAgentId === caller.sub) return;
+  const owner = await usersRepo.findById(assignedAgentId);
+  if (owner?.manager_id === caller.sub) return;
+  throw ApiError.forbidden("Only the lead's owner, their manager or an admin can change its status.");
+}
+
 export async function updateLeadStatus(
   caller: AccessTokenPayload,
   leadId: string,
@@ -377,6 +389,7 @@ export async function updateLeadStatus(
   const scopedToAgentId = scopeForCaller(caller);
   const existing = await repo.findById(leadId, scopedToAgentId);
   if (!existing) throw ApiError.notFound("Lead not found");
+  await assertStatusChangeAllowed(caller, existing.assigned_agent_id);
 
   const stampFirstResponse = existing.status_code === "NEW"; // first-ever status change
 

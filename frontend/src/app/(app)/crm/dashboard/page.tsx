@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import Link from "next/link";
 import { useApp, Lead } from "@/context/AppContext";
+import { useDialog } from "@/components/ui/DialogProvider";
 import AddLeadModal from "@/components/crm/AddLeadModal";
 import LeadDrillDownPanel, { LeadQuickViewDrawer, useLeadStatusChange } from "@/components/crm/LeadDrillDownPanel";
 import TeamTasksTable, { TeamTaskTab } from "@/components/dashboard/TeamTasksTable";
@@ -22,6 +23,7 @@ import { DateRangeValue, toIsoDate } from "@/components/ui/DateRangePicker";
 // real path, alongside /hrms/dashboard and /finance/dashboard.
 export default function CrmDashboardPage() {
   const { leads, properties, users, currentUser, addLead, followupCalls, isDataLoading } = useApp();
+  const { toast } = useDialog();
 
   const [dateRange, setDateRange] = useState<"today" | "yesterday" | "week" | "month" | "all" | "custom">("today");
   // The range picked via the Date Range dropdown's "Custom" option.
@@ -158,12 +160,12 @@ export default function CrmDashboardPage() {
       setUploadMsg(`Successfully ingested lead for: ${data.name}`);
       setTimeout(() => setUploadMsg(""), 4000);
     } else {
-      alert(`Ingestion failed: ${res.error}`);
+      toast(`Ingestion failed: ${res.error}`, "error");
     }
   };
 
   const handleUploadBulkLeads = (data: { assignmentMode: "project" | "agent"; target: string; fileName: string }) => {
-    alert(`Bulk Import Started!\nFile: ${data.fileName}\nAssignment Mode: ${data.assignmentMode} (${data.target})\nProcessing rows...`);
+    toast(`Bulk import started for ${data.fileName} (${data.assignmentMode}: ${data.target}).`, "info");
     setIsUploadOpen(false);
   };
 
@@ -175,9 +177,9 @@ export default function CrmDashboardPage() {
       <div className="flex justify-end">
         <button
           onClick={() => setIsUploadOpen(true)}
-          className="inline-flex items-center gap-1.5 bg-[#0B0447] hover:opacity-90 text-white px-4 py-2 rounded-xl text-xs font-semibold transition-all shadow-md shrink-0"
+          className="inline-flex items-center justify-center gap-2 h-9 px-3.5 bg-[#0B0447] hover:opacity-90 text-white rounded-xl text-xs font-bold transition-all shadow-md shrink-0"
         >
-          <Plus className="h-3.5 w-3.5" />
+          <Plus className="h-4 w-4" />
           Upload Leads
         </button>
       </div>

@@ -40,7 +40,8 @@ export async function createNotification(input: CreateNotificationInput): Promis
 export const LEAD_ACTIVITY_CATEGORIES = ["REMINDER", "MISSED_SLA", "GENERAL", "REASSIGNMENT", "KYC"] as const;
 
 // SQL condition matching an informational row — the negation of "lead-linked activity alert".
-export const INFORMATIONAL_SQL = `NOT (lead_id IS NOT NULL AND category = ANY('{${LEAD_ACTIVITY_CATEGORIES.join(",")}}'::text[]))`;
+// category is the notification_category enum in production; compare as text.
+export const INFORMATIONAL_SQL = `NOT (lead_id IS NOT NULL AND category::text = ANY('{${LEAD_ACTIVITY_CATEGORIES.join(",")}}'::text[]))`;
 
 /**
  * Deletes a lead's activity alerts for every recipient (the agent and any
@@ -53,7 +54,7 @@ export async function deleteLeadActivityNotifications(
   categories: readonly string[] = LEAD_ACTIVITY_CATEGORIES
 ): Promise<void> {
   try {
-    await pool.query(`DELETE FROM notifications WHERE lead_id = $1 AND category = ANY($2::text[])`, [leadId, categories]);
+    await pool.query(`DELETE FROM notifications WHERE lead_id = $1 AND category::text = ANY($2::text[])`, [leadId, categories]);
   } catch (err) {
     logger.warn({ errCode: (err as { code?: string }).code, leadId }, "Could not delete a lead's activity notifications");
   }

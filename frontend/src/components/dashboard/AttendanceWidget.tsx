@@ -2,6 +2,7 @@ import React from "react";
 import { Users, CheckCircle, Clock, Calendar, ShieldAlert } from "lucide-react";
 import SubActionsMenu, { ActionItem } from "./SubActionsMenu";
 import { useRouter } from "next/navigation";
+import { useDialog } from "@/components/ui/DialogProvider";
 import { User, TimesheetLog } from "@/context/AppContext";
 import { todayIso } from "@/components/ui/DateRangePicker";
 
@@ -12,6 +13,7 @@ interface AttendanceWidgetProps {
 
 export default function AttendanceWidget({ users, timesheets }: AttendanceWidgetProps) {
   const router = useRouter();
+  const { toast } = useDialog();
 
   const handleWidgetRedirect = () => {
     router.push("/dashboard/hrms?tab=attendance");
@@ -20,7 +22,7 @@ export default function AttendanceWidget({ users, timesheets }: AttendanceWidget
   const getSubActions = (): ActionItem[] => [
     { label: "View Attendance Roster", href: "/dashboard/hrms?tab=attendance" },
     { label: "View Roster Directory", href: "/dashboard/hrms?tab=teams" },
-    { label: "Trigger Geofence Check", onClick: () => alert("Testing geofencing audit checks...") }
+    { label: "Trigger Geofence Check", onClick: () => toast("Testing geofencing audit checks...", "info") }
   ];
 
   const employeeList = users.filter(u => u.role !== "ADMIN");

@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { X, Upload, FileSpreadsheet, Info, Download, Plus, Trash2 } from "lucide-react";
 import { PlatformLabel } from "@/components/icons/ContactIcons";
 import { SearchableSelect } from "@/components/ui/SearchableDropdown";
+import { useDialog } from "@/components/ui/DialogProvider";
 
 const BASE_LEAD_SOURCES = ["Meta Ads", "Google Ads", "Referral Code", "Offline Event", "Direct Walkin"];
 const CUSTOM_LEAD_SOURCES_KEY = "taskezy_custom_lead_sources";
@@ -36,6 +37,7 @@ export default function AddLeadModal({
   agentsList,
   propertiesList
 }: AddLeadModalProps) {
+  const { toast } = useDialog();
   const [activeTab, setActiveTab] = useState<"manual" | "bulk">("manual");
 
   // Tab 1 Form State
@@ -120,7 +122,7 @@ export default function AddLeadModal({
   const handleManualSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name || !phone) {
-      alert("Name and Phone are required.");
+      toast("Name and Phone are required.", "warning");
       return;
     }
     onSubmitManual({ name, phone, email, agent, source, property, note });
@@ -134,7 +136,7 @@ export default function AddLeadModal({
   const handleBulkSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!uploadedFile) {
-      alert("Please upload a lead spreadsheet file first.");
+      toast("Please upload a lead spreadsheet file first.", "warning");
       return;
     }
     onSubmitBulk({ assignmentMode: bulkMode, target: bulkTarget, fileName: uploadedFile });
@@ -166,7 +168,7 @@ export default function AddLeadModal({
   };
 
   const triggerDownloadTemplate = () => {
-    alert("Downloading Excel spreadsheet template sheet: taskezy_bulk_leads_v2.xlsx...");
+    toast("Downloading Excel spreadsheet template sheet: taskezy_bulk_leads_v2.xlsx...", "info");
   };
 
   // Rendered via a portal straight into <body>: this component's caller
@@ -351,13 +353,13 @@ export default function AddLeadModal({
                 <button
                   type="button"
                   onClick={onClose}
-                  className="flex-1 sm:flex-none sm:px-8 bg-slate-100 border border-slate-200 text-slate-750 font-bold px-4 py-2.5 rounded-xl text-xs hover:bg-slate-200 transition-colors"
+                  className="flex-1 sm:flex-none bg-slate-100 border border-slate-200 text-slate-750 font-bold px-5 py-2 rounded-xl text-sm hover:bg-slate-200 transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 sm:flex-none sm:px-8 sm:ml-auto bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold px-4 py-2.5 rounded-xl text-xs transition-all shadow-md shadow-[#0B1E6E]/10"
+                  className="flex-1 sm:flex-none sm:ml-auto bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold px-5 py-2 rounded-xl text-sm transition-all shadow-md shadow-[#0B1E6E]/10"
                 >
                   Save Lead Profile
                 </button>
@@ -500,13 +502,13 @@ export default function AddLeadModal({
                 <button
                   type="button"
                   onClick={onClose}
-                  className="flex-1 sm:flex-none sm:px-8 bg-slate-100 border border-slate-200 text-slate-750 font-bold px-4 py-2.5 rounded-xl text-xs hover:bg-slate-200 transition-colors"
+                  className="flex-1 sm:flex-none bg-slate-100 border border-slate-200 text-slate-750 font-bold px-5 py-2 rounded-xl text-sm hover:bg-slate-200 transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 sm:flex-none sm:px-8 sm:ml-auto bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold px-4 py-2.5 rounded-xl text-xs transition-all shadow-md shadow-[#0B1E6E]/10"
+                  className="flex-1 sm:flex-none sm:ml-auto bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold px-5 py-2 rounded-xl text-sm transition-all shadow-md shadow-[#0B1E6E]/10"
                 >
                   Import Leads Database
                 </button>

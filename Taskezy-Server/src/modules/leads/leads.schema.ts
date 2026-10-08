@@ -41,7 +41,10 @@ export const listLeadsQuerySchema = z.object({
   // (today/yesterday/week/month/custom) before sending the request.
   dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateFrom must be YYYY-MM-DD").optional(),
   dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateTo must be YYYY-MM-DD").optional(),
-  search: z.string().trim().max(200).optional()
+  search: z.string().trim().max(200).optional(),
+  // "true" leaves out Data Calling leads (source "Bulk Upload"), which only
+  // show on the Data Calling page until they're qualified.
+  excludeBulkUpload: z.enum(["true", "false"]).optional().transform(v => v === "true")
 });
 
 // Same filter shape as listLeadsQuerySchema (status/assignedAgentId/campaign/
