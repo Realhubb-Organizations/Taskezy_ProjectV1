@@ -1438,7 +1438,7 @@ export default function LeadDashboard() {
                           )}
                           {isAdmin && adminVisibleColumns.campaign && (
                             <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]" title={l.campaign || "—"}>
-                              {l.campaign ? <PlatformLabel text={l.campaign} classifyBy={l.source || l.campaign} /> : "—"}
+                              {l.campaign ? <PlatformLabel text={l.campaign} classifyBy={l.source || l.campaign} wrap /> : "—"}
                             </td>
                           )}
                           {adminVisibleColumns.notes && (
@@ -1863,7 +1863,7 @@ export default function LeadDashboard() {
                                 <td className="px-4 py-3 text-slate-600 align-top"><div className="line-clamp-3 [overflow-wrap:anywhere]" title={adminLatestLogMessage(l)}>{adminLatestLogMessage(l)}</div></td>
                                 <td className="px-4 py-3 text-slate-500 align-top"><NextCallCell next={adminNextCallDateFor(l.id)} /></td>
                                 <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]" title={l.campaign || "—"}>
-                              {l.campaign ? <PlatformLabel text={l.campaign} classifyBy={l.source || l.campaign} /> : "—"}
+                              {l.campaign ? <PlatformLabel text={l.campaign} classifyBy={l.source || l.campaign} wrap /> : "—"}
                             </td>
                               </tr>
                             )))}

@@ -76,12 +76,15 @@ export function PlatformLabel({
   text,
   classifyBy,
   className,
-  iconOnly = false
+  iconOnly = false,
+  wrap = false
 }: {
   text: string;
   classifyBy?: string;
   className?: string;
   iconOnly?: boolean;
+  /** Wrap long text onto more lines inside its container instead of cutting it off. */
+  wrap?: boolean;
 }) {
   const platform = platformFromText(classifyBy ?? text);
   if (iconOnly && platform) {
@@ -90,6 +93,16 @@ export function PlatformLabel({
         {platform === "Meta" && <MetaIcon className="h-4 w-4 shrink-0" />}
         {platform === "Google" && <GoogleIcon className="h-4 w-4 shrink-0" />}
         {platform === "Excel" && <ExcelIcon className="h-4 w-4 shrink-0" />}
+      </span>
+    );
+  }
+  if (wrap) {
+    return (
+      <span className={`flex items-start gap-1.5 min-w-0 max-w-full ${className || ""}`}>
+        {platform === "Meta" && <MetaIcon className="h-3.5 w-3.5 shrink-0 mt-0.5" />}
+        {platform === "Google" && <GoogleIcon className="h-3.5 w-3.5 shrink-0 mt-0.5" />}
+        {platform === "Excel" && <ExcelIcon className="h-3.5 w-3.5 shrink-0 mt-0.5" />}
+        <span className="min-w-0 [overflow-wrap:anywhere]">{text}</span>
       </span>
     );
   }
