@@ -34,13 +34,12 @@ import {
   Phone,
   HelpCircle,
   Video,
-  LifeBuoy,
   Calendar,
   PanelLeftClose,
   PanelLeftOpen
 } from "lucide-react";
 
-// Organization + Help & Support / CRM Tutorials / Contact Support are hidden
+// Organization + Help & Support / CRM Tutorials are hidden
 // from the sidebar (desktop and mobile) for now — flip to true to bring them back.
 const SHOW_SIDEBAR_EXTRA_LINKS = false;
 
@@ -429,7 +428,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                             onClick={() => setActiveSystem(group.key)}
                             className={`flex items-center px-3 py-2 text-xs font-bold rounded-lg transition-all duration-200 ${
                               isActive
-                                ? "bg-brand-700 text-white shadow-sm"
+                                ? "bg-[#0B1E6E] text-white shadow-sm"
                                 : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
                             }`}
                           >
@@ -471,7 +470,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                     title={item.name}
                     className={`flex items-center text-xs font-bold rounded-lg transition-all duration-200 ${
                       isSidebarCollapsed ? "justify-center py-2" : "px-4 py-2"
-                    } ${isActive ? "bg-brand-700 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"}`}
+                    } ${isActive ? "bg-[#0B1E6E] text-white shadow-sm" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"}`}
                   >
                     <item.icon className={`h-4 w-4 ${isSidebarCollapsed ? "" : "mr-2.5"} ${isActive ? "text-white" : "text-slate-400"}`} />
                     {!isSidebarCollapsed && item.name}
@@ -494,13 +493,6 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                 className={`w-full flex items-center hover:text-slate-800 transition-colors ${isSidebarCollapsed ? "justify-center py-2" : "px-4 py-1.5"}`}
               >
                 <Video className={`h-3.5 w-3.5 ${isSidebarCollapsed ? "" : "mr-2"}`} /> {!isSidebarCollapsed && "CRM Tutorials"}
-              </button>
-              <button
-                onClick={() => setActiveModal("contact")}
-                title="Contact Support"
-                className={`w-full flex items-center hover:text-slate-800 transition-colors ${isSidebarCollapsed ? "justify-center py-2" : "px-4 py-1.5"}`}
-              >
-                <LifeBuoy className={`h-3.5 w-3.5 ${isSidebarCollapsed ? "" : "mr-2"}`} /> {!isSidebarCollapsed && "Contact Support"}
               </button>
             </div>
             </>)}
@@ -544,7 +536,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                 onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
                 className="flex items-center justify-center sm:justify-start gap-1.5 min-h-10 min-w-10 sm:min-h-0 sm:min-w-0"
               >
-                <span className="h-8 w-8 rounded-full bg-brand-800 text-white text-xs font-bold flex items-center justify-center shrink-0">
+                <span className="h-8 w-8 rounded-full bg-[#0B1E6E] text-white text-xs font-bold flex items-center justify-center shrink-0">
                   {initialsFor(currentUser?.name)}
                 </span>
                 <ChevronDown className={`h-3.5 w-3.5 text-slate-400 transition-transform duration-200 hidden sm:block ${isUserMenuOpen ? "rotate-180" : ""}`} />
@@ -663,7 +655,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                                 key={item.name}
                                 href={item.href}
                                 className={`flex items-center min-h-10 sm:min-h-0 px-3 py-2 text-xs font-semibold rounded-lg ${
-                                  isActive ? "bg-brand-700 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50"
+                                  isActive ? "bg-[#0B1E6E] text-white shadow-sm" : "text-slate-500 hover:bg-slate-50"
                                 }`}
                                 onClick={() => {
                                   setActiveSystem(group.key);
@@ -704,7 +696,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                           key={item.name}
                           href={item.href}
                           className={`flex items-center min-h-10 sm:min-h-0 px-4 py-1.5 text-xs font-semibold rounded-lg ${
-                            isActive ? "bg-brand-700 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50"
+                            isActive ? "bg-[#0B1E6E] text-white shadow-sm" : "text-slate-500 hover:bg-slate-50"
                           }`}
                           onClick={() => setIsMobileMenuOpen(false)}
                         >
@@ -730,12 +722,6 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                     className="w-full flex items-center min-h-10 sm:min-h-0 px-4 py-1.5 hover:text-slate-800 transition-colors"
                   >
                     <Video className="mr-2 h-3.5 w-3.5" /> CRM Tutorials
-                  </button>
-                  <button
-                    onClick={() => setActiveModal("contact")}
-                    className="w-full flex items-center min-h-10 sm:min-h-0 px-4 py-1.5 hover:text-slate-800 transition-colors"
-                  >
-                    <LifeBuoy className="mr-2 h-3.5 w-3.5" /> Contact Support
                   </button>
                 </div>
                 )}
@@ -803,7 +789,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                 >
                   <span
                     className={`h-14 w-14 rounded-full flex items-center justify-center text-white shadow-lg ring-4 ring-white ${
-                      isActive ? "bg-brand-800" : "bg-brand-700"
+                      isActive ? "bg-[#081650]" : "bg-[#0B1E6E]"
                     }`}
                   >
                     <mobileDashboardItem.icon className="h-6 w-6" />
@@ -859,7 +845,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                 <div className="pt-2">
                   <Link
                     href="/home"
-                    className="bg-brand-700 hover:bg-brand-600 text-white font-bold px-4 py-2.5 rounded-lg text-xs transition-all shadow-md shadow-brand-700/10"
+                    className="bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold px-4 py-2.5 rounded-lg text-xs transition-all shadow-md"
                   >
                     Return to Home
                   </Link>

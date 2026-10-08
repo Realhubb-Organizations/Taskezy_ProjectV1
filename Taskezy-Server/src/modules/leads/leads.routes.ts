@@ -11,6 +11,7 @@ import {
   leadStatsQuerySchema,
   listLeadsQuerySchema,
   reassignLeadSchema,
+  updateLeadNoteSchema,
   updateLeadStatusSchema
 } from "./leads.schema";
 import {
@@ -24,6 +25,7 @@ import {
   getLeadStatsHandler,
   listLeadsHandler,
   reassignLeadHandler,
+  updateLeadNoteHandler,
   reassignUnassignedSheetLeadsHandler,
   updateLeadStatusHandler,
   verifyLeadKycHandler
@@ -72,6 +74,12 @@ leadsRouter.patch(
 // who can reassign to whom based on reporting line (ADMIN: anyone; Manager:
 // own reports; Member: teammates under the same manager). Delete stays
 // ADMIN-only — genuinely destructive, no equivalent scoped-down case for it.
+// Owner, their manager or an admin (enforced in leads.service.ts).
+leadsRouter.patch(
+  "/:id/notes",
+  validate({ params: leadIdParamSchema, body: updateLeadNoteSchema }),
+  asyncHandler(updateLeadNoteHandler)
+);
 leadsRouter.patch(
   "/:id/reassign",
   validate({ params: leadIdParamSchema, body: reassignLeadSchema }),

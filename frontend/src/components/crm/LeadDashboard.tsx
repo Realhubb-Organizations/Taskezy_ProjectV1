@@ -4,22 +4,26 @@ import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useApp, Lead, LeadStatus, mapApiLeadToFrontendLead } from "@/context/AppContext";
+import { useDialog } from "@/components/ui/DialogProvider";
 import { Sliders, Sparkles, Plus, Check, ChevronDown, Search, X, Minus, Download, RotateCcw, Users, Trash2, AlertTriangle } from "lucide-react";
 import { STATUS_OPTIONS, frontendStatusToDbCode } from "@/lib/leadStatusMapping";
 import { type LeadSummaryStats } from "@/lib/leadSummaryStats";
-import { apiListLeadsPage, apiGetLeadStats, apiDeleteLead, apiBulkDeleteLeads, type LeadListFilters } from "@/lib/apiClient";
+import { apiListLeadsPage, apiGetLeadStats, apiDeleteLead, apiBulkDeleteLeads, apiReassignLead, apiUpdateLeadStatus, type LeadListFilters } from "@/lib/apiClient";
 import { WhatsAppIcon, CallIcon, PlatformLabel } from "@/components/icons/ContactIcons";
 import { LineSkeleton, TableRowsSkeleton } from "@/components/ui/Skeletons";
 import Tooltip from "@/components/ui/Tooltip";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
-import { eligibleAssignees, isUnassignedLead } from "@/lib/leadAssignment";
+import { canChangeLeadStatus, eligibleAssignees, isUnassignedLead, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
 import DateRangePicker, { type DateRangeValue, todayIso } from "@/components/ui/DateRangePicker";
 import DateRangeSelect from "@/components/ui/DateRangeSelect";
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
 import AddLeadModal from "./AddLeadModal";
 import LeadDetailDrawer from "./LeadDetailDrawer";
 import LeadDrillDownPanel from "./LeadDrillDownPanel";
-import { toast } from "@/lib/toast";
+import { DateTimeLines, dateTimeParts } from "@/components/ui/DateTimeLines";
+import { nextFollowupFor } from "@/lib/followups";
+import NextCallCell from "./NextCallCell";
+import LeadNoteCell from "./LeadNoteCell";
 
 // The admin leads table's togglable columns (beyond the always-shown Lead
 // Name/Email/Assigned To) — driven by the Filter panel's Settings modal.
@@ -32,17 +36,17 @@ type AdminColumnKey =
   | "notes" | "propertyMatch";
 
 const ADMIN_COLUMNS: { key: AdminColumnKey; label: string; width: number }[] = [
-  { key: "date", label: "Date", width: 140 },
-  { key: "property", label: "Property", width: 150 },
-  { key: "reassignedTo", label: "Reassign From", width: 140 },
-  { key: "source", label: "Source", width: 130 },
+  { key: "date", label: "Date", width: 130 },
+  { key: "property", label: "Property", width: 170 },
+  { key: "reassignedTo", label: "Reassign From", width: 160 },
+  { key: "source", label: "Source", width: 170 },
   { key: "leadScore", label: "Lead Score", width: 100 },
-  { key: "status", label: "Status", width: 130 },
-  { key: "nextCallDate", label: "Next Call Date", width: 150 },
-  { key: "actions", label: "Actions", width: 100 },
-  { key: "adSetName", label: "Ad Set Name", width: 150 },
-  { key: "campaign", label: "Campaign", width: 150 },
-  { key: "notes", label: "Notes", width: 200 },
+  { key: "status", label: "Status", width: 150 },
+  { key: "nextCallDate", label: "Next Call Date", width: 130 },
+  { key: "actions", label: "Actions", width: 120 },
+  { key: "adSetName", label: "Ad Set Name", width: 170 },
+  { key: "campaign", label: "Campaign", width: 170 },
+  { key: "notes", label: "Notes", width: 240 },
   { key: "propertyMatch", label: "Property Match", width: 140 }
 ];
 
@@ -121,6 +125,7 @@ export default function LeadDashboard() {
     leadsChangedSignal,
     removeLeadsLocally
   } = useApp();
+  const { toast, prompt: promptDialog } = useDialog();
 
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -180,15 +185,20 @@ export default function LeadDashboard() {
     .filter(u => u.department === "SALES" && u.status !== "INACTIVE")
     .map(u => u.name);
 
-  const handleUpdateLeadStatus = (leadId: string, status: LeadStatus) => {
+  const handleUpdateLeadStatus = async (leadId: string, status: LeadStatus) => {
     // Booking a lead auto-generates a real invoice using this deal value as
     // the base amount (see AppContext's updateLeadStatus) — a real value is
     // required here, not a hardcoded ₹5,00,000 regardless of the actual deal.
     if (status === "Booking Done" || status === "Booking Approved" || status === "Booked") {
-      const input = prompt("Enter the real deal value for this booking (INR):");
+      const input = await promptDialog({
+        title: "Enter deal value",
+        message: "Enter the real deal value for this booking (INR):",
+        label: "Deal value (INR)",
+        confirmLabel: "Mark as Booked"
+      });
       const dealValue = input ? parseFloat(input.replace(/[^0-9.]/g, "")) : NaN;
       if (!input || isNaN(dealValue) || dealValue <= 0) {
-        toast.error("Missing details", "A valid deal value is required to mark a lead as Booked.");
+        toast("A valid deal value is required to mark a lead as Booked.", "warning");
         return;
       }
       updateLeadStatus(leadId, status, dealValue);
@@ -210,7 +220,22 @@ export default function LeadDashboard() {
   // Per-row Status editor cell — the shared searchable single-select (the
   // full status list runs ~18 options deep). Shared by the main Leads table
   // and the Analytics drilldown table.
+  // Clicking anywhere on a row opens the lead, except on the row's own controls
+  // (checkbox, status dropdown, WhatsApp/Call/Delete) or while selecting text.
+  // React events from portaled dropdown panels still bubble here, so anything
+  // outside the row's own DOM is ignored too.
+  const handleLeadRowClick = (e: React.MouseEvent<HTMLTableRowElement>, lead: Lead) => {
+    const target = e.target as HTMLElement;
+    if (!e.currentTarget.contains(target)) return;
+    if (target.closest("button, a, input, select, textarea, label, [role='button'], [role='combobox'], [role='listbox']")) return;
+    if (window.getSelection()?.toString()) return;
+    setSelectedLead(lead);
+  };
+
   const renderStatusCell = (l: Lead) => {
+    if (!canChangeLeadStatus(l, currentUser, users)) {
+      return <span className="inline-block max-w-[110px] text-[11px] text-slate-700" title={STATUS_LOCKED_HINT}>{l.status}</span>;
+    }
     const allOptions = STATUS_OPTIONS.includes(l.status) ? STATUS_OPTIONS : [l.status, ...STATUS_OPTIONS];
     return (
       <SearchableSelect
@@ -250,7 +275,7 @@ export default function LeadDashboard() {
       setSuccessMsg(`Successfully ingested lead for: ${data.name}`);
       setTimeout(() => setSuccessMsg(""), 4000);
     } else {
-      toast.error("Ingestion failed", res.error);
+      toast(`Ingestion failed: ${res.error}`, "error");
     }
   };
 
@@ -263,7 +288,7 @@ export default function LeadDashboard() {
     // Jasprit Bumrah) into the real database on every click, regardless of
     // the file's actual contents, and then claim the import succeeded.
     // Bulk CSV/XLSX parsing isn't wired to a real backend endpoint yet.
-    toast.info("Bulk import not available", "Bulk import isn't wired up to a real backend yet — please use Manual Ingestion Entry for now.");
+    toast("Bulk import isn't wired up to a real backend yet — please use Manual Ingestion Entry for now.", "info");
     setIsAddOpen(false);
   };
 
@@ -403,7 +428,9 @@ export default function LeadDashboard() {
       campaign: adminCampaignFilter.length > 0 ? adminCampaignFilter : undefined,
       dateFrom,
       dateTo,
-      search: debouncedAdminSearch || undefined
+      search: debouncedAdminSearch || undefined,
+      // Data Calling leads stay on the Data Calling page until qualified.
+      excludeBulkUpload: true
     };
   };
 
@@ -626,22 +653,13 @@ export default function LeadDashboard() {
     dateInRange(dateStr, range, refNow, adminCustomRange);
 
   const adminSortedLogs = (l: Lead) => [...(l.logs || [])].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-  const adminLatestLogMessage = (l: Lead): string => {
-    const logs = adminSortedLogs(l);
-    return logs.length > 0 ? logs[0].message : "No feedback yet";
-  };
   const adminFormatDateTime = (iso: string | undefined): string => {
     if (!iso) return "—";
     const d = new Date(iso);
     if (isNaN(d.getTime())) return iso;
     return d.toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
   };
-  const adminNextCallDateFor = (leadId: string): string => {
-    const upcoming = followupCalls
-      .filter(c => c.leadId === leadId && c.status === "Upcoming")
-      .sort((a, b) => new Date(`${a.date}T${a.time}`).getTime() - new Date(`${b.date}T${b.time}`).getTime());
-    return upcoming.length > 0 ? `${upcoming[0].date} ${upcoming[0].time}` : "—";
-  };
+  const adminNextCallDateFor = (leadId: string) => nextFollowupFor(leadId, followupCalls);
 
   // The Campaigns quick-filter (adminCampaignFilter) narrows these same 7
   // stat cards down to whichever campaign(s) are selected.
@@ -711,27 +729,36 @@ export default function LeadDashboard() {
   // ---- Bulk Assign / Reshuffle (Admin + Manager) ----
   // "Assign" appears once the selection holds an unassigned lead, "Reshuffle"
   // once it holds an already-assigned one — same split as Data Calling.
-  const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
-  const toggleLeadSelection = (id: string) => setSelectedLeadIds(prev => {
-    const next = new Set(prev);
-    if (next.has(id)) next.delete(id); else next.add(id);
+  // Keyed by id, holding the selected table rows themselves, so Assign/
+  // Reshuffle work on exactly the leads that were ticked (on any page).
+  const [selectedLeads, setSelectedLeads] = useState<Map<string, Lead>>(new Map());
+  const toggleLeadSelection = (lead: Lead) => setSelectedLeads(prev => {
+    const next = new Map(prev);
+    if (next.has(lead.id)) next.delete(lead.id); else next.set(lead.id, lead);
+    return next;
+  });
+  const clearSelected = (ids: string[]) => setSelectedLeads(prev => {
+    const next = new Map(prev);
+    ids.forEach(id => next.delete(id));
     return next;
   });
   // serverLeads already *is* the current page — no slicing needed anymore.
   const currentPageLeads = serverLeads;
-  const allOnPageSelected = currentPageLeads.length > 0 && currentPageLeads.every(l => selectedLeadIds.has(l.id));
-  const toggleSelectAllOnPage = () => setSelectedLeadIds(prev => {
-    const next = new Set(prev);
+  const allOnPageSelected = currentPageLeads.length > 0 && currentPageLeads.every(l => selectedLeads.has(l.id));
+  const toggleSelectAllOnPage = () => setSelectedLeads(prev => {
+    const next = new Map(prev);
     if (allOnPageSelected) currentPageLeads.forEach(l => next.delete(l.id));
-    else currentPageLeads.forEach(l => next.add(l.id));
+    else currentPageLeads.forEach(l => next.set(l.id, l));
     return next;
   });
-  const selectedUnassignedLeads = scopedLeads.filter(l => selectedLeadIds.has(l.id) && isUnassignedLead(l));
-  const selectedAssignedLeads = scopedLeads.filter(l => selectedLeadIds.has(l.id) && !isUnassignedLead(l));
+  const selectedLeadList = Array.from(selectedLeads.values());
+  const selectedUnassignedLeads = selectedLeadList.filter(l => isUnassignedLead(l));
+  const selectedAssignedLeads = selectedLeadList.filter(l => !isUnassignedLead(l));
 
   const [assignFlowMode, setAssignFlowMode] = useState<"assign" | "reshuffle" | null>(null);
   const [assignPropertyIds, setAssignPropertyIds] = useState<Set<string>>(new Set());
   const [assignAssigneeId, setAssignAssigneeId] = useState("");
+  const [assignNote, setAssignNote] = useState("");
   const flowTargetLeads = assignFlowMode === "reshuffle" ? selectedAssignedLeads : selectedUnassignedLeads;
   const assigneeOptions = eligibleAssignees({
     users,
@@ -740,38 +767,60 @@ export default function LeadDashboard() {
     caller: currentUser,
     targetLeads: flowTargetLeads
   });
-  const canConfirmAssign = assignPropertyIds.size > 0 && !!assignAssigneeId && assigneeOptions.some(u => u.id === assignAssigneeId);
+  const canConfirmAssign = assignPropertyIds.size > 0 && !!assignAssigneeId && assigneeOptions.some(u => u.id === assignAssigneeId) && assignNote.trim().length > 0;
+
+  const [assignSubmitting, setAssignSubmitting] = useState(false);
+  const [assignError, setAssignError] = useState("");
+
+  // Notes column pencil saved a note: patch the table's own copy of the row.
+  const handleNoteSaved = (leadId: string, note: string, updated: Lead | null) => {
+    setServerLeads(prev => prev.map(r => (r.id === leadId ? (updated ? { ...r, ...updated } : { ...r, notes: note }) : r)));
+  };
 
   const openAssignFlow = (mode: "assign" | "reshuffle") => {
+    setAssignNote("");
     setAssignPropertyIds(new Set());
     setAssignAssigneeId("");
+    setAssignError("");
     setAssignFlowMode(mode);
   };
-  const confirmBulkAssign = () => {
+  const closeAssignFlow = () => { if (!assignSubmitting) setAssignFlowMode(null); };
+  const confirmBulkAssign = async () => {
     const assignee = users.find(u => u.id === assignAssigneeId);
-    if (!canConfirmAssign || !assignFlowMode || !assignee) return;
+    if (!canConfirmAssign || !assignFlowMode || !assignee || assignSubmitting) return;
+    const mode = assignFlowMode;
     // The backend rejects moving a lead to the agent who already holds it,
     // so those are skipped rather than sent.
     const toMove = flowTargetLeads.filter(l => l.assignedAgent?.trim().toLowerCase() !== assignee.name.trim().toLowerCase());
-    toMove.forEach(l => {
-      reassignLead(l.id, assignee.name);
-      if (assignFlowMode === "assign" && l.status === "Unassigned") updateLeadStatus(l.id, "New Lead");
-    });
-    setServerLeads(prev => prev.map(l => {
-      const moved = toMove.find(m => m.id === l.id);
-      if (!moved) return l;
-      const becomesNewLead = assignFlowMode === "assign" && moved.status === "Unassigned";
-      return { ...l, assignedAgent: assignee.name, status: becomesNewLead ? "New Lead" : l.status };
-    }));
     const skipped = flowTargetLeads.length - toMove.length;
-    setSelectedLeadIds(prev => {
-      const next = new Set(prev);
-      flowTargetLeads.forEach(l => next.delete(l.id));
-      return next;
-    });
+
+    setAssignSubmitting(true);
+    setAssignError("");
+    const results = await Promise.allSettled(toMove.map(async (l) => {
+      await apiReassignLead(l.id, assignee.id, assignNote.trim());
+      if (mode === "assign" && l.status === "Unassigned") await apiUpdateLeadStatus(l.id, "NEW");
+    }));
+    setAssignSubmitting(false);
+
+    const failed = toMove.filter((_, i) => results[i].status === "rejected");
+    const moved = toMove.length - failed.length;
+    // Drop everything that went through from the selection; failed leads stay
+    // ticked so they can be retried.
+    clearSelected(flowTargetLeads.filter(l => !failed.includes(l)).map(l => l.id));
+    if (moved > 0) setLeadsRefreshKey(k => k + 1);
+
+    if (failed.length > 0) {
+      const firstError = results.find((r): r is PromiseRejectedResult => r.status === "rejected")?.reason;
+      const reason = firstError instanceof Error ? firstError.message : "Please try again.";
+      setAssignError(
+        `${moved > 0 ? `${moved} lead${moved === 1 ? "" : "s"} moved, but ` : ""}` +
+        `${failed.length} could not be ${mode === "reshuffle" ? "reshuffled" : "assigned"}: ${reason}`
+      );
+      return;
+    }
     setAssignFlowMode(null);
     setSuccessMsg(
-      `${assignFlowMode === "reshuffle" ? "Reshuffled" : "Assigned"} ${toMove.length} lead${toMove.length === 1 ? "" : "s"} to ${assignee.name}` +
+      `${mode === "reshuffle" ? "Reshuffled" : "Assigned"} ${moved} lead${moved === 1 ? "" : "s"} to ${assignee.name}` +
       (skipped > 0 ? ` (${skipped} already with ${assignee.name}, skipped)` : "") + "."
     );
     setTimeout(() => setSuccessMsg(""), 4000);
@@ -783,7 +832,7 @@ export default function LeadDashboard() {
   const [deleteError, setDeleteError] = useState("");
   const closeDeleteDialog = () => { if (!deleteSubmitting) { setDeleteTarget(null); setDeleteError(""); } };
   const openSingleDelete = (l: Lead) => { setDeleteError(""); setDeleteTarget({ ids: [l.id], names: [l.name] }); };
-  const openBulkDelete = () => { setDeleteError(""); setDeleteTarget({ ids: Array.from(selectedLeadIds), names: [] }); };
+  const openBulkDelete = () => { setDeleteError(""); setDeleteTarget({ ids: Array.from(selectedLeads.keys()), names: [] }); };
   const confirmDelete = async () => {
     if (!deleteTarget || deleteSubmitting) return;
     setDeleteSubmitting(true);
@@ -804,11 +853,7 @@ export default function LeadDashboard() {
       }
       removeLeadsLocally(removedIds);
       setTimeout(() => setSuccessMsg(""), 4000);
-      setSelectedLeadIds(prev => {
-        const next = new Set(prev);
-        ids.forEach(id => next.delete(id));
-        return next;
-      });
+      clearSelected(ids);
       if (selectedLead && ids.includes(selectedLead.id)) setSelectedLead(null);
       setDeleteTarget(null);
       setLeadsRefreshKey(k => k + 1);
@@ -880,13 +925,14 @@ export default function LeadDashboard() {
   // then their own leads (matched by name, same as everywhere else in this
   // file) are aggregated the same way as the top-level rows.
   const salesTeamUsers = users.filter(u => u.department === "SALES" && u.status !== "INACTIVE");
+  const NO_TEAM_LABEL = "No manager assigned";
 
   // Real per-agent lead-quality breakdown for the Leads Analytics tab — same
   // categorization the stat cards above use, just grouped per agent, plus
   // two real conversion rates derived from those same counts (no new data
   // needed): QL's %age = qualified/total, QL2SV %age = of the qualified
   // leads, what share also reached a site-visit status.
-  const adminAgentBreakdown = agentsList.map(agentName => {
+  const adminManagerRows = agentsList.map(agentName => {
     const agentLeads = analyticsScopedLeads.filter(l => l.assignedAgent === agentName);
     const stats = computeLeadStats(agentLeads);
     const salesUser = salesTeamUsers.find(u => u.name === agentName);
@@ -901,10 +947,29 @@ export default function LeadDashboard() {
       : [];
     const teamTotal = stats.total + directReports.reduce((sum, d) => sum + d.total, 0);
     return { agentName, isManager, directReports, teamTotal, ...stats };
-  }).filter(row =>
-    row.isManager &&
-    (row.total > 0 || row.directReports.some(d => d.total > 0)) &&
-    (!analyticsManagerSearch || row.agentName.toLowerCase().includes(analyticsManagerSearch.toLowerCase()))
+  }).filter(row => row.isManager && (row.total > 0 || row.directReports.some(d => d.total > 0)));
+
+  // Leads held by anyone outside a manager's team (no manager set, an admin,
+  // or a non-sales user) are grouped under one "No manager assigned" row so
+  // they never silently disappear from this table.
+  const teamCoveredNames = new Set(adminManagerRows.flatMap(r => [r.agentName, ...r.directReports.map(d => d.name)]));
+  const noTeamNames = Array.from(new Set(analyticsScopedLeads.map(l => l.assignedAgent).filter(n => n && !teamCoveredNames.has(n))));
+  const noTeamReports = noTeamNames.map(name => ({
+    name,
+    ...computeLeadStats(analyticsScopedLeads.filter(l => l.assignedAgent === name))
+  }));
+  const noTeamRow = noTeamReports.length > 0
+    ? {
+        agentName: NO_TEAM_LABEL,
+        isManager: true,
+        directReports: noTeamReports,
+        teamTotal: noTeamReports.reduce((sum, d) => sum + d.total, 0),
+        ...computeLeadStats(analyticsScopedLeads.filter(l => noTeamNames.includes(l.assignedAgent)))
+      }
+    : null;
+
+  const adminAgentBreakdown = [...adminManagerRows, ...(noTeamRow ? [noTeamRow] : [])].filter(row =>
+    !analyticsManagerSearch || row.agentName.toLowerCase().includes(analyticsManagerSearch.toLowerCase())
   );
 
   const analyticsTotalPages = Math.max(1, Math.ceil(adminAgentBreakdown.length / analyticsRowsPerPage));
@@ -994,7 +1059,7 @@ export default function LeadDashboard() {
               )}
               <button
                 onClick={() => setIsAddOpen(true)}
-                className="inline-flex items-center gap-2 bg-[#0B1E6E] hover:bg-[#081650] text-white px-4 py-2.5 rounded-lg text-xs font-bold transition-all shadow-md cursor-pointer"
+                className="inline-flex items-center justify-center gap-2 h-9 px-3.5 bg-[#0B1E6E] hover:bg-[#081650] text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer"
               >
                 <Plus className="h-4 w-4" />
                 Upload Leads
@@ -1088,53 +1153,55 @@ export default function LeadDashboard() {
                 Custom (it shows the picked dates); the × on the badge
                 reverts it to Today. */}
             <div className="flex flex-wrap justify-end items-center gap-3">
-              {canBulkAssign && selectedUnassignedLeads.length > 0 && (
+              <div className="flex flex-wrap justify-end items-center gap-3">
+                {canBulkAssign && selectedUnassignedLeads.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => openAssignFlow("assign")}
+                    className="inline-flex items-center justify-center gap-2 h-9 px-3.5 border border-slate-200 bg-white rounded-xl text-xs text-slate-700 font-bold shadow-sm hover:bg-slate-50 transition-all"
+                  >
+                    <Users className="h-4 w-4 text-blue-600" />
+                    Assign ({selectedUnassignedLeads.length})
+                  </button>
+                )}
+                {canBulkAssign && selectedAssignedLeads.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => openAssignFlow("reshuffle")}
+                    className="inline-flex items-center justify-center gap-2 h-9 px-3.5 border border-slate-200 bg-white rounded-xl text-xs text-slate-700 font-bold shadow-sm hover:bg-slate-50 transition-all"
+                  >
+                    <Users className="h-4 w-4 text-blue-600" />
+                    Reshuffle ({selectedAssignedLeads.length})
+                  </button>
+                )}
+                {isAdmin && selectedLeads.size > 0 && (
+                  <button
+                    type="button"
+                    onClick={openBulkDelete}
+                    className="inline-flex items-center justify-center gap-2 h-9 px-3.5 border border-slate-200 bg-white rounded-xl text-xs text-red-600 font-bold shadow-sm hover:bg-red-50 transition-all"
+                  >
+                    <Trash2 className="h-4 w-4 text-red-600" />
+                    Delete ({selectedLeads.size})
+                  </button>
+                )}
+                <DateRangePicker
+                  value={adminDateRange === "custom" ? adminCustomRange : null}
+                  onChange={(range) => {
+                    setAdminCustomRange(range);
+                    setAdminDateRange(range ? "custom" : "today");
+                    setAdminPage(1);
+                  }}
+                  emptyLabel={todayStr}
+                />
                 <button
                   type="button"
-                  onClick={() => openAssignFlow("assign")}
-                  className="flex items-center gap-2 border border-slate-200 bg-white rounded-lg px-3 py-1.5 text-xs text-slate-700 font-bold shadow-sm hover:bg-slate-50 transition-all"
+                  onClick={() => setIsColumnsSettingsOpen(true)}
+                  className="inline-flex items-center justify-center gap-2 h-9 px-3.5 border border-slate-200 bg-white rounded-xl text-xs text-slate-700 font-bold shadow-sm hover:bg-slate-50 transition-all"
                 >
-                  <Users className="h-4 w-4 text-blue-600" />
-                  Assign ({selectedUnassignedLeads.length})
+                  <Sliders className="h-4 w-4 text-blue-600" />
+                  Filter
                 </button>
-              )}
-              {canBulkAssign && selectedAssignedLeads.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => openAssignFlow("reshuffle")}
-                  className="flex items-center gap-2 border border-slate-200 bg-white rounded-lg px-3 py-1.5 text-xs text-slate-700 font-bold shadow-sm hover:bg-slate-50 transition-all"
-                >
-                  <Users className="h-4 w-4 text-blue-600" />
-                  Reshuffle ({selectedAssignedLeads.length})
-                </button>
-              )}
-              {isAdmin && selectedLeadIds.size > 0 && (
-                <button
-                  type="button"
-                  onClick={openBulkDelete}
-                  className="flex items-center gap-2 border border-slate-200 bg-white rounded-lg px-3 py-1.5 text-xs text-red-600 font-bold shadow-sm hover:bg-red-50 transition-all"
-                >
-                  <Trash2 className="h-4 w-4 text-red-600" />
-                  Delete ({selectedLeadIds.size})
-                </button>
-              )}
-              <DateRangePicker
-                value={adminDateRange === "custom" ? adminCustomRange : null}
-                onChange={(range) => {
-                  setAdminCustomRange(range);
-                  setAdminDateRange(range ? "custom" : "today");
-                  setAdminPage(1);
-                }}
-                emptyLabel={todayStr}
-              />
-              <button
-                type="button"
-                onClick={() => setIsColumnsSettingsOpen(true)}
-                className="flex items-center gap-2 border border-slate-200 bg-white rounded-lg px-3 py-1.5 text-xs text-slate-700 font-bold shadow-sm hover:bg-slate-50 transition-all"
-              >
-                <Sliders className="h-4 w-4 text-blue-600" />
-                Filter
-              </button>
+              </div>
             </div>
 
             {/* Which stat card's filter is currently applied to the table
@@ -1168,23 +1235,30 @@ export default function LeadDashboard() {
                 scrollable. */}
             <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden">
               <div ref={adminScrollRef} onScroll={handleAdminTableScroll} className="overflow-auto max-h-[70vh]">
-                <table className="w-full text-left border-collapse table-fixed min-w-[1080px]">
+                <table
+                  className="w-full text-left border-collapse table-fixed"
+                  style={{ minWidth: (canBulkAssign ? 44 : 0) + (adminVisibleColumns.actions ? (isAdmin ? 140 : 110) : 0) + (3 + adminVisibleColumnList.filter(c => c.key !== "actions").length) * 150 }}
+                >
                   <colgroup>
                     {/* Bulk-select checkbox (Admin/Manager) */}
-                    {canBulkAssign && <col className="w-[40px]" />}
+                    {canBulkAssign && <col className="w-[44px]" />}
                     {/* Lead Name is sticky left on all sizes; Email and Assigned To scroll */}
-                    <col className="w-[150px]" />
-                    <col className="w-[170px]" />
-                    <col className="w-[130px]" />
-                    {/* Togglable, driven by the Filter panel */}
+                    <col />
+                    <col />
+                    <col />
+                    {/* Togglable, driven by the Filter panel. Data columns share
+                        the remaining width equally; only the icon-only Actions
+                        column gets a fixed width to fit its buttons. */}
                     {adminVisibleColumnList.map(c => (
-                      <col key={c.key} style={{ width: c.width }} />
+                      c.key === "actions"
+                        ? <col key={c.key} className={isAdmin ? "w-[140px]" : "w-[110px]"} />
+                        : <col key={c.key} />
                     ))}
                   </colgroup>
                   <thead className="sticky top-0 z-10 bg-white">
                     <tr className="border-b border-slate-200 text-xs font-bold text-slate-800">
                       {canBulkAssign && (
-                        <th className="pl-4 pr-1 py-2.5">
+                        <th className="pl-4 pr-1 py-3 whitespace-nowrap">
                           <input
                             type="checkbox"
                             checked={allOnPageSelected}
@@ -1194,7 +1268,7 @@ export default function LeadDashboard() {
                           />
                         </th>
                       )}
-                      <th className="px-4 py-2.5 sticky left-0 z-20 bg-white">
+                      <th className="px-4 py-3 whitespace-nowrap sticky left-0 z-20 bg-white">
                         {adminSearchOpen ? (
                           <div className="flex items-center gap-1">
                             <input
@@ -1223,8 +1297,8 @@ export default function LeadDashboard() {
                           </div>
                         )}
                       </th>
-                      <th className="px-4 py-2.5 whitespace-nowrap">Email</th>
-                      <th className="px-4 py-2.5">
+                      <th className="px-4 py-3 whitespace-nowrap">Email</th>
+                      <th className="px-4 py-3 whitespace-nowrap">
                         <SearchableMultiSelect
                           variant="inline"
                           label="Assigned To"
@@ -1237,13 +1311,13 @@ export default function LeadDashboard() {
                       </th>
 
                       {/* Togglable, in the same order as the Filter panel */}
-                      {adminVisibleColumns.date && <th className="px-4 py-2.5 whitespace-nowrap">Date</th>}
-                      {adminVisibleColumns.property && <th className="px-4 py-2.5 whitespace-nowrap">Property</th>}
-                      {adminVisibleColumns.reassignedTo && <th className="px-4 py-2.5 whitespace-nowrap">Reassign From</th>}
-                      {adminVisibleColumns.source && <th className="px-4 py-2.5 whitespace-nowrap">Source</th>}
-                      {adminVisibleColumns.leadScore && <th className="px-4 py-2.5 whitespace-nowrap">Lead Score</th>}
+                      {adminVisibleColumns.date && <th className="px-4 py-3 whitespace-nowrap">Date</th>}
+                      {adminVisibleColumns.property && <th className="px-4 py-3 whitespace-nowrap">Property</th>}
+                      {adminVisibleColumns.reassignedTo && <th className="px-4 py-3 whitespace-nowrap">Reassign From</th>}
+                      {adminVisibleColumns.source && <th className="px-4 py-3 whitespace-nowrap">Source</th>}
+                      {adminVisibleColumns.leadScore && <th className="px-4 py-3 whitespace-nowrap">Lead Score</th>}
                       {adminVisibleColumns.status && (
-                        <th className="px-4 py-2.5">
+                        <th className="px-4 py-3 whitespace-nowrap">
                           <SearchableMultiSelect
                             variant="inline"
                             label="Status"
@@ -1255,26 +1329,14 @@ export default function LeadDashboard() {
                           />
                         </th>
                       )}
-                      {adminVisibleColumns.nextCallDate && <th className="px-4 py-2.5 whitespace-nowrap">Next Call Date</th>}
-                      {adminVisibleColumns.actions && <th className="px-4 py-2.5 text-right whitespace-nowrap">Actions</th>}
-                      {adminVisibleColumns.adSetName && <th className="px-4 py-2.5 whitespace-nowrap">Ad Set Name</th>}
+                      {adminVisibleColumns.nextCallDate && <th className="px-4 py-3 whitespace-nowrap">Next Call Date</th>}
+                      {adminVisibleColumns.actions && <th className="px-4 py-3 text-right whitespace-nowrap">Actions</th>}
+                      {adminVisibleColumns.adSetName && <th className="px-4 py-3 whitespace-nowrap">Ad Set Name</th>}
                       {isAdmin && adminVisibleColumns.campaign && (
-                        <th className="px-4 py-2.5">
-                          <SearchableMultiSelect
-                            variant="inline"
-                            label="Campaign"
-                            options={adminCampaignsList}
-                            selected={adminCampaignFilter}
-                            onChange={(next) => { setAdminPage(1); setAdminCampaignFilter(next); }}
-                            searchPlaceholder="Search campaigns..."
-                            renderLabel={(l) => <PlatformLabel text={l} />}
-                            panelWidth={224}
-                            align="right"
-                          />
-                        </th>
+                        <th className="px-4 py-3 whitespace-nowrap">Campaign</th>
                       )}
-                      {adminVisibleColumns.notes && <th className="px-4 py-2.5 whitespace-nowrap">Notes</th>}
-                      {adminVisibleColumns.propertyMatch && <th className="px-4 py-2.5 whitespace-nowrap">Property Match</th>}
+                      {adminVisibleColumns.notes && <th className="px-4 py-3 whitespace-nowrap">Notes</th>}
+                      {adminVisibleColumns.propertyMatch && <th className="px-4 py-3 whitespace-nowrap">Property Match</th>}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-xs">
@@ -1291,13 +1353,14 @@ export default function LeadDashboard() {
                         <tr
                           key={l.id}
                           ref={idx % adminRowsPerPage === 0 ? (el) => { adminPageRowRefs.current[Math.floor(idx / adminRowsPerPage)] = el; } : undefined}
-                          className={`transition-colors ${selectedLeadIds.has(l.id) ? "bg-blue-50/50" : "hover:bg-slate-50/60"}`}>
+                          onClick={(e) => handleLeadRowClick(e, l)}
+                          className={`cursor-pointer transition-colors ${selectedLeads.has(l.id) ? "bg-blue-50/50" : "hover:bg-slate-50/60"}`}>
                           {canBulkAssign && (
                             <td className="pl-4 pr-1 py-3 align-top">
                               <input
                                 type="checkbox"
-                                checked={selectedLeadIds.has(l.id)}
-                                onChange={() => toggleLeadSelection(l.id)}
+                                checked={selectedLeads.has(l.id)}
+                                onChange={() => toggleLeadSelection(l)}
                                 aria-label={`Select ${l.name}`}
                                 className="h-3.5 w-3.5 rounded border-slate-300 accent-[#0B1E6E]"
                               />
@@ -1306,42 +1369,41 @@ export default function LeadDashboard() {
                           <td className="px-4 py-3 align-top overflow-hidden sticky left-0 z-10 bg-white">
                             <button
                               onClick={() => setSelectedLead(l)}
-                              className="font-bold text-[#0B1E6E] hover:underline text-left truncate block max-w-full"
+                              className="font-bold text-[#0B1E6E] hover:underline text-left [overflow-wrap:anywhere] block max-w-full"
                               title={l.name}
                             >
                               {l.name}
                             </button>
-                            <p className="text-[11px] text-slate-500 font-mono mt-0.5 truncate">{l.phone}</p>
+                            <p className="text-[11px] text-slate-500 font-mono mt-0.5 [overflow-wrap:anywhere]">{l.phone}</p>
                           </td>
-                          <td className="px-4 py-3 text-slate-600 align-top truncate" title={l.email || "—"}>{l.email || "—"}</td>
-                          <td className="px-4 py-3 text-slate-700 font-medium align-top truncate" title={l.assignedAgent || "Unassigned"}>{l.assignedAgent || "Unassigned"}</td>
+                          <td className="px-4 py-3 text-slate-600 align-top [overflow-wrap:anywhere]" title={l.email || "—"}>{l.email || "—"}</td>
+                          <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]" title={l.assignedAgent || "Unassigned"}>{l.assignedAgent || "Unassigned"}</td>
 
                           {adminVisibleColumns.date && (
-                            <td className="px-4 py-3 text-slate-500 align-top truncate">{adminFormatDateTime(l.createdAtStr)}</td>
+                            <td className="px-4 py-3 text-slate-500 align-top"><DateTimeLines {...dateTimeParts(l.createdAtStr)} /></td>
                           )}
                           {adminVisibleColumns.property && (
-                            <td className="px-4 py-3 text-slate-700 font-medium align-top truncate" title={l.property || "Not set"}>{l.property || "Not set"}</td>
+                            <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]" title={l.property || "Not set"}>{l.property || "Not set"}</td>
                           )}
                           {adminVisibleColumns.reassignedTo && (
-                            <td className="px-4 py-3 text-slate-700 font-medium align-top truncate">
-                              <Tooltip text="Click to see activity log of this lead">
-                                <button
-                                  type="button"
-                                  onClick={() => setSelectedLead(l)}
-                                  className="truncate text-left hover:text-[#0B1E6E] hover:underline"
-                                >
-                                  {l.previousAgent || "—"}
-                                </button>
-                              </Tooltip>
+                            <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]">
+                              {l.previousAgent ? (
+                                <Tooltip text="Click to see activity log of this lead">
+                                  <button type="button" onClick={() => setSelectedLead(l)} className="text-left hover:text-[#0B1E6E] hover:underline">
+                                    <span className="block">{l.assignedAgent || "Unassigned"}</span>
+                                    <span className="block text-[11px] text-slate-400 font-normal">from {l.previousAgent}</span>
+                                  </button>
+                                </Tooltip>
+                              ) : "—"}
                             </td>
                           )}
                           {adminVisibleColumns.source && (
-                            <td className="px-4 py-3 text-slate-700 font-medium align-top truncate" title={l.source || "—"}>
+                            <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]" title={l.source || "—"}>
                               <PlatformLabel text={l.source || "—"} iconOnly />
                             </td>
                           )}
                           {adminVisibleColumns.leadScore && (
-                            <td className="px-4 py-3 text-slate-700 font-medium align-top truncate">{l.leadScore != null ? l.leadScore : "—"}</td>
+                            <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]">{l.leadScore != null ? l.leadScore : "—"}</td>
                           )}
                           {adminVisibleColumns.status && (
                             <td className="px-4 py-3 align-top">
@@ -1349,7 +1411,7 @@ export default function LeadDashboard() {
                             </td>
                           )}
                           {adminVisibleColumns.nextCallDate && (
-                            <td className="px-4 py-3 text-slate-500 align-top truncate">{adminNextCallDateFor(l.id)}</td>
+                            <td className="px-4 py-3 text-slate-500 align-top"><NextCallCell next={adminNextCallDateFor(l.id)} /></td>
                           )}
                           {adminVisibleColumns.actions && (
                             <td className="px-4 py-3 align-top text-right">
@@ -1360,7 +1422,7 @@ export default function LeadDashboard() {
                                 className="inline-flex items-center justify-center h-10 w-10 sm:h-7 sm:w-7 rounded-lg bg-slate-100 text-slate-700 hover:bg-emerald-50 hover:text-emerald-600 transition-colors"
                                 title="WhatsApp"
                               >
-                                <WhatsAppIcon className="h-4 w-4" />
+                                <WhatsAppIcon className="h-3.5 w-3.5" />
                               </a>
                               <a
                                 href={`tel:${l.phone}`}
@@ -1382,18 +1444,18 @@ export default function LeadDashboard() {
                             </td>
                           )}
                           {adminVisibleColumns.adSetName && (
-                            <td className="px-4 py-3 text-slate-400 align-top truncate italic" title="Not tracked yet — no ad-set-level data ingested">—</td>
+                            <td className="px-4 py-3 text-slate-400 align-top [overflow-wrap:anywhere] italic" title="Not tracked yet — no ad-set-level data ingested">—</td>
                           )}
                           {isAdmin && adminVisibleColumns.campaign && (
-                            <td className="px-4 py-3 text-slate-700 font-medium align-top truncate" title={l.campaign || l.source || "—"}>
-                              <PlatformLabel text={l.campaign || l.source || "—"} classifyBy={l.source || l.campaign} />
+                            <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]" title={l.campaign || "—"}>
+                              {l.campaign ? <PlatformLabel text={l.campaign} classifyBy={l.source || l.campaign} wrap /> : "—"}
                             </td>
                           )}
                           {adminVisibleColumns.notes && (
-                            <td className="px-4 py-3 text-slate-600 truncate align-top" title={adminLatestLogMessage(l)}>{adminLatestLogMessage(l)}</td>
+                            <td className="px-4 py-3 text-slate-600 align-top"><LeadNoteCell lead={l} onSaved={handleNoteSaved} /></td>
                           )}
                           {adminVisibleColumns.propertyMatch && (
-                            <td className="px-4 py-3 text-slate-400 align-top truncate italic" title="Not tracked yet — no property-match scoring implemented">—</td>
+                            <td className="px-4 py-3 text-slate-400 align-top [overflow-wrap:anywhere] italic" title="Not tracked yet — no property-match scoring implemented">—</td>
                           )}
                         </tr>
                       )))
@@ -1429,17 +1491,17 @@ export default function LeadDashboard() {
                   type="button"
                   onClick={handleExportAnalytics}
                   title="Export as CSV"
-                  className="h-10 w-10 shrink-0 flex items-center justify-center bg-white border border-slate-200 rounded-xl text-[#0B1E6E] hover:bg-slate-50 shadow-sm transition-colors"
+                  className="h-9 w-9 shrink-0 flex items-center justify-center bg-white border border-slate-200 rounded-xl text-[#0B1E6E] hover:bg-slate-50 shadow-sm transition-colors"
                 >
-                  <Download className="h-4.5 w-4.5" />
+                  <Download className="h-4 w-4" />
                 </button>
                 <button
                   type="button"
                   onClick={() => setIsColumnsSettingsOpen(true)}
                   title="Filter"
-                  className="h-10 w-10 shrink-0 flex items-center justify-center bg-white border border-slate-200 rounded-xl text-[#0B1E6E] hover:bg-slate-50 shadow-sm transition-colors"
+                  className="h-9 w-9 shrink-0 flex items-center justify-center bg-white border border-slate-200 rounded-xl text-[#0B1E6E] hover:bg-slate-50 shadow-sm transition-colors"
                 >
-                  <Sliders className="h-4.5 w-4.5" />
+                  <Sliders className="h-4 w-4" />
                 </button>
 
                 {/* Date range — the shared calendar, same as the Leads tab but with
@@ -1486,15 +1548,25 @@ export default function LeadDashboard() {
                 />
               </div>
 
-              {adminAgentBreakdown.length === 0 ? (
-                <p className="text-xs text-slate-400 italic p-6">No leads assigned to any agent in this range.</p>
-              ) : (
-                <>
+              <>
                   <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs border-collapse min-w-[820px]">
+                    <table
+                      className="w-full text-left text-xs border-collapse table-fixed"
+                      style={{ minWidth: (1 + ANALYTICS_COLUMNS.filter(c => analyticsVisibleColumns[c.key]).length) * 150 }}
+                    >
+                      <colgroup>
+                        <col />
+                        {analyticsVisibleColumns.teamTotal && <col />}
+                        {analyticsVisibleColumns.total && <col />}
+                        {analyticsVisibleColumns.qualified && <col />}
+                        {analyticsVisibleColumns.unqualified && <col />}
+                        {analyticsVisibleColumns.siteVisits && <col />}
+                        {analyticsVisibleColumns.qlPct && <col />}
+                        {analyticsVisibleColumns.ql2svPct && <col />}
+                      </colgroup>
                       <thead>
-                        <tr className="border-b border-slate-200 text-[11px] font-bold text-slate-800">
-                          <th className="px-4 py-3">
+                        <tr className="border-b border-slate-200 text-left text-xs font-bold text-slate-800">
+                          <th className="px-4 py-3 whitespace-nowrap">
                             {analyticsManagerSearchOpen ? (
                               <div className="flex items-center gap-1">
                                 <input
@@ -1535,6 +1607,13 @@ export default function LeadDashboard() {
                       <tbody className="divide-y divide-slate-100 text-slate-700">
                         {isDataLoading && analyticsPageRows.length === 0 ? (
                           <TableRowsSkeleton rows={8} columns={1 + ANALYTICS_COLUMNS.filter(c => analyticsVisibleColumns[c.key]).length} />
+                        ) : analyticsPageRows.length === 0 ? (
+                          <tr>
+                            <td colSpan={1 + ANALYTICS_COLUMNS.filter(c => analyticsVisibleColumns[c.key]).length} className="px-4 py-10 text-center">
+                              <p className="text-sm font-semibold text-slate-600">No leads in this date range</p>
+                              <p className="text-[11px] text-slate-400 mt-1">Try a wider date range or clear the filters above.</p>
+                            </td>
+                          </tr>
                         ) : analyticsPageRows.map(row => {
                           const isExpanded = expandedManagers.has(row.agentName);
                           const visibleColCount = ANALYTICS_COLUMNS.filter(c => analyticsVisibleColumns[c.key]).length;
@@ -1605,51 +1684,60 @@ export default function LeadDashboard() {
                                       ) : (
                                         <PaginatedSubList items={row.directReports} rowLabel="Member">
                                           {(pageRows) => (
-                                            <table className="w-full text-left text-[11px] border-collapse">
+                                            <table className="w-full text-left text-[11px] border-collapse table-fixed">
+                                              <colgroup>
+                                                <col />
+                                                {analyticsVisibleColumns.total && <col />}
+                                                {analyticsVisibleColumns.qualified && <col />}
+                                                {analyticsVisibleColumns.unqualified && <col />}
+                                                {analyticsVisibleColumns.siteVisits && <col />}
+                                                {analyticsVisibleColumns.qlPct && <col />}
+                                                {analyticsVisibleColumns.ql2svPct && <col />}
+                                              </colgroup>
                                               <thead>
-                                                <tr className="border-b border-slate-200 font-bold text-slate-600">
-                                                  <th className="py-2 pr-4">Team Member</th>
-                                                  {analyticsVisibleColumns.total && <th className="py-2 pr-4">Total Leads Assigned</th>}
-                                                  {analyticsVisibleColumns.qualified && <th className="py-2 pr-4">Qualified Leads</th>}
-                                                  {analyticsVisibleColumns.unqualified && <th className="py-2 pr-4">Unqualified Leads</th>}
-                                                  {analyticsVisibleColumns.siteVisits && <th className="py-2 pr-4">Site Visit Leads</th>}
-                                                  {analyticsVisibleColumns.qlPct && <th className="py-2 pr-4">QL&apos;s %age</th>}
-                                                  {analyticsVisibleColumns.ql2svPct && <th className="py-2 pr-4">QL2SV %age</th>}
+                                                <tr className="border-b border-slate-200 text-left text-xs font-bold text-slate-800">
+                                                  <th className="px-4 py-3 whitespace-nowrap">Team Member</th>
+                                                  {analyticsVisibleColumns.total && <th className="px-4 py-3 whitespace-nowrap">Total Leads Assigned</th>}
+                                                  {analyticsVisibleColumns.qualified && <th className="px-4 py-3 whitespace-nowrap">Qualified Leads</th>}
+                                                  {analyticsVisibleColumns.unqualified && <th className="px-4 py-3 whitespace-nowrap">Unqualified Leads</th>}
+                                                  {analyticsVisibleColumns.siteVisits && <th className="px-4 py-3 whitespace-nowrap">Site Visit Leads</th>}
+                                                  {analyticsVisibleColumns.qlPct && <th className="px-4 py-3 whitespace-nowrap">QL&apos;s %age</th>}
+                                                  {analyticsVisibleColumns.ql2svPct && <th className="px-4 py-3 whitespace-nowrap">QL2SV %age</th>}
                                                 </tr>
                                               </thead>
                                               <tbody className="divide-y divide-slate-100 text-slate-700">
                                                 {pageRows.map(member => (
                                                   <tr key={member.name}>
-                                                    <td className="py-2 pr-4 font-semibold">
+                                                    <td className="px-4 py-3 font-semibold">
                                                       <StatCell value={member.name} onClick={() => openAnalyticsDrilldown([member.name], null, `${member.name} — All Leads`)} />
                                                     </td>
                                                     {analyticsVisibleColumns.total && (
-                                                      <td className="py-2 pr-4">
+                                                      <td className="px-4 py-3">
                                                         <StatCell value={member.total} onClick={() => openAnalyticsDrilldown([member.name], null, `${member.name} — All Leads`)} />
                                                       </td>
                                                     )}
                                                     {analyticsVisibleColumns.qualified && (
-                                                      <td className="py-2 pr-4">
+                                                      <td className="px-4 py-3">
                                                         <StatCell value={member.qualified} onClick={() => openAnalyticsDrilldown([member.name], QUALIFIED_STATUS_OPTIONS, `${member.name} — Qualified Leads`)} />
                                                       </td>
                                                     )}
                                                     {analyticsVisibleColumns.unqualified && (
-                                                      <td className="py-2 pr-4">
+                                                      <td className="px-4 py-3">
                                                         <StatCell value={member.unqualified} onClick={() => openAnalyticsDrilldown([member.name], UNQUALIFIED_STATUSES, `${member.name} — Unqualified Leads`)} />
                                                       </td>
                                                     )}
                                                     {analyticsVisibleColumns.siteVisits && (
-                                                      <td className="py-2 pr-4">
+                                                      <td className="px-4 py-3">
                                                         <StatCell value={member.siteVisits} onClick={() => openAnalyticsDrilldown([member.name], SITE_VISIT_STATUSES, `${member.name} — Site Visit Leads`)} />
                                                       </td>
                                                     )}
                                                     {analyticsVisibleColumns.qlPct && (
-                                                      <td className="py-2 pr-4">
+                                                      <td className="px-4 py-3">
                                                         <StatCell value={`${member.qlPct.toFixed(2)}%`} onClick={() => openAnalyticsDrilldown([member.name], QUALIFIED_STATUS_OPTIONS, `${member.name} — Qualified Leads`)} />
                                                       </td>
                                                     )}
                                                     {analyticsVisibleColumns.ql2svPct && (
-                                                      <td className="py-2 pr-4">
+                                                      <td className="px-4 py-3">
                                                         <StatCell value={`${member.ql2svPct.toFixed(2)}%`} onClick={() => openAnalyticsDrilldown([member.name], SITE_VISIT_STATUSES, `${member.name} — Site Visit Leads`)} />
                                                       </td>
                                                     )}
@@ -1679,8 +1767,7 @@ export default function LeadDashboard() {
                     onRowsPerPageChange={setAnalyticsRowsPerPage}
                     rowLabel="Manager"
                   />
-                </>
-              )}
+              </>
             </div>
 
             {/* Drill-down card — opened by clicking any manager/team-member
@@ -1707,20 +1794,20 @@ export default function LeadDashboard() {
                   ) : (
                     <>
                       <div ref={drilldownScrollRef} onScroll={handleDrilldownTableScroll} className="overflow-auto max-h-[70vh]">
-                        <table className="w-full text-left text-xs border-collapse table-fixed min-w-[900px]">
+                        <table className="w-full text-left text-xs border-collapse table-fixed min-w-[1200px]">
                           <colgroup>
-                            <col className="w-[150px]" />
-                            <col className="w-[170px]" />
-                            <col className="w-[120px]" />
-                            <col className="w-[130px]" />
-                            <col className="w-[110px]" />
-                            <col className="w-[200px]" />
-                            <col className="w-[130px]" />
-                            <col className="w-[130px]" />
+                            <col />
+                            <col />
+                            <col />
+                            <col />
+                            <col />
+                            <col />
+                            <col />
+                            <col />
                           </colgroup>
                           <thead className="sticky top-0 z-10 bg-white">
-                            <tr className="border-b border-slate-200 font-bold text-slate-800">
-                              <th className="px-4 py-2.5">
+                            <tr className="border-b border-slate-200 text-left text-xs font-bold text-slate-800">
+                              <th className="px-4 py-3 whitespace-nowrap">
                                 {drilldownSearchOpen ? (
                                   <div className="flex items-center gap-1">
                                     <input
@@ -1749,13 +1836,13 @@ export default function LeadDashboard() {
                                   </div>
                                 )}
                               </th>
-                              <th className="px-4 py-2.5 whitespace-nowrap">Email</th>
-                              <th className="px-4 py-2.5 whitespace-nowrap">Status</th>
-                              <th className="px-4 py-2.5 whitespace-nowrap">Assigned To</th>
-                              <th className="px-4 py-2.5 whitespace-nowrap">Date</th>
-                              <th className="px-4 py-2.5 whitespace-nowrap">Notes</th>
-                              <th className="px-4 py-2.5 whitespace-nowrap">Next Call Date</th>
-                              <th className="px-4 py-2.5 whitespace-nowrap">Campaign</th>
+                              <th className="px-4 py-3 whitespace-nowrap">Email</th>
+                              <th className="px-4 py-3 whitespace-nowrap">Status</th>
+                              <th className="px-4 py-3 whitespace-nowrap">Assigned To</th>
+                              <th className="px-4 py-3 whitespace-nowrap">Date</th>
+                              <th className="px-4 py-3 whitespace-nowrap">Notes</th>
+                              <th className="px-4 py-3 whitespace-nowrap">Next Call Date</th>
+                              <th className="px-4 py-3 whitespace-nowrap">Campaign</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
@@ -1770,23 +1857,23 @@ export default function LeadDashboard() {
                                 <td className="px-4 py-3 align-top overflow-hidden">
                                   <button
                                     onClick={() => setSelectedLead(l)}
-                                    className="font-bold text-[#0B1E6E] hover:underline text-left truncate block max-w-full"
+                                    className="font-bold text-[#0B1E6E] hover:underline text-left [overflow-wrap:anywhere] block max-w-full"
                                     title={l.name}
                                   >
                                     {l.name}
                                   </button>
-                                  <p className="text-[11px] text-slate-500 font-mono mt-0.5 truncate">{l.phone}</p>
+                                  <p className="text-[11px] text-slate-500 font-mono mt-0.5 [overflow-wrap:anywhere]">{l.phone}</p>
                                 </td>
-                                <td className="px-4 py-3 text-slate-600 align-top truncate" title={l.email || "—"}>{l.email || "—"}</td>
+                                <td className="px-4 py-3 text-slate-600 align-top [overflow-wrap:anywhere]" title={l.email || "—"}>{l.email || "—"}</td>
                                 <td className="px-4 py-3 align-top">
                                   {renderStatusCell(l)}
                                 </td>
-                                <td className="px-4 py-3 text-slate-700 font-medium align-top truncate" title={l.assignedAgent || "Unassigned"}>{l.assignedAgent || "Unassigned"}</td>
-                                <td className="px-4 py-3 text-slate-500 align-top truncate">{adminFormatDateTime(l.createdAtStr)}</td>
-                                <td className="px-4 py-3 text-slate-600 truncate align-top" title={adminLatestLogMessage(l)}>{adminLatestLogMessage(l)}</td>
-                                <td className="px-4 py-3 text-slate-500 align-top truncate">{adminNextCallDateFor(l.id)}</td>
-                                <td className="px-4 py-3 text-slate-700 font-medium align-top truncate" title={l.campaign || l.source || "—"}>
-                              <PlatformLabel text={l.campaign || l.source || "—"} classifyBy={l.source || l.campaign} />
+                                <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]" title={l.assignedAgent || "Unassigned"}>{l.assignedAgent || "Unassigned"}</td>
+                                <td className="px-4 py-3 text-slate-500 align-top"><DateTimeLines {...dateTimeParts(l.createdAtStr)} /></td>
+                                <td className="px-4 py-3 text-slate-600 align-top"><LeadNoteCell lead={l} onSaved={handleNoteSaved} /></td>
+                                <td className="px-4 py-3 text-slate-500 align-top"><NextCallCell next={adminNextCallDateFor(l.id)} /></td>
+                                <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]" title={l.campaign || "—"}>
+                              {l.campaign ? <PlatformLabel text={l.campaign} classifyBy={l.source || l.campaign} wrap /> : "—"}
                             </td>
                               </tr>
                             )))}
@@ -1833,14 +1920,21 @@ export default function LeadDashboard() {
                 </div>
               </div>
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs border-collapse min-w-[700px]">
+                <table className="w-full text-left text-xs border-collapse table-fixed min-w-[750px]">
+                  <colgroup>
+                    <col />
+                    <col />
+                    <col />
+                    <col />
+                    <col />
+                  </colgroup>
                   <thead>
-                    <tr className="border-b border-slate-200 text-[11px] font-bold text-slate-800">
-                      <th className="px-4 py-2.5 whitespace-nowrap">Total Leads</th>
-                      <th className="px-4 py-2.5 whitespace-nowrap">Avg Call Back Initiation<br />Per Lead / Day</th>
-                      <th className="px-4 py-2.5 whitespace-nowrap">Avg Calling Per Lead<br />before dead</th>
-                      <th className="px-4 py-2.5 whitespace-nowrap">Date</th>
-                      <th className="px-4 py-2.5 whitespace-nowrap">AI Notes</th>
+                    <tr className="border-b border-slate-200 text-left text-xs font-bold text-slate-800">
+                      <th className="px-4 py-3 whitespace-nowrap">Total Leads</th>
+                      <th className="px-4 py-3 whitespace-nowrap">Avg Call Back Initiation<br />Per Lead / Day</th>
+                      <th className="px-4 py-3 whitespace-nowrap">Avg Calling Per Lead<br />before dead</th>
+                      <th className="px-4 py-3 whitespace-nowrap">Date</th>
+                      <th className="px-4 py-3 whitespace-nowrap">AI Notes</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-slate-700">
@@ -1874,7 +1968,7 @@ export default function LeadDashboard() {
             their own direct reports (lib/leadAssignment.ts). */}
         {canBulkAssign && assignFlowMode && createPortal(
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <div className="fixed inset-0 bg-slate-900/40" onClick={() => setAssignFlowMode(null)} />
+            <div className="fixed inset-0 bg-slate-900/40" onClick={closeAssignFlow} />
             <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md">
               <div className="px-6 pt-6 pb-4 border-b border-slate-100">
                 <h3 className="text-xl font-extrabold text-slate-900">
@@ -1918,24 +2012,47 @@ export default function LeadDashboard() {
                     </p>
                   )}
                 </div>
+
+                <div className="space-y-1.5">
+                  <label htmlFor="assign-note" className="block text-sm font-bold text-slate-800">
+                    Note <span className="text-red-600">*</span>
+                  </label>
+                  <textarea
+                    id="assign-note"
+                    value={assignNote}
+                    onChange={(e) => setAssignNote(e.target.value)}
+                    rows={3}
+                    maxLength={2000}
+                    placeholder={assignFlowMode === "reshuffle" ? "Why are these leads being reshuffled? e.g. Agent on leave this week" : "Anything the agent should know? e.g. Interested in 2BHK, call after 6 pm"}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-slate-800 resize-y focus:outline-none focus:border-brand-500"
+                  />
+                  <p className="text-[11px] text-slate-400">Required. Saved as the lead&apos;s note and in its activity history.</p>
+                </div>
               </div>
+              {assignError && (
+                <div className="mx-6 mb-4 p-2.5 bg-red-50 border border-red-100 text-[11px] text-red-700 rounded-xl font-bold flex items-center gap-2">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                  <span>{assignError}</span>
+                </div>
+              )}
               <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => setAssignFlowMode(null)}
-                  className="px-5 py-2 rounded-xl border border-slate-300 font-bold text-slate-700 text-sm hover:bg-slate-50 transition-colors"
+                  disabled={assignSubmitting}
+                  onClick={closeAssignFlow}
+                  className="px-5 py-2 rounded-xl border border-slate-300 font-bold text-slate-700 text-sm hover:bg-slate-50 transition-colors disabled:opacity-50"
                 >
                   Cancel
                 </button>
                 <button
                   type="button"
-                  disabled={!canConfirmAssign}
+                  disabled={!canConfirmAssign || assignSubmitting}
                   onClick={confirmBulkAssign}
                   className={`px-5 py-2 rounded-xl font-bold text-sm text-white transition-colors ${
-                    canConfirmAssign ? "bg-[#0B1E6E] hover:bg-[#081650]" : "bg-slate-300 cursor-not-allowed"
+                    canConfirmAssign && !assignSubmitting ? "bg-[#0B1E6E] hover:bg-[#081650]" : "bg-slate-300 cursor-not-allowed"
                   }`}
                 >
-                  {assignFlowMode === "reshuffle" ? "Reshuffle" : "Assign"}
+                  {assignSubmitting ? "Saving..." : assignFlowMode === "reshuffle" ? "Reshuffle" : "Assign"}
                 </button>
               </div>
             </div>
@@ -1997,6 +2114,8 @@ export default function LeadDashboard() {
           isOpen={selectedLead !== null}
           onClose={() => setSelectedLead(null)}
           onUpdateStatus={handleUpdateLeadStatus}
+          onReassigned={() => setLeadsRefreshKey(k => k + 1)}
+          onNoteSaved={handleNoteSaved}
         />
 
         {/* Filter panel (column visibility) — opened from both the Leads

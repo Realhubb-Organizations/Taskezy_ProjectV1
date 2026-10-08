@@ -14,8 +14,6 @@ import {
   apiListUsersPage
 } from "@/lib/apiClient";
 import { isNotificationSoundMuted, setNotificationSoundMuted } from "@/lib/notificationSound";
-import { toast } from "@/lib/toast";
-import { confirmAction } from "@/lib/confirmDialog";
 import {
   Settings,
   Plus,
@@ -46,6 +44,7 @@ import {
 import { LineSkeleton, CardListSkeleton } from "@/components/ui/Skeletons";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
+import { useDialog } from "@/components/ui/DialogProvider";
 
 const DEPARTMENT_OPTIONS = [
   { value: "SALES", label: "SALES" },
@@ -102,6 +101,7 @@ export default function SettingsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { users, leads, activeRole, activeSystem, logout, updateUserFields, addTeamMember, deleteTeamMember, refreshMetaConnectionStatus, tenantSettings, updateTenantSettings, isDataLoading } = useApp();
+  const { toast, confirm: confirmDialog } = useDialog();
 
   const initialTabParam = searchParams.get("tab");
   const initialTab = (TABS as readonly string[]).includes(initialTabParam || "") ? (initialTabParam as Tab) : "Connected Apps";
@@ -156,7 +156,7 @@ export default function SettingsPage() {
   };
 
   const handleRequestIntegration = () => {
-    toast.info("Request form coming soon", "Thanks — we don't have a request form wired up yet. Reach out to support with which platform you need and we'll take it from there.");
+    toast("Thanks — we don't have a request form wired up yet. Reach out to support with which platform you need and we'll take it from there.", "info");
   };
 
   // --- Meta Ads: real OAuth connection ---
@@ -223,13 +223,18 @@ export default function SettingsPage() {
   };
 
   const handleDisconnectMeta = async (connectionId: string, pageName: string) => {
-    if (!(await confirmAction({ message: `Disconnect "${pageName}"? New leads from this Page will stop arriving until you reconnect it.`, danger: true, confirmLabel: "Disconnect" }))) return;
+    if (!(await confirmDialog({
+      title: `Disconnect "${pageName}"?`,
+      message: "New leads from this Page will stop arriving until you reconnect it.",
+      confirmLabel: "Disconnect",
+      danger: true
+    }))) return;
     try {
       await apiDisconnectMeta(connectionId);
       await loadMetaConnections();
       await refreshMetaConnectionStatus();
     } catch (err) {
-      toast.error("Could not disconnect this Page. Please try again.");
+      toast("Could not disconnect this Page. Please try again.", "error");
       console.warn("Meta disconnect failed:", err);
     }
   };
@@ -464,7 +469,7 @@ export default function SettingsPage() {
     e.preventDefault();
     if (!selectedUser) return;
     if (passwordHash.length < 4) {
-      toast.error("Password must be at least 4 characters.");
+      toast("Password must be at least 4 characters.", "warning");
       return;
     }
     updateUserFields(selectedUser.id, firstName, lastName, passwordHash, designation, roleType, status, managerId || null);
@@ -479,7 +484,7 @@ export default function SettingsPage() {
   const handleAddSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!addFirstName || !addEmail || !addPassword) {
-      toast.error("First name, email, and password are required.");
+      toast("First name, email, and password are required.", "warning");
       return;
     }
     addTeamMember({
@@ -519,7 +524,11 @@ export default function SettingsPage() {
   };
 
   const handleSignOut = async () => {
-    if (await confirmAction({ message: "Are you sure you want to sign out?", danger: true, confirmLabel: "Sign Out" })) {
+    if (await confirmDialog({
+      title: "Sign out?",
+      message: "Are you sure you want to sign out?",
+      confirmLabel: "Sign out"
+    })) {
       logout();
       router.push("/auth/login");
     }
@@ -766,7 +775,7 @@ export default function SettingsPage() {
                 <button
                   onClick={handleConnectMeta}
                   disabled={metaLoading}
-                  className="px-3 py-1.5 rounded-lg text-[11px] font-bold border bg-brand-50 border-brand-200 text-brand-700 hover:bg-brand-700 hover:text-white transition-all disabled:opacity-50"
+                  className="px-3 py-1.5 rounded-lg text-[11px] font-bold border bg-brand-50 border-brand-200 text-brand-700 hover:bg-[#0B1E6E] hover:text-white transition-all disabled:opacity-50"
                 >
                   {metaLoading ? "Redirecting…" : activeMetaConnections.length > 0 ? "Connect Another Page" : "Connect"}
                 </button>
@@ -830,7 +839,7 @@ export default function SettingsPage() {
               {activeRole === "ADMIN" ? (
                 <Link
                   href="/dashboard/settings/integrations?app=google"
-                  className="px-3 py-1.5 rounded-lg text-[11px] font-bold border bg-brand-50 border-brand-200 text-brand-700 hover:bg-brand-700 hover:text-white transition-all"
+                  className="px-3 py-1.5 rounded-lg text-[11px] font-bold border bg-brand-50 border-brand-200 text-brand-700 hover:bg-[#0B1E6E] hover:text-white transition-all"
                 >
                   Manage
                 </Link>
@@ -876,7 +885,7 @@ export default function SettingsPage() {
                   className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-all ${
                     active
                       ? "bg-red-50 border-red-200 text-red-700 hover:bg-red-100"
-                      : "bg-brand-50 border-brand-200 text-brand-700 hover:bg-brand-700 hover:text-white"
+                      : "bg-brand-50 border-brand-200 text-brand-700 hover:bg-[#0B1E6E] hover:text-white"
                   }`}
                 >
                   {active ? "Disconnect" : "Connect"}
@@ -1113,7 +1122,7 @@ export default function SettingsPage() {
                 <button
                   type="submit"
                   disabled={hrmsSaving}
-                  className="w-full bg-brand-700 hover:bg-brand-600 text-white font-bold py-2.5 rounded-lg text-xs transition-all shadow-sm disabled:opacity-60"
+                  className="w-full bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold py-2.5 rounded-lg text-xs transition-all shadow-sm disabled:opacity-60"
                 >
                   {hrmsSaving ? "Saving…" : "Save HRMS Settings"}
                 </button>
@@ -1181,7 +1190,7 @@ export default function SettingsPage() {
                 <button
                   type="submit"
                   disabled={financeSaving}
-                  className="w-full bg-brand-700 hover:bg-brand-600 text-white font-bold py-2.5 rounded-lg text-xs transition-all shadow-sm disabled:opacity-60"
+                  className="w-full bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold py-2.5 rounded-lg text-xs transition-all shadow-sm disabled:opacity-60"
                 >
                   {financeSaving ? "Saving…" : "Save Finance Settings"}
                 </button>
@@ -1198,7 +1207,7 @@ export default function SettingsPage() {
             <h3 className="text-sm font-bold text-slate-700">Corporate User Directory</h3>
             <button
               onClick={() => setIsAddOpen(true)}
-              className="inline-flex items-center gap-1.5 bg-brand-700 hover:bg-brand-600 text-white px-4 py-2 rounded-lg text-xs font-bold transition-all shadow-md shadow-brand-700/10 shrink-0"
+              className="inline-flex items-center gap-1.5 bg-[#0B1E6E] hover:bg-[#081650] text-white px-4 py-2 rounded-lg text-xs font-bold transition-all shadow-md shrink-0"
             >
               <Plus className="h-4 w-4" />
               Add User
@@ -1325,7 +1334,7 @@ export default function SettingsPage() {
               <button
                 type="button"
                 onClick={handleToggleSoundMuted}
-                className={`relative shrink-0 h-6 w-11 rounded-full transition-colors ${!soundMuted ? "bg-brand-600" : "bg-slate-300"}`}
+                className={`relative shrink-0 h-6 w-11 rounded-full transition-colors ${!soundMuted ? "bg-[#0B1E6E]" : "bg-slate-300"}`}
               >
                 <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${!soundMuted ? "translate-x-5" : "translate-x-0.5"}`} />
               </button>
@@ -1534,7 +1543,7 @@ export default function SettingsPage() {
 
               <button
                 type="submit"
-                className="w-full bg-brand-700 hover:bg-brand-600 text-white font-bold py-2.5 rounded-lg text-xs transition-all shadow-sm"
+                className="w-full bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold py-2.5 rounded-lg text-xs transition-all shadow-sm"
               >
                 Create User
               </button>
@@ -1654,7 +1663,12 @@ export default function SettingsPage() {
                 <button
                   type="button"
                   onClick={async () => {
-                    if (await confirmAction({ message: `Are you sure you want to delete ${selectedUser.name}?`, danger: true, confirmLabel: "Delete" })) {
+                    if (await confirmDialog({
+                      title: "Delete user?",
+                      message: `Are you sure you want to delete ${selectedUser.name}?`,
+                      confirmLabel: "Delete",
+                      danger: true
+                    })) {
                       deleteTeamMember(selectedUser.id);
                       setSelectedUser(null);
                       setSuccessMsg(`Removed ${selectedUser.name} from the roster.`);
@@ -1672,7 +1686,7 @@ export default function SettingsPage() {
 
               <button
                 type="submit"
-                className="w-full bg-brand-700 hover:bg-brand-600 text-white font-semibold py-2.5 rounded-lg text-xs transition-all shadow-md shadow-brand-700/10"
+                className="w-full bg-[#0B1E6E] hover:bg-[#081650] text-white font-semibold py-2.5 rounded-lg text-xs transition-all shadow-md"
               >
                 Save Changes
               </button>

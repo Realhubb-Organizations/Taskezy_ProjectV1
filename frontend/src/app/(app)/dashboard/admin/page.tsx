@@ -4,11 +4,11 @@ import React, { useState } from "react";
 import { useApp, User, Role } from "@/context/AppContext";
 import { ShieldCheck, Edit, X, AlertTriangle, Eye, EyeOff, CheckCircle, Plus } from "lucide-react";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
-import { toast } from "@/lib/toast";
-import { confirmAction } from "@/lib/confirmDialog";
+import { useDialog } from "@/components/ui/DialogProvider";
 
 export default function AdminPage() {
   const { users, activeRole, updateUserFields, addTeamMember, deleteTeamMember, isDataLoading } = useApp();
+  const { toast, confirm: confirmDialog } = useDialog();
 
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   
@@ -52,7 +52,7 @@ export default function AdminPage() {
     if (!selectedUser) return;
 
     if (passwordHash.length < 4) {
-      toast.error("Password must be at least 4 characters.");
+      toast("Password must be at least 4 characters.", "warning");
       return;
     }
 
@@ -74,7 +74,7 @@ export default function AdminPage() {
   const handleAddSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!addFirstName || !addEmail || !addPassword) {
-      toast.error("First name, email, and password are required.");
+      toast("First name, email, and password are required.", "warning");
       return;
     }
 
@@ -157,7 +157,7 @@ export default function AdminPage() {
           <h3 className="text-sm font-bold text-slate-700">Corporate Accounts &amp; Roster</h3>
           <button
             onClick={() => setIsAddOpen(true)}
-            className="inline-flex items-center gap-1.5 bg-brand-700 hover:bg-brand-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-md shadow-brand-700/10"
+            className="inline-flex items-center gap-1.5 bg-[#0B1E6E] hover:bg-[#081650] text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-md"
           >
             <Plus className="h-4 w-4" />
             Add Account
@@ -230,7 +230,12 @@ export default function AdminPage() {
                           </button>
                           <button
                             onClick={async () => {
-                              if (await confirmAction({ message: `Are you sure you want to delete ${user.name}?`, danger: true, confirmLabel: "Delete" })) {
+                              if (await confirmDialog({
+                                title: "Delete user?",
+                                message: `Are you sure you want to delete ${user.name}?`,
+                                confirmLabel: "Delete",
+                                danger: true
+                              })) {
                                 deleteTeamMember(user.id);
                               }
                             }}
@@ -393,7 +398,7 @@ export default function AdminPage() {
 
               <button
                 type="submit"
-                className="w-full bg-brand-700 hover:bg-brand-600 text-white font-bold py-2.5 rounded-lg text-xs transition-all shadow-sm"
+                className="w-full bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold py-2.5 rounded-lg text-xs transition-all shadow-sm"
               >
                 Provision Account
               </button>
@@ -503,7 +508,7 @@ export default function AdminPage() {
 
               <button
                 type="submit"
-                className="w-full bg-brand-700 hover:bg-brand-600 text-white font-semibold py-2.5 rounded-lg text-xs transition-all shadow-md shadow-brand-700/10"
+                className="w-full bg-[#0B1E6E] hover:bg-[#081650] text-white font-semibold py-2.5 rounded-lg text-xs transition-all shadow-md"
               >
                 Apply Changes &amp; Synchronize
               </button>

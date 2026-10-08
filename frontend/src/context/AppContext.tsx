@@ -14,6 +14,7 @@ import {
   apiUpdateLeadStatus,
   apiEditLead,
   apiReassignLead,
+  apiUpdateLeadNote,
   apiDeleteLead,
   apiVerifyLeadKyc,
   apiListUsers,
@@ -203,6 +204,7 @@ export interface Lead {
   kycDocUrl?: string;
   kycVerified: boolean;
   assignedAgent: string;
+  assignedAgentId?: string;
   logs: LeadLog[];
   source?: string;
   subSource?: string; // free-text batch label from bulk upload (e.g. "Kashmiri Data") — lets that batch be filtered/reassigned/reshuffled as a group. undefined for every other ingestion path.
@@ -220,6 +222,9 @@ export interface Lead {
   firstResponseAt?: string; // ISO — first time status was changed away from the initial state
   reassignedAt?: string; // ISO — set when the lead was moved to a different agent
   previousAgent?: string; // agent the lead was reassigned away from
+  notes?: string; // the lead's current note, written by a person
+  notesUpdatedAt?: string;
+  notesUpdatedBy?: string;
 }
 
 export interface AdSpendRecord {
@@ -552,7 +557,9 @@ interface AppActions {
     kycDocName?: string,
     subStatus?: "Qualified" | "Not Qualified"
   ) => { success: boolean; error?: string };
-  reassignLead: (leadId: string, newAgent: string) => void;
+  reassignLead: (leadId: string, newAgent: string, note: string) => Promise<void>;
+  /** Saves the lead's current note; resolves with the updated lead (or null for a local-only lead). */
+  updateLeadNote: (leadId: string, note: string) => Promise<Lead | null>;
   connectMeta: () => Promise<void>;
   disconnectMeta: () => void;
 
@@ -642,7 +649,12 @@ export function mapApiLeadToFrontendLead(row: ApiLeadRow): Lead {
     dealValue: row.deal_value ? Number(row.deal_value) : undefined,
     kycVerified: false, // not included in the leads list endpoint yet
     assignedAgent: row.assigned_agent_name,
+    assignedAgentId: row.assigned_agent_id,
     previousAgent: row.previous_agent_name || undefined,
+    reassignedAt: row.reassigned_at || undefined,
+    notes: row.notes || undefined,
+    notesUpdatedAt: row.notes_updated_at || undefined,
+    notesUpdatedBy: row.notes_updated_by_name || undefined,
     logs: row.logs.map(l => ({ message: l.message, timestamp: l.timestamp, user: l.user })),
     source: row.source || undefined,
     subSource: row.sub_source || undefined,
@@ -1685,7 +1697,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Reassigns a lead to a new agent and restarts its SLA clock (used to correct missed leads)
-  const reassignLead = (leadId: string, newAgent: string) => {
+  // Saves to the server first and only then updates local state, so the UI
+  // never shows a reassignment the server refused. Rejects on failure.
+  const reassignLead = async (leadId: string, newAgent: string, note: string): Promise<void> => {
+    if (isApiSessionActive() && isRealLeadId(leadId)) {
+      const realAgent = users.find(u => u.name === newAgent);
+      if (!realAgent) throw new Error(`No team member named "${newAgent}".`);
+      await apiReassignLead(leadId, realAgent.id, note);
+    }
+
     const lead = allLeads.find(l => l.id === leadId);
     if (!lead) return;
 
@@ -1695,9 +1715,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     lead.reassignedAt = new Date().toISOString();
     lead.assignedAt = new Date().toISOString();
     lead.firstResponseAt = undefined;
+    lead.notes = note;
+    lead.notesUpdatedAt = new Date().toISOString();
+    lead.notesUpdatedBy = currentUser?.name;
     lead.logs.push({
       timestamp: new Date().toISOString(),
-      message: `Reassigned to ${newAgent}`,
+      message: `Reassigned to ${newAgent}. Note: ${note}`,
       user: currentUser?.name || "System"
     });
     setAllLeads([...allLeads]);
@@ -1709,15 +1732,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       message: `${lead.name} moved from ${previousAgent} to ${newAgent}.`,
       leadId: lead.id
     });
+  };
 
+  const updateLeadNote = async (leadId: string, note: string): Promise<Lead | null> => {
+    let updated: Lead | null = null;
     if (isApiSessionActive() && isRealLeadId(leadId)) {
-      const realAgent = users.find(u => u.name === newAgent);
-      if (realAgent) {
-        apiReassignLead(leadId, realAgent.id).catch((err) =>
-          console.warn("Could not persist lead reassignment to the database:", err)
-        );
-      }
+      updated = mapApiLeadToFrontendLead(await apiUpdateLeadNote(leadId, note));
     }
+    setAllLeads(prev => prev.map(l => (l.id === leadId
+      ? (updated ? { ...l, ...updated } : {
+          ...l,
+          notes: note,
+          notesUpdatedAt: new Date().toISOString(),
+          notesUpdatedBy: currentUser?.name,
+          logs: [...l.logs, { timestamp: new Date().toISOString(), message: `Note: ${note}`, user: currentUser?.name || "System" }]
+        })
+      : l)));
+    return updated;
   };
 
   const connectMeta = async () => {
@@ -2268,6 +2299,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addLead,
         updateLeadStatus,
         reassignLead,
+        updateLeadNote,
         connectMeta,
         disconnectMeta,
         addProperty,

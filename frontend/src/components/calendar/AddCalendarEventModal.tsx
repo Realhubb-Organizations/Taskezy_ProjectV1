@@ -5,7 +5,7 @@ import { X } from "lucide-react";
 import { CalendarEventType } from "@/context/AppContext";
 import { SearchableSelect } from "@/components/ui/SearchableDropdown";
 import { DatePicker } from "@/components/ui/DateRangePicker";
-import { toast } from "@/lib/toast";
+import { useDialog } from "@/components/ui/DialogProvider";
 
 interface TypeOption {
   value: CalendarEventType;
@@ -29,6 +29,7 @@ export default function AddCalendarEventModal({
   heading,
   showAmount
 }: AddCalendarEventModalProps) {
+  const { toast } = useDialog();
   const [type, setType] = useState<CalendarEventType>(typeOptions[0]?.value);
   const [title, setTitle] = useState("");
   const [date, setDate] = useState("");
@@ -41,7 +42,7 @@ export default function AddCalendarEventModal({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title || !date) {
-      toast.error("Title and date are required.");
+      toast("Title and date are required.", "warning");
       return;
     }
     onSubmit({
@@ -137,7 +138,7 @@ export default function AddCalendarEventModal({
 
           <button
             type="submit"
-            className="w-full bg-brand-700 hover:bg-brand-600 text-white font-bold py-2.5 rounded-lg text-xs transition-all shadow-sm"
+            className="w-full bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold px-5 py-2 rounded-xl text-sm transition-all shadow-sm"
           >
             Save
           </button>

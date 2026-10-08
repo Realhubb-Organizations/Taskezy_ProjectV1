@@ -1,4 +1,4 @@
-import type { Lead, Property } from "@/context/AppContext";
+import type { Lead, Property, User } from "@/context/AppContext";
 
 // Rules for the Leads page's bulk Assign / Reshuffle, kept in one place so
 // the picker never offers someone the backend would reject
@@ -17,6 +17,18 @@ interface AssignableUser {
 
 // Same signal as Data Calling: status "Unassigned" (ingest fallback), or no
 // real agent name on the lead.
+/** Mirrors the server rule: the lead's owner, the owner's manager, or an admin may change its status. */
+export function canChangeLeadStatus(lead: Lead, currentUser: User | null, users: User[]): boolean {
+  if (!currentUser) return false;
+  if (currentUser.role === "ADMIN") return true;
+  const ownerId = lead.assignedAgentId ?? users.find(u => u.name === lead.assignedAgent)?.id;
+  if (!ownerId) return false;
+  if (ownerId === currentUser.id) return true;
+  return users.find(u => u.id === ownerId)?.managerId === currentUser.id;
+}
+
+export const STATUS_LOCKED_HINT = "Only the lead's owner, their manager or an admin can change its status";
+
 export function isUnassignedLead(l: Lead): boolean {
   return l.status === "Unassigned" || !l.assignedAgent || l.assignedAgent === "Not Assigned";
 }

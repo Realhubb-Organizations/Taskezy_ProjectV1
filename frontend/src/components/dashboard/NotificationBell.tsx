@@ -371,7 +371,7 @@ export default function NotificationBell() {
                             type="button"
                             onClick={() => { setSystemScope(s); setScopeDropdownOpen(false); }}
                             className={`w-full text-left px-3 py-1.5 text-xs font-bold transition-colors ${
-                              systemScope === s ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"
+                              systemScope === s ? "bg-[#0B1E6E] text-white" : "text-slate-700 hover:bg-slate-50"
                             }`}
                           >
                             {scopeLabel(s)}

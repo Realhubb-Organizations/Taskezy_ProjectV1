@@ -12,11 +12,10 @@ import {
   apiListGoogleAdsAccounts,
   ApiGoogleAdsAccount
 } from "@/lib/apiClient";
-import { ChevronRight, CheckCircle, AlertTriangle, Info, Search, HelpCircle, ArrowRight, Users, TrendingUp, LayoutGrid, Calendar, RefreshCw, Clock, Zap, ExternalLink, Mail, Hash, IndianRupee, ShieldCheck, Edit } from "lucide-react";
+import { ChevronRight, CheckCircle, AlertTriangle, Info, Search, ArrowRight, Users, TrendingUp, LayoutGrid, Calendar, RefreshCw, Clock, Zap, Mail, Hash, IndianRupee, ShieldCheck, Edit } from "lucide-react";
 import { LineSkeleton } from "@/components/ui/Skeletons";
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
-import { toast } from "@/lib/toast";
-import { confirmAction } from "@/lib/confirmDialog";
+import { useDialog } from "@/components/ui/DialogProvider";
 
 type IntegrationKey = "meta" | "google";
 
@@ -182,6 +181,7 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
 
   const { activeRole, users, leads, isDataLoading } = useApp();
   const { adSpendRecords } = useApp();
+  const { toast, confirm: confirmDialog } = useDialog();
 
   // --- Meta ---
   const [metaConnections, setMetaConnections] = useState<ApiMetaConnection[]>([]);
@@ -224,12 +224,17 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
   };
 
   const handleDisconnectMeta = async (connectionId: string, pageName: string) => {
-    if (!(await confirmAction({ message: `Disconnect "${pageName}"? New leads from this Page will stop arriving until you reconnect it.`, danger: true, confirmLabel: "Disconnect" }))) return;
+    if (!(await confirmDialog({
+      title: `Disconnect "${pageName}"?`,
+      message: "New leads from this Page will stop arriving until you reconnect it.",
+      confirmLabel: "Disconnect",
+      danger: true
+    }))) return;
     try {
       await apiDisconnectMeta(connectionId);
       await loadMetaConnections();
     } catch (err) {
-      toast.error("Could not disconnect this Page. Please try again.");
+      toast("Could not disconnect this Page. Please try again.", "error");
       console.warn("Meta disconnect failed:", err);
     }
   };
@@ -611,10 +616,15 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
                       <>
                         <button
                           onClick={async () => {
-                            if (!(await confirmAction({
-                              message: activeMetaConnections.length === 1
-                                ? `Disconnect "${activeMetaConnections[0].page_name}"? New leads from this Page will stop arriving until you reconnect it.`
-                                : `Disconnect all ${activeMetaConnections.length} connected Pages? New leads will stop arriving from every one of them until you reconnect.`,
+                            const single = activeMetaConnections.length === 1;
+                            if (!(await confirmDialog({
+                              title: single
+                                ? `Disconnect "${activeMetaConnections[0].page_name}"?`
+                                : `Disconnect all ${activeMetaConnections.length} connected Pages?`,
+                              message: single
+                                ? "New leads from this Page will stop arriving until you reconnect it."
+                                : "New leads will stop arriving from every one of them until you reconnect.",
+                              confirmLabel: "Disconnect",
                               danger: true
                             }))) return;
                             Promise.all(activeMetaConnections.map(c => apiDisconnectMeta(c.id))).then(loadMetaConnections);
@@ -637,7 +647,7 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
                           <p className="font-bold text-slate-700 -mt-1.5 pl-5.5">Real-time — no wait</p>
                           <div className="flex items-center justify-between pt-1">
                             <div className="flex items-center gap-2"><Zap className="h-3.5 w-3.5 text-slate-400 shrink-0" /><span className="text-slate-400 font-semibold">Auto Sync</span></div>
-                            <span className="relative inline-flex h-5 w-9 rounded-full bg-brand-600 shrink-0" title="Always on for a real-time integration">
+                            <span className="relative inline-flex h-5 w-9 rounded-full bg-[#0B1E6E] shrink-0" title="Always on for a real-time integration">
                               <span className="absolute top-0.5 right-0.5 h-4 w-4 rounded-full bg-white" />
                             </span>
                           </div>
@@ -648,7 +658,7 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
                       <button
                         onClick={handleConnectMeta}
                         disabled={metaLoading}
-                        className="w-full px-3.5 py-2 rounded-lg text-xs font-bold border bg-brand-50 border-brand-200 text-brand-700 hover:bg-brand-700 hover:text-white transition-all disabled:opacity-50"
+                        className="w-full px-3.5 py-2 rounded-lg text-xs font-bold border bg-brand-50 border-brand-200 text-brand-700 hover:bg-[#0B1E6E] hover:text-white transition-all disabled:opacity-50"
                       >
                         {metaLoading ? "Redirecting…" : "Connect Meta Ads"}
                       </button>
@@ -656,19 +666,6 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
                   ) : (
                     <p className="text-[11px] text-slate-400 italic">New accounts linked under the MCC appear here automatically — no manual connect action needed.</p>
                   )}
-                  <div className="bg-slate-50 border border-slate-150 rounded-xl p-3 flex items-start gap-2.5">
-                    <HelpCircle className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" />
-                    <div className="flex-1">
-                      <p className="text-[11px] font-bold text-slate-700">Need Help?</p>
-                      <p className="text-[11px] text-slate-500 mt-0.5">Follow our step-by-step guide to set up {info.name} integration.</p>
-                      <button
-                        onClick={() => toast.info("Setup guide coming soon", "A written setup guide isn't published yet — use Contact Support in the sidebar and we'll walk you through it.")}
-                        className="mt-2 inline-flex items-center gap-1.5 bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-[11px] font-bold text-slate-700 hover:bg-slate-50 transition-colors"
-                      >
-                        View Setup Guide <ExternalLink className="h-3 w-3" />
-                      </button>
-                    </div>
-                  </div>
                 </div>
 
                 <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4">

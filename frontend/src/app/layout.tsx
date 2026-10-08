@@ -5,8 +5,7 @@ import "react-loading-skeleton/dist/skeleton.css";
 import { SkeletonTheme } from "react-loading-skeleton";
 import { AppProvider } from "@/context/AppContext";
 import NativeStatusBar from "@/components/NativeStatusBar";
-import ToastHost from "@/components/ui/ToastHost";
-import ConfirmHost from "@/components/ui/ConfirmHost";
+import { DialogProvider } from "@/components/ui/DialogProvider";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -38,10 +37,10 @@ export default function RootLayout({
             like a different design language from the real content it's
             standing in for. */}
         <NativeStatusBar />
-        <ToastHost />
-        <ConfirmHost />
         <SkeletonTheme baseColor="#e2e8f0" highlightColor="#f1f5f9" borderRadius={8}>
-          <AppProvider>{children}</AppProvider>
+          <DialogProvider>
+            <AppProvider>{children}</AppProvider>
+          </DialogProvider>
         </SkeletonTheme>
       </body>
     </html>

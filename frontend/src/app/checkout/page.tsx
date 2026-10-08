@@ -2,13 +2,14 @@
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useDialog } from "@/components/ui/DialogProvider";
 import { useApp } from "@/context/AppContext";
 import { ArrowLeft, CreditCard, CheckCircle, ShieldAlert, Sparkles } from "lucide-react";
 import Link from "next/link";
-import { toast } from "@/lib/toast";
 
 export default function CheckoutPage() {
   const router = useRouter();
+  const { toast } = useDialog();
   const {
     adminSeats,
     financeSeats,
@@ -37,7 +38,7 @@ export default function CheckoutPage() {
   const handleCheckout = async (e: React.FormEvent) => {
     e.preventDefault();
     if (selectedMethod === "upi" && !upiId) {
-      toast.error("Please enter a UPI ID");
+      toast("Please enter a UPI ID.", "warning");
       return;
     }
     setLoading(true);
@@ -277,7 +278,7 @@ export default function CheckoutPage() {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full mt-6 bg-brand-700 hover:bg-brand-600 text-white py-3 rounded-lg text-sm font-semibold transition-all shadow-lg shadow-brand-700/15 flex items-center justify-center gap-2"
+                className="w-full mt-6 bg-[#0B1E6E] hover:bg-[#081650] text-white py-3 rounded-lg text-sm font-semibold transition-all shadow-md flex items-center justify-center gap-2"
               >
                 {loading ? "Authorizing Gateway..." : `Pay ₹${total.toLocaleString("en-IN")} and Subscribe`}
               </button>

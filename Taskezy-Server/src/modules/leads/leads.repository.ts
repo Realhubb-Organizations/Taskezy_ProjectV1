@@ -19,7 +19,12 @@ export interface LeadListRow {
   lead_score: number | null;
   assigned_agent_id: string;
   assigned_agent_name: string;
+  /** Agent the lead was last reassigned away from (null if never reassigned). */
   previous_agent_name: string | null;
+  reassigned_at: string | null;
+  notes: string | null;
+  notes_updated_at: string | null;
+  notes_updated_by_name: string | null;
   property_id: string | null;
   property_name: string | null;
   assigned_at: string | null;
@@ -61,6 +66,8 @@ export interface LeadFilterConditions {
   dateFrom?: string;
   dateTo?: string;
   search?: string;
+  /** Leave out Data Calling leads (source "Bulk Upload"). */
+  excludeBulkUpload?: boolean;
   /** When set (non-admin/manager caller), results are hard-restricted to this agent's own leads. */
   scopedToAgentId?: string;
 }
@@ -98,6 +105,10 @@ function buildLeadWhereClause(filter: LeadFilterConditions): { whereClause: stri
     }
   }
 
+  if (filter.excludeBulkUpload) {
+    conditions.push(`l.source IS DISTINCT FROM 'Bulk Upload'`);
+  }
+
   if (filter.campaign && filter.campaign.length > 0) {
     params.push(filter.campaign);
     conditions.push(`COALESCE(l.campaign, l.source) = ANY($${params.length}::text[])`);
@@ -128,7 +139,9 @@ const LIST_SELECT = `
     l.id, l.name, l.phone, l.email, l.status_code, ls.label AS status_label,
     l.deal_value, l.lead_score, l.assigned_agent_id,
     u.first_name || COALESCE(' ' || u.last_name, '') AS assigned_agent_name,
-    pu.first_name || COALESCE(' ' || pu.last_name, '') AS previous_agent_name,
+    pu.first_name || COALESCE(' ' || pu.last_name, '') AS previous_agent_name, l.reassigned_at,
+    l.notes, l.notes_updated_at,
+    nu.first_name || COALESCE(' ' || nu.last_name, '') AS notes_updated_by_name,
     l.property_id, p.name AS property_name,
     l.assigned_at, l.first_response_at, l.created_at,
     l.source, l.sub_source, l.sub_status, l.campaign, l.meta_page_name, l.meta_form_id, l.meta_ad_id,
@@ -141,6 +154,7 @@ const LIST_SELECT = `
   FROM leads l
   JOIN users u ON u.id = l.assigned_agent_id
   LEFT JOIN users pu ON pu.id = l.previous_agent_id
+  LEFT JOIN users nu ON nu.id = l.notes_updated_by
   JOIN lead_statuses ls ON ls.code = l.status_code
   LEFT JOIN properties p ON p.id = l.property_id
 `;
@@ -299,6 +313,14 @@ export async function updateStatus(
          source = COALESCE($5, source)
      WHERE id = $6`,
     [statusCode, dealValue ?? null, stampFirstResponse, subStatus, promotedSource ?? null, leadId]
+  );
+}
+
+/** Must run inside the same transaction as insertLeadLog. */
+export async function setNote(client: PoolClient, leadId: string, note: string, userId: string): Promise<void> {
+  await client.query(
+    `UPDATE leads SET notes = $1, notes_updated_at = now(), notes_updated_by = $2 WHERE id = $3`,
+    [note, userId, leadId]
   );
 }
 

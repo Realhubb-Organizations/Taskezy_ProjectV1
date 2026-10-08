@@ -188,7 +188,7 @@ export default function MarketingReports({ dateRange }: { dateRange: DateRange }
             key={t}
             onClick={() => setSubTab(t)}
             className={`px-3.5 py-1.5 rounded-lg text-[11px] font-bold border transition-all ${
-              subTab === t ? "bg-brand-700 border-brand-700 text-white shadow-sm" : "bg-white border-slate-200 text-slate-500 hover:text-slate-700"
+              subTab === t ? "bg-[#0B1E6E] border-[#0B1E6E] text-white shadow-sm" : "bg-white border-slate-200 text-slate-500 hover:text-slate-700"
             }`}
           >
             {t}
@@ -200,16 +200,25 @@ export default function MarketingReports({ dateRange }: { dateRange: DateRange }
         <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 space-y-4">
           <h3 className="text-xs font-bold text-slate-700">Individual Ad Account Performance</h3>
           <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm overflow-x-auto">
-            <table className="w-full min-w-[760px] text-left text-[11px] border-collapse">
+            <table className="table-fixed w-full min-w-[1050px] text-[11px] border-collapse">
+              <colgroup>
+                <col />
+                <col />
+                <col />
+                <col />
+                <col />
+                <col />
+                <col />
+              </colgroup>
               <thead>
-                <tr className="bg-slate-50 border-b border-slate-200 text-[9px] uppercase font-bold text-slate-500 tracking-wider">
-                  <th className="p-3">Platform</th>
-                  <th className="p-3">Ad Account</th>
-                  <th className="p-3">Spend</th>
-                  <th className="p-3">Platform Leads</th>
-                  <th className="p-3">CPL</th>
-                  <th className="p-3">Lead Quality</th>
-                  <th className="p-3">Booking ROI</th>
+                <tr className="bg-slate-50 border-b border-slate-200">
+                  <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Platform</th>
+                  <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Ad Account</th>
+                  <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Spend</th>
+                  <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Platform Leads</th>
+                  <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">CPL</th>
+                  <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Lead Quality</th>
+                  <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Booking ROI</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -220,25 +229,25 @@ export default function MarketingReports({ dateRange }: { dateRange: DateRange }
                 ) : (
                   accountPagination.pageRows.map(acc => (
                     <tr key={acc.accountName} className="hover:bg-slate-50/50">
-                      <td className="p-3">
+                      <td className="px-4 py-3">
                         <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${
                           acc.platform === "Meta" ? "bg-blue-50 text-blue-700 border-blue-100" : "bg-amber-50 text-amber-700 border-amber-100"
                         }`}>
                           {acc.platform}
                         </span>
                       </td>
-                      <td className="p-3 font-bold text-slate-800 max-w-[220px] truncate" title={acc.accountName}>{acc.accountName}</td>
-                      <td className="p-3 font-mono font-semibold text-slate-700">{formatCurrency(acc.spend)}</td>
-                      <td className="p-3 font-mono text-slate-600">{acc.platformLeads}</td>
-                      <td className="p-3 font-mono font-bold text-brand-700">{formatCurrency(acc.cpl)}</td>
-                      <td className="p-3">
+                      <td className="px-4 py-3 font-bold text-slate-800 [overflow-wrap:anywhere]" title={acc.accountName}>{acc.accountName}</td>
+                      <td className="px-4 py-3 font-mono font-semibold text-slate-700">{formatCurrency(acc.spend)}</td>
+                      <td className="px-4 py-3 font-mono text-slate-600">{acc.platformLeads}</td>
+                      <td className="px-4 py-3 font-mono font-bold text-brand-700">{formatCurrency(acc.cpl)}</td>
+                      <td className="px-4 py-3">
                         {acc.hasMatchedLeads ? (
                           <span className="font-mono font-semibold text-slate-700">{acc.qualityPercent.toFixed(0)}%</span>
                         ) : (
                           <span className="text-slate-400 italic">No CRM leads matched</span>
                         )}
                       </td>
-                      <td className="p-3 font-mono font-bold text-emerald-650">
+                      <td className="px-4 py-3 font-mono font-bold text-emerald-650">
                         {acc.hasMatchedLeads ? `${acc.roi.toFixed(1)}x` : "—"}
                       </td>
                     </tr>
@@ -307,16 +316,25 @@ export default function MarketingReports({ dateRange }: { dateRange: DateRange }
             Property-wise Marketing Performance
           </h3>
           <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm overflow-x-auto">
-            <table className="w-full min-w-[760px] text-left text-[11px] border-collapse">
+            <table className="table-fixed w-full min-w-[1050px] text-[11px] border-collapse">
+              <colgroup>
+                <col />
+                <col />
+                <col />
+                <col />
+                <col />
+                <col />
+                <col />
+              </colgroup>
               <thead>
-                <tr className="bg-slate-50 border-b border-slate-200 text-[9px] uppercase font-bold text-slate-500 tracking-wider">
-                  <th className="p-3">Property</th>
-                  <th className="p-3">Spend</th>
-                  <th className="p-3">CRM Leads</th>
-                  <th className="p-3">CPL</th>
-                  <th className="p-3">Bookings</th>
-                  <th className="p-3">Booking Value</th>
-                  <th className="p-3">ROI</th>
+                <tr className="bg-slate-50 border-b border-slate-200">
+                  <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Property</th>
+                  <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Spend</th>
+                  <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">CRM Leads</th>
+                  <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">CPL</th>
+                  <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Bookings</th>
+                  <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Booking Value</th>
+                  <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">ROI</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -327,13 +345,13 @@ export default function MarketingReports({ dateRange }: { dateRange: DateRange }
                 ) : (
                   propertyPagination.pageRows.map(row => (
                     <tr key={row.name} className="hover:bg-slate-50/50">
-                      <td className="p-3 font-bold text-slate-800">{row.name}</td>
-                      <td className="p-3 font-mono text-slate-700">{formatCurrency(row.spend)}</td>
-                      <td className="p-3 font-mono text-slate-600">{row.crmLeadsCount}</td>
-                      <td className="p-3 font-mono font-bold text-brand-700">{formatCurrency(row.cpl)}</td>
-                      <td className="p-3 font-mono text-slate-600">{row.bookingCount}</td>
-                      <td className="p-3 font-mono text-slate-700">{formatCurrency(row.bookingValue)}</td>
-                      <td className="p-3 font-mono font-bold text-emerald-650">{row.roi.toFixed(1)}x</td>
+                      <td className="px-4 py-3 font-bold text-slate-800">{row.name}</td>
+                      <td className="px-4 py-3 font-mono text-slate-700">{formatCurrency(row.spend)}</td>
+                      <td className="px-4 py-3 font-mono text-slate-600">{row.crmLeadsCount}</td>
+                      <td className="px-4 py-3 font-mono font-bold text-brand-700">{formatCurrency(row.cpl)}</td>
+                      <td className="px-4 py-3 font-mono text-slate-600">{row.bookingCount}</td>
+                      <td className="px-4 py-3 font-mono text-slate-700">{formatCurrency(row.bookingValue)}</td>
+                      <td className="px-4 py-3 font-mono font-bold text-emerald-650">{row.roi.toFixed(1)}x</td>
                     </tr>
                   ))
                 )}

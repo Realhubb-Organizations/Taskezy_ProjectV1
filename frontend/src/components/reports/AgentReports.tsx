@@ -2,6 +2,7 @@
 
 import React, { useMemo, useState } from "react";
 import { useApp } from "@/context/AppContext";
+import { useDialog } from "@/components/ui/DialogProvider";
 import { AlertTriangle, DollarSign, TrendingUp, Users, UserCog, RefreshCw } from "lucide-react";
 import { DateRange } from "./DateRangeFilter";
 import {
@@ -19,10 +20,10 @@ import {
 } from "@/lib/reportMetrics";
 import { LineSkeleton, TableRowsSkeleton, CardListSkeleton } from "@/components/ui/Skeletons";
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
-import { toast } from "@/lib/toast";
 
 export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
   const { leads, adSpendRecords, followupCalls, users, currentUser, activeRole, reassignLead, isDataLoading } = useApp();
+  const { toast, prompt: promptDialog } = useDialog();
 
   const rangeLeads = useMemo(() => filterLeadsByRange(leads, dateRange.from, dateRange.to), [leads, dateRange]);
   const rangeSpend = useMemo(() => filterAdSpendByRange(adSpendRecords, dateRange.from, dateRange.to), [adSpendRecords, dateRange]);
@@ -84,14 +85,36 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
   const missedLeadsPagination = usePagination(missedLeads, 10, detailResetKey);
   const missedFollowupsPagination = usePagination(missedFollowups, 10, detailResetKey);
 
-  const handleReassign = (leadId: string, leadName: string) => {
-    const target = prompt(`Reassign "${leadName}" to which team member?`, agentSalesTeamOptions.find(n => n !== activeAgent) || "");
+  const handleReassign = async (leadId: string, leadName: string) => {
+    const target = await promptDialog({
+      title: "Reassign lead",
+      message: `Reassign "${leadName}" to which team member?`,
+      label: "Team member",
+      defaultValue: agentSalesTeamOptions.find(n => n !== activeAgent) || "",
+      options: agentSalesTeamOptions,
+      confirmLabel: "Reassign"
+    });
     if (!target) return;
     if (!agentSalesTeamOptions.includes(target)) {
-      toast.error("Please enter a valid team member name from the roster.");
+      toast("Please enter a valid team member name from the roster.", "warning");
       return;
     }
-    reassignLead(leadId, target);
+    const note = await promptDialog({
+      title: `Reassign to ${target}`,
+      message: leadName,
+      label: "Note (required)",
+      placeholder: "Note for the new agent — e.g. Prefers WhatsApp, call after 6 pm",
+      confirmLabel: "Reassign",
+      multiline: true,
+      validate: (v) => (!v ? "Please write a note." : null)
+    });
+    if (note === null) return;
+    try {
+      await reassignLead(leadId, target, note);
+      toast(`${leadName} reassigned to ${target}.`, "success");
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Could not reassign this lead. Please try again.", "error");
+    }
   };
 
   return (
@@ -118,10 +141,10 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                       key={name}
                       onClick={() => setSelectedAgent(name)}
                       className={`w-full text-left px-3 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-between ${
-                        activeAgent === name ? "bg-brand-700 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"
+                        activeAgent === name ? "bg-[#0B1E6E] text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"
                       }`}
                     >
-                      <span className="truncate">
+                      <span className="[overflow-wrap:anywhere]">
                         {name}
                         {isManagedBy && (
                           <span className={`block text-[9px] font-semibold ${activeAgent === name ? "text-brand-100" : "text-slate-400"}`}>
@@ -236,16 +259,25 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                   Missed Leads — Full Detail
                 </h3>
                 <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm overflow-x-auto">
-                  <table className="w-full text-left text-[11px] border-collapse">
+                  <table className={`table-fixed w-full text-[11px] border-collapse ${activeRole === "ADMIN" ? "min-w-[1050px]" : "min-w-[900px]"}`}>
+                    <colgroup>
+                      <col />
+                      <col />
+                      <col />
+                      <col />
+                      <col />
+                      <col />
+                      {activeRole === "ADMIN" && <col />}
+                    </colgroup>
                     <thead>
-                      <tr className="bg-slate-50 border-b border-slate-200 text-[9px] uppercase font-bold text-slate-500 tracking-wider">
-                        <th className="p-3">Lead</th>
-                        <th className="p-3">Assigned At</th>
-                        <th className="p-3">Wait Time</th>
-                        <th className="p-3">Overdue By</th>
-                        <th className="p-3">Notes</th>
-                        <th className="p-3">Reassigned At</th>
-                        {activeRole === "ADMIN" && <th className="p-3 text-right">Action</th>}
+                      <tr className="bg-slate-50 border-b border-slate-200">
+                        <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Lead</th>
+                        <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Assigned At</th>
+                        <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Wait Time</th>
+                        <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Overdue By</th>
+                        <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Notes</th>
+                        <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Reassigned At</th>
+                        {activeRole === "ADMIN" && <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Action</th>}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
@@ -269,18 +301,18 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                           const overdueMinutes = missedAtTime !== undefined ? Math.round((activityTime - missedAtTime) / 60000) : undefined;
                           return (
                             <tr key={lead.id} className="hover:bg-slate-50/50">
-                              <td className="p-3">
+                              <td className="px-4 py-3">
                                 <p className="font-bold text-slate-800">{lead.name}</p>
                                 <p className="text-[9px] text-slate-450 font-mono">{lead.phone}</p>
                               </td>
-                              <td className="p-3 font-mono text-slate-600">
+                              <td className="px-4 py-3 font-mono text-slate-600">
                                 {lead.assignedAt ? new Date(lead.assignedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—"}
                               </td>
-                              <td className="p-3">
+                              <td className="px-4 py-3">
                                 <span className="font-bold text-red-650">{formatMinutes(info.responseMinutes)}</span>
                                 {info.responseMinutes === undefined && <span className="text-[9px] text-slate-400 block">still waiting</span>}
                               </td>
-                              <td className="p-3">
+                              <td className="px-4 py-3">
                                 {overdueMinutes !== undefined && overdueMinutes > 0 ? (
                                   <span className="font-bold text-amber-700">{formatMinutes(overdueMinutes)}</span>
                                 ) : (
@@ -288,21 +320,21 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                                 )}
                                 {!latestLog && <span className="text-[9px] text-slate-400 block">and counting</span>}
                               </td>
-                              <td className="p-3 text-slate-500 max-w-[220px]">
-                                <p className="truncate" title={latestLog?.message}>{latestLog?.message || "No activity logged."}</p>
+                              <td className="px-4 py-3 text-slate-500">
+                                <p className="line-clamp-3 [overflow-wrap:anywhere]" title={latestLog?.message}>{latestLog?.message || "No activity logged."}</p>
                                 {latestLog && (
                                   <p className="text-[9px] text-slate-400 font-mono mt-0.5">
                                     {new Date(latestLog.timestamp).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
                                   </p>
                                 )}
                               </td>
-                              <td className="p-3 font-mono text-slate-600">
+                              <td className="px-4 py-3 font-mono text-slate-600">
                                 {lead.reassignedAt
                                   ? new Date(lead.reassignedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })
                                   : "Not reassigned"}
                               </td>
                               {activeRole === "ADMIN" && (
-                                <td className="p-3 text-right">
+                                <td className="px-4 py-3 text-right">
                                   <button
                                     onClick={() => handleReassign(lead.id, lead.name)}
                                     className="inline-flex items-center gap-1 text-[10px] font-bold text-brand-600 hover:text-brand-700"
@@ -327,13 +359,19 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                   Missed Follow-ups — Full Detail
                 </h3>
                 <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm overflow-x-auto">
-                  <table className="w-full text-left text-[11px] border-collapse">
+                  <table className="table-fixed w-full min-w-[600px] text-[11px] border-collapse">
+                    <colgroup>
+                      <col />
+                      <col />
+                      <col />
+                      <col />
+                    </colgroup>
                     <thead>
-                      <tr className="bg-slate-50 border-b border-slate-200 text-[9px] uppercase font-bold text-slate-500 tracking-wider">
-                        <th className="p-3">Lead</th>
-                        <th className="p-3">Type</th>
-                        <th className="p-3">Scheduled</th>
-                        <th className="p-3">Overdue By</th>
+                      <tr className="bg-slate-50 border-b border-slate-200">
+                        <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Lead</th>
+                        <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Type</th>
+                        <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Scheduled</th>
+                        <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Overdue By</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
@@ -357,13 +395,13 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                           const overdueMinutes = Math.round((Date.now() - missedAtTime) / 60000);
                           return (
                             <tr key={f.id} className="hover:bg-slate-50/50">
-                              <td className="p-3">
+                              <td className="px-4 py-3">
                                 <p className="font-bold text-slate-800">{f.leadName}</p>
                                 <p className="text-[9px] text-slate-450 font-mono">{f.phone}</p>
                               </td>
-                              <td className="p-3 text-slate-600">{f.type}</td>
-                              <td className="p-3 font-mono text-slate-600">{f.date} • {f.time}</td>
-                              <td className="p-3">
+                              <td className="px-4 py-3 text-slate-600">{f.type}</td>
+                              <td className="px-4 py-3 font-mono text-slate-600">{f.date} • {f.time}</td>
+                              <td className="px-4 py-3">
                                 {overdueMinutes > 0 ? (
                                   <span className="font-bold text-amber-700">{formatMinutes(overdueMinutes)}</span>
                                 ) : (

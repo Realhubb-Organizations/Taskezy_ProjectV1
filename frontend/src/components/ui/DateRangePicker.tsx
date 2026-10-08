@@ -23,6 +23,7 @@ export interface DateRangeValue {
 
 const WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 const PANEL_WIDTH = 308;
+const PRESETS_WIDTH = 132;
 
 const pad = (n: number) => String(n).padStart(2, "0");
 export const toIsoDate = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -133,9 +134,9 @@ function MonthGrid({
               onMouseEnter={() => onHover?.(iso)}
               className={`h-11 sm:h-9 text-[13px] tabular-nums transition-colors ${
                 end
-                  ? "bg-[#3370E8] text-white font-semibold"
+                  ? "bg-[#0B1E6E] text-white font-semibold"
                   : between
-                    ? "bg-[#9BB8F3] text-white"
+                    ? "bg-[#0B1E6E]/10 text-[#0B1E6E]"
                     : disabled
                       ? "text-slate-300 cursor-not-allowed"
                       : "text-slate-700 hover:bg-slate-100"
@@ -156,7 +157,7 @@ function PanelFooter({ onClose, onApply, canApply }: { onClose: () => void; onAp
       <button
         type="button"
         onClick={onClose}
-        className="px-4 py-1.5 rounded-lg border border-[#3370E8] text-[#3370E8] text-xs font-semibold hover:bg-blue-50 transition-colors"
+        className="px-4 py-1.5 rounded-lg border border-[#0B1E6E] text-[#0B1E6E] text-xs font-semibold hover:bg-[#0B1E6E]/5 transition-colors"
       >
         Close
       </button>
@@ -164,7 +165,7 @@ function PanelFooter({ onClose, onApply, canApply }: { onClose: () => void; onAp
         type="button"
         onClick={onApply}
         disabled={!canApply}
-        className="px-4 py-1.5 rounded-lg bg-[#3370E8] text-white text-xs font-semibold hover:bg-[#2A5FCC] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        className="px-4 py-1.5 rounded-lg bg-[#0B1E6E] text-white text-xs font-semibold hover:bg-[#081650] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
       >
         Apply
       </button>
@@ -207,14 +208,14 @@ function HeaderDateInput({
       onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commit(); } }}
       placeholder={placeholder}
       className={`w-[92px] bg-transparent text-center text-[13px] tabular-nums text-slate-700 placeholder:text-slate-400 outline-none border-b-2 pb-0.5 transition-colors ${
-        active ? "border-[#3370E8]" : "border-transparent"
+        active ? "border-[#0B1E6E]" : "border-transparent"
       }`}
     />
   );
 }
 
-const triggerClass =
-  "flex items-center gap-2 bg-white border border-slate-300/80 rounded-xl px-3 py-1.5 text-xs text-slate-700 font-medium shadow-2xs hover:bg-slate-50 transition-colors";
+export const triggerClass =
+  "inline-flex items-center justify-center gap-2 h-9 bg-white border border-slate-300/80 rounded-xl px-3.5 text-xs text-slate-700 font-medium shadow-2xs hover:bg-slate-50 transition-colors";
 
 export default function DateRangePicker({
   value,
@@ -244,7 +245,7 @@ export default function DateRangePicker({
     <>
       <span className={`inline-flex items-center ${className ?? ""}`}>
         <button ref={anchorRef} type="button" onClick={() => setOpen(o => !o)} className={triggerClass}>
-          <Calendar className="h-3.5 w-3.5 text-blue-600" />
+          <Calendar className="h-4 w-4 text-blue-600" />
           <span className="tabular-nums">
             {value ? `${formatDisplayDate(value.start)} To ${formatDisplayDate(value.end)}` : emptyLabel}
           </span>
@@ -287,7 +288,10 @@ export function RangeCalendarPanel({
   maxDate = todayIso(),
   minDate,
   onApply,
-  onClose
+  onClose,
+  presets,
+  activePreset,
+  onPreset
 }: {
   anchorRef: React.RefObject<HTMLElement>;
   initial: DateRangeValue | null;
@@ -295,7 +299,13 @@ export function RangeCalendarPanel({
   minDate?: string;
   onApply: (v: DateRangeValue) => void;
   onClose: () => void;
+  /** Optional quick ranges shown beside the calendar; picking one calls onPreset. */
+  presets?: { value: string; label: string }[];
+  activePreset?: string;
+  onPreset?: (value: string) => void;
 }) {
+  const hasPresets = !!presets && presets.length > 0;
+  const panelWidth = hasPresets ? PANEL_WIDTH + PRESETS_WIDTH : PANEL_WIDTH;
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   useCloseOnScroll(!!pos, onClose, panelRef);
@@ -313,12 +323,12 @@ export function RangeCalendarPanel({
   useLayoutEffect(() => {
     const rect = anchorRef.current?.getBoundingClientRect();
     if (!rect) return;
-    const left = Math.max(8, Math.min(rect.left, window.innerWidth - PANEL_WIDTH - 8));
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - panelWidth - 8));
     const h = panelRef.current?.offsetHeight ?? 0;
     const fitsBelow = rect.bottom + 6 + h <= window.innerHeight - 8;
     const top = !pos || fitsBelow || rect.top - 6 - h < 8 ? rect.bottom + 6 : rect.top - 6 - h;
     if (!pos || pos.top !== top || pos.left !== left) setPos({ top, left });
-  }, [anchorRef, pos]);
+  }, [anchorRef, pos, panelWidth]);
 
   const isDisabled = (iso: string) => (!!maxDate && iso > maxDate) || (!!minDate && iso < minDate);
 
@@ -347,8 +357,26 @@ export function RangeCalendarPanel({
             ref={panelRef}
             onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}
             className="fixed z-[210] max-w-[calc(100vw-1rem)] bg-white rounded-2xl shadow-2xl border border-slate-100"
-            style={{ top: pos?.top ?? -9999, left: pos?.left ?? 0, width: PANEL_WIDTH }}
+            style={{ top: pos?.top ?? -9999, left: pos?.left ?? 0, width: panelWidth }}
           >
+            <div className={hasPresets ? "flex flex-col sm:flex-row" : undefined}>
+            {hasPresets && (
+              <div className="flex flex-wrap sm:flex-col gap-1 p-3 sm:w-[132px] shrink-0 border-b sm:border-b-0 sm:border-r border-slate-100">
+                {presets!.map(p => (
+                  <button
+                    key={p.value}
+                    type="button"
+                    onClick={() => onPreset?.(p.value)}
+                    className={`text-left px-3 py-2 rounded-lg text-xs font-semibold transition-colors ${
+                      activePreset === p.value ? "bg-[#0B1E6E] text-white" : "text-slate-700 hover:bg-slate-50"
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className={hasPresets ? "flex-1 min-w-0" : undefined}>
             <div className="flex justify-center pt-4">
               <div className="flex items-center gap-2 rounded-full bg-white shadow-md border border-slate-100 px-4 py-1.5">
                 <HeaderDateInput
@@ -388,6 +416,8 @@ export function RangeCalendarPanel({
               onHover={setHover}
             />
             <PanelFooter onClose={onClose} onApply={apply} canApply={canApply} />
+            </div>
+            </div>
           </div>
         </>,
         document.body

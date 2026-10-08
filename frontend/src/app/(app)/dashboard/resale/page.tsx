@@ -2,13 +2,14 @@
 
 import React, { useEffect, useState } from "react";
 import { useApp, mapApiResaleUnitToFrontend, ResaleUnit } from "@/context/AppContext";
+import { useDialog } from "@/components/ui/DialogProvider";
 import { apiListResaleUnitsPage, type ResaleUnitListFilters } from "@/lib/apiClient";
-import { toast } from "@/lib/toast";
 import { Plus, X, Search, Landmark, PhoneCall, Link2, CheckCircle } from "lucide-react";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
 import TablePagination, { DEFAULT_ROWS_PER_PAGE_OPTIONS } from "@/components/ui/TablePagination";
 
 export default function ResalePage() {
+  const { toast } = useDialog();
   const { resaleUnits, addResaleUnit, leads } = useApp();
 
   // Filters state
@@ -103,7 +104,7 @@ export default function ResalePage() {
   const handlePostResale = (e: React.FormEvent) => {
     e.preventDefault();
     if (!resaleProp || !resalePrice) {
-      toast.error("Property name and price are required.");
+      toast("Property name and price are required.", "warning");
       return;
     }
     addResaleUnit({
@@ -148,7 +149,7 @@ export default function ResalePage() {
         </div>
         <button
           onClick={() => setIsPostOpen(true)}
-          className="inline-flex items-center gap-1.5 bg-brand-700 hover:bg-brand-600 text-white px-4 py-2 rounded-lg text-xs font-bold transition-all shadow-md shadow-brand-700/10"
+          className="inline-flex items-center gap-1.5 bg-[#0B1E6E] hover:bg-[#081650] text-white px-4 py-2 rounded-lg text-xs font-bold transition-all shadow-md"
         >
           <Plus className="h-4 w-4" />
           Post Resale Unit
@@ -219,7 +220,7 @@ export default function ResalePage() {
                       <div className="flex gap-2 justify-end">
                         <button
                           onClick={() => handleFindLeads(u)}
-                          className="px-2.5 py-1 rounded bg-brand-50 border border-brand-200 text-[10px] font-bold text-brand-700 hover:bg-brand-700 hover:text-white transition-all"
+                          className="px-2.5 py-1 rounded bg-brand-50 border border-brand-200 text-[10px] font-bold text-brand-700 hover:bg-[#0B1E6E] hover:text-white transition-all"
                         >
                           Find Leads
                         </button>
@@ -322,7 +323,7 @@ export default function ResalePage() {
 
               <button
                 type="submit"
-                className="w-full bg-brand-700 hover:bg-brand-600 text-white font-bold py-2.5 rounded-lg text-xs transition-all shadow-sm"
+                className="w-full bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold py-2.5 rounded-lg text-xs transition-all shadow-sm"
               >
                 Post Listing
               </button>

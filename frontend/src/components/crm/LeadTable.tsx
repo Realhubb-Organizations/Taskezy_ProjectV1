@@ -1,7 +1,7 @@
 import React from "react";
 import { Phone, MessageSquare, Mail, Eye, Trash2, ShieldAlert, Award } from "lucide-react";
 import { Lead, LeadStatus } from "@/context/AppContext";
-import { toast } from "@/lib/toast";
+import { useDialog } from "@/components/ui/DialogProvider";
 
 interface LeadTableProps {
   leads: Lead[];
@@ -16,6 +16,7 @@ export default function LeadTable({
   onDelete,
   activeRole
 }: LeadTableProps) {
+  const { toast } = useDialog();
 
   const getStatusColor = (status: LeadStatus) => {
     switch (status) {
@@ -49,7 +50,7 @@ export default function LeadTable({
 
   const triggerCall = (phone: string, name: string) => {
     // API Integration Point: Wire up dialer system call action
-    toast.info("Dialing", `Dialing ${name} at ${phone}... Connecting cloud telephony...`);
+    toast(`Dialing ${name} at ${phone}...`, "info");
     window.location.href = `tel:${phone}`;
   };
 

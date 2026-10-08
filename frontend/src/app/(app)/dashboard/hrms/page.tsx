@@ -3,8 +3,8 @@
 import React, { useEffect, useState } from "react";
 import { useApp, AttendanceRecord, TimesheetLog, CalendarEventType, mapApiTimesheetToFrontend, mapApiAttendanceToFrontend } from "@/context/AppContext";
 import { apiListTimesheetsPage, apiListAttendancePage } from "@/lib/apiClient";
-import { toast } from "@/lib/toast";
 import { useSearchParams } from "next/navigation";
+import { useDialog } from "@/components/ui/DialogProvider";
 import MonthCalendar from "@/components/calendar/MonthCalendar";
 import AddCalendarEventModal from "@/components/calendar/AddCalendarEventModal";
 import TablePagination from "@/components/ui/TablePagination";
@@ -30,6 +30,7 @@ import {
 import { todayIso } from "@/components/ui/DateRangePicker";
 
 export default function HRMSPage() {
+  const { toast } = useDialog();
   const {
     users,
     activeRole,
@@ -78,7 +79,7 @@ export default function HRMSPage() {
   const handleAddMember = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name || !email) {
-      toast.error("Name and email are required.");
+      toast("Name and email are required.", "warning");
       return;
     }
     setSuccessMsg(`Successfully invited and provisioned account for ${name}.`);
@@ -287,7 +288,7 @@ export default function HRMSPage() {
         {isAdmin && activeTabParam === "teams" && (
           <button
             onClick={() => setIsAddOpen(true)}
-            className="inline-flex items-center gap-1.5 bg-brand-700 hover:bg-brand-600 text-white px-4 py-2 rounded-lg text-xs font-bold transition-all shadow-md shadow-brand-700/10"
+            className="inline-flex items-center gap-1.5 bg-[#0B1E6E] hover:bg-[#081650] text-white px-4 py-2 rounded-lg text-xs font-bold transition-all shadow-md"
           >
             <Plus className="h-4 w-4" />
             Add Team Member
@@ -297,7 +298,7 @@ export default function HRMSPage() {
         {isAdmin && activeTabParam === "calendar" && (
           <button
             onClick={() => setIsAddEventOpen(true)}
-            className="inline-flex items-center gap-1.5 bg-brand-700 hover:bg-brand-600 text-white px-4 py-2 rounded-lg text-xs font-bold transition-all shadow-md shadow-brand-700/10"
+            className="inline-flex items-center gap-1.5 bg-[#0B1E6E] hover:bg-[#081650] text-white px-4 py-2 rounded-lg text-xs font-bold transition-all shadow-md"
           >
             <Plus className="h-4 w-4" />
             Add Event
@@ -423,7 +424,7 @@ export default function HRMSPage() {
                   className={`w-full py-3 rounded-xl text-xs font-bold text-white transition-all shadow-md disabled:opacity-60 disabled:cursor-not-allowed ${
                     activePunch
                       ? "bg-red-650 hover:bg-red-600 shadow-red-200"
-                      : "bg-brand-700 hover:bg-brand-600 shadow-brand-200"
+                      : "bg-[#0B1E6E] hover:bg-[#081650]"
                   }`}
                 >
                   {isPunching
@@ -553,7 +554,7 @@ export default function HRMSPage() {
                         <div className="flex gap-2">
                           <button
                             onClick={() => approveRegularization(ts.id)}
-                            className="px-3 py-1.5 rounded bg-emerald-650 text-white hover:bg-emerald-600 text-[10px] font-bold"
+                            className="px-3 py-1.5 rounded bg-[#0B1E6E] text-white hover:bg-[#081650] text-[10px] font-bold"
                           >
                             Approve Correction
                           </button>
@@ -933,7 +934,7 @@ export default function HRMSPage() {
 
               <button
                 type="submit"
-                className="w-full bg-brand-700 hover:bg-brand-600 text-white font-bold py-2.5 rounded-lg text-xs transition-all shadow-sm"
+                className="w-full bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold py-2.5 rounded-lg text-xs transition-all shadow-sm"
               >
                 Submit Correction Request
               </button>
@@ -1007,7 +1008,7 @@ export default function HRMSPage() {
 
               <button
                 type="submit"
-                className="w-full bg-brand-700 hover:bg-brand-600 text-white font-bold py-2.5 rounded-lg text-xs transition-all shadow-sm"
+                className="w-full bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold py-2.5 rounded-lg text-xs transition-all shadow-sm"
               >
                 Provision Team Account
               </button>

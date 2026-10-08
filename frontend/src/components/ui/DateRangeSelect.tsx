@@ -1,15 +1,14 @@
 "use client";
 
 import React, { useRef, useState } from "react";
-import { SearchableSelect, DropdownVariant } from "@/components/ui/SearchableDropdown";
-import { DateRangeValue, RangeCalendarPanel, formatDisplayDate, todayIso } from "@/components/ui/DateRangePicker";
+import { Calendar, ChevronDown } from "lucide-react";
+import { DateRangeValue, RangeCalendarPanel, formatDisplayDate, todayIso, triggerClass } from "@/components/ui/DateRangePicker";
 
-// The "Date Range" preset dropdown used on the CRM Dashboard, Leads,
-// Campaigns and Data Calling pages: the page's presets (Today, This Week, …)
-// plus a "Custom" option that opens the shared calendar right under the
-// dropdown. Apply → the page switches to its custom value with the picked
-// range and the trigger shows "dd-mm-yyyy To dd-mm-yyyy"; Close → nothing
-// changes (the previous preset stays).
+// The "Date Range" control used on the CRM Dashboard, Leads, Campaigns and
+// Data Calling pages. One click opens a single panel: the page's quick
+// presets (Today, This Week, …) beside the calendar. Picking a preset applies
+// it immediately; picking dates and pressing Apply sets a custom range and
+// the trigger shows "dd-mm-yyyy To dd-mm-yyyy".
 
 export const CUSTOM_OPTION_LABEL = "Custom";
 
@@ -21,7 +20,6 @@ export default function DateRangeSelect<T extends string>({
   onPresetChange,
   onCustomApply,
   maxDate = todayIso(),
-  variant = "pill",
   className
 }: {
   /** The page's presets, without Custom. */
@@ -34,37 +32,36 @@ export default function DateRangeSelect<T extends string>({
   /** Called on Apply — the page should store the range and set its value to customValue. */
   onCustomApply: (range: DateRangeValue) => void;
   maxDate?: string;
-  variant?: DropdownVariant;
+  /** @deprecated kept for existing callers; the control is always the toolbar button. */
+  variant?: string;
   className?: string;
 }) {
-  const [calendarOpen, setCalendarOpen] = useState(false);
-  const anchorRef = useRef<HTMLSpanElement>(null);
+  const [open, setOpen] = useState(false);
+  const anchorRef = useRef<HTMLButtonElement>(null);
 
+  const presets = options.filter(o => o.value !== customValue);
   const isCustom = value === customValue && !!customRange;
-  const allOptions = [
-    ...options.filter(o => o.value !== customValue),
-    { value: customValue, label: CUSTOM_OPTION_LABEL }
-  ];
+  const label = isCustom
+    ? `${formatDisplayDate(customRange!.start)} To ${formatDisplayDate(customRange!.end)}`
+    : presets.find(o => o.value === value)?.label ?? CUSTOM_OPTION_LABEL;
 
   return (
-    <span ref={anchorRef} className={`inline-flex ${className ?? ""}`}>
-      <SearchableSelect
-        variant={variant}
-        options={allOptions}
-        value={value}
-        // Custom always (re)opens the calendar — even when it's already the
-        // selection — so a new range can be picked.
-        onChange={(v) => (v === customValue ? setCalendarOpen(true) : onPresetChange(v as T))}
-        label={isCustom ? `${formatDisplayDate(customRange!.start)} To ${formatDisplayDate(customRange!.end)}` : undefined}
-        panelWidth={180}
-      />
-      {calendarOpen && (
+    <span className={`inline-flex ${className ?? ""}`}>
+      <button ref={anchorRef} type="button" onClick={() => setOpen(o => !o)} className={triggerClass}>
+        <Calendar className="h-4 w-4 text-blue-600" />
+        <span className="tabular-nums whitespace-nowrap">{label}</span>
+        <ChevronDown className={`h-3.5 w-3.5 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
         <RangeCalendarPanel
           anchorRef={anchorRef}
           initial={isCustom ? customRange : null}
           maxDate={maxDate}
-          onApply={(range) => { onCustomApply(range); setCalendarOpen(false); }}
-          onClose={() => setCalendarOpen(false)}
+          presets={presets}
+          activePreset={isCustom ? undefined : value}
+          onPreset={(v) => { onPresetChange(v as T); setOpen(false); }}
+          onApply={(range) => { onCustomApply(range); setOpen(false); }}
+          onClose={() => setOpen(false)}
         />
       )}
     </span>

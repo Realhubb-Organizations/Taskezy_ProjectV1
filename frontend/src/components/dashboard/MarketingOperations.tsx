@@ -2,7 +2,7 @@ import React from "react";
 import { Globe, TrendingUp, DollarSign, Activity, Eye, ArrowUpRight } from "lucide-react";
 import SubActionsMenu, { ActionItem } from "./SubActionsMenu";
 import { useRouter } from "next/navigation";
-import { toast } from "@/lib/toast";
+import { useDialog } from "@/components/ui/DialogProvider";
 
 interface MarketingOperationsProps {
   metaTotalSpend: number;
@@ -26,15 +26,16 @@ export default function MarketingOperations({
   googleActiveCampaigns
 }: MarketingOperationsProps) {
   const router = useRouter();
+  const { toast } = useDialog();
 
   const handleCardRedirect = (path: string) => {
     router.push(path);
   };
 
   const getCampaignActions = (source: string): ActionItem[] => [
-    { label: `View ${source} Campaign Details`, onClick: () => toast.info("Coming soon", `Redirecting to ${source} details...`) },
-    { label: `Optimize Bid Strategy`, onClick: () => toast.info("Coming soon", `Adjusting bid strategy for ${source}...`) },
-    { label: `Sync Ads Manager`, onClick: () => toast.info("Coming soon", `Syncing ads data for ${source}...`) }
+    { label: `View ${source} Campaign Details`, onClick: () => toast(`Redirecting to ${source} details...`, "info") },
+    { label: `Optimize Bid Strategy`, onClick: () => toast(`Adjusting bid strategy for ${source}...`, "info") },
+    { label: `Sync Ads Manager`, onClick: () => toast(`Syncing ads data for ${source}...`, "info") }
   ];
 
   return (

@@ -4,7 +4,6 @@ import React, { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { X, UploadCloud, Download, ChevronDown, CheckCircle2, AlertTriangle } from "lucide-react";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
-import { toast } from "@/lib/toast";
 
 // exceljs is a ~260KB dependency used only by this modal (template
 // generation + file parsing) — dynamically imported so it's fetched when an
@@ -468,18 +467,12 @@ export default function UploadLeadsModal({ isOpen, onClose, onSubmit, properties
           )}
           </div>
 
-          <div className="shrink-0 flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-t border-slate-100">
-            <p className="text-[11px] text-slate-400">
-              Still facing issues?{" "}
-              <button type="button" className="text-[#0B1E6E] font-bold hover:underline" onClick={() => toast.success("Support request sent", "Our team will reach out shortly.")}>
-                Contact support
-              </button>
-            </p>
+          <div className="shrink-0 flex flex-wrap items-center justify-end gap-3 px-6 py-4 border-t border-slate-100">
             <div className="flex items-center gap-3">
               <button
                 type="button"
                 onClick={onClose}
-                className="bg-slate-100 border border-slate-200 text-slate-750 font-bold px-5 py-2.5 rounded-xl text-xs hover:bg-slate-200 transition-colors"
+                className="bg-slate-100 border border-slate-200 text-slate-750 font-bold px-5 py-2 rounded-xl text-sm hover:bg-slate-200 transition-colors"
               >
                 {result ? "Close" : "Cancel"}
               </button>
@@ -488,7 +481,7 @@ export default function UploadLeadsModal({ isOpen, onClose, onSubmit, properties
                   type="button"
                   onClick={handleUpload}
                   disabled={isSubmitting}
-                  className="bg-[#0B1E6E] hover:bg-[#081650] disabled:opacity-60 text-white font-bold px-6 py-2.5 rounded-xl text-xs transition-all shadow-md shadow-[#0B1E6E]/10"
+                  className="bg-[#0B1E6E] hover:bg-[#081650] disabled:opacity-60 text-white font-bold px-5 py-2 rounded-xl text-sm transition-all shadow-md shadow-[#0B1E6E]/10"
                 >
                   {isSubmitting ? "Uploading…" : "Upload"}
                 </button>

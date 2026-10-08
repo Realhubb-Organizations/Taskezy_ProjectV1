@@ -3,8 +3,6 @@
 import React, { useEffect, useState } from "react";
 import { useApp, mapApiPropertyToFrontend, Property, PropertyTeamAssignmentMode, LeadAssignmentMode, PropertyTeamMember } from "@/context/AppContext";
 import { apiListPropertiesPage, type PropertyListFilters } from "@/lib/apiClient";
-import { toast } from "@/lib/toast";
-import { confirmAction } from "@/lib/confirmDialog";
 import {
   Search,
   ArrowUp,
@@ -30,11 +28,13 @@ import AddPropertyModal, {
 import MetaCampaignLinker from "@/components/properties/MetaCampaignLinker";
 import GoogleCampaignLinker from "@/components/properties/GoogleCampaignLinker";
 import SheetSourceLinker from "@/components/properties/SheetSourceLinker";
+import { useDialog } from "@/components/ui/DialogProvider";
 import { MetaIcon, GoogleIcon, platformFromText } from "@/components/icons/ContactIcons";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
 import TablePagination from "@/components/ui/TablePagination";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
 import { DatePicker } from "@/components/ui/DateRangePicker";
+import { DateTimeLines, dateTimeParts } from "@/components/ui/DateTimeLines";
 
 const ROWS_PER_PAGE_OPTIONS = [25, 50, 100];
 
@@ -47,6 +47,7 @@ function formatDateTime(iso?: string): string {
 }
 
 export default function PropertiesPage() {
+  const { toast, confirm: confirmDialog } = useDialog();
   const { properties, users, leads, deleteProperty, editProperty, activeRole } = useApp();
   const isAdmin = activeRole === "ADMIN";
 
@@ -156,7 +157,7 @@ export default function PropertiesPage() {
 
   const handleContactProperty = (p: Property) => {
     if (!p.contactNumber) {
-      toast.error("No contact number is set for this property yet.");
+      toast("No contact number is set for this property yet.", "warning");
       return;
     }
     window.open(`tel:${p.contactNumber}`, "_self");
@@ -242,7 +243,7 @@ export default function PropertiesPage() {
   const handleRegisterInterest = (e: React.FormEvent) => {
     e.preventDefault();
     if (!interestName || !interestPhone) {
-      toast.error("Name and phone number are required.");
+      toast("Name and phone number are required.", "warning");
       return;
     }
     setInterestSuccess("Thank you! Your interest has been successfully registered. An agent will contact you shortly.");
@@ -275,16 +276,20 @@ export default function PropertiesPage() {
 
     // Property type is required server-side; the multi-select can be emptied.
     if (!editType.trim()) {
-      toast.error("Select at least one property type.");
+      toast("Select at least one property type.", "warning");
       return;
     }
 
     if (editTeamAssignmentMode === "CUSTOM_MEMBERS" && editSelectedMemberIds.length === 0) {
-      toast.error("Select at least one team member, or switch to All Members.");
+      toast("Select at least one team member, or switch to All Members.", "warning");
       return;
     }
     if (editTeamAssignmentMode === "CUSTOM_MEMBERS" && editLeadAssignmentMode === "PERCENTAGE" && editPercentageTotal !== 100) {
-      if (!(await confirmAction({ message: `Selected member percentages add up to ${editPercentageTotal}%, not 100%. Save anyway?`, confirmLabel: "Save Anyway" }))) return;
+      if (!(await confirmDialog({
+        title: "Save anyway?",
+        message: `Selected member percentages add up to ${editPercentageTotal}%, not 100%.`,
+        confirmLabel: "Save anyway"
+      }))) return;
     }
 
     const assignedTeam: PropertyTeamMember[] =
@@ -323,7 +328,12 @@ export default function PropertiesPage() {
   };
 
   const handleDeleteProperty = async (p: Property) => {
-    if (await confirmAction({ message: `Are you sure you want to delete "${p.name}"?`, danger: true, confirmLabel: "Delete" })) {
+    if (await confirmDialog({
+      title: "Delete property?",
+      message: `Are you sure you want to delete "${p.name}"?`,
+      confirmLabel: "Delete",
+      danger: true
+    })) {
       deleteProperty(p.id);
       setSuccessMsg("Property deleted successfully.");
       if (selectedProperty?.id === p.id) closeDrawer();
@@ -335,18 +345,17 @@ export default function PropertiesPage() {
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold text-slate-800"></h2>
-        {isAdmin && (
+      {isAdmin && (
+        <div className="flex justify-end">
           <button
             onClick={() => { setDuplicateSource(null); setIsAddOpen(true); }}
-            className="inline-flex items-center gap-1.5 bg-brand-800 hover:bg-brand-700 text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-md shadow-brand-800/15"
+            className="inline-flex items-center justify-center gap-2 h-9 px-3.5 bg-[#0B1E6E] hover:bg-[#081650] text-white rounded-xl text-xs font-bold transition-all shadow-md"
           >
             <Plus className="h-4 w-4" />
             Add Property
           </button>
-        )}
-      </div>
+        </div>
+      )}
 
       {successMsg && (
         <div className="p-3 bg-emerald-50 border border-emerald-100 rounded-xl text-xs text-emerald-700 font-bold flex items-center gap-2 animate-fade-in shadow-sm">
@@ -370,12 +379,24 @@ export default function PropertiesPage() {
       {/* Table */}
       <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs border-collapse min-w-[900px]">
+          {/* Fixed layout: Actions sized to its icon buttons, every other
+              column shares the remaining width equally. */}
+          <table className={`table-fixed w-full border-collapse text-xs ${isAdmin ? "min-w-[1270px]" : "min-w-[1150px]"}`}>
+            <colgroup>
+              <col />
+              <col />
+              <col />
+              <col />
+              <col />
+              <col />
+              <col />
+              <col className={isAdmin ? "w-[220px]" : "w-[100px]"} />
+            </colgroup>
             <thead>
-              <tr className="border-b border-slate-200 text-[10px] uppercase font-bold text-slate-500 tracking-wider">
-                <th className="p-3.5">Properties</th>
-                <th className="p-3.5">Property Location</th>
-                <th className="p-3.5">
+              <tr className="border-b border-slate-200">
+                <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Properties</th>
+                <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Property Location</th>
+                <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">
                   <SearchableMultiSelect
                     variant="inline"
                     label="Property Type"
@@ -383,11 +404,10 @@ export default function PropertiesPage() {
                     selected={selectedTypes}
                     onChange={(next) => { setSelectedTypes(next); setCurrentPage(1); }}
                     searchPlaceholder="Search types..."
-                    className="uppercase"
                   />
                 </th>
-                <th className="p-3.5">Price</th>
-                <th className="p-3.5">
+                <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Price</th>
+                <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">
                   <button
                     onClick={() => setSortDir(d => (d === "asc" ? "desc" : "asc"))}
                     className="flex items-center gap-1 hover:text-slate-700"
@@ -395,9 +415,9 @@ export default function PropertiesPage() {
                     Date <ArrowUp className={`h-3 w-3 transition-transform duration-300 ease-out ${sortDir === "asc" ? "rotate-180" : ""}`} />
                   </button>
                 </th>
-                <th className="p-3.5">Assigned To</th>
-                <th className="p-3.5">Campaigns</th>
-                <th className="p-3.5">Actions</th>
+                <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Assigned To</th>
+                <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Campaigns</th>
+                <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -412,18 +432,18 @@ export default function PropertiesPage() {
               ) : (
                 pageRows.map((p) => (
                   <tr key={p.id} className="hover:bg-slate-50/60 transition-colors">
-                    <td className="p-3.5">
-                      <button onClick={() => openDrawer(p, false)} className="text-left group">
+                    <td className="px-4 py-3 align-top">
+                      <button onClick={() => openDrawer(p, false)} className="text-left group [overflow-wrap:anywhere]">
                         <span className="block font-bold text-slate-800 group-hover:text-brand-700 transition-colors">{p.developer}</span>
                         <span className="block text-[11px] text-slate-450">{p.name}</span>
                       </button>
                     </td>
-                    <td className="p-3.5 text-slate-600">{p.location || "—"}</td>
-                    <td className="p-3.5 text-slate-600">{p.type}</td>
-                    <td className="p-3.5 font-semibold text-slate-800">{p.price ? `${p.price}*` : "—"}</td>
-                    <td className="p-3.5 text-slate-500 whitespace-nowrap">{formatDateTime(p.createdAt)}</td>
-                    <td className="p-3.5 text-slate-600">{teamLabelForProperty(p)}</td>
-                    <td className="p-3.5">
+                    <td className="px-4 py-3 align-top text-slate-600"><div className="[overflow-wrap:anywhere]">{p.location || "—"}</div></td>
+                    <td className="px-4 py-3 align-top text-slate-600"><div className="[overflow-wrap:anywhere]">{p.type}</div></td>
+                    <td className="px-4 py-3 align-top font-semibold text-slate-800 whitespace-nowrap">{p.price ? `${p.price}*` : "—"}</td>
+                    <td className="px-4 py-3 align-top text-slate-500"><DateTimeLines {...dateTimeParts(p.createdAt)} /></td>
+                    <td className="px-4 py-3 align-top text-slate-600"><div className="[overflow-wrap:anywhere]">{teamLabelForProperty(p)}</div></td>
+                    <td className="px-4 py-3 align-top">
                       {(() => {
                         const platforms = propertySourcePlatforms(p.name);
                         if (platforms.length === 0) return <span className="text-slate-400">—</span>;
@@ -435,30 +455,30 @@ export default function PropertiesPage() {
                         );
                       })()}
                     </td>
-                    <td className="p-3.5">
-                      <div className="flex items-center gap-1">
-                        <button onClick={() => openDrawer(p, false)} className="p-1.5 rounded-lg text-slate-500 hover:text-brand-700 hover:bg-brand-50 transition-colors" title="View details">
+                    <td className="px-4 py-3 align-top">
+                      <div className="flex items-center gap-1 whitespace-nowrap">
+                        <button onClick={() => openDrawer(p, false)} className="inline-flex items-center justify-center h-10 w-10 sm:h-7 sm:w-7 rounded-lg text-slate-500 hover:text-brand-700 hover:bg-brand-50 transition-colors" title="View details">
                           <Eye className="h-3.5 w-3.5" />
                         </button>
-                        <button onClick={() => handleContactProperty(p)} className="p-1.5 rounded-lg text-slate-500 hover:text-brand-700 hover:bg-brand-50 transition-colors" title="Contact">
+                        <button onClick={() => handleContactProperty(p)} className="inline-flex items-center justify-center h-10 w-10 sm:h-7 sm:w-7 rounded-lg text-slate-500 hover:text-brand-700 hover:bg-brand-50 transition-colors" title="Contact">
                           <MessageCircle className="h-3.5 w-3.5" />
                         </button>
                         {isAdmin && (
-                          <button onClick={() => openDrawer(p, true)} className="p-1.5 rounded-lg text-slate-500 hover:text-brand-700 hover:bg-brand-50 transition-colors" title="Edit">
+                          <button onClick={() => openDrawer(p, true)} className="inline-flex items-center justify-center h-10 w-10 sm:h-7 sm:w-7 rounded-lg text-slate-500 hover:text-brand-700 hover:bg-brand-50 transition-colors" title="Edit">
                             <Edit className="h-3.5 w-3.5" />
                           </button>
                         )}
                         {isAdmin && (
-                          <button onClick={() => handleDuplicateProperty(p)} className="p-1.5 rounded-lg text-slate-500 hover:text-brand-700 hover:bg-brand-50 transition-colors" title="Duplicate">
+                          <button onClick={() => handleDuplicateProperty(p)} className="inline-flex items-center justify-center h-10 w-10 sm:h-7 sm:w-7 rounded-lg text-slate-500 hover:text-brand-700 hover:bg-brand-50 transition-colors" title="Duplicate">
                             <Copy className="h-3.5 w-3.5" />
                           </button>
                         )}
                         {isAdmin && (
-                          <button onClick={() => handleDeleteProperty(p)} className="p-1.5 rounded-lg text-slate-500 hover:text-red-600 hover:bg-red-50 transition-colors" title="Delete">
+                          <button onClick={() => handleDeleteProperty(p)} className="inline-flex items-center justify-center h-10 w-10 sm:h-7 sm:w-7 rounded-lg text-slate-500 hover:text-red-600 hover:bg-red-50 transition-colors" title="Delete">
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>
                         )}
-                        <button onClick={() => handleDownloadProperty(p)} className="p-1.5 rounded-lg text-slate-500 hover:text-brand-700 hover:bg-brand-50 transition-colors" title="Download">
+                        <button onClick={() => handleDownloadProperty(p)} className="inline-flex items-center justify-center h-10 w-10 sm:h-7 sm:w-7 rounded-lg text-slate-500 hover:text-brand-700 hover:bg-brand-50 transition-colors" title="Download">
                           <Download className="h-3.5 w-3.5" />
                         </button>
                       </div>
@@ -626,7 +646,7 @@ export default function PropertiesPage() {
                                   <label className="flex items-center gap-2 cursor-pointer min-w-0 flex-1">
                                     <input type="checkbox" checked={isChecked} onChange={() => toggleEditMember(member.id)} className="h-3.5 w-3.5 rounded border-slate-300 text-brand-600 focus:ring-brand-500" />
                                     <span className="min-w-0">
-                                      <span className="block text-[11px] font-bold text-slate-800 truncate">{member.name}</span>
+                                      <span className="block text-[11px] font-bold text-slate-800 [overflow-wrap:anywhere]">{member.name}</span>
                                       <span className="block text-[9px] text-slate-450">{member.role_type === "Manager" ? "Sales Manager / TL" : "Sales Agent"}</span>
                                     </span>
                                   </label>
@@ -653,10 +673,10 @@ export default function PropertiesPage() {
                   </div>
 
                   <div className="flex gap-2 pt-2">
-                    <button type="submit" className="flex-1 bg-brand-700 hover:bg-brand-600 text-white font-bold py-2 rounded-lg text-xs transition-all shadow-sm">
+                    <button type="submit" className="flex-1 bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold px-5 py-2 rounded-xl text-sm transition-all shadow-sm">
                       Save Changes
                     </button>
-                    <button type="button" onClick={() => handleDeleteProperty(selectedProperty)} className="bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 font-bold px-3 py-2 rounded-lg text-xs transition-all flex items-center justify-center">
+                    <button type="button" onClick={() => handleDeleteProperty(selectedProperty)} className="bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 font-bold px-5 py-2 rounded-xl text-sm transition-all flex items-center justify-center">
                       <Trash2 className="h-4 w-4" />
                     </button>
                   </div>
@@ -728,7 +748,7 @@ export default function PropertiesPage() {
                       <input type="text" required placeholder="Client Name" value={interestName} onChange={(e) => setInterestName(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none" />
                       <input type="tel" required placeholder="Phone Number" value={interestPhone} onChange={(e) => setInterestPhone(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none" />
                       <input type="email" placeholder="Email address (optional)" value={interestEmail} onChange={(e) => setInterestEmail(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none" />
-                      <button type="submit" className="w-full py-2 bg-brand-700 hover:bg-brand-600 text-white font-bold rounded-lg text-xs transition-all shadow-sm">
+                      <button type="submit" className="w-full px-5 py-2 bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold rounded-xl text-sm transition-all shadow-sm">
                         Register Interest
                       </button>
                     </form>

@@ -3,12 +3,12 @@
 import React, { useEffect, useState } from "react";
 import { useApp, Invoice, ReimbursementClaim, Lead, CalendarEventType, mapApiInvoiceToFrontend, mapApiReimbursementToFrontend } from "@/context/AppContext";
 import { useSearchParams } from "next/navigation";
+import { useDialog } from "@/components/ui/DialogProvider";
 import MonthCalendar from "@/components/calendar/MonthCalendar";
 import AddCalendarEventModal from "@/components/calendar/AddCalendarEventModal";
 import { LineSkeleton, TableRowsSkeleton, CardListSkeleton } from "@/components/ui/Skeletons";
 import TablePagination from "@/components/ui/TablePagination";
 import { apiListInvoicesPage, apiListReimbursementsPage } from "@/lib/apiClient";
-import { confirmAction } from "@/lib/confirmDialog";
 import {
   CreditCard,
   DollarSign,
@@ -28,6 +28,7 @@ import {
 import { todayIso } from "@/components/ui/DateRangePicker";
 
 export default function FinancePage() {
+  const { confirm: confirmDialog } = useDialog();
   const {
     invoices,
     reimbursements,
@@ -189,7 +190,7 @@ export default function FinancePage() {
   };
 
   const handleDeleteInvoice = async (id: string) => {
-    if (await confirmAction({ message: "Are you sure you want to delete this invoice ledger?", danger: true, confirmLabel: "Delete" })) {
+    if (await confirmDialog({ title: "Delete this invoice?", message: "This invoice ledger will be permanently deleted.", confirmLabel: "Delete", danger: true })) {
       deleteInvoice(id);
     }
   };
@@ -215,7 +216,7 @@ export default function FinancePage() {
         {activeTabParam === "billing" && (
           <button
             onClick={() => setIsNewInvoiceOpen(true)}
-            className="inline-flex items-center gap-1.5 bg-brand-700 hover:bg-brand-600 text-white px-4 py-2 rounded-lg text-xs font-bold transition-all shadow-md shadow-brand-700/10"
+            className="inline-flex items-center gap-1.5 bg-[#0B1E6E] hover:bg-[#081650] text-white px-4 py-2 rounded-lg text-xs font-bold transition-all shadow-md"
           >
             <Plus className="h-4 w-4" />
             Create Invoice Ledger
@@ -225,7 +226,7 @@ export default function FinancePage() {
         {activeTabParam === "calendar" && (
           <button
             onClick={() => setIsAddEventOpen(true)}
-            className="inline-flex items-center gap-1.5 bg-brand-700 hover:bg-brand-600 text-white px-4 py-2 rounded-lg text-xs font-bold transition-all shadow-md shadow-brand-700/10"
+            className="inline-flex items-center gap-1.5 bg-[#0B1E6E] hover:bg-[#081650] text-white px-4 py-2 rounded-lg text-xs font-bold transition-all shadow-md"
           >
             <Plus className="h-4 w-4" />
             Add Reminder / Task
@@ -281,7 +282,7 @@ export default function FinancePage() {
                                 generateInvoice(inv.id);
                               }
                             }}
-                            className="px-2.5 py-1 rounded bg-brand-50 border border-brand-200 text-brand-700 text-[10px] font-bold hover:bg-brand-700 hover:text-white transition-all"
+                            className="px-2.5 py-1 rounded bg-brand-50 border border-brand-200 text-brand-700 text-[10px] font-bold hover:bg-[#0B1E6E] hover:text-white transition-all"
                           >
                             {inv.invoiceNumber ? "Collect Payment" : "Activate Invoice"}
                           </button>
@@ -401,7 +402,7 @@ export default function FinancePage() {
                           {activeRole === "ADMIN" && (
                             <button
                               onClick={async () => {
-                                if (await confirmAction({ message: "Are you sure you want to delete this claim?", danger: true, confirmLabel: "Delete" })) {
+                                if (await confirmDialog({ title: "Delete this claim?", message: "This reimbursement claim will be permanently deleted.", confirmLabel: "Delete", danger: true })) {
                                   deleteClaim(c.id);
                                 }
                               }}
@@ -583,7 +584,7 @@ export default function FinancePage() {
                     <div className="flex gap-2 sm:justify-end">
                       <button
                         onClick={() => handleApproveBooking(l.id)}
-                        className="px-3 py-1.5 rounded bg-emerald-650 text-white hover:bg-emerald-600 text-[10px] font-bold shadow-sm"
+                        className="px-3 py-1.5 rounded bg-[#0B1E6E] text-white hover:bg-[#081650] text-[10px] font-bold shadow-sm"
                       >
                         Approve Booking &amp; Activate Invoice
                       </button>
@@ -773,7 +774,7 @@ export default function FinancePage() {
 
               <button
                 type="submit"
-                className="w-full bg-brand-700 hover:bg-brand-600 text-white font-bold py-2.5 rounded-lg text-xs transition-all shadow-sm"
+                className="w-full bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold py-2.5 rounded-lg text-xs transition-all shadow-sm"
               >
                 Ingest Invoice
               </button>

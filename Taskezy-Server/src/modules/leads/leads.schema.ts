@@ -41,7 +41,10 @@ export const listLeadsQuerySchema = z.object({
   // (today/yesterday/week/month/custom) before sending the request.
   dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateFrom must be YYYY-MM-DD").optional(),
   dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateTo must be YYYY-MM-DD").optional(),
-  search: z.string().trim().max(200).optional()
+  search: z.string().trim().max(200).optional(),
+  // "true" leaves out Data Calling leads (source "Bulk Upload"), which only
+  // show on the Data Calling page until they're qualified.
+  excludeBulkUpload: z.enum(["true", "false"]).optional().transform(v => v === "true")
 });
 
 // Same filter shape as listLeadsQuerySchema (status/assignedAgentId/campaign/
@@ -83,8 +86,16 @@ export const editLeadSchema = z.object({
   leadScore: z.number().int().min(0).max(100).optional()
 }).refine((data) => Object.keys(data).length > 0, { message: "At least one field must be provided" });
 
+// A note is required on every reassignment so the next agent knows why.
+const noteText = z.string().trim().min(1, "Please write a note").max(2000, "Notes are limited to 2,000 characters");
+
 export const reassignLeadSchema = z.object({
-  newAgentId: z.string().uuid()
+  newAgentId: z.string().uuid(),
+  note: noteText
+});
+
+export const updateLeadNoteSchema = z.object({
+  note: noteText
 });
 
 export const bulkDeleteLeadsSchema = z.object({

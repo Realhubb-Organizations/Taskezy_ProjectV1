@@ -3,19 +3,20 @@ import { sendOk, sendPaginated } from "../../utils/apiResponse";
 import * as leadsService from "./leads.service";
 
 export async function listLeadsHandler(req: Request, res: Response): Promise<void> {
-  const { page, pageSize, status, assignedAgentId, campaign, dateFrom, dateTo, search } = req.query as unknown as {
+  const { page, pageSize, status, assignedAgentId, campaign, dateFrom, dateTo, search, excludeBulkUpload } = req.query as unknown as {
     page: number; pageSize: number; status?: string[]; assignedAgentId?: string[]; campaign?: string[];
-    dateFrom?: string; dateTo?: string; search?: string;
+    dateFrom?: string; dateTo?: string; search?: string; excludeBulkUpload?: boolean;
   };
-  const { rows, meta } = await leadsService.listLeads(req.user!, { page, pageSize, status, assignedAgentId, campaign, dateFrom, dateTo, search });
+  const { rows, meta } = await leadsService.listLeads(req.user!, { page, pageSize, status, assignedAgentId, campaign, dateFrom, dateTo, search, excludeBulkUpload });
   sendPaginated(res, rows, meta);
 }
 
 export async function getLeadStatsHandler(req: Request, res: Response): Promise<void> {
-  const { status, assignedAgentId, campaign, dateFrom, dateTo, search } = req.query as unknown as {
+  const { status, assignedAgentId, campaign, dateFrom, dateTo, search, excludeBulkUpload } = req.query as unknown as {
     status?: string[]; assignedAgentId?: string[]; campaign?: string[]; dateFrom?: string; dateTo?: string; search?: string;
+    excludeBulkUpload?: boolean;
   };
-  const stats = await leadsService.getLeadStats(req.user!, { status, assignedAgentId, campaign, dateFrom, dateTo, search });
+  const stats = await leadsService.getLeadStats(req.user!, { status, assignedAgentId, campaign, dateFrom, dateTo, search, excludeBulkUpload });
   sendOk(res, stats);
 }
 
@@ -46,7 +47,12 @@ export async function bulkImportLeadsHandler(req: Request, res: Response): Promi
 }
 
 export async function reassignLeadHandler(req: Request, res: Response): Promise<void> {
-  const lead = await leadsService.reassignLead(req.user!, req.params.id, req.body.newAgentId);
+  const lead = await leadsService.reassignLead(req.user!, req.params.id, req.body.newAgentId, req.body.note);
+  sendOk(res, lead);
+}
+
+export async function updateLeadNoteHandler(req: Request, res: Response): Promise<void> {
+  const lead = await leadsService.updateLeadNote(req.user!, req.params.id, req.body.note);
   sendOk(res, lead);
 }
 
