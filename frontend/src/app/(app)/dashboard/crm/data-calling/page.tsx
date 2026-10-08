@@ -15,6 +15,8 @@ import DateRangeSelect from "@/components/ui/DateRangeSelect";
 import { canChangeLeadStatus, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
 import { nextFollowupFor } from "@/lib/followups";
 import NextCallCell from "@/components/crm/NextCallCell";
+import { useDialog } from "@/components/ui/DialogProvider";
+import LeadNoteCell from "@/components/crm/LeadNoteCell";
 
 // Data Calling's whole status model is deliberately just these three — a
 // cold-outreach triage pipeline, not the full CRM pipeline: a fresh
@@ -163,6 +165,7 @@ export default function DataCallingPage() {
   // AppContext.tsx), aliased to `leads` here so the rest of this large file
   // needs no other changes.
   const { dataCallingLeads: leads, followupCalls, properties, users, currentUser, activeRole, updateLeadStatus, reassignLead, bulkImportLeads, addFollowupCall, isDataLoading } = useApp();
+  const { toast, prompt: promptDialog } = useDialog();
   // Bulk select + Assign/Reshuffle are an admin-only workflow — a sales
   // agent has no one to hand leads off to in that sense, so the checkbox
   // column and both toolbar buttons stay admin-only.
@@ -603,11 +606,13 @@ export default function DataCallingPage() {
     () => users.find(u => u.id === assignSelectedAssigneeId)?.name || "",
     [users, assignSelectedAssigneeId]
   );
-  const canConfirmAssign = assignSelectedPropertyIds.size > 0 && !!assignSelectedAssigneeId;
+  const [assignNote, setAssignNote] = useState("");
+  const canConfirmAssign = assignSelectedPropertyIds.size > 0 && !!assignSelectedAssigneeId && assignNote.trim().length > 0;
 
   const openAssignFlow = (mode: "assign" | "reshuffle") => {
     setAssignSelectedPropertyIds(new Set());
     setAssignSelectedAssigneeId("");
+    setAssignNote("");
     setAssignFlowMode(mode);
   };
   const closeAssignFlow = () => setAssignFlowMode(null);
@@ -621,10 +626,13 @@ export default function DataCallingPage() {
   const confirmBulkAssign = () => {
     if (!canConfirmAssign || !assignFlowMode) return;
     const agentName = selectedAssigneeName;
+    const note = assignNote.trim();
     const targetIds = flowTargetIds;
     targetIds.forEach(id => {
       const lead = leads.find(l => l.id === id);
-      reassignLead(id, agentName).catch((err) => console.warn("Could not reassign lead:", err));
+      reassignLead(id, agentName, note).catch((err) =>
+        toast(`Could not reassign ${lead?.name ?? "a lead"}: ${err instanceof Error ? err.message : "please try again."}`, "error")
+      );
       // Move it off the "Unassigned" pipeline state now that it actually has
       // someone on it — otherwise it'd stay eligible for the Assign button.
       // "New Lead" (not "Assigned") since Data Calling's status model is
@@ -696,10 +704,25 @@ export default function DataCallingPage() {
     if (text) navigator.clipboard?.writeText(text).catch(() => {});
   };
 
-  const latestLogMessage = (l: Lead): string => {
-    if (!l.logs || l.logs.length === 0) return "No feedback yet";
-    const sorted = [...l.logs].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-    return sorted[0].message;
+  // Changing "Assigned To" in a row asks for the required note first.
+  const reassignWithNote = async (l: Lead, agentName: string) => {
+    if (!agentName || agentName === l.assignedAgent) return;
+    const note = await promptDialog({
+      title: `Reassign to ${agentName}`,
+      message: l.name,
+      label: "Note (required)",
+      placeholder: "Note for the new agent — e.g. Prefers WhatsApp, call after 6 pm",
+      confirmLabel: "Reassign",
+      multiline: true,
+      validate: (v) => (!v ? "Please write a note." : null)
+    });
+    if (note === null) return;
+    try {
+      await reassignLead(l.id, agentName, note);
+      toast(`${l.name} reassigned to ${agentName}.`, "success");
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Could not reassign this lead. Please try again.", "error");
+    }
   };
   const nextCallDateFor = (leadId: string) => nextFollowupFor(leadId, followupCalls);
 
@@ -1565,7 +1588,7 @@ export default function DataCallingPage() {
                             <SearchableSelect
                               variant="inline"
                               value={l.assignedAgent || ""}
-                              onChange={(v) => reassignLead(l.id, v).catch((err) => console.warn("Could not reassign lead:", err))}
+                              onChange={(v) => reassignWithNote(l, v)}
                               options={assignedOptions}
                               placeholder="—"
                               searchPlaceholder="Search agents..."
@@ -1575,7 +1598,7 @@ export default function DataCallingPage() {
                           </td>
                         )}
                         {visibleColumns.date && <td className="px-4 py-3.5">{formatDateTime(l.createdAtStr)}</td>}
-                        {visibleColumns.notes && <td className="px-4 py-3.5"><div className="line-clamp-3 [overflow-wrap:anywhere]" title={latestLogMessage(l)}>{latestLogMessage(l)}</div></td>}
+                        {visibleColumns.notes && <td className="px-4 py-3.5"><LeadNoteCell lead={l} /></td>}
                         <td className="px-4 py-3.5"><NextCallCell next={nextCallDateFor(l.id)} /></td>
                         {visibleColumns.property && <td className="px-4 py-3.5 [overflow-wrap:anywhere]">{l.property || "—"}</td>}
                         {visibleColumns.dataCallSource && <td className="px-4 py-3.5 [overflow-wrap:anywhere]">{l.subSource || l.source || "—"}</td>}
@@ -1749,6 +1772,22 @@ export default function DataCallingPage() {
                   placeholder="Select Member"
                   searchPlaceholder="Search assignee..."
                 />
+              </div>
+
+              <div className="space-y-1.5">
+                <label htmlFor="dc-assign-note" className="block text-sm font-bold text-slate-800">
+                  Note <span className="text-red-600">*</span>
+                </label>
+                <textarea
+                  id="dc-assign-note"
+                  value={assignNote}
+                  onChange={(e) => setAssignNote(e.target.value)}
+                  rows={3}
+                  maxLength={2000}
+                  placeholder={assignFlowMode === "reshuffle" ? "Why are these leads being reshuffled? e.g. Agent on leave this week" : "Anything the agent should know? e.g. Call in the evening"}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-slate-800 resize-y focus:outline-none focus:border-brand-500"
+                />
+                <p className="text-[11px] text-slate-400">Required. Saved as the lead&apos;s note and in its activity history.</p>
               </div>
             </div>
             <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100">

@@ -31,6 +31,8 @@ export interface PromptOptions {
   confirmLabel?: string;
   /** When set, shows a picker of these values instead of a free-text field. */
   options?: string[];
+  /** Multi-line text box (e.g. notes) instead of a single-line field. */
+  multiline?: boolean;
   /** Return an error message to keep the popup open, or null when valid. */
   validate?: (value: string) => string | null;
 }
@@ -131,7 +133,7 @@ function DialogModal({ dialog, onClose }: { dialog: ActiveDialog; onClose: (resu
   const promptOpts = isPrompt ? dialog.opts : null;
   const [value, setValue] = useState(promptOpts?.defaultValue ?? promptOpts?.options?.[0] ?? "");
   const [error, setError] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement & HTMLSelectElement>(null);
+  const inputRef = useRef<HTMLInputElement & HTMLSelectElement & HTMLTextAreaElement>(null);
 
   useEffect(() => { inputRef.current?.focus(); }, []);
 
@@ -176,6 +178,16 @@ function DialogModal({ dialog, onClose }: { dialog: ActiveDialog; onClose: (resu
                 >
                   {promptOpts.options.map(o => <option key={o} value={o}>{o}</option>)}
                 </select>
+              ) : promptOpts.multiline ? (
+                <textarea
+                  ref={inputRef}
+                  value={value}
+                  rows={4}
+                  placeholder={promptOpts.placeholder}
+                  onChange={(e) => { setValue(e.target.value); setError(null); }}
+                  onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submit(); } }}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-slate-800 resize-y focus:outline-none focus:border-brand-500"
+                />
               ) : (
                 <input
                   ref={inputRef}

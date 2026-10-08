@@ -22,6 +22,7 @@ import LeadDrillDownPanel from "./LeadDrillDownPanel";
 import { DateTimeLines, dateTimeParts } from "@/components/ui/DateTimeLines";
 import { nextFollowupFor } from "@/lib/followups";
 import NextCallCell from "./NextCallCell";
+import LeadNoteCell from "./LeadNoteCell";
 
 // The admin leads table's togglable columns (beyond the always-shown Lead
 // Name/Email/Assigned To) — driven by the Filter panel's Settings modal.
@@ -648,10 +649,6 @@ export default function LeadDashboard() {
     dateInRange(dateStr, range, refNow, adminCustomRange);
 
   const adminSortedLogs = (l: Lead) => [...(l.logs || [])].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-  const adminLatestLogMessage = (l: Lead): string => {
-    const logs = adminSortedLogs(l);
-    return logs.length > 0 ? logs[0].message : "No feedback yet";
-  };
   const adminFormatDateTime = (iso: string | undefined): string => {
     if (!iso) return "—";
     const d = new Date(iso);
@@ -757,6 +754,7 @@ export default function LeadDashboard() {
   const [assignFlowMode, setAssignFlowMode] = useState<"assign" | "reshuffle" | null>(null);
   const [assignPropertyIds, setAssignPropertyIds] = useState<Set<string>>(new Set());
   const [assignAssigneeId, setAssignAssigneeId] = useState("");
+  const [assignNote, setAssignNote] = useState("");
   const flowTargetLeads = assignFlowMode === "reshuffle" ? selectedAssignedLeads : selectedUnassignedLeads;
   const assigneeOptions = eligibleAssignees({
     users,
@@ -765,12 +763,18 @@ export default function LeadDashboard() {
     caller: currentUser,
     targetLeads: flowTargetLeads
   });
-  const canConfirmAssign = assignPropertyIds.size > 0 && !!assignAssigneeId && assigneeOptions.some(u => u.id === assignAssigneeId);
+  const canConfirmAssign = assignPropertyIds.size > 0 && !!assignAssigneeId && assigneeOptions.some(u => u.id === assignAssigneeId) && assignNote.trim().length > 0;
 
   const [assignSubmitting, setAssignSubmitting] = useState(false);
   const [assignError, setAssignError] = useState("");
 
+  // Notes column pencil saved a note: patch the table's own copy of the row.
+  const handleNoteSaved = (leadId: string, note: string, updated: Lead | null) => {
+    setServerLeads(prev => prev.map(r => (r.id === leadId ? (updated ? { ...r, ...updated } : { ...r, notes: note }) : r)));
+  };
+
   const openAssignFlow = (mode: "assign" | "reshuffle") => {
+    setAssignNote("");
     setAssignPropertyIds(new Set());
     setAssignAssigneeId("");
     setAssignError("");
@@ -789,7 +793,7 @@ export default function LeadDashboard() {
     setAssignSubmitting(true);
     setAssignError("");
     const results = await Promise.allSettled(toMove.map(async (l) => {
-      await apiReassignLead(l.id, assignee.id);
+      await apiReassignLead(l.id, assignee.id, assignNote.trim());
       if (mode === "assign" && l.status === "Unassigned") await apiUpdateLeadStatus(l.id, "NEW");
     }));
     setAssignSubmitting(false);
@@ -1442,7 +1446,7 @@ export default function LeadDashboard() {
                             </td>
                           )}
                           {adminVisibleColumns.notes && (
-                            <td className="px-4 py-3 text-slate-600 align-top"><div className="line-clamp-3 [overflow-wrap:anywhere]" title={adminLatestLogMessage(l)}>{adminLatestLogMessage(l)}</div></td>
+                            <td className="px-4 py-3 text-slate-600 align-top"><LeadNoteCell lead={l} onSaved={handleNoteSaved} /></td>
                           )}
                           {adminVisibleColumns.propertyMatch && (
                             <td className="px-4 py-3 text-slate-400 align-top [overflow-wrap:anywhere] italic" title="Not tracked yet — no property-match scoring implemented">—</td>
@@ -1860,7 +1864,7 @@ export default function LeadDashboard() {
                                 </td>
                                 <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]" title={l.assignedAgent || "Unassigned"}>{l.assignedAgent || "Unassigned"}</td>
                                 <td className="px-4 py-3 text-slate-500 align-top"><DateTimeLines {...dateTimeParts(l.createdAtStr)} /></td>
-                                <td className="px-4 py-3 text-slate-600 align-top"><div className="line-clamp-3 [overflow-wrap:anywhere]" title={adminLatestLogMessage(l)}>{adminLatestLogMessage(l)}</div></td>
+                                <td className="px-4 py-3 text-slate-600 align-top"><LeadNoteCell lead={l} onSaved={handleNoteSaved} /></td>
                                 <td className="px-4 py-3 text-slate-500 align-top"><NextCallCell next={adminNextCallDateFor(l.id)} /></td>
                                 <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]" title={l.campaign || "—"}>
                               {l.campaign ? <PlatformLabel text={l.campaign} classifyBy={l.source || l.campaign} wrap /> : "—"}
@@ -2002,6 +2006,22 @@ export default function LeadDashboard() {
                     </p>
                   )}
                 </div>
+
+                <div className="space-y-1.5">
+                  <label htmlFor="assign-note" className="block text-sm font-bold text-slate-800">
+                    Note <span className="text-red-600">*</span>
+                  </label>
+                  <textarea
+                    id="assign-note"
+                    value={assignNote}
+                    onChange={(e) => setAssignNote(e.target.value)}
+                    rows={3}
+                    maxLength={2000}
+                    placeholder={assignFlowMode === "reshuffle" ? "Why are these leads being reshuffled? e.g. Agent on leave this week" : "Anything the agent should know? e.g. Interested in 2BHK, call after 6 pm"}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-slate-800 resize-y focus:outline-none focus:border-brand-500"
+                  />
+                  <p className="text-[11px] text-slate-400">Required. Saved as the lead&apos;s note and in its activity history.</p>
+                </div>
               </div>
               {assignError && (
                 <div className="mx-6 mb-4 p-2.5 bg-red-50 border border-red-100 text-[11px] text-red-700 rounded-xl font-bold flex items-center gap-2">
@@ -2089,6 +2109,7 @@ export default function LeadDashboard() {
           onClose={() => setSelectedLead(null)}
           onUpdateStatus={handleUpdateLeadStatus}
           onReassigned={() => setLeadsRefreshKey(k => k + 1)}
+          onNoteSaved={handleNoteSaved}
         />
 
         {/* Filter panel (column visibility) — opened from both the Leads
