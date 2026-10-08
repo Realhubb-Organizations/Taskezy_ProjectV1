@@ -33,13 +33,12 @@ import {
   Phone,
   HelpCircle,
   Video,
-  LifeBuoy,
   Calendar,
   PanelLeftClose,
   PanelLeftOpen
 } from "lucide-react";
 
-// Organization + Help & Support / CRM Tutorials / Contact Support are hidden
+// Organization + Help & Support / CRM Tutorials are hidden
 // from the sidebar (desktop and mobile) for now — flip to true to bring them back.
 const SHOW_SIDEBAR_EXTRA_LINKS = false;
 
@@ -494,13 +493,6 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
               >
                 <Video className={`h-3.5 w-3.5 ${isSidebarCollapsed ? "" : "mr-2"}`} /> {!isSidebarCollapsed && "CRM Tutorials"}
               </button>
-              <button
-                onClick={() => setActiveModal("contact")}
-                title="Contact Support"
-                className={`w-full flex items-center hover:text-slate-800 transition-colors ${isSidebarCollapsed ? "justify-center py-2" : "px-4 py-1.5"}`}
-              >
-                <LifeBuoy className={`h-3.5 w-3.5 ${isSidebarCollapsed ? "" : "mr-2"}`} /> {!isSidebarCollapsed && "Contact Support"}
-              </button>
             </div>
             </>)}
           </nav>
@@ -729,12 +721,6 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                     className="w-full flex items-center min-h-10 sm:min-h-0 px-4 py-1.5 hover:text-slate-800 transition-colors"
                   >
                     <Video className="mr-2 h-3.5 w-3.5" /> CRM Tutorials
-                  </button>
-                  <button
-                    onClick={() => setActiveModal("contact")}
-                    className="w-full flex items-center min-h-10 sm:min-h-0 px-4 py-1.5 hover:text-slate-800 transition-colors"
-                  >
-                    <LifeBuoy className="mr-2 h-3.5 w-3.5" /> Contact Support
                   </button>
                 </div>
                 )}

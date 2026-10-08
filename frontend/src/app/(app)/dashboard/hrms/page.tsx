@@ -4,6 +4,7 @@ import React, { useEffect, useState } from "react";
 import { useApp, AttendanceRecord, TimesheetLog, CalendarEventType, mapApiTimesheetToFrontend, mapApiAttendanceToFrontend } from "@/context/AppContext";
 import { apiListTimesheetsPage, apiListAttendancePage } from "@/lib/apiClient";
 import { useSearchParams } from "next/navigation";
+import { useDialog } from "@/components/ui/DialogProvider";
 import MonthCalendar from "@/components/calendar/MonthCalendar";
 import AddCalendarEventModal from "@/components/calendar/AddCalendarEventModal";
 import TablePagination from "@/components/ui/TablePagination";
@@ -29,6 +30,7 @@ import {
 import { todayIso } from "@/components/ui/DateRangePicker";
 
 export default function HRMSPage() {
+  const { toast } = useDialog();
   const {
     users,
     activeRole,
@@ -77,7 +79,7 @@ export default function HRMSPage() {
   const handleAddMember = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name || !email) {
-      alert("Name and email are required.");
+      toast("Name and email are required.", "warning");
       return;
     }
     setSuccessMsg(`Successfully invited and provisioned account for ${name}.`);

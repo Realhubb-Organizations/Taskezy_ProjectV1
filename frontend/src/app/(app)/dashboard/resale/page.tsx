@@ -2,12 +2,14 @@
 
 import React, { useEffect, useState } from "react";
 import { useApp, mapApiResaleUnitToFrontend, ResaleUnit } from "@/context/AppContext";
+import { useDialog } from "@/components/ui/DialogProvider";
 import { apiListResaleUnitsPage, type ResaleUnitListFilters } from "@/lib/apiClient";
 import { Plus, X, Search, Landmark, PhoneCall, Link2, CheckCircle } from "lucide-react";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
 import TablePagination, { DEFAULT_ROWS_PER_PAGE_OPTIONS } from "@/components/ui/TablePagination";
 
 export default function ResalePage() {
+  const { toast } = useDialog();
   const { resaleUnits, addResaleUnit, leads } = useApp();
 
   // Filters state
@@ -102,7 +104,7 @@ export default function ResalePage() {
   const handlePostResale = (e: React.FormEvent) => {
     e.preventDefault();
     if (!resaleProp || !resalePrice) {
-      alert("Property name and price are required.");
+      toast("Property name and price are required.", "warning");
       return;
     }
     addResaleUnit({

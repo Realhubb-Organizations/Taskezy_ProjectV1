@@ -39,6 +39,8 @@ import {
   BOOKING_LEAD_STATUSES,
   buildCampaignsList
 } from "@/lib/campaignBuilder";
+import { formatNextFollowup, nextFollowupFor } from "@/lib/followups";
+import NextCallCell from "@/components/crm/NextCallCell";
 
 // Same icon URLs the admin leads page uses for these platforms (LeadDashboard.tsx).
 const PLATFORM_ICON_URL: Partial<Record<CampaignItem["platform"], string>> = {
@@ -367,7 +369,16 @@ export default function AdminCampaignsPage() {
   // Pure Meta+Google+Other self-reported total for the same Date Range —
   // shown alongside the real synced-lead Total Leads count so both real
   // numbers are visible together, not just one.
-  const platformReportedLeadsTotal = campaignsListResult.platformReportedTotal;
+  // Campaigns-tab multi-select. Narrows the main table and the summary cards
+  // above it; it only applies while the Campaigns tab is open.
+  const [campaignFilters, setCampaignFilters] = useState<string[]>([]);
+  const campaignFilterActive = activeTab === "Campaigns" && campaignFilters.length > 0;
+  const selectedCampaignNames = useMemo(() => new Set(campaignFilters.map(n => n.toLowerCase())), [campaignFilters]);
+  const inSelectedCampaigns = (name: string | undefined) =>
+    !campaignFilterActive || (!!name && selectedCampaignNames.has(name.toLowerCase()));
+  const platformReportedLeadsTotal = campaignFilterActive
+    ? campaignsList.filter(c => inSelectedCampaigns(c.name)).reduce((sum, c) => sum + c.platformReportedLeads, 0)
+    : campaignsListResult.platformReportedTotal;
 
   // Same real campaigns, but always all-time — a campaign's status
   // (Active/Pause/Stopped) and platform are snapshot properties of the
@@ -434,10 +445,11 @@ export default function AdminCampaignsPage() {
   const categoryLeadsInRange = useMemo(() => {
     const out: Record<string, Lead[]> = {};
     Object.entries(categoryLeads).forEach(([key, list]) => {
-      out[key] = list.filter(leadInSelectedRange);
+      out[key] = list.filter(l => leadInSelectedRange(l) && inSelectedCampaigns(l.campaign || l.source));
     });
     return out;
-  }, [categoryLeads, dateRange, appliedCustomRange, today]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [categoryLeads, dateRange, appliedCustomRange, today, campaignFilterActive, selectedCampaignNames]);
 
   // Aggregate Metrics for Top Summary Card.
   //
@@ -449,20 +461,25 @@ export default function AdminCampaignsPage() {
   // the range, from the Date-Range-scoped campaignsList.
   const summaryMetrics = useMemo(() => {
     return {
-      activeCampaigns: campaignsList.filter(c => c.status === "Active").length,
+      activeCampaigns: campaignsList.filter(c => c.status === "Active" && inSelectedCampaigns(c.name)).length,
       totalLeads: categoryLeadsInRange["Total Leads"].length,
       qualifiedLeads: categoryLeadsInRange["Qualified Leads"].length,
       siteVisits: categoryLeadsInRange["Site Visits"].length,
       followUps: categoryLeadsInRange["Follow Ups"].length,
       callBacks: categoryLeadsInRange["Call Backs"].length
     };
-  }, [campaignsList, categoryLeadsInRange]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [campaignsList, categoryLeadsInRange, campaignFilterActive, selectedCampaignNames]);
 
   // "Active Campaigns" drills into campaigns, not leads — it's a count of
   // campaigns (matching the summary card's own unit), not a leads list.
   // Same campaignsList the card's own count comes from, so they can never
   // disagree.
-  const activeCampaignsDrill = useMemo(() => campaignsList.filter(c => c.status === "Active"), [campaignsList]);
+  const activeCampaignsDrill = useMemo(
+    () => campaignsList.filter(c => c.status === "Active" && inSelectedCampaigns(c.name)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [campaignsList, campaignFilterActive, selectedCampaignNames]
+  );
 
   const formatCurrency = (n: number) => `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -474,12 +491,7 @@ export default function AdminCampaignsPage() {
     const sorted = [...l.logs].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
     return sorted[0].message;
   };
-  const nextCallDateFor = (leadId: string): string => {
-    const upcoming = followupCalls
-      .filter(f => f.leadId === leadId && f.status === "Upcoming")
-      .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
-    return upcoming.length > 0 ? `${upcoming[0].date} ${upcoming[0].time}` : "—";
-  };
+  const nextCallDateFor = (leadId: string) => nextFollowupFor(leadId, followupCalls);
 
   // ---- Campaigns Analytics tab ----------------------------------------
 
@@ -806,7 +818,7 @@ export default function AdminCampaignsPage() {
       ["Lead Name", "Phone", "Email", "Status", "Assigned To", "Date", "Notes", "Next Call Date", "Campaign"],
       ...qualifiedLeadsDrillList.map(l => [
         l.name, l.phone, l.email, l.status, l.assignedAgent,
-        l.createdAtStr || "—", latestLogMessage(l), nextCallDateFor(l.id), l.campaign || l.source || "—"
+        l.createdAtStr || "—", latestLogMessage(l), formatNextFollowup(nextCallDateFor(l.id)), l.campaign || l.source || "—"
       ])
     ];
     const csv = rows.map(r => r.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
@@ -946,9 +958,10 @@ export default function AdminCampaignsPage() {
     return campaignsList.filter(c => {
       const matchesSearch = !searchQuery || c.name.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesStatus = selectedStatuses.length === 0 || selectedStatuses.includes(c.status);
-      return matchesSearch && matchesStatus;
+      return matchesSearch && matchesStatus && inSelectedCampaigns(c.name);
     });
-  }, [campaignsList, searchQuery, selectedStatuses]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [campaignsList, searchQuery, selectedStatuses, campaignFilterActive, selectedCampaignNames]);
 
   const currentPageClamped = Math.min(currentPage, Math.max(1, Math.ceil(filteredCampaigns.length / rowsPerPage)));
   const paginatedCampaigns = filteredCampaigns.slice((currentPageClamped - 1) * rowsPerPage, currentPageClamped * rowsPerPage);
@@ -1113,13 +1126,19 @@ export default function AdminCampaignsPage() {
                 </div>
                 <div ref={drillScrollRef} onScroll={handleDrillScroll} className="max-h-80 overflow-y-auto">
                   {isCampaignsTable ? (
-                    <table className="w-full text-left border-collapse min-w-[500px]">
+                    <table className="table-fixed w-full text-left border-collapse min-w-[600px]">
+                      <colgroup>
+                        <col />
+                        <col />
+                        <col />
+                        <col />
+                      </colgroup>
                       <thead className="sticky top-0 bg-white">
-                        <tr className="border-b border-slate-100 text-[11px] font-bold text-slate-500">
-                          <th className="px-5 py-2.5">Campaign Name</th>
-                          <th className="px-5 py-2.5">Total Leads</th>
-                          <th className="px-5 py-2.5">Qualified Leads</th>
-                          <th className="px-5 py-2.5">Site Visit</th>
+                        <tr className="border-b border-slate-100 text-left text-xs font-bold text-slate-800 whitespace-nowrap">
+                          <th className="px-4 py-3 whitespace-nowrap">Campaign Name</th>
+                          <th className="px-4 py-3 whitespace-nowrap">Total Leads</th>
+                          <th className="px-4 py-3 whitespace-nowrap">Qualified Leads</th>
+                          <th className="px-4 py-3 whitespace-nowrap">Site Visit</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 text-[12px] text-slate-700">
@@ -1127,7 +1146,7 @@ export default function AdminCampaignsPage() {
                           <TableRowsSkeleton rows={6} columns={4} />
                         ) : shownCampaigns.length === 0 ? (
                           <tr>
-                            <td colSpan={4} className="px-5 py-6 text-center text-slate-400 italic">
+                            <td colSpan={4} className="px-4 py-6 text-center text-slate-400 italic">
                               No campaigns found.
                             </td>
                           </tr>
@@ -1138,23 +1157,29 @@ export default function AdminCampaignsPage() {
                               ref={idx % drillRowsPerPage === 0 ? (el) => { drillPageRowRefs.current[Math.floor(idx / drillRowsPerPage)] = el; } : undefined}
                               className="hover:bg-slate-50/50 transition-colors"
                             >
-                              <td className="px-5 py-2.5 font-semibold text-slate-900">{c.name}</td>
-                              <td className="px-5 py-2.5">{c.totalLeads}</td>
-                              <td className="px-5 py-2.5">{c.qualifiedLeads}</td>
-                              <td className="px-5 py-2.5">{c.siteVisit}</td>
+                              <td className="px-4 py-2.5 font-semibold text-slate-900 [overflow-wrap:anywhere]">{c.name}</td>
+                              <td className="px-4 py-2.5">{c.totalLeads}</td>
+                              <td className="px-4 py-2.5">{c.qualifiedLeads}</td>
+                              <td className="px-4 py-2.5">{c.siteVisit}</td>
                             </tr>
                           )))
                         )}
                       </tbody>
                     </table>
                   ) : (
-                    <table className="w-full text-left border-collapse min-w-[600px]">
+                    <table className="table-fixed w-full text-left border-collapse min-w-[600px]">
+                      <colgroup>
+                        <col />
+                        <col />
+                        <col />
+                        <col />
+                      </colgroup>
                       <thead className="sticky top-0 bg-white">
-                        <tr className="border-b border-slate-100 text-[11px] font-bold text-slate-500">
-                          <th className="px-5 py-2.5">Name</th>
-                          <th className="px-5 py-2.5">Phone</th>
-                          <th className="px-5 py-2.5">Status</th>
-                          <th className="px-5 py-2.5">Campaign</th>
+                        <tr className="border-b border-slate-100 text-left text-xs font-bold text-slate-800 whitespace-nowrap">
+                          <th className="px-4 py-3 whitespace-nowrap">Name</th>
+                          <th className="px-4 py-3 whitespace-nowrap">Phone</th>
+                          <th className="px-4 py-3 whitespace-nowrap">Status</th>
+                          <th className="px-4 py-3 whitespace-nowrap">Campaign</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 text-[12px] text-slate-700">
@@ -1162,7 +1187,7 @@ export default function AdminCampaignsPage() {
                           <TableRowsSkeleton rows={6} columns={4} />
                         ) : shownLeads.length === 0 ? (
                           <tr>
-                            <td colSpan={4} className="px-5 py-6 text-center text-slate-400 italic">
+                            <td colSpan={4} className="px-4 py-6 text-center text-slate-400 italic">
                               No leads found for this category.
                             </td>
                           </tr>
@@ -1173,10 +1198,10 @@ export default function AdminCampaignsPage() {
                               ref={idx % drillRowsPerPage === 0 ? (el) => { drillPageRowRefs.current[Math.floor(idx / drillRowsPerPage)] = el; } : undefined}
                               className="hover:bg-slate-50/50 transition-colors"
                             >
-                              <td className="px-5 py-2.5 font-semibold text-slate-900">{l.name}</td>
-                              <td className="px-5 py-2.5 font-mono">{l.phone}</td>
-                              <td className="px-5 py-2.5">{l.status}</td>
-                              <td className="px-5 py-2.5">{l.campaign || l.source || "—"}</td>
+                              <td className="px-4 py-2.5 font-semibold text-slate-900 [overflow-wrap:anywhere]">{l.name}</td>
+                              <td className="px-4 py-2.5 font-mono [overflow-wrap:anywhere]">{l.phone}</td>
+                              <td className="px-4 py-2.5">{l.status}</td>
+                              <td className="px-4 py-2.5 [overflow-wrap:anywhere]">{l.campaign || l.source || "—"}</td>
                             </tr>
                           )))
                         )}
@@ -1227,39 +1252,48 @@ export default function AdminCampaignsPage() {
                   <h3 className="text-sm font-bold text-slate-900">Campaign Deep Dive</h3>
                 </div>
                 <div className="overflow-auto">
-                  <table className="w-full text-left border-collapse min-w-[760px]">
+                  <table className="table-fixed w-full text-left border-collapse min-w-[1050px]">
+                    <colgroup>
+                      <col />
+                      <col />
+                      <col />
+                      <col />
+                      <col />
+                      <col />
+                      <col />
+                    </colgroup>
                     <thead>
-                      <tr className="border-b border-slate-200/80 text-[12px] font-bold text-slate-900">
-                        <th className="px-5 py-3">Campaign Name</th>
-                        <th className="px-5 py-3 whitespace-nowrap">Source</th>
-                        <th className="px-5 py-3 whitespace-nowrap">Ad Set Name</th>
-                        <th className="px-5 py-3 whitespace-nowrap">Ad creative Name</th>
-                        <th className="px-5 py-3 whitespace-nowrap">Qualified Leads</th>
-                        <th className="px-5 py-3 whitespace-nowrap">CPL</th>
-                        <th className="px-5 py-3 whitespace-nowrap">Spend</th>
+                      <tr className="border-b border-slate-200/80 text-left text-xs font-bold text-slate-800 whitespace-nowrap">
+                        <th className="px-4 py-3 whitespace-nowrap">Campaign Name</th>
+                        <th className="px-4 py-3 whitespace-nowrap">Source</th>
+                        <th className="px-4 py-3 whitespace-nowrap">Ad Set Name</th>
+                        <th className="px-4 py-3 whitespace-nowrap">Ad creative Name</th>
+                        <th className="px-4 py-3 whitespace-nowrap">Qualified Leads</th>
+                        <th className="px-4 py-3 whitespace-nowrap">CPL</th>
+                        <th className="px-4 py-3 whitespace-nowrap">Spend</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-[12px] font-medium text-slate-700">
                       {adSetDrillRows.length === 0 ? (
                         <tr>
-                          <td className="px-5 py-3 text-slate-900 font-semibold">{analyticsDrillView.campaign.name}</td>
-                          <td className="px-5 py-3"><PlatformIcon platform={analyticsDrillView.campaign.platform} /></td>
-                          <td className="px-5 py-3 text-slate-300" title="No ad-set-level data synced for this campaign yet">—</td>
-                          <td className="px-5 py-3 text-slate-300" title="No ad-creative-level data synced for this campaign yet">—</td>
-                          <td className="px-5 py-3">{analyticsDrillView.campaign.qualifiedLeads}</td>
-                          <td className="px-5 py-3">{analyticsDrillView.campaign.cpl.toFixed(2)}</td>
-                          <td className="px-5 py-3 font-semibold text-slate-800">{formatCurrency(analyticsDrillView.campaign.spend)}</td>
+                          <td className="px-4 py-3 text-slate-900 font-semibold [overflow-wrap:anywhere]">{analyticsDrillView.campaign.name}</td>
+                          <td className="px-4 py-3"><PlatformIcon platform={analyticsDrillView.campaign.platform} /></td>
+                          <td className="px-4 py-3 text-slate-300" title="No ad-set-level data synced for this campaign yet">—</td>
+                          <td className="px-4 py-3 text-slate-300" title="No ad-creative-level data synced for this campaign yet">—</td>
+                          <td className="px-4 py-3">{analyticsDrillView.campaign.qualifiedLeads}</td>
+                          <td className="px-4 py-3">{analyticsDrillView.campaign.cpl.toFixed(2)}</td>
+                          <td className="px-4 py-3 font-semibold text-slate-800">{formatCurrency(analyticsDrillView.campaign.spend)}</td>
                         </tr>
                       ) : (
                         adRows.map((ad, i) => (
                           <tr key={ad.adId}>
-                            <td className="px-5 py-3 text-slate-900 font-semibold">{i === 0 ? analyticsDrillView.campaign.name : ""}</td>
-                            <td className="px-5 py-3">{i === 0 && <PlatformIcon platform={analyticsDrillView.campaign.platform} />}</td>
-                            <td className="px-5 py-3">{ad.adSetName}</td>
-                            <td className="px-5 py-3">{ad.creativeName || ad.adType || ad.adName || "—"}</td>
-                            <td className="px-5 py-3">{qualifiedLeadsForAd(ad.adId)}</td>
-                            <td className="px-5 py-3">{cplForAd(ad).toFixed(2)}</td>
-                            <td className="px-5 py-3 font-semibold text-slate-800">{formatCurrency(ad.spend)}</td>
+                            <td className="px-4 py-3 text-slate-900 font-semibold [overflow-wrap:anywhere]">{i === 0 ? analyticsDrillView.campaign.name : ""}</td>
+                            <td className="px-4 py-3">{i === 0 && <PlatformIcon platform={analyticsDrillView.campaign.platform} />}</td>
+                            <td className="px-4 py-3 [overflow-wrap:anywhere]">{ad.adSetName}</td>
+                            <td className="px-4 py-3 [overflow-wrap:anywhere]">{ad.creativeName || ad.adType || ad.adName || "—"}</td>
+                            <td className="px-4 py-3">{qualifiedLeadsForAd(ad.adId)}</td>
+                            <td className="px-4 py-3">{cplForAd(ad).toFixed(2)}</td>
+                            <td className="px-4 py-3 font-semibold text-slate-800">{formatCurrency(ad.spend)}</td>
                           </tr>
                         ))
                       )}
@@ -1296,24 +1330,34 @@ export default function AdminCampaignsPage() {
                       type="button"
                       onClick={exportQualifiedLeadsCsv}
                       title="Download CSV"
-                      className="p-2 border border-slate-300/80 rounded-lg hover:bg-slate-50 transition-colors"
+                      className="inline-flex items-center justify-center h-9 w-9 border border-slate-300/80 rounded-xl hover:bg-slate-50 transition-colors"
                     >
-                      <Download className="h-3.5 w-3.5 text-blue-600" />
+                      <Download className="h-4 w-4 text-blue-600" />
                     </button>
                   </div>
                 </div>
                 <div className="overflow-auto max-h-[55vh]">
-                  <table className="w-full text-left border-collapse min-w-[900px]">
+                  <table className="table-fixed w-full text-left border-collapse min-w-[1200px]">
+                    <colgroup>
+                      <col />
+                      <col />
+                      <col />
+                      <col />
+                      <col />
+                      <col />
+                      <col />
+                      <col />
+                    </colgroup>
                     <thead className="sticky top-0 z-10 bg-white">
-                      <tr className="border-b border-slate-200/80 text-[12px] font-bold text-slate-900">
-                        <th className="px-5 py-3">Lead Name</th>
-                        <th className="px-5 py-3 whitespace-nowrap">Email</th>
-                        <th className="px-5 py-3 whitespace-nowrap">Status</th>
-                        <th className="px-5 py-3 whitespace-nowrap">Assigned To</th>
-                        <th className="px-5 py-3 whitespace-nowrap">Date</th>
-                        <th className="px-5 py-3 whitespace-nowrap">Notes</th>
-                        <th className="px-5 py-3 whitespace-nowrap">Next Call Date</th>
-                        <th className="px-5 py-3 whitespace-nowrap">Campaign</th>
+                      <tr className="border-b border-slate-200/80 text-left text-xs font-bold text-slate-800 whitespace-nowrap">
+                        <th className="px-4 py-3 whitespace-nowrap">Lead Name</th>
+                        <th className="px-4 py-3 whitespace-nowrap">Email</th>
+                        <th className="px-4 py-3 whitespace-nowrap">Status</th>
+                        <th className="px-4 py-3 whitespace-nowrap">Assigned To</th>
+                        <th className="px-4 py-3 whitespace-nowrap">Date</th>
+                        <th className="px-4 py-3 whitespace-nowrap">Notes</th>
+                        <th className="px-4 py-3 whitespace-nowrap">Next Call Date</th>
+                        <th className="px-4 py-3 whitespace-nowrap">Campaign</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-[12px] font-medium text-slate-700">
@@ -1321,19 +1365,19 @@ export default function AdminCampaignsPage() {
                         <TableRowsSkeleton rows={6} columns={8} />
                       ) : qualifiedLeadsDrillList.length === 0 ? (
                         <tr>
-                          <td colSpan={8} className="px-5 py-8 text-center text-slate-400 italic">No qualified leads found for this campaign.</td>
+                          <td colSpan={8} className="px-4 py-8 text-center text-slate-400 italic">No qualified leads found for this campaign.</td>
                         </tr>
                       ) : (
                         qualifiedLeadsPagination.pageRows.map(l => (
                           <tr key={l.id} className="hover:bg-slate-50/50 transition-colors">
-                            <td className="px-5 py-3 text-slate-900 font-semibold">{l.name}</td>
-                            <td className="px-5 py-3 truncate max-w-[160px]" title={l.email}>{l.email || "—"}</td>
-                            <td className="px-5 py-3 whitespace-nowrap">{l.status}</td>
-                            <td className="px-5 py-3">{l.assignedAgent || "—"}</td>
-                            <td className="px-5 py-3 whitespace-nowrap">{l.createdAtStr || "—"}</td>
-                            <td className="px-5 py-3 truncate max-w-[200px]" title={latestLogMessage(l)}>{latestLogMessage(l)}</td>
-                            <td className="px-5 py-3 whitespace-nowrap">{nextCallDateFor(l.id)}</td>
-                            <td className="px-5 py-3">{l.campaign || l.source || "—"}</td>
+                            <td className="px-4 py-3 text-slate-900 font-semibold [overflow-wrap:anywhere]">{l.name}</td>
+                            <td className="px-4 py-3 [overflow-wrap:anywhere]" title={l.email}>{l.email || "—"}</td>
+                            <td className="px-4 py-3 whitespace-nowrap">{l.status}</td>
+                            <td className="px-4 py-3 [overflow-wrap:anywhere]">{l.assignedAgent || "—"}</td>
+                            <td className="px-4 py-3">{l.createdAtStr || "—"}</td>
+                            <td className="px-4 py-3"><div className="line-clamp-3 [overflow-wrap:anywhere]" title={latestLogMessage(l)}>{latestLogMessage(l)}</div></td>
+                            <td className="px-4 py-3"><NextCallCell next={nextCallDateFor(l.id)} /></td>
+                            <td className="px-4 py-3 [overflow-wrap:anywhere]">{l.campaign || l.source || "—"}</td>
                           </tr>
                         ))
                       )}
@@ -1455,7 +1499,7 @@ export default function AdminCampaignsPage() {
                         {typeGroupBy === "Platform" && (t.type === "Meta" || t.type === "Google") && (
                           <PlatformIcon platform={t.type} />
                         )}
-                        <span className="font-semibold text-slate-700 truncate">{t.type}</span>
+                        <span className="font-semibold text-slate-700 [overflow-wrap:anywhere]">{t.type}</span>
                       </span>
                       {/* Platform-reported is the headline (matches the Total
                           row below and the top summary bar), real synced
@@ -1513,9 +1557,9 @@ export default function AdminCampaignsPage() {
                   type="button"
                   onClick={exportBreakdownCsv}
                   title="Download CSV"
-                  className="p-2 border border-slate-300/80 rounded-lg hover:bg-slate-50 transition-colors"
+                  className="inline-flex items-center justify-center h-9 w-9 border border-slate-300/80 rounded-xl hover:bg-slate-50 transition-colors"
                 >
-                  <Download className="h-3.5 w-3.5 text-blue-600" />
+                  <Download className="h-4 w-4 text-blue-600" />
                 </button>
                 <DateRangePicker
                   value={appliedCustomRange}
@@ -1534,32 +1578,68 @@ export default function AdminCampaignsPage() {
                 <button
                   type="button"
                   onClick={() => setIsBreakdownFilterOpen(true)}
-                  className="flex items-center gap-2 border border-slate-300/80 bg-white rounded-xl px-3.5 py-1.5 text-xs text-slate-700 font-semibold hover:bg-slate-50 shadow-2xs transition-colors"
+                  className="inline-flex items-center justify-center gap-2 h-9 border border-slate-300/80 bg-white rounded-xl px-3.5 text-xs text-slate-700 font-bold hover:bg-slate-50 shadow-2xs transition-colors"
                 >
-                  <Sliders className="h-3.5 w-3.5 text-blue-600" />
+                  <Sliders className="h-4 w-4 text-blue-600" />
                   Filter
                 </button>
               </div>
             </div>
 
             <div className="overflow-auto max-h-[40vh]">
-              <table className="w-full text-left border-collapse min-w-[720px]">
+              <table className="table-fixed w-full text-left border-collapse" style={{ minWidth: (breakdownTab === "Property" ? BREAKDOWN_COLUMNS.filter(c => breakdownVisibleColumns[c.key]).length : STATUS_COLUMNS.filter(c => statusVisibleColumns[c.key]).length) * 150 }}>
+                <colgroup>
+                  {breakdownTab === "Property" ? (
+                    <>
+                      {breakdownVisibleColumns.property && <col />}
+                      {breakdownVisibleColumns.date && <col />}
+                      {breakdownVisibleColumns.campaigns && <col />}
+                      {breakdownVisibleColumns.source && <col />}
+                      {breakdownVisibleColumns.totalLeads && <col />}
+                      {breakdownVisibleColumns.qualifiedLeads && <col />}
+                      {breakdownVisibleColumns.unqualifiedLeads && <col />}
+                      {breakdownVisibleColumns.qualifiedPercent && <col />}
+                      {breakdownVisibleColumns.cpl && <col />}
+                      {breakdownVisibleColumns.qcpl && <col />}
+                      {breakdownVisibleColumns.spend && <col />}
+                      {breakdownVisibleColumns.qSpend && <col />}
+                    </>
+                  ) : (
+                    <>
+                      {statusVisibleColumns.date && <col />}
+                      {statusVisibleColumns.campaign && <col />}
+                      {statusVisibleColumns.totalLeads && <col />}
+                      {statusVisibleColumns.source && <col />}
+                      {statusVisibleColumns.newLead && <col />}
+                      {statusVisibleColumns.callBack && <col />}
+                      {statusVisibleColumns.followUps && <col />}
+                      {statusVisibleColumns.siteVisits && <col />}
+                      {statusVisibleColumns.eoi && <col />}
+                      {statusVisibleColumns.booked && <col />}
+                      {statusVisibleColumns.dead && <col />}
+                      {statusVisibleColumns.rnr && <col />}
+                      {statusVisibleColumns.lowBudget && <col />}
+                      {statusVisibleColumns.otherReq && <col />}
+                      {statusVisibleColumns.cancelled && <col />}
+                    </>
+                  )}
+                </colgroup>
                 {breakdownTab === "Property" ? (
                   <>
                     <thead className="sticky top-0 z-10 bg-white">
-                      <tr className="border-b border-slate-200/80 text-[12px] font-bold text-slate-900">
-                        {breakdownVisibleColumns.property && <th className="px-5 py-3">Property</th>}
-                        {breakdownVisibleColumns.date && <th className="px-5 py-3 whitespace-nowrap">Date</th>}
-                        {breakdownVisibleColumns.campaigns && <th className="px-5 py-3 whitespace-nowrap">Campaigns</th>}
-                        {breakdownVisibleColumns.source && <th className="px-5 py-3 whitespace-nowrap">Source</th>}
-                        {breakdownVisibleColumns.totalLeads && <th className="px-5 py-3 whitespace-nowrap">Total Leads</th>}
-                        {breakdownVisibleColumns.qualifiedLeads && <th className="px-5 py-3 whitespace-nowrap">Qualified Leads</th>}
-                        {breakdownVisibleColumns.unqualifiedLeads && <th className="px-5 py-3 whitespace-nowrap">Unqualified Leads</th>}
-                        {breakdownVisibleColumns.qualifiedPercent && <th className="px-5 py-3 whitespace-nowrap">Qualified %age</th>}
-                        {breakdownVisibleColumns.cpl && <th className="px-5 py-3 whitespace-nowrap">CPL</th>}
-                        {breakdownVisibleColumns.qcpl && <th className="px-5 py-3 whitespace-nowrap">QCPL</th>}
-                        {breakdownVisibleColumns.spend && <th className="px-5 py-3 whitespace-nowrap">Spend</th>}
-                        {breakdownVisibleColumns.qSpend && <th className="px-5 py-3 whitespace-nowrap">Q Spend</th>}
+                      <tr className="border-b border-slate-200/80 text-left text-xs font-bold text-slate-800 whitespace-nowrap">
+                        {breakdownVisibleColumns.property && <th className="px-4 py-3 whitespace-nowrap">Property</th>}
+                        {breakdownVisibleColumns.date && <th className="px-4 py-3 whitespace-nowrap">Date</th>}
+                        {breakdownVisibleColumns.campaigns && <th className="px-4 py-3 whitespace-nowrap">Campaigns</th>}
+                        {breakdownVisibleColumns.source && <th className="px-4 py-3 whitespace-nowrap">Source</th>}
+                        {breakdownVisibleColumns.totalLeads && <th className="px-4 py-3 whitespace-nowrap">Total Leads</th>}
+                        {breakdownVisibleColumns.qualifiedLeads && <th className="px-4 py-3 whitespace-nowrap">Qualified Leads</th>}
+                        {breakdownVisibleColumns.unqualifiedLeads && <th className="px-4 py-3 whitespace-nowrap">Unqualified Leads</th>}
+                        {breakdownVisibleColumns.qualifiedPercent && <th className="px-4 py-3 whitespace-nowrap">Qualified %age</th>}
+                        {breakdownVisibleColumns.cpl && <th className="px-4 py-3 whitespace-nowrap">CPL</th>}
+                        {breakdownVisibleColumns.qcpl && <th className="px-4 py-3 whitespace-nowrap">QCPL</th>}
+                        {breakdownVisibleColumns.spend && <th className="px-4 py-3 whitespace-nowrap">Spend</th>}
+                        {breakdownVisibleColumns.qSpend && <th className="px-4 py-3 whitespace-nowrap">Q Spend</th>}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-[12px] font-medium text-slate-700">
@@ -1567,7 +1647,7 @@ export default function AdminCampaignsPage() {
                         <TableRowsSkeleton rows={6} columns={BREAKDOWN_COLUMNS.filter(c => breakdownVisibleColumns[c.key]).length || 1} />
                       ) : propertyBreakdown.length === 0 ? (
                         <tr>
-                          <td colSpan={BREAKDOWN_COLUMNS.filter(c => breakdownVisibleColumns[c.key]).length || 1} className="px-5 py-8 text-center text-slate-400 italic">No campaign/ad-spend data yet.</td>
+                          <td colSpan={BREAKDOWN_COLUMNS.filter(c => breakdownVisibleColumns[c.key]).length || 1} className="px-4 py-8 text-center text-slate-400 italic">No campaign/ad-spend data yet.</td>
                         </tr>
                       ) : (
                         propertyPagination.pageRows.map(row => {
@@ -1576,61 +1656,61 @@ export default function AdminCampaignsPage() {
                             <React.Fragment key={row.property}>
                               <tr className="hover:bg-slate-50/50 transition-colors">
                                 {breakdownVisibleColumns.property && (
-                                  <td className="px-5 py-3 text-slate-900 font-semibold">
+                                  <td className="px-4 py-3 text-slate-900 font-semibold">
                                     <button
                                       type="button"
                                       onClick={() => togglePropertyExpanded(row.property)}
-                                      className="flex items-center gap-1.5 hover:text-[#0B1E6E] transition-colors"
+                                      className="flex items-center gap-1.5 text-left [overflow-wrap:anywhere] hover:text-[#0B1E6E] transition-colors"
                                     >
                                       {row.property}
                                       {isExpanded ? <CircleMinus className="h-3.5 w-3.5 text-slate-400" /> : <CirclePlus className="h-3.5 w-3.5 text-slate-400" />}
                                     </button>
                                   </td>
                                 )}
-                                {breakdownVisibleColumns.date && <td className="px-5 py-3 text-slate-300" title="Not tracked yet — no per-campaign date field ingested">—</td>}
-                                {breakdownVisibleColumns.campaigns && <td className="px-5 py-3">{row.campaigns.length}</td>}
-                                {breakdownVisibleColumns.source && <td className="px-5 py-3"><PlatformIcons platforms={row.platforms} /></td>}
-                                {breakdownVisibleColumns.totalLeads && <td className="px-5 py-3">{row.totalLeads}</td>}
-                                {breakdownVisibleColumns.qualifiedLeads && <td className="px-5 py-3">{row.qualifiedLeads}</td>}
-                                {breakdownVisibleColumns.unqualifiedLeads && <td className="px-5 py-3">{row.unqualifiedLeads}</td>}
-                                {breakdownVisibleColumns.qualifiedPercent && <td className="px-5 py-3">{row.qualifiedPercent.toFixed(1)}%</td>}
-                                {breakdownVisibleColumns.cpl && <td className="px-5 py-3">{row.cpl.toFixed(2)}</td>}
-                                {breakdownVisibleColumns.qcpl && <td className="px-5 py-3">{row.qcpl.toFixed(2)}</td>}
-                                {breakdownVisibleColumns.spend && <td className="px-5 py-3 font-semibold text-slate-800">{formatCurrency(row.spend)}</td>}
-                                {breakdownVisibleColumns.qSpend && <td className="px-5 py-3 text-slate-300" title="Not tracked yet — no qualified-spend field defined">—</td>}
+                                {breakdownVisibleColumns.date && <td className="px-4 py-3 text-slate-300" title="Not tracked yet — no per-campaign date field ingested">—</td>}
+                                {breakdownVisibleColumns.campaigns && <td className="px-4 py-3">{row.campaigns.length}</td>}
+                                {breakdownVisibleColumns.source && <td className="px-4 py-3"><PlatformIcons platforms={row.platforms} /></td>}
+                                {breakdownVisibleColumns.totalLeads && <td className="px-4 py-3">{row.totalLeads}</td>}
+                                {breakdownVisibleColumns.qualifiedLeads && <td className="px-4 py-3">{row.qualifiedLeads}</td>}
+                                {breakdownVisibleColumns.unqualifiedLeads && <td className="px-4 py-3">{row.unqualifiedLeads}</td>}
+                                {breakdownVisibleColumns.qualifiedPercent && <td className="px-4 py-3">{row.qualifiedPercent.toFixed(1)}%</td>}
+                                {breakdownVisibleColumns.cpl && <td className="px-4 py-3">{row.cpl.toFixed(2)}</td>}
+                                {breakdownVisibleColumns.qcpl && <td className="px-4 py-3">{row.qcpl.toFixed(2)}</td>}
+                                {breakdownVisibleColumns.spend && <td className="px-4 py-3 font-semibold text-slate-800">{formatCurrency(row.spend)}</td>}
+                                {breakdownVisibleColumns.qSpend && <td className="px-4 py-3 text-slate-300" title="Not tracked yet — no qualified-spend field defined">—</td>}
                               </tr>
                               {isExpanded && (
-                                <tr className="bg-slate-50/50 text-[12px] font-bold text-slate-900">
-                                  {breakdownVisibleColumns.property && <td className="px-5 py-2">Campaign</td>}
-                                  {breakdownVisibleColumns.date && <td className="px-5 py-2"></td>}
-                                  {breakdownVisibleColumns.campaigns && <td className="px-5 py-2"></td>}
-                                  {breakdownVisibleColumns.source && <td className="px-5 py-2">Source</td>}
-                                  {breakdownVisibleColumns.totalLeads && <td className="px-5 py-2">Total Leads</td>}
-                                  {breakdownVisibleColumns.qualifiedLeads && <td className="px-5 py-2">Qualified Leads</td>}
-                                  {breakdownVisibleColumns.unqualifiedLeads && <td className="px-5 py-2">Unqualified Leads</td>}
-                                  {breakdownVisibleColumns.qualifiedPercent && <td className="px-5 py-2">Qualified %age</td>}
-                                  {breakdownVisibleColumns.cpl && <td className="px-5 py-2">CPL</td>}
-                                  {breakdownVisibleColumns.qcpl && <td className="px-5 py-2">QCPL</td>}
-                                  {breakdownVisibleColumns.spend && <td className="px-5 py-2">Spend</td>}
-                                  {breakdownVisibleColumns.qSpend && <td className="px-5 py-2"></td>}
+                                <tr className="bg-slate-50/50 text-left text-xs font-bold text-slate-800 whitespace-nowrap">
+                                  {breakdownVisibleColumns.property && <td className="px-4 py-2">Campaign</td>}
+                                  {breakdownVisibleColumns.date && <td className="px-4 py-2"></td>}
+                                  {breakdownVisibleColumns.campaigns && <td className="px-4 py-2"></td>}
+                                  {breakdownVisibleColumns.source && <td className="px-4 py-2">Source</td>}
+                                  {breakdownVisibleColumns.totalLeads && <td className="px-4 py-2">Total Leads</td>}
+                                  {breakdownVisibleColumns.qualifiedLeads && <td className="px-4 py-2">Qualified Leads</td>}
+                                  {breakdownVisibleColumns.unqualifiedLeads && <td className="px-4 py-2">Unqualified Leads</td>}
+                                  {breakdownVisibleColumns.qualifiedPercent && <td className="px-4 py-2">Qualified %age</td>}
+                                  {breakdownVisibleColumns.cpl && <td className="px-4 py-2">CPL</td>}
+                                  {breakdownVisibleColumns.qcpl && <td className="px-4 py-2">QCPL</td>}
+                                  {breakdownVisibleColumns.spend && <td className="px-4 py-2">Spend</td>}
+                                  {breakdownVisibleColumns.qSpend && <td className="px-4 py-2"></td>}
                                 </tr>
                               )}
                               {isExpanded && row.campaigns.map(c => {
                                 const cQualifiedPercent = c.totalLeads > 0 ? (c.qualifiedLeads / c.totalLeads) * 100 : 0;
                                 return (
                                   <tr key={c.id} className="bg-slate-50/50 hover:bg-slate-50 transition-colors">
-                                    {breakdownVisibleColumns.property && <td className="px-5 py-2.5 text-slate-700">{c.name}</td>}
-                                    {breakdownVisibleColumns.date && <td className="px-5 py-2.5 text-slate-300">—</td>}
-                                    {breakdownVisibleColumns.campaigns && <td className="px-5 py-2.5"></td>}
-                                    {breakdownVisibleColumns.source && <td className="px-5 py-2.5"><PlatformIcon platform={c.platform} /></td>}
-                                    {breakdownVisibleColumns.totalLeads && <td className="px-5 py-2.5">{c.totalLeads}</td>}
-                                    {breakdownVisibleColumns.qualifiedLeads && <td className="px-5 py-2.5">{c.qualifiedLeads}</td>}
-                                    {breakdownVisibleColumns.unqualifiedLeads && <td className="px-5 py-2.5">{c.unqualifiedLeads}</td>}
-                                    {breakdownVisibleColumns.qualifiedPercent && <td className="px-5 py-2.5">{cQualifiedPercent.toFixed(1)}%</td>}
-                                    {breakdownVisibleColumns.cpl && <td className="px-5 py-2.5">{c.cpl.toFixed(2)}</td>}
-                                    {breakdownVisibleColumns.qcpl && <td className="px-5 py-2.5">{computeCPL(c.spend, c.qualifiedLeads).toFixed(2)}</td>}
-                                    {breakdownVisibleColumns.spend && <td className="px-5 py-2.5 font-semibold text-slate-800">{formatCurrency(c.spend)}</td>}
-                                    {breakdownVisibleColumns.qSpend && <td className="px-5 py-2.5 text-slate-300">—</td>}
+                                    {breakdownVisibleColumns.property && <td className="px-4 py-2.5 text-slate-700 [overflow-wrap:anywhere]">{c.name}</td>}
+                                    {breakdownVisibleColumns.date && <td className="px-4 py-2.5 text-slate-300">—</td>}
+                                    {breakdownVisibleColumns.campaigns && <td className="px-4 py-2.5"></td>}
+                                    {breakdownVisibleColumns.source && <td className="px-4 py-2.5"><PlatformIcon platform={c.platform} /></td>}
+                                    {breakdownVisibleColumns.totalLeads && <td className="px-4 py-2.5">{c.totalLeads}</td>}
+                                    {breakdownVisibleColumns.qualifiedLeads && <td className="px-4 py-2.5">{c.qualifiedLeads}</td>}
+                                    {breakdownVisibleColumns.unqualifiedLeads && <td className="px-4 py-2.5">{c.unqualifiedLeads}</td>}
+                                    {breakdownVisibleColumns.qualifiedPercent && <td className="px-4 py-2.5">{cQualifiedPercent.toFixed(1)}%</td>}
+                                    {breakdownVisibleColumns.cpl && <td className="px-4 py-2.5">{c.cpl.toFixed(2)}</td>}
+                                    {breakdownVisibleColumns.qcpl && <td className="px-4 py-2.5">{computeCPL(c.spend, c.qualifiedLeads).toFixed(2)}</td>}
+                                    {breakdownVisibleColumns.spend && <td className="px-4 py-2.5 font-semibold text-slate-800">{formatCurrency(c.spend)}</td>}
+                                    {breakdownVisibleColumns.qSpend && <td className="px-4 py-2.5 text-slate-300">—</td>}
                                   </tr>
                                 );
                               })}
@@ -1643,22 +1723,22 @@ export default function AdminCampaignsPage() {
                 ) : (
                   <>
                     <thead className="sticky top-0 z-10 bg-white">
-                      <tr className="border-b border-slate-200/80 text-[12px] font-bold text-slate-900">
-                        {statusVisibleColumns.date && <th className="px-5 py-3 whitespace-nowrap">Date</th>}
-                        {statusVisibleColumns.campaign && <th className="px-5 py-3 whitespace-nowrap">Campaign</th>}
-                        {statusVisibleColumns.totalLeads && <th className="px-5 py-3 whitespace-nowrap">Total Leads</th>}
-                        {statusVisibleColumns.source && <th className="px-5 py-3 whitespace-nowrap">Source</th>}
-                        {statusVisibleColumns.newLead && <th className="px-5 py-3 whitespace-nowrap">New Lead</th>}
-                        {statusVisibleColumns.callBack && <th className="px-5 py-3 whitespace-nowrap">Call Back</th>}
-                        {statusVisibleColumns.followUps && <th className="px-5 py-3 whitespace-nowrap">Follow ups</th>}
-                        {statusVisibleColumns.siteVisits && <th className="px-5 py-3 whitespace-nowrap">Site Visits</th>}
-                        {statusVisibleColumns.eoi && <th className="px-5 py-3 whitespace-nowrap">EOI</th>}
-                        {statusVisibleColumns.booked && <th className="px-5 py-3 whitespace-nowrap">Booked</th>}
-                        {statusVisibleColumns.dead && <th className="px-5 py-3 whitespace-nowrap">Dead</th>}
-                        {statusVisibleColumns.rnr && <th className="px-5 py-3 whitespace-nowrap">RNR</th>}
-                        {statusVisibleColumns.lowBudget && <th className="px-5 py-3 whitespace-nowrap">Low Budget</th>}
-                        {statusVisibleColumns.otherReq && <th className="px-5 py-3 whitespace-nowrap">Other Req.</th>}
-                        {statusVisibleColumns.cancelled && <th className="px-5 py-3 whitespace-nowrap">Cancelled</th>}
+                      <tr className="border-b border-slate-200/80 text-left text-xs font-bold text-slate-800 whitespace-nowrap">
+                        {statusVisibleColumns.date && <th className="px-4 py-3 whitespace-nowrap">Date</th>}
+                        {statusVisibleColumns.campaign && <th className="px-4 py-3 whitespace-nowrap">Campaign</th>}
+                        {statusVisibleColumns.totalLeads && <th className="px-4 py-3 whitespace-nowrap">Total Leads</th>}
+                        {statusVisibleColumns.source && <th className="px-4 py-3 whitespace-nowrap">Source</th>}
+                        {statusVisibleColumns.newLead && <th className="px-4 py-3 whitespace-nowrap">New Lead</th>}
+                        {statusVisibleColumns.callBack && <th className="px-4 py-3 whitespace-nowrap">Call Back</th>}
+                        {statusVisibleColumns.followUps && <th className="px-4 py-3 whitespace-nowrap">Follow ups</th>}
+                        {statusVisibleColumns.siteVisits && <th className="px-4 py-3 whitespace-nowrap">Site Visits</th>}
+                        {statusVisibleColumns.eoi && <th className="px-4 py-3 whitespace-nowrap">EOI</th>}
+                        {statusVisibleColumns.booked && <th className="px-4 py-3 whitespace-nowrap">Booked</th>}
+                        {statusVisibleColumns.dead && <th className="px-4 py-3 whitespace-nowrap">Dead</th>}
+                        {statusVisibleColumns.rnr && <th className="px-4 py-3 whitespace-nowrap">RNR</th>}
+                        {statusVisibleColumns.lowBudget && <th className="px-4 py-3 whitespace-nowrap">Low Budget</th>}
+                        {statusVisibleColumns.otherReq && <th className="px-4 py-3 whitespace-nowrap">Other Req.</th>}
+                        {statusVisibleColumns.cancelled && <th className="px-4 py-3 whitespace-nowrap">Cancelled</th>}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-[12px] font-medium text-slate-700">
@@ -1666,26 +1746,26 @@ export default function AdminCampaignsPage() {
                         <TableRowsSkeleton rows={6} columns={STATUS_COLUMNS.filter(c => statusVisibleColumns[c.key]).length || 1} />
                       ) : statusDateBreakdown.length === 0 ? (
                         <tr>
-                          <td colSpan={STATUS_COLUMNS.filter(c => statusVisibleColumns[c.key]).length || 1} className="px-5 py-8 text-center text-slate-400 italic">No ad-spend data yet.</td>
+                          <td colSpan={STATUS_COLUMNS.filter(c => statusVisibleColumns[c.key]).length || 1} className="px-4 py-8 text-center text-slate-400 italic">No ad-spend data yet.</td>
                         </tr>
                       ) : (
                         statusPagination.pageRows.map(row => (
                           <tr key={row.id} className="hover:bg-slate-50/50 transition-colors">
-                            {statusVisibleColumns.date && <td className="px-5 py-3 text-slate-700 whitespace-nowrap">{row.dateLabel}</td>}
-                            {statusVisibleColumns.campaign && <td className="px-5 py-3 text-slate-900 font-semibold">{row.campaign}</td>}
-                            {statusVisibleColumns.totalLeads && <td className="px-5 py-3">{row.totalLeads}</td>}
-                            {statusVisibleColumns.source && <td className="px-5 py-3"><PlatformIcon platform={row.platform} /></td>}
-                            {statusVisibleColumns.newLead && <td className="px-5 py-3">{row.newLead}</td>}
-                            {statusVisibleColumns.callBack && <td className="px-5 py-3">{row.callBack}</td>}
-                            {statusVisibleColumns.followUps && <td className="px-5 py-3">{row.followUps}</td>}
-                            {statusVisibleColumns.siteVisits && <td className="px-5 py-3">{row.siteVisits}</td>}
-                            {statusVisibleColumns.eoi && <td className="px-5 py-3">{row.eoi}</td>}
-                            {statusVisibleColumns.booked && <td className="px-5 py-3">{row.booked}</td>}
-                            {statusVisibleColumns.dead && <td className="px-5 py-3">{row.dead}</td>}
-                            {statusVisibleColumns.rnr && <td className="px-5 py-3">{row.rnr}</td>}
-                            {statusVisibleColumns.lowBudget && <td className="px-5 py-3">{row.lowBudget}</td>}
-                            {statusVisibleColumns.otherReq && <td className="px-5 py-3 text-slate-300" title="Not tracked yet — no matching lead status defined">—</td>}
-                            {statusVisibleColumns.cancelled && <td className="px-5 py-3 text-slate-300" title="Not tracked yet — no matching lead status defined">—</td>}
+                            {statusVisibleColumns.date && <td className="px-4 py-3 text-slate-700 whitespace-nowrap">{row.dateLabel}</td>}
+                            {statusVisibleColumns.campaign && <td className="px-4 py-3 text-slate-900 font-semibold [overflow-wrap:anywhere]">{row.campaign}</td>}
+                            {statusVisibleColumns.totalLeads && <td className="px-4 py-3">{row.totalLeads}</td>}
+                            {statusVisibleColumns.source && <td className="px-4 py-3"><PlatformIcon platform={row.platform} /></td>}
+                            {statusVisibleColumns.newLead && <td className="px-4 py-3">{row.newLead}</td>}
+                            {statusVisibleColumns.callBack && <td className="px-4 py-3">{row.callBack}</td>}
+                            {statusVisibleColumns.followUps && <td className="px-4 py-3">{row.followUps}</td>}
+                            {statusVisibleColumns.siteVisits && <td className="px-4 py-3">{row.siteVisits}</td>}
+                            {statusVisibleColumns.eoi && <td className="px-4 py-3">{row.eoi}</td>}
+                            {statusVisibleColumns.booked && <td className="px-4 py-3">{row.booked}</td>}
+                            {statusVisibleColumns.dead && <td className="px-4 py-3">{row.dead}</td>}
+                            {statusVisibleColumns.rnr && <td className="px-4 py-3">{row.rnr}</td>}
+                            {statusVisibleColumns.lowBudget && <td className="px-4 py-3">{row.lowBudget}</td>}
+                            {statusVisibleColumns.otherReq && <td className="px-4 py-3 text-slate-300" title="Not tracked yet — no matching lead status defined">—</td>}
+                            {statusVisibleColumns.cancelled && <td className="px-4 py-3 text-slate-300" title="Not tracked yet — no matching lead status defined">—</td>}
                           </tr>
                         ))
                       )}
@@ -1786,19 +1866,28 @@ export default function AdminCampaignsPage() {
                 <button
                   onClick={handleAdSpendSync}
                   disabled={adSyncStatus === "syncing"}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-[12px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed whitespace-nowrap"
+                  className="inline-flex items-center justify-center gap-2 h-9 px-3.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed whitespace-nowrap"
                   title="Fetch the latest Ad Set Name/Ad creative Name/spend from Meta and Google now, instead of waiting for the automatic sync"
                 >
-                  <RefreshCw size={13} className={adSyncStatus === "syncing" ? "animate-spin" : ""} />
+                  <RefreshCw size={16} className={adSyncStatus === "syncing" ? "animate-spin" : ""} />
                   {adSyncStatus === "syncing" ? "Syncing…" : "Sync"}
                 </button>
               </div>
             </div>
             <div className="overflow-auto max-h-[45vh]">
-              <table className="w-full text-left border-collapse min-w-[760px]">
+              <table className="table-fixed w-full text-left border-collapse min-w-[1050px]">
+                <colgroup>
+                  <col />
+                  <col />
+                  <col />
+                  <col />
+                  <col />
+                  <col />
+                  <col />
+                </colgroup>
                 <thead className="sticky top-0 z-10 bg-white">
-                  <tr className="border-b border-slate-200/80 text-[12px] font-bold text-slate-900">
-                    <th className="px-5 py-3">
+                  <tr className="border-b border-slate-200/80 text-left text-xs font-bold text-slate-800 whitespace-nowrap">
+                    <th className="px-4 py-3 whitespace-nowrap">
                       {deepDiveSearchOpen ? (
                         <div className="flex items-center gap-1">
                           <input
@@ -1806,7 +1895,7 @@ export default function AdminCampaignsPage() {
                             value={deepDiveSearchQuery}
                             onChange={(e) => setDeepDiveSearchQuery(e.target.value)}
                             placeholder="Filter campaign..."
-                            className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs font-normal focus:outline-none w-36"
+                            className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs font-normal focus:outline-none w-full min-w-0"
                           />
                           <button onClick={() => { setDeepDiveSearchQuery(""); setDeepDiveSearchOpen(false); }} className="text-slate-400 hover:text-slate-600">
                             <X className="h-3.5 w-3.5" />
@@ -1821,7 +1910,7 @@ export default function AdminCampaignsPage() {
                         </div>
                       )}
                     </th>
-                    <th className="px-5 py-3 whitespace-nowrap">
+                    <th className="px-4 py-3 whitespace-nowrap">
                       <SearchableMultiSelect
                         variant="inline"
                         label="Source"
@@ -1832,11 +1921,11 @@ export default function AdminCampaignsPage() {
                         panelWidth={180}
                       />
                     </th>
-                    <th className="px-5 py-3 whitespace-nowrap">Ad Set Name</th>
-                    <th className="px-5 py-3 whitespace-nowrap">Ad creative Name</th>
-                    <th className="px-5 py-3 whitespace-nowrap">Qualified Leads</th>
-                    <th className="px-5 py-3 whitespace-nowrap">CPL</th>
-                    <th className="px-5 py-3 whitespace-nowrap">Spend</th>
+                    <th className="px-4 py-3 whitespace-nowrap">Ad Set Name</th>
+                    <th className="px-4 py-3 whitespace-nowrap">Ad creative Name</th>
+                    <th className="px-4 py-3 whitespace-nowrap">Qualified Leads</th>
+                    <th className="px-4 py-3 whitespace-nowrap">CPL</th>
+                    <th className="px-4 py-3 whitespace-nowrap">Spend</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-[12px] font-medium text-slate-700">
@@ -1844,7 +1933,7 @@ export default function AdminCampaignsPage() {
                     <TableRowsSkeleton rows={6} columns={7} />
                   ) : deepDiveCampaigns.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-5 py-8 text-center text-slate-400 italic">No campaigns found matching filter.</td>
+                      <td colSpan={7} className="px-4 py-8 text-center text-slate-400 italic">No campaigns found matching filter.</td>
                     </tr>
                   ) : (
                     deepDivePagination.pageRows.map(c => {
@@ -1852,26 +1941,26 @@ export default function AdminCampaignsPage() {
                       const topAd = adRows[0];
                       return (
                       <tr key={c.id} className="hover:bg-slate-50/50 transition-colors">
-                        <td className="px-5 py-3 text-slate-900 font-semibold">{c.name}</td>
-                        <td className="px-5 py-3"><PlatformIcon platform={c.platform} /></td>
-                        <td className="px-5 py-3">
+                        <td className="px-4 py-3 text-slate-900 font-semibold [overflow-wrap:anywhere]">{c.name}</td>
+                        <td className="px-4 py-3"><PlatformIcon platform={c.platform} /></td>
+                        <td className="px-4 py-3">
                           <button
                             type="button"
                             onClick={() => setAnalyticsDrillView({ type: "adSetBreakdown", campaign: c })}
-                            className="flex items-center gap-1 text-slate-700 hover:text-[#0B1E6E] transition-colors max-w-[160px]"
+                            className="flex items-center gap-1 text-left text-slate-700 hover:text-[#0B1E6E] transition-colors max-w-full"
                             title={adRows.length > 1 ? `${adRows.length} real ad sets/ads — click to see all` : "Open ad-set breakdown"}
                           >
-                            <span className="truncate">
+                            <span className="[overflow-wrap:anywhere]">
                               {topAd ? topAd.adSetName : "—"}
                               {adRows.length > 1 && <span className="text-slate-400"> +{adRows.length - 1}</span>}
                             </span>
                             <ChevronDown className="h-3.5 w-3.5 shrink-0" />
                           </button>
                         </td>
-                        <td className="px-5 py-3 truncate max-w-[160px]" title={topAd ? (topAd.creativeName || topAd.adType || topAd.adName || undefined) : undefined}>
+                        <td className="px-4 py-3 [overflow-wrap:anywhere]" title={topAd ? (topAd.creativeName || topAd.adType || topAd.adName || undefined) : undefined}>
                           {topAd ? (topAd.creativeName || topAd.adType || topAd.adName || "—") : <span className="text-slate-300" title="No ad-creative data synced for this campaign yet">—</span>}
                         </td>
-                        <td className="px-5 py-3">
+                        <td className="px-4 py-3">
                           <button
                             type="button"
                             onClick={() => setAnalyticsDrillView({ type: "qualifiedLeads", campaign: c })}
@@ -1880,8 +1969,8 @@ export default function AdminCampaignsPage() {
                             {c.qualifiedLeads}
                           </button>
                         </td>
-                        <td className="px-5 py-3">{c.cpl.toFixed(2)}</td>
-                        <td className="px-5 py-3 font-semibold text-slate-800">{formatCurrency(c.spend)}</td>
+                        <td className="px-4 py-3">{c.cpl.toFixed(2)}</td>
+                        <td className="px-4 py-3 font-semibold text-slate-800">{formatCurrency(c.spend)}</td>
                       </tr>
                       );
                     })
@@ -1895,24 +1984,37 @@ export default function AdminCampaignsPage() {
         )
       ) : (
         <>
-          {/* Action Toolbar (Date Picker Pill, Campaigns Dropdown, Filter Button) */}
-          <div className="flex flex-wrap items-center justify-end gap-2.5 pt-1">
-            {/* Date Range Picker Pill */}
-            <DateRangePicker
-              value={appliedCustomRange}
-              onChange={handleDateRangeChange}
-              emptyLabel={todayStr}
-            />
+          {/* Action toolbar (Date Picker Pill, Campaigns, Filter Button) */}
+          <div className="flex flex-wrap items-center justify-end gap-3 pt-1">
+            <div className="flex flex-wrap items-center justify-end gap-2.5">
+              {/* Date Range Picker Pill */}
+              <DateRangePicker
+                value={appliedCustomRange}
+                onChange={handleDateRangeChange}
+                emptyLabel={todayStr}
+              />
 
-            {/* Filter Button → column-visibility Settings drawer */}
-            <button
-              type="button"
-              onClick={() => setIsColumnsSettingsOpen(true)}
-              className="flex items-center gap-2 border border-slate-300/80 bg-white rounded-xl px-3.5 py-1.5 text-xs text-slate-700 font-semibold hover:bg-slate-50 shadow-2xs transition-colors"
-            >
-              <Sliders className="h-3.5 w-3.5 text-blue-600" />
-              Filter
-            </button>
+              {/* Campaigns multi-select — filters the table and the summary cards */}
+              <SearchableMultiSelect
+                options={breakdownCampaignOptions}
+                selected={campaignFilters}
+                onChange={(next) => { setCampaignFilters(next); setCurrentPage(1); }}
+                placeholder="All Campaigns"
+                searchPlaceholder="Search campaigns..."
+                panelWidth={240}
+                align="right"
+              />
+
+              {/* Filter Button → column-visibility Settings drawer */}
+              <button
+                type="button"
+                onClick={() => setIsColumnsSettingsOpen(true)}
+                className="inline-flex items-center justify-center gap-2 h-9 border border-slate-300/80 bg-white rounded-xl px-3.5 text-xs text-slate-700 font-bold hover:bg-slate-50 shadow-2xs transition-colors"
+              >
+                <Sliders className="h-4 w-4 text-blue-600" />
+                Filter
+              </button>
+            </div>
           </div>
 
           {/* Main Campaigns Data Table — row area is height-capped with its
@@ -1921,10 +2023,26 @@ export default function AdminCampaignsPage() {
               the pagination footer below stays out of the scroll area. */}
           <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden">
             <div className="overflow-auto max-h-[45vh]">
-              <table className="w-full text-left border-collapse table-auto min-w-[850px]">
+              <table className="table-fixed w-full text-left border-collapse" style={{ minWidth: (2 + CAMPAIGN_COLUMNS.filter(c => campaignVisibleColumns[c.key]).length) * 150 }}>
+                <colgroup>
+                  <col />
+                  <col />
+                  {campaignVisibleColumns.status && <col />}
+                  {campaignVisibleColumns.qualifiedLeads && <col />}
+                  {campaignVisibleColumns.unqualifiedLeads && <col />}
+                  {campaignVisibleColumns.siteVisit && <col />}
+                  {campaignVisibleColumns.cpl && <col />}
+                  {campaignVisibleColumns.date && <col />}
+                  {campaignVisibleColumns.ctr && <col />}
+                  {campaignVisibleColumns.clicks && <col />}
+                  {campaignVisibleColumns.adSetName && <col />}
+                  {campaignVisibleColumns.impressions && <col />}
+                  {campaignVisibleColumns.source && <col />}
+                  {campaignVisibleColumns.qcpl && <col />}
+                </colgroup>
                 <thead className="sticky top-0 z-10">
-                  <tr className="border-b border-slate-200/80 text-[12px] font-bold text-slate-900 bg-white">
-                    <th className="px-5 py-3.5">
+                  <tr className="border-b border-slate-200/80 text-left text-xs font-bold text-slate-800 whitespace-nowrap bg-white">
+                    <th className="px-4 py-3 whitespace-nowrap">
                       {searchOpen ? (
                         <div className="flex items-center gap-1">
                           <input
@@ -1932,7 +2050,7 @@ export default function AdminCampaignsPage() {
                             value={searchQuery}
                             onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
                             placeholder="Filter campaign..."
-                            className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs font-normal focus:outline-none w-36"
+                            className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs font-normal focus:outline-none w-full min-w-0"
                           />
                           <button onClick={() => { setSearchQuery(""); setSearchOpen(false); }} className="text-slate-400 hover:text-slate-600">
                             <X className="h-3.5 w-3.5" />
@@ -1947,9 +2065,9 @@ export default function AdminCampaignsPage() {
                         </div>
                       )}
                     </th>
-                    <th className="px-5 py-3.5 whitespace-nowrap">Total Leads</th>
+                    <th className="px-4 py-3 whitespace-nowrap">Total Leads</th>
                     {campaignVisibleColumns.status && (
-                      <th className="px-5 py-3.5 whitespace-nowrap">
+                      <th className="px-4 py-3 whitespace-nowrap">
                         <SearchableMultiSelect
                           variant="inline"
                           label="Campaign Status"
@@ -1960,17 +2078,17 @@ export default function AdminCampaignsPage() {
                         />
                       </th>
                     )}
-                    {campaignVisibleColumns.qualifiedLeads && <th className="px-5 py-3.5 whitespace-nowrap">Qualified Leads</th>}
-                    {campaignVisibleColumns.unqualifiedLeads && <th className="px-5 py-3.5 whitespace-nowrap">Unqualified Leads</th>}
-                    {campaignVisibleColumns.siteVisit && <th className="px-5 py-3.5 whitespace-nowrap">Site Visit</th>}
-                    {campaignVisibleColumns.cpl && <th className="px-5 py-3.5 whitespace-nowrap">CPL</th>}
-                    {campaignVisibleColumns.date && <th className="px-5 py-3.5 whitespace-nowrap">Date</th>}
-                    {campaignVisibleColumns.ctr && <th className="px-5 py-3.5 whitespace-nowrap">CTR</th>}
-                    {campaignVisibleColumns.clicks && <th className="px-5 py-3.5 whitespace-nowrap">Clicks</th>}
-                    {campaignVisibleColumns.adSetName && <th className="px-5 py-3.5 whitespace-nowrap">Ad Set Name</th>}
-                    {campaignVisibleColumns.impressions && <th className="px-5 py-3.5 whitespace-nowrap">Impressions</th>}
-                    {campaignVisibleColumns.source && <th className="px-5 py-3.5 whitespace-nowrap">Source</th>}
-                    {campaignVisibleColumns.qcpl && <th className="px-5 py-3.5 whitespace-nowrap">QCPL</th>}
+                    {campaignVisibleColumns.qualifiedLeads && <th className="px-4 py-3 whitespace-nowrap">Qualified Leads</th>}
+                    {campaignVisibleColumns.unqualifiedLeads && <th className="px-4 py-3 whitespace-nowrap">Unqualified Leads</th>}
+                    {campaignVisibleColumns.siteVisit && <th className="px-4 py-3 whitespace-nowrap">Site Visit</th>}
+                    {campaignVisibleColumns.cpl && <th className="px-4 py-3 whitespace-nowrap">CPL</th>}
+                    {campaignVisibleColumns.date && <th className="px-4 py-3 whitespace-nowrap">Date</th>}
+                    {campaignVisibleColumns.ctr && <th className="px-4 py-3 whitespace-nowrap">CTR</th>}
+                    {campaignVisibleColumns.clicks && <th className="px-4 py-3 whitespace-nowrap">Clicks</th>}
+                    {campaignVisibleColumns.adSetName && <th className="px-4 py-3 whitespace-nowrap">Ad Set Name</th>}
+                    {campaignVisibleColumns.impressions && <th className="px-4 py-3 whitespace-nowrap">Impressions</th>}
+                    {campaignVisibleColumns.source && <th className="px-4 py-3 whitespace-nowrap">Source</th>}
+                    {campaignVisibleColumns.qcpl && <th className="px-4 py-3 whitespace-nowrap">QCPL</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-[12px] font-medium text-slate-700">
@@ -1978,27 +2096,27 @@ export default function AdminCampaignsPage() {
                     <TableRowsSkeleton rows={6} columns={2 + CAMPAIGN_COLUMNS.filter(c => campaignVisibleColumns[c.key]).length} />
                   ) : paginatedCampaigns.length === 0 ? (
                     <tr>
-                      <td colSpan={2 + CAMPAIGN_COLUMNS.filter(c => campaignVisibleColumns[c.key]).length} className="px-5 py-8 text-center text-slate-400 italic">
+                      <td colSpan={2 + CAMPAIGN_COLUMNS.filter(c => campaignVisibleColumns[c.key]).length} className="px-4 py-8 text-center text-slate-400 italic">
                         No campaigns found matching filter.
                       </td>
                     </tr>
                   ) : (
                     paginatedCampaigns.map((row) => (
                       <tr key={row.id} className="hover:bg-slate-50/50 transition-colors">
-                        <td className="px-5 py-3.5 text-slate-900 font-semibold">{row.name}</td>
-                        <td className="px-5 py-3.5">{row.totalLeads}</td>
-                        {campaignVisibleColumns.status && <td className="px-5 py-3.5 whitespace-nowrap">{getStatusBadge(row.status)}</td>}
-                        {campaignVisibleColumns.qualifiedLeads && <td className="px-5 py-3.5">{row.qualifiedLeads}</td>}
-                        {campaignVisibleColumns.unqualifiedLeads && <td className="px-5 py-3.5">{row.unqualifiedLeads}</td>}
-                        {campaignVisibleColumns.siteVisit && <td className="px-5 py-3.5">{row.siteVisit}</td>}
-                        {campaignVisibleColumns.cpl && <td className="px-5 py-3.5 font-semibold text-slate-800">{row.cpl.toFixed(2)}</td>}
-                        {campaignVisibleColumns.date && <td className="px-5 py-3.5 text-slate-300" title="Not tracked yet — no per-campaign date field ingested">—</td>}
-                        {campaignVisibleColumns.ctr && <td className="px-5 py-3.5 text-slate-300" title="Not tracked yet — no click/impression-level data ingested">—</td>}
-                        {campaignVisibleColumns.clicks && <td className="px-5 py-3.5 text-slate-300" title="Not tracked yet — no click-level data ingested">—</td>}
-                        {campaignVisibleColumns.adSetName && <td className="px-5 py-3.5 text-slate-300" title="Not tracked yet — no ad-set-level data ingested">—</td>}
-                        {campaignVisibleColumns.impressions && <td className="px-5 py-3.5 text-slate-300" title="Not tracked yet — no impression-level data ingested">—</td>}
-                        {campaignVisibleColumns.source && <td className="px-5 py-3.5 text-slate-300" title="Not tracked yet — no ad-source field ingested">—</td>}
-                        {campaignVisibleColumns.qcpl && <td className="px-5 py-3.5 text-slate-300" title="Not tracked yet — no qualified-lead cost field ingested">—</td>}
+                        <td className="px-4 py-3.5 text-slate-900 font-semibold [overflow-wrap:anywhere]">{row.name}</td>
+                        <td className="px-4 py-3.5">{row.totalLeads}</td>
+                        {campaignVisibleColumns.status && <td className="px-4 py-3.5 whitespace-nowrap">{getStatusBadge(row.status)}</td>}
+                        {campaignVisibleColumns.qualifiedLeads && <td className="px-4 py-3.5">{row.qualifiedLeads}</td>}
+                        {campaignVisibleColumns.unqualifiedLeads && <td className="px-4 py-3.5">{row.unqualifiedLeads}</td>}
+                        {campaignVisibleColumns.siteVisit && <td className="px-4 py-3.5">{row.siteVisit}</td>}
+                        {campaignVisibleColumns.cpl && <td className="px-4 py-3.5 font-semibold text-slate-800">{row.cpl.toFixed(2)}</td>}
+                        {campaignVisibleColumns.date && <td className="px-4 py-3.5 text-slate-300" title="Not tracked yet — no per-campaign date field ingested">—</td>}
+                        {campaignVisibleColumns.ctr && <td className="px-4 py-3.5 text-slate-300" title="Not tracked yet — no click/impression-level data ingested">—</td>}
+                        {campaignVisibleColumns.clicks && <td className="px-4 py-3.5 text-slate-300" title="Not tracked yet — no click-level data ingested">—</td>}
+                        {campaignVisibleColumns.adSetName && <td className="px-4 py-3.5 text-slate-300" title="Not tracked yet — no ad-set-level data ingested">—</td>}
+                        {campaignVisibleColumns.impressions && <td className="px-4 py-3.5 text-slate-300" title="Not tracked yet — no impression-level data ingested">—</td>}
+                        {campaignVisibleColumns.source && <td className="px-4 py-3.5 text-slate-300" title="Not tracked yet — no ad-source field ingested">—</td>}
+                        {campaignVisibleColumns.qcpl && <td className="px-4 py-3.5 text-slate-300" title="Not tracked yet — no qualified-lead cost field ingested">—</td>}
                       </tr>
                     ))
                   )}

@@ -3,12 +3,17 @@
 import React, { useMemo, useState, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useApp, Lead, LeadStatus } from "@/context/AppContext";
+import { useDialog } from "@/components/ui/DialogProvider";
 import { deriveActivityTimeline, STATUS_OPTIONS, statusBadgeClasses } from "@/lib/leadStatusMapping";
 import { WhatsAppIcon, CallIcon } from "@/components/icons/ContactIcons";
 import { Phone, Mail, X, Copy, Check, User, Search, ArrowRight } from "lucide-react";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
+import { DateTimeLines, dateTimeParts } from "@/components/ui/DateTimeLines";
+import { canChangeLeadStatus, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
+import { nextFollowupFor } from "@/lib/followups";
+import NextCallCell from "./NextCallCell";
 
 // Drill-down table + lead quick-view drawer behind the 7 lead stat cards
 // (Total Leads … Site Visit Done). Shared by the CRM Dashboard and the admin
@@ -44,12 +49,18 @@ const lastActivityTime = (l: Lead): string => formatDateTime(lastActivityIso(l))
 // else in the app a status dropdown can reach a Booking status.
 export function useLeadStatusChange() {
   const { updateLeadStatus } = useApp();
-  return (leadId: string, status: LeadStatus) => {
+  const { toast, prompt: promptDialog } = useDialog();
+  return async (leadId: string, status: LeadStatus) => {
     if (status === "Booking Done" || status === "Booking Approved" || status === "Booked") {
-      const input = prompt("Enter the real deal value for this booking (INR):");
+      const input = await promptDialog({
+        title: "Enter deal value",
+        message: "Enter the real deal value for this booking (INR):",
+        label: "Deal value (INR)",
+        confirmLabel: "Mark as Booked"
+      });
       const dealValue = input ? parseFloat(input.replace(/[^0-9.]/g, "")) : NaN;
       if (!input || isNaN(dealValue) || dealValue <= 0) {
-        alert("A valid deal value is required to mark a lead as Booked.");
+        toast("A valid deal value is required to mark a lead as Booked.", "warning");
         return;
       }
       updateLeadStatus(leadId, status, dealValue);
@@ -239,7 +250,7 @@ export default function LeadDrillDownPanel({ title, leads, onClose }: {
   leads: Lead[];
   onClose: () => void;
 }) {
-  const { followupCalls, isDataLoading } = useApp();
+  const { followupCalls, isDataLoading, currentUser, users } = useApp();
   const handleDrillStatusChange = useLeadStatusChange();
 
   const [drillPage, setDrillPage] = useState(1);
@@ -324,17 +335,14 @@ export default function LeadDrillDownPanel({ title, leads, onClose }: {
   // Real next-scheduled-call date, from the actual followup_calls queue —
   // "—" when no reminder was ever set for this lead, rather than a
   // fabricated createdAt+1day placeholder.
-  const nextCallDateFor = (leadId: string): string => {
-    const upcoming = followupCalls
-      .filter(c => c.leadId === leadId && c.status === "Upcoming")
-      .sort((a, b) => new Date(`${a.date}T${a.time}`).getTime() - new Date(`${b.date}T${b.time}`).getTime());
-    return upcoming.length > 0 ? `${upcoming[0].date} ${upcoming[0].time}` : "—";
-  };
+  const nextCallDateFor = (leadId: string) => nextFollowupFor(leadId, followupCalls);
 
   // Drill-down table's per-row Status cell — the shared searchable dropdown,
   // in place of a plain native <select> (whose OS-default popup, e.g. dark
   // on macOS/Chrome, clashed with the rest of the app).
-  const renderRowStatusCell = (l: Lead) => (
+  const renderRowStatusCell = (l: Lead) => !canChangeLeadStatus(l, currentUser, users) ? (
+    <span className="inline-block max-w-[110px] text-[11px] text-slate-700" title={STATUS_LOCKED_HINT}>{l.status}</span>
+  ) : (
     <SearchableSelect
       variant="inline"
       options={STATUS_OPTIONS.includes(l.status) ? STATUS_OPTIONS : [l.status, ...STATUS_OPTIONS]}
@@ -359,21 +367,21 @@ export default function LeadDrillDownPanel({ title, leads, onClose }: {
           </div>
 
           <div ref={drillScrollRef} onScroll={handleDrillTableScroll} className="overflow-auto max-h-[70vh]">
-            <table className="w-full text-left border-collapse table-fixed min-w-[1080px]">
+            <table className="w-full text-left border-collapse table-fixed min-w-[1310px]">
               <colgroup>
-                <col className="w-[150px]" />
-                <col className="w-[160px]" />
-                <col className="w-[140px]" />
-                <col className="w-[120px]" />
+                <col />
+                <col />
+                <col />
+                <col />
+                <col />
+                <col />
+                <col />
+                <col />
                 <col className="w-[110px]" />
-                <col className="w-[180px]" />
-                <col className="w-[120px]" />
-                <col className="w-[150px]" />
-                <col className="w-[90px]" />
               </colgroup>
               <thead>
-                <tr className="border-b border-slate-200 text-xs font-bold text-slate-800">
-                  <th className="px-4 py-2.5">
+                <tr className="border-b border-slate-200 text-left text-xs font-bold text-slate-800">
+                  <th className="px-4 py-3 whitespace-nowrap">
                     {drillSearchOpen ? (
                       <div className="flex items-center gap-1">
                         <input
@@ -402,8 +410,8 @@ export default function LeadDrillDownPanel({ title, leads, onClose }: {
                       </div>
                     )}
                   </th>
-                  <th className="px-4 py-2.5 whitespace-nowrap">Email</th>
-                  <th className="px-4 py-2.5">
+                  <th className="px-4 py-3 whitespace-nowrap">Email</th>
+                  <th className="px-4 py-3 whitespace-nowrap">
                     <SearchableMultiSelect
                       variant="inline"
                       label="Status"
@@ -413,7 +421,7 @@ export default function LeadDrillDownPanel({ title, leads, onClose }: {
                       panelWidth={208}
                     />
                   </th>
-                  <th className="px-4 py-2.5">
+                  <th className="px-4 py-3 whitespace-nowrap">
                     <SearchableMultiSelect
                       variant="inline"
                       label="Assigned To"
@@ -423,10 +431,10 @@ export default function LeadDrillDownPanel({ title, leads, onClose }: {
                       panelWidth={208}
                     />
                   </th>
-                  <th className="px-4 py-2.5 whitespace-nowrap">Date</th>
-                  <th className="px-4 py-2.5 whitespace-nowrap">Feedback</th>
-                  <th className="px-4 py-2.5 whitespace-nowrap">Next Call Date</th>
-                  <th className="px-4 py-2.5">
+                  <th className="px-4 py-3 whitespace-nowrap">Date</th>
+                  <th className="px-4 py-3 whitespace-nowrap">Feedback</th>
+                  <th className="px-4 py-3 whitespace-nowrap">Next Call Date</th>
+                  <th className="px-4 py-3 whitespace-nowrap">
                     <SearchableMultiSelect
                       variant="inline"
                       label="Campaign"
@@ -437,7 +445,7 @@ export default function LeadDrillDownPanel({ title, leads, onClose }: {
                       panelWidth={224}
                     />
                   </th>
-                  <th className="px-4 py-2.5 text-right">Actions</th>
+                  <th className="px-4 py-3 text-right whitespace-nowrap">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-xs">
@@ -459,35 +467,35 @@ export default function LeadDrillDownPanel({ title, leads, onClose }: {
                       <td className="px-4 py-3 align-top overflow-hidden">
                         <button
                           onClick={() => setQuickViewLead(l)}
-                          className="font-bold text-[#0B1E6E] hover:underline text-left truncate block max-w-full"
+                          className="font-bold text-[#0B1E6E] hover:underline text-left [overflow-wrap:anywhere] block max-w-full"
                           title={l.name}
                         >
                           {l.name}
                         </button>
-                        <p className="text-[11px] text-slate-500 font-mono mt-0.5 truncate">{l.phone}</p>
+                        <p className="text-[11px] text-slate-500 font-mono mt-0.5 [overflow-wrap:anywhere]">{l.phone}</p>
                       </td>
-                      <td className="px-4 py-3 text-slate-600 align-top truncate" title={l.email || "—"}>{l.email || "—"}</td>
+                      <td className="px-4 py-3 text-slate-600 align-top [overflow-wrap:anywhere]" title={l.email || "—"}>{l.email || "—"}</td>
                       <td className="px-4 py-3 align-top">
                         {renderRowStatusCell(l)}
                       </td>
-                      <td className="px-4 py-3 text-slate-700 font-medium align-top truncate" title={l.assignedAgent || "Unassigned"}>{l.assignedAgent || "Unassigned"}</td>
-                      <td className="px-4 py-3 text-slate-500 align-top truncate">{formatDateTime(l.createdAtStr)}</td>
-                      <td className="px-4 py-3 text-slate-600 truncate align-top" title={latestLogMessage(l)}>{latestLogMessage(l)}</td>
-                      <td className="px-4 py-3 text-slate-500 align-top truncate">{nextCallDateFor(l.id)}</td>
-                      <td className="px-4 py-3 text-slate-700 font-medium align-top truncate" title={l.campaign || l.source || "—"}>{l.campaign || l.source || "—"}</td>
+                      <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]" title={l.assignedAgent || "Unassigned"}>{l.assignedAgent || "Unassigned"}</td>
+                      <td className="px-4 py-3 text-slate-500 align-top"><DateTimeLines {...dateTimeParts(l.createdAtStr)} /></td>
+                      <td className="px-4 py-3 text-slate-600 align-top"><div className="line-clamp-3 [overflow-wrap:anywhere]" title={latestLogMessage(l)}>{latestLogMessage(l)}</div></td>
+                      <td className="px-4 py-3 text-slate-500 align-top"><NextCallCell next={nextCallDateFor(l.id)} /></td>
+                      <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]" title={l.campaign || l.source || "—"}>{l.campaign || l.source || "—"}</td>
                       <td className="px-4 py-3 align-top text-right">
                         <a
                           href={`https://wa.me/${l.phone.replace(/[^0-9]/g, "")}`}
                           target="_blank"
                           rel="noreferrer"
-                          className="inline-flex items-center justify-center h-7 w-7 rounded-lg bg-slate-100 text-slate-700 hover:bg-emerald-50 hover:text-emerald-600 transition-colors"
+                          className="inline-flex items-center justify-center h-10 w-10 sm:h-7 sm:w-7 rounded-lg bg-slate-100 text-slate-700 hover:bg-emerald-50 hover:text-emerald-600 transition-colors"
                           title="WhatsApp"
                         >
-                          <WhatsAppIcon className="h-4 w-4" />
+                          <WhatsAppIcon className="h-3.5 w-3.5" />
                         </a>
                         <a
                           href={`tel:${l.phone}`}
-                          className="inline-flex items-center justify-center h-7 w-7 rounded-lg bg-slate-100 text-slate-700 hover:bg-brand-50 hover:text-brand-700 transition-colors ml-1.5"
+                          className="inline-flex items-center justify-center h-10 w-10 sm:h-7 sm:w-7 rounded-lg bg-slate-100 text-slate-700 hover:bg-brand-50 hover:text-brand-700 transition-colors ml-1.5"
                           title="Call"
                         >
                           <CallIcon className="h-3.5 w-3.5" />

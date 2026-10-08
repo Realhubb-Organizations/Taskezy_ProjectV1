@@ -44,6 +44,7 @@ import {
 import { LineSkeleton, CardListSkeleton } from "@/components/ui/Skeletons";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
+import { useDialog } from "@/components/ui/DialogProvider";
 
 const DEPARTMENT_OPTIONS = [
   { value: "SALES", label: "SALES" },
@@ -100,6 +101,7 @@ export default function SettingsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { users, leads, activeRole, activeSystem, logout, updateUserFields, addTeamMember, deleteTeamMember, refreshMetaConnectionStatus, tenantSettings, updateTenantSettings, isDataLoading } = useApp();
+  const { toast, confirm: confirmDialog } = useDialog();
 
   const initialTabParam = searchParams.get("tab");
   const initialTab = (TABS as readonly string[]).includes(initialTabParam || "") ? (initialTabParam as Tab) : "Connected Apps";
@@ -154,7 +156,7 @@ export default function SettingsPage() {
   };
 
   const handleRequestIntegration = () => {
-    alert("Thanks — we don't have a request form wired up yet. Reach out to support with which platform you need and we'll take it from there.");
+    toast("Thanks — we don't have a request form wired up yet. Reach out to support with which platform you need and we'll take it from there.", "info");
   };
 
   // --- Meta Ads: real OAuth connection ---
@@ -221,13 +223,18 @@ export default function SettingsPage() {
   };
 
   const handleDisconnectMeta = async (connectionId: string, pageName: string) => {
-    if (!confirm(`Disconnect "${pageName}"? New leads from this Page will stop arriving until you reconnect it.`)) return;
+    if (!(await confirmDialog({
+      title: `Disconnect "${pageName}"?`,
+      message: "New leads from this Page will stop arriving until you reconnect it.",
+      confirmLabel: "Disconnect",
+      danger: true
+    }))) return;
     try {
       await apiDisconnectMeta(connectionId);
       await loadMetaConnections();
       await refreshMetaConnectionStatus();
     } catch (err) {
-      alert("Could not disconnect this Page. Please try again.");
+      toast("Could not disconnect this Page. Please try again.", "error");
       console.warn("Meta disconnect failed:", err);
     }
   };
@@ -462,7 +469,7 @@ export default function SettingsPage() {
     e.preventDefault();
     if (!selectedUser) return;
     if (passwordHash.length < 4) {
-      alert("Password must be at least 4 characters.");
+      toast("Password must be at least 4 characters.", "warning");
       return;
     }
     updateUserFields(selectedUser.id, firstName, lastName, passwordHash, designation, roleType, status, managerId || null);
@@ -477,7 +484,7 @@ export default function SettingsPage() {
   const handleAddSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!addFirstName || !addEmail || !addPassword) {
-      alert("First name, email, and password are required.");
+      toast("First name, email, and password are required.", "warning");
       return;
     }
     addTeamMember({
@@ -516,8 +523,12 @@ export default function SettingsPage() {
     setTimeout(() => setUsersRefreshKey(k => k + 1), 400);
   };
 
-  const handleSignOut = () => {
-    if (confirm("Are you sure you want to sign out?")) {
+  const handleSignOut = async () => {
+    if (await confirmDialog({
+      title: "Sign out?",
+      message: "Are you sure you want to sign out?",
+      confirmLabel: "Sign out"
+    })) {
       logout();
       router.push("/auth/login");
     }
@@ -1651,8 +1662,13 @@ export default function SettingsPage() {
               {selectedUser.role !== "ADMIN" && (
                 <button
                   type="button"
-                  onClick={() => {
-                    if (confirm(`Are you sure you want to delete ${selectedUser.name}?`)) {
+                  onClick={async () => {
+                    if (await confirmDialog({
+                      title: "Delete user?",
+                      message: `Are you sure you want to delete ${selectedUser.name}?`,
+                      confirmLabel: "Delete",
+                      danger: true
+                    })) {
                       deleteTeamMember(selectedUser.id);
                       setSelectedUser(null);
                       setSuccessMsg(`Removed ${selectedUser.name} from the roster.`);

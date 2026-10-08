@@ -178,6 +178,8 @@ export interface ApiLeadRow {
   lead_score: number | null;
   assigned_agent_id: string;
   assigned_agent_name: string;
+  previous_agent_name: string | null;
+  reassigned_at: string | null;
   property_id: string | null;
   property_name: string | null;
   assigned_at: string | null;
@@ -239,6 +241,8 @@ export interface LeadListFilters {
   dateFrom?: string;
   dateTo?: string;
   search?: string;
+  /** Leave out Data Calling ("Bulk Upload") leads. */
+  excludeBulkUpload?: boolean;
 }
 
 function buildLeadFilterParams(filters: LeadListFilters): URLSearchParams {
@@ -249,6 +253,7 @@ function buildLeadFilterParams(filters: LeadListFilters): URLSearchParams {
   if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
   if (filters.dateTo) params.set("dateTo", filters.dateTo);
   if (filters.search) params.set("search", filters.search);
+  if (filters.excludeBulkUpload) params.set("excludeBulkUpload", "true");
   return params;
 }
 

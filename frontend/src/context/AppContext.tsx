@@ -203,6 +203,7 @@ export interface Lead {
   kycDocUrl?: string;
   kycVerified: boolean;
   assignedAgent: string;
+  assignedAgentId?: string;
   logs: LeadLog[];
   source?: string;
   subSource?: string; // free-text batch label from bulk upload (e.g. "Kashmiri Data") — lets that batch be filtered/reassigned/reshuffled as a group. undefined for every other ingestion path.
@@ -544,7 +545,7 @@ interface AppActions {
     kycDocName?: string,
     subStatus?: "Qualified" | "Not Qualified"
   ) => { success: boolean; error?: string };
-  reassignLead: (leadId: string, newAgent: string) => void;
+  reassignLead: (leadId: string, newAgent: string) => Promise<void>;
   connectMeta: () => Promise<void>;
   disconnectMeta: () => void;
 
@@ -634,6 +635,9 @@ export function mapApiLeadToFrontendLead(row: ApiLeadRow): Lead {
     dealValue: row.deal_value ? Number(row.deal_value) : undefined,
     kycVerified: false, // not included in the leads list endpoint yet
     assignedAgent: row.assigned_agent_name,
+    assignedAgentId: row.assigned_agent_id,
+    previousAgent: row.previous_agent_name || undefined,
+    reassignedAt: row.reassigned_at || undefined,
     logs: row.logs.map(l => ({ message: l.message, timestamp: l.timestamp, user: l.user })),
     source: row.source || undefined,
     subSource: row.sub_source || undefined,
@@ -1633,7 +1637,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Reassigns a lead to a new agent and restarts its SLA clock (used to correct missed leads)
-  const reassignLead = (leadId: string, newAgent: string) => {
+  // Saves to the server first and only then updates local state, so the UI
+  // never shows a reassignment the server refused. Rejects on failure.
+  const reassignLead = async (leadId: string, newAgent: string): Promise<void> => {
+    if (isApiSessionActive() && isRealLeadId(leadId)) {
+      const realAgent = users.find(u => u.name === newAgent);
+      if (!realAgent) throw new Error(`No team member named "${newAgent}".`);
+      await apiReassignLead(leadId, realAgent.id);
+    }
+
     const lead = allLeads.find(l => l.id === leadId);
     if (!lead) return;
 
@@ -1657,15 +1669,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       message: `${lead.name} moved from ${previousAgent} to ${newAgent}.`,
       leadId: lead.id
     });
-
-    if (isApiSessionActive() && isRealLeadId(leadId)) {
-      const realAgent = users.find(u => u.name === newAgent);
-      if (realAgent) {
-        apiReassignLead(leadId, realAgent.id).catch((err) =>
-          console.warn("Could not persist lead reassignment to the database:", err)
-        );
-      }
-    }
   };
 
   const connectMeta = async () => {

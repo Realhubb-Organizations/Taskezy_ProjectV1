@@ -63,19 +63,19 @@ export default function MonthCalendar({ events, selectedDate, onSelectDate, colo
         <div className="flex items-center gap-1">
           <button
             onClick={() => setCursor(new Date(year, month - 1, 1))}
-            className="h-10 min-w-[40px] sm:h-auto sm:min-w-0 p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 transition-colors"
+            className="inline-flex items-center justify-center h-9 w-9 rounded-xl hover:bg-slate-100 text-slate-500 transition-colors"
           >
             <ChevronLeft className="h-4 w-4" />
           </button>
           <button
             onClick={() => setCursor(new Date())}
-            className="h-10 min-w-[40px] sm:h-auto sm:min-w-0 px-2 py-1 rounded-lg text-[10px] font-bold text-brand-600 hover:bg-brand-50 transition-colors"
+            className="inline-flex items-center justify-center gap-2 h-9 px-3.5 rounded-xl text-xs font-bold text-brand-600 hover:bg-brand-50 transition-colors"
           >
             Today
           </button>
           <button
             onClick={() => setCursor(new Date(year, month + 1, 1))}
-            className="h-10 min-w-[40px] sm:h-auto sm:min-w-0 p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 transition-colors"
+            className="inline-flex items-center justify-center h-9 w-9 rounded-xl hover:bg-slate-100 text-slate-500 transition-colors"
           >
             <ChevronRight className="h-4 w-4" />
           </button>

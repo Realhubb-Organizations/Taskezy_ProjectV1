@@ -151,20 +151,20 @@ export default function SalesPendingTasksTable({
       </div>
 
       <div className="overflow-auto max-h-[70vh] px-3 pb-3">
-        <table className="w-full text-left table-fixed min-w-[860px] border-separate border-spacing-y-1.5">
+        <table className="w-full text-left table-fixed min-w-[750px] border-separate border-spacing-y-1.5">
           <colgroup>
-            <col className="w-[18%]" />
-            <col className="w-[22%]" />
-            <col className="w-[20%]" />
-            <col className="w-[18%]" />
-            <col className="w-[22%]" />
+            <col />
+            <col />
+            <col />
+            <col />
+            <col />
           </colgroup>
           {/* Header cells are sticky so the column labels stay in place while
               the task rows scroll underneath them. */}
           <thead>
-            <tr className="text-xs font-bold text-slate-800">
-              <th className="px-4 py-2.5 whitespace-nowrap border-b border-slate-200 sticky top-0 z-10 bg-white">Task Time</th>
-              <th className="px-4 py-2.5 border-b border-slate-200 sticky top-0 z-10 bg-white">
+            <tr className="text-left text-xs font-bold text-slate-800">
+              <th className="px-4 py-3 whitespace-nowrap border-b border-slate-200 sticky top-0 z-10 bg-white">Task Time</th>
+              <th className="px-4 py-3 whitespace-nowrap border-b border-slate-200 sticky top-0 z-10 bg-white">
                 {searchOpen ? (
                   <div className="flex items-center gap-1">
                     <input
@@ -193,8 +193,8 @@ export default function SalesPendingTasksTable({
                   </div>
                 )}
               </th>
-              <th className="px-4 py-2.5 whitespace-nowrap border-b border-slate-200 sticky top-0 z-10 bg-white">Email</th>
-              <th className="px-4 py-2.5 border-b border-slate-200 sticky top-0 z-10 bg-white">
+              <th className="px-4 py-3 whitespace-nowrap border-b border-slate-200 sticky top-0 z-10 bg-white">Email</th>
+              <th className="px-4 py-3 whitespace-nowrap border-b border-slate-200 sticky top-0 z-10 bg-white">
                 <SearchableMultiSelect
                   variant="inline"
                   label="Status"
@@ -205,7 +205,7 @@ export default function SalesPendingTasksTable({
                   panelWidth={208}
                 />
               </th>
-              <th className="px-4 py-2.5 whitespace-nowrap border-b border-slate-200 sticky top-0 z-10 bg-white">Feedback</th>
+              <th className="px-4 py-3 whitespace-nowrap border-b border-slate-200 sticky top-0 z-10 bg-white">Feedback</th>
             </tr>
           </thead>
           <tbody className="text-xs">
@@ -223,7 +223,7 @@ export default function SalesPendingTasksTable({
               </tr>
             ) : (
               pageRows.map(t => {
-                const cell = `py-3.5 align-middle border-y ${BUCKET_STYLES[t.bucket].row}`;
+                const cell = `py-3 align-middle border-y ${BUCKET_STYLES[t.bucket].row}`;
                 return (
                   <tr key={t.id}>
                     <td className={`${cell} px-4 border-l rounded-l-lg text-slate-700`}>
@@ -236,15 +236,15 @@ export default function SalesPendingTasksTable({
                     </td>
                     <td className={`${cell} px-4 overflow-hidden`}>
                       {t.leadId ? (
-                        <button onClick={() => onViewLead(t.leadId!)} className="font-bold text-slate-900 hover:underline text-left truncate block max-w-full" title={t.name}>
+                        <button onClick={() => onViewLead(t.leadId!)} className="font-bold text-slate-900 hover:underline text-left [overflow-wrap:anywhere] block max-w-full" title={t.name}>
                           {t.name}
                         </button>
                       ) : (
-                        <p className="font-bold text-slate-900 truncate" title={t.name}>{t.name}</p>
+                        <p className="font-bold text-slate-900 [overflow-wrap:anywhere]" title={t.name}>{t.name}</p>
                       )}
                       {t.phone && (
                         <div className="flex items-center gap-1.5 mt-0.5">
-                          <span className="text-[11px] text-slate-600 truncate">{t.phone}</span>
+                          <span className="text-[11px] text-slate-600 [overflow-wrap:anywhere]">{t.phone}</span>
                           <button onClick={() => copy(`${t.id}-phone`, t.phone)} className="text-slate-400 hover:text-brand-700 shrink-0" title="Copy phone number">
                             {copied === `${t.id}-phone` ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
                           </button>
@@ -254,7 +254,7 @@ export default function SalesPendingTasksTable({
                     <td className={`${cell} px-4 overflow-hidden`}>
                       {t.email ? (
                         <div className="flex items-center gap-1.5">
-                          <span className="text-slate-700 truncate" title={t.email}>{t.email}</span>
+                          <span className="text-slate-700 [overflow-wrap:anywhere]" title={t.email}>{t.email}</span>
                           <button onClick={() => copy(`${t.id}-email`, t.email)} className="text-slate-400 hover:text-brand-700 shrink-0" title="Copy email">
                             {copied === `${t.id}-email` ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
                           </button>
@@ -265,7 +265,7 @@ export default function SalesPendingTasksTable({
                     </td>
                     <td className={`${cell} px-4 overflow-hidden`}>{renderStatusCell(t)}</td>
                     <td className={`${cell} px-4 border-r rounded-r-lg text-slate-700`}>
-                      <p className="line-clamp-2" title={t.feedback}>{t.feedback}</p>
+                      <p className="line-clamp-3 [overflow-wrap:anywhere]" title={t.feedback}>{t.feedback}</p>
                     </td>
                   </tr>
                 );

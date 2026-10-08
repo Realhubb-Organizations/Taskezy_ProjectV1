@@ -116,26 +116,40 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
         </h3>
 
         <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm overflow-x-auto">
-          <table className="w-full text-left text-[11px] border-collapse">
+          <table className="table-fixed w-full min-w-[1440px] text-[11px] border-collapse">
+            <colgroup>
+              <col />
+              <col />
+              <col />
+              <col />
+              <col />
+              <col />
+              <col />
+              <col />
+              <col />
+              <col />
+              <col />
+              <col />
+            </colgroup>
             <thead>
-              <tr className="bg-slate-50 border-b border-slate-200 text-[9px] uppercase font-bold text-slate-400 tracking-wider">
-                <th className="p-3" rowSpan={2}>Manager / TL</th>
-                <th className="p-2 text-center border-l border-slate-200 bg-blue-50/40" colSpan={4}>Individual (Self)</th>
-                <th className="p-2 text-center border-l border-slate-200 bg-indigo-50/40" colSpan={4}>Team</th>
-                <th className="p-2 text-center border-l border-slate-200 bg-emerald-50/40" colSpan={2}>Combined</th>
-                <th className="p-3 border-l border-slate-200" rowSpan={2}></th>
+              <tr className="bg-slate-50 border-b border-slate-200">
+                <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap" rowSpan={2}>Manager / TL</th>
+                <th className="px-4 py-3 border-l border-slate-200 bg-blue-50/40 text-left text-xs font-bold text-slate-800 whitespace-nowrap" colSpan={4}>Individual (Self)</th>
+                <th className="px-4 py-3 border-l border-slate-200 bg-indigo-50/40 text-left text-xs font-bold text-slate-800 whitespace-nowrap" colSpan={4}>Team</th>
+                <th className="px-4 py-3 border-l border-slate-200 bg-emerald-50/40 text-left text-xs font-bold text-slate-800 whitespace-nowrap" colSpan={2}>Combined</th>
+                <th className="px-4 py-3 border-l border-slate-200 text-left text-xs font-bold text-slate-800 whitespace-nowrap" rowSpan={2}></th>
               </tr>
-              <tr className="bg-slate-50 border-b border-slate-200 text-[9px] uppercase font-bold text-slate-500 tracking-wider">
-                <th className="p-2 border-l border-slate-200 bg-blue-50/40">Leads</th>
-                <th className="p-2 bg-blue-50/40">Spend</th>
-                <th className="p-2 bg-blue-50/40">ROI</th>
-                <th className="p-2 bg-blue-50/40">Missed</th>
-                <th className="p-2 border-l border-slate-200 bg-indigo-50/40">Leads</th>
-                <th className="p-2 bg-indigo-50/40">Spend</th>
-                <th className="p-2 bg-indigo-50/40">ROI</th>
-                <th className="p-2 bg-indigo-50/40">Missed</th>
-                <th className="p-2 border-l border-slate-200 bg-emerald-50/40">Leads</th>
-                <th className="p-2 bg-emerald-50/40">ROI</th>
+              <tr className="bg-slate-50 border-b border-slate-200">
+                <th className="px-4 py-3 border-l border-slate-200 bg-blue-50/40 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Leads</th>
+                <th className="px-4 py-3 bg-blue-50/40 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Spend</th>
+                <th className="px-4 py-3 bg-blue-50/40 text-left text-xs font-bold text-slate-800 whitespace-nowrap">ROI</th>
+                <th className="px-4 py-3 bg-blue-50/40 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Missed</th>
+                <th className="px-4 py-3 border-l border-slate-200 bg-indigo-50/40 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Leads</th>
+                <th className="px-4 py-3 bg-indigo-50/40 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Spend</th>
+                <th className="px-4 py-3 bg-indigo-50/40 text-left text-xs font-bold text-slate-800 whitespace-nowrap">ROI</th>
+                <th className="px-4 py-3 bg-indigo-50/40 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Missed</th>
+                <th className="px-4 py-3 border-l border-slate-200 bg-emerald-50/40 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Leads</th>
+                <th className="px-4 py-3 bg-emerald-50/40 text-left text-xs font-bold text-slate-800 whitespace-nowrap">ROI</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -143,20 +157,20 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
                 <TableRowsSkeleton rows={6} columns={12} />
               ) : managerRows.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="p-6 text-center text-slate-400 italic font-semibold">
+                  <td colSpan={12} className="p-6 text-center text-slate-400 italic font-semibold">
                     Manager-level reports aren&apos;t visible at your access level.
                   </td>
                 </tr>
               ) : managerPagination.pageRows.map(row => (
                 <React.Fragment key={row.manager}>
                   <tr className="hover:bg-slate-50/50">
-                    <td className="p-3 font-bold text-slate-800">{row.manager}</td>
+                    <td className="px-4 py-3 font-bold text-slate-800">{row.manager}</td>
 
                     {/* Individual */}
-                    <td className="p-2 font-mono text-slate-600 border-l border-slate-100 text-center">{row.individualLeadsCount}</td>
-                    <td className="p-2 font-mono text-slate-700 text-center">{formatCurrency(row.individualSpend)}</td>
-                    <td className="p-2 font-mono font-bold text-emerald-650 text-center">{row.individualROI.toFixed(1)}x</td>
-                    <td className="p-2 text-center">
+                    <td className="px-4 py-3 font-mono text-slate-600 border-l border-slate-100">{row.individualLeadsCount}</td>
+                    <td className="px-4 py-3 font-mono text-slate-700">{formatCurrency(row.individualSpend)}</td>
+                    <td className="px-4 py-3 font-mono font-bold text-emerald-650">{row.individualROI.toFixed(1)}x</td>
+                    <td className="px-4 py-3">
                       {row.individualMissedCount > 0 ? (
                         <span className="inline-flex items-center gap-1 text-amber-700 font-bold">
                           <AlertTriangle className="h-3 w-3" /> {row.individualMissedCount}
@@ -167,10 +181,10 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
                     </td>
 
                     {/* Team */}
-                    <td className="p-2 font-mono text-slate-600 border-l border-slate-100 text-center">{row.teamLeadsCount}</td>
-                    <td className="p-2 font-mono text-slate-700 text-center">{formatCurrency(row.teamSpend)}</td>
-                    <td className="p-2 font-mono font-bold text-emerald-650 text-center">{row.teamROI.toFixed(1)}x</td>
-                    <td className="p-2 text-center">
+                    <td className="px-4 py-3 font-mono text-slate-600 border-l border-slate-100">{row.teamLeadsCount}</td>
+                    <td className="px-4 py-3 font-mono text-slate-700">{formatCurrency(row.teamSpend)}</td>
+                    <td className="px-4 py-3 font-mono font-bold text-emerald-650">{row.teamROI.toFixed(1)}x</td>
+                    <td className="px-4 py-3">
                       {row.teamMissedCount > 0 ? (
                         <span className="inline-flex items-center gap-1 text-red-650 font-bold">
                           <AlertTriangle className="h-3 w-3" /> {row.teamMissedCount}
@@ -181,10 +195,10 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
                     </td>
 
                     {/* Combined */}
-                    <td className="p-2 font-mono font-bold text-slate-800 border-l border-slate-100 text-center">{row.totalLeadsCount}</td>
-                    <td className="p-2 font-mono font-bold text-emerald-700 text-center">{row.combinedROI.toFixed(1)}x</td>
+                    <td className="px-4 py-3 font-mono font-bold text-slate-800 border-l border-slate-100">{row.totalLeadsCount}</td>
+                    <td className="px-4 py-3 font-mono font-bold text-emerald-700">{row.combinedROI.toFixed(1)}x</td>
 
-                    <td className="p-3 border-l border-slate-100 text-right">
+                    <td className="px-4 py-3 border-l border-slate-100 text-right">
                       <button
                         onClick={() => setExpanded(expanded === row.manager ? null : row.manager)}
                         className="inline-flex items-center gap-1 text-brand-600 hover:text-brand-700 font-bold whitespace-nowrap"

@@ -4,9 +4,11 @@ import React, { useState } from "react";
 import { useApp, User, Role } from "@/context/AppContext";
 import { ShieldCheck, Edit, X, AlertTriangle, Eye, EyeOff, CheckCircle, Plus } from "lucide-react";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
+import { useDialog } from "@/components/ui/DialogProvider";
 
 export default function AdminPage() {
   const { users, activeRole, updateUserFields, addTeamMember, deleteTeamMember, isDataLoading } = useApp();
+  const { toast, confirm: confirmDialog } = useDialog();
 
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   
@@ -50,7 +52,7 @@ export default function AdminPage() {
     if (!selectedUser) return;
 
     if (passwordHash.length < 4) {
-      alert("Password must be at least 4 characters.");
+      toast("Password must be at least 4 characters.", "warning");
       return;
     }
 
@@ -72,7 +74,7 @@ export default function AdminPage() {
   const handleAddSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!addFirstName || !addEmail || !addPassword) {
-      alert("First name, email, and password are required.");
+      toast("First name, email, and password are required.", "warning");
       return;
     }
 
@@ -227,8 +229,13 @@ export default function AdminPage() {
                             Edit
                           </button>
                           <button
-                            onClick={() => {
-                              if (confirm(`Are you sure you want to delete ${user.name}?`)) {
+                            onClick={async () => {
+                              if (await confirmDialog({
+                                title: "Delete user?",
+                                message: `Are you sure you want to delete ${user.name}?`,
+                                confirmLabel: "Delete",
+                                danger: true
+                              })) {
                                 deleteTeamMember(user.id);
                               }
                             }}

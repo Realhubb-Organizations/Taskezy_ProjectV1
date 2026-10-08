@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { useApp, Invoice, ReimbursementClaim, Lead, CalendarEventType, mapApiInvoiceToFrontend, mapApiReimbursementToFrontend } from "@/context/AppContext";
 import { useSearchParams } from "next/navigation";
+import { useDialog } from "@/components/ui/DialogProvider";
 import MonthCalendar from "@/components/calendar/MonthCalendar";
 import AddCalendarEventModal from "@/components/calendar/AddCalendarEventModal";
 import { LineSkeleton, TableRowsSkeleton, CardListSkeleton } from "@/components/ui/Skeletons";
@@ -27,6 +28,7 @@ import {
 import { todayIso } from "@/components/ui/DateRangePicker";
 
 export default function FinancePage() {
+  const { confirm: confirmDialog } = useDialog();
   const {
     invoices,
     reimbursements,
@@ -187,8 +189,8 @@ export default function FinancePage() {
     updateLeadStatus(leadId, "Finance Rejected");
   };
 
-  const handleDeleteInvoice = (id: string) => {
-    if (confirm("Are you sure you want to delete this invoice ledger?")) {
+  const handleDeleteInvoice = async (id: string) => {
+    if (await confirmDialog({ title: "Delete this invoice?", message: "This invoice ledger will be permanently deleted.", confirmLabel: "Delete", danger: true })) {
       deleteInvoice(id);
     }
   };
@@ -399,8 +401,8 @@ export default function FinancePage() {
                           )}
                           {activeRole === "ADMIN" && (
                             <button
-                              onClick={() => {
-                                if (confirm("Are you sure you want to delete this claim?")) {
+                              onClick={async () => {
+                                if (await confirmDialog({ title: "Delete this claim?", message: "This reimbursement claim will be permanently deleted.", confirmLabel: "Delete", danger: true })) {
                                   deleteClaim(c.id);
                                 }
                               }}

@@ -7,6 +7,7 @@ import { useApp, Property, LeadAssignmentMode, PropertyTeamAssignmentMode, Prope
 import { CardListSkeleton } from "@/components/ui/Skeletons";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
 import { DatePicker } from "@/components/ui/DateRangePicker";
+import { useDialog } from "@/components/ui/DialogProvider";
 
 interface AddPropertyModalProps {
   isOpen: boolean;
@@ -60,6 +61,7 @@ function Field({
 const REQUIRED_FIELDS = ["name", "developer", "propertyType", "location"] as const;
 
 export default function AddPropertyModal({ isOpen, onClose, onSuccess, duplicateFrom }: AddPropertyModalProps) {
+  const { toast, confirm: confirmDialog } = useDialog();
   const { users, addProperty, isDataLoading } = useApp();
 
   const [activeTab, setActiveTab] = useState<"details" | "team">("details");
@@ -144,7 +146,7 @@ export default function AddPropertyModal({ isOpen, onClose, onSuccess, duplicate
   const validateDetailsTab = (): boolean => {
     const missing = REQUIRED_FIELDS.filter(f => !fieldValues[f].trim());
     if (missing.length > 0) {
-      alert("Please fill in Builder Name, Property Name, Property Type, and Location before continuing.");
+      toast("Please fill in Builder Name, Property Name, Property Type, and Location before continuing.", "warning");
       return false;
     }
     return true;
@@ -154,17 +156,21 @@ export default function AddPropertyModal({ isOpen, onClose, onSuccess, duplicate
     if (validateDetailsTab()) setActiveTab("team");
   };
 
-  const handleCreateProperty = () => {
+  const handleCreateProperty = async () => {
     if (!validateDetailsTab()) {
       setActiveTab("details");
       return;
     }
     if (teamAssignmentMode === "CUSTOM_MEMBERS" && selectedMemberIds.length === 0) {
-      alert("Select at least one team member, or switch to All Members.");
+      toast("Select at least one team member, or switch to All Members.", "warning");
       return;
     }
     if (teamAssignmentMode === "CUSTOM_MEMBERS" && leadAssignmentMode === "PERCENTAGE" && selectedPercentageTotal !== 100) {
-      if (!confirm(`Selected member percentages add up to ${selectedPercentageTotal}%, not 100%. Save anyway?`)) return;
+      if (!(await confirmDialog({
+        title: "Save anyway?",
+        message: `Selected member percentages add up to ${selectedPercentageTotal}%, not 100%.`,
+        confirmLabel: "Save anyway"
+      }))) return;
     }
 
     const assignedTeam: PropertyTeamMember[] | undefined =
@@ -409,21 +415,21 @@ export default function AddPropertyModal({ isOpen, onClose, onSuccess, duplicate
           <div className="flex justify-end items-center gap-2 px-6 py-4 border-t border-slate-100 shrink-0">
             <button
               onClick={handleClose}
-              className="px-5 py-2 rounded-lg text-xs font-bold border border-slate-200 text-slate-600 hover:bg-slate-50 transition-all"
+              className="px-5 py-2 rounded-xl text-sm font-bold border border-slate-200 text-slate-600 hover:bg-slate-50 transition-all"
             >
               Cancel
             </button>
             {activeTab === "details" ? (
               <button
                 onClick={handleSaveAndNext}
-                className="px-5 py-2 rounded-lg text-xs font-bold bg-brand-700 hover:bg-brand-600 text-white transition-all shadow-sm"
+                className="px-5 py-2 rounded-xl text-sm font-bold bg-brand-700 hover:bg-brand-600 text-white transition-all shadow-sm"
               >
                 Save &amp; Next
               </button>
             ) : (
               <button
                 onClick={handleCreateProperty}
-                className="px-5 py-2 rounded-lg text-xs font-bold bg-brand-700 hover:bg-brand-600 text-white transition-all shadow-sm"
+                className="px-5 py-2 rounded-xl text-sm font-bold bg-brand-700 hover:bg-brand-600 text-white transition-all shadow-sm"
               >
                 Create Property
               </button>

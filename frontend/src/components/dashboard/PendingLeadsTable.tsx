@@ -111,19 +111,19 @@ export default function PendingLeadsTable({
       </div>
 
       <div ref={scrollRef} onScroll={handleTableScroll} className="overflow-auto max-h-[70vh]">
-        <table className="w-full text-left border-collapse table-fixed min-w-[900px]">
+        <table className="w-full text-left border-collapse table-fixed min-w-[860px]">
           <colgroup>
-            <col className="w-[130px]" />
-            <col className="w-[170px]" />
-            <col className="w-[150px]" />
-            <col className="w-[220px]" />
-            <col className="w-[160px]" />
-            <col className="w-[90px]" />
+            <col />
+            <col />
+            <col />
+            <col />
+            <col />
+            <col className="w-[110px]" />
           </colgroup>
           <thead>
-            <tr className="border-b border-slate-200 text-xs font-bold text-slate-800">
-              <th className="px-4 py-2.5 whitespace-nowrap">Time</th>
-              <th className="px-4 py-2.5">
+            <tr className="border-b border-slate-200 text-left text-xs font-bold text-slate-800">
+              <th className="px-4 py-3 whitespace-nowrap">Time</th>
+              <th className="px-4 py-3 whitespace-nowrap">
                 {searchOpen ? (
                   <div className="flex items-center gap-1">
                     <input
@@ -152,7 +152,7 @@ export default function PendingLeadsTable({
                   </div>
                 )}
               </th>
-              <th className="px-4 py-2.5">
+              <th className="px-4 py-3 whitespace-nowrap">
                 <SearchableMultiSelect
                   variant="inline"
                   label="Assigned To"
@@ -162,8 +162,8 @@ export default function PendingLeadsTable({
                   panelWidth={224}
                 />
               </th>
-              <th className="px-4 py-2.5">Feedback</th>
-              <th className="px-4 py-2.5">
+              <th className="px-4 py-3 whitespace-nowrap">Feedback</th>
+              <th className="px-4 py-3 whitespace-nowrap">
                 <SearchableMultiSelect
                   variant="inline"
                   label="Property"
@@ -174,7 +174,7 @@ export default function PendingLeadsTable({
                   panelWidth={224}
                 />
               </th>
-              <th className="px-4 py-2.5 text-right">Actions</th>
+              <th className="px-4 py-3 text-right whitespace-nowrap">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -193,43 +193,43 @@ export default function PendingLeadsTable({
                   ref={idx % rowsPerPage === 0 ? (el) => { pageRowRefs.current[Math.floor(idx / rowsPerPage)] = el; } : undefined}
                   className="hover:bg-slate-50/60 transition-colors text-xs"
                 >
-                  <td className="px-4 py-3 font-mono text-slate-700 truncate align-top">{row.time}</td>
+                  <td className="px-4 py-3 font-mono text-slate-700 [overflow-wrap:anywhere] align-top">{row.time}</td>
                   <td className="px-4 py-3 align-top overflow-hidden">
                     {row.leadId && onViewLead ? (
                       <button
                         onClick={() => onViewLead(row.leadId!)}
-                        className="font-bold text-[#0B1E6E] hover:underline text-xs text-left truncate block max-w-full"
+                        className="font-bold text-[#0B1E6E] hover:underline text-xs text-left [overflow-wrap:anywhere] block max-w-full"
                         title={row.name}
                       >
                         {row.name}
                       </button>
                     ) : (
-                      <p className="font-bold text-slate-900 text-xs truncate">{row.name}</p>
+                      <p className="font-bold text-slate-900 text-xs [overflow-wrap:anywhere]">{row.name}</p>
                     )}
                     <div className="flex items-center gap-1.5 mt-0.5">
-                      <span className="text-[11px] text-slate-500 font-mono truncate">{row.phone}</span>
+                      <span className="text-[11px] text-slate-500 font-mono [overflow-wrap:anywhere]">{row.phone}</span>
                       <button onClick={() => handleCopy(row)} className="text-slate-350 hover:text-brand-700 shrink-0" title="Copy phone number">
                         {copiedId === row.id ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
                       </button>
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-slate-700 font-medium align-top truncate" title={row.assignedTo}>{row.assignedTo}</td>
-                  <td className="px-4 py-3 text-slate-600 truncate align-top" title={row.feedback}>{row.feedback}</td>
-                  <td className="px-4 py-3 text-slate-700 font-medium align-top truncate" title={row.property}>{row.property}</td>
+                  <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]" title={row.assignedTo}>{row.assignedTo}</td>
+                  <td className="px-4 py-3 text-slate-600 align-top"><div className="line-clamp-3 [overflow-wrap:anywhere]" title={row.feedback}>{row.feedback}</div></td>
+                  <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]" title={row.property}>{row.property}</td>
                   <td className="px-4 py-3 align-top">
                     <div className="flex items-center justify-end gap-1.5">
                       <a
                         href={`https://wa.me/${row.phone.replace(/[^0-9]/g, "")}`}
                         target="_blank"
                         rel="noreferrer"
-                        className="inline-flex items-center justify-center h-7 w-7 rounded-lg bg-slate-100 text-slate-700 hover:bg-emerald-50 hover:text-emerald-600 transition-colors shrink-0"
+                        className="inline-flex items-center justify-center h-10 w-10 sm:h-7 sm:w-7 rounded-lg bg-slate-100 text-slate-700 hover:bg-emerald-50 hover:text-emerald-600 transition-colors shrink-0"
                         title="WhatsApp"
                       >
-                        <WhatsAppIcon className="h-4 w-4" />
+                        <WhatsAppIcon className="h-3.5 w-3.5" />
                       </a>
                       <a
                         href={`tel:${row.phone}`}
-                        className="inline-flex items-center justify-center h-7 w-7 rounded-lg bg-slate-100 text-slate-700 hover:bg-brand-50 hover:text-brand-700 transition-colors shrink-0"
+                        className="inline-flex items-center justify-center h-10 w-10 sm:h-7 sm:w-7 rounded-lg bg-slate-100 text-slate-700 hover:bg-brand-50 hover:text-brand-700 transition-colors shrink-0"
                         title="Call"
                       >
                         <CallIcon className="h-3.5 w-3.5" />

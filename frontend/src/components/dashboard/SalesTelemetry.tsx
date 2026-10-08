@@ -2,6 +2,7 @@ import React from "react";
 import { Phone, Clock, Users, Calendar, AlertTriangle, ArrowRight } from "lucide-react";
 import SubActionsMenu, { ActionItem } from "./SubActionsMenu";
 import { useRouter } from "next/navigation";
+import { useDialog } from "@/components/ui/DialogProvider";
 
 interface SalesTelemetryProps {
   phoneCallsToday: number;
@@ -19,6 +20,7 @@ export default function SalesTelemetry({
   missedFollowups
 }: SalesTelemetryProps) {
   const router = useRouter();
+  const { toast } = useDialog();
 
   const handleCardRedirect = (path: string) => {
     router.push(path);
@@ -27,7 +29,7 @@ export default function SalesTelemetry({
   const getSubActions = (title: string, path: string): ActionItem[] => [
     { label: `View Call Logs`, href: path },
     { label: "View Team Roster", href: "/dashboard/hrms?tab=teams" },
-    { label: "Audit Telemetry", onClick: () => alert(`Auditing ${title} telemetry logs...`) }
+    { label: "Audit Telemetry", onClick: () => toast(`Auditing ${title} telemetry logs...`, "info") }
   ];
 
   return (

@@ -12,6 +12,9 @@ import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/Searcha
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
 import DateRangePicker, { DatePicker, DateRangeValue, formatDisplayDate, todayIso, toIsoDate } from "@/components/ui/DateRangePicker";
 import DateRangeSelect from "@/components/ui/DateRangeSelect";
+import { canChangeLeadStatus, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
+import { nextFollowupFor } from "@/lib/followups";
+import NextCallCell from "@/components/crm/NextCallCell";
 
 // Data Calling's whole status model is deliberately just these three — a
 // cold-outreach triage pipeline, not the full CRM pipeline: a fresh
@@ -159,7 +162,7 @@ export default function DataCallingPage() {
   // the ONLY-bulk-upload view AppContext derives for exactly this page (see
   // AppContext.tsx), aliased to `leads` here so the rest of this large file
   // needs no other changes.
-  const { dataCallingLeads: leads, followupCalls, properties, users, activeRole, updateLeadStatus, reassignLead, bulkImportLeads, addFollowupCall, isDataLoading } = useApp();
+  const { dataCallingLeads: leads, followupCalls, properties, users, currentUser, activeRole, updateLeadStatus, reassignLead, bulkImportLeads, addFollowupCall, isDataLoading } = useApp();
   // Bulk select + Assign/Reshuffle are an admin-only workflow — a sales
   // agent has no one to hand leads off to in that sense, so the checkbox
   // column and both toolbar buttons stay admin-only.
@@ -621,7 +624,7 @@ export default function DataCallingPage() {
     const targetIds = flowTargetIds;
     targetIds.forEach(id => {
       const lead = leads.find(l => l.id === id);
-      reassignLead(id, agentName);
+      reassignLead(id, agentName).catch((err) => console.warn("Could not reassign lead:", err));
       // Move it off the "Unassigned" pipeline state now that it actually has
       // someone on it — otherwise it'd stay eligible for the Assign button.
       // "New Lead" (not "Assigned") since Data Calling's status model is
@@ -698,17 +701,7 @@ export default function DataCallingPage() {
     const sorted = [...l.logs].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
     return sorted[0].message;
   };
-  const nextCallDateFor = (leadId: string): string => {
-    const upcoming = followupCalls
-      .filter(f => f.leadId === leadId && f.status === "Upcoming")
-      .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
-    if (upcoming.length === 0) return "—";
-    const f = upcoming[0];
-    const parsed = new Date(`${f.date} ${f.time}`);
-    if (isNaN(parsed.getTime())) return `${f.date} ${f.time}`;
-    const pad = (n: number) => String(n).padStart(2, "0");
-    return `${f.date} ${pad(parsed.getHours())}:${pad(parsed.getMinutes())}:00`;
-  };
+  const nextCallDateFor = (leadId: string) => nextFollowupFor(leadId, followupCalls);
 
   const filteredLeads = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -772,7 +765,7 @@ export default function DataCallingPage() {
         {isAdmin && activeTab === "DataCalling" && (
           <button
             onClick={() => setIsUploadLeadsOpen(true)}
-            className="inline-flex items-center gap-2 bg-[#0B1E6E] hover:bg-[#081650] text-white px-4 py-2.5 rounded-lg text-xs font-bold transition-all shadow-md cursor-pointer shrink-0"
+            className="inline-flex items-center justify-center gap-2 h-9 px-3.5 bg-[#0B1E6E] hover:bg-[#081650] text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer shrink-0"
           >
             <Plus className="h-4 w-4" />
             Upload Leads
@@ -924,13 +917,19 @@ export default function DataCallingPage() {
               </div>
             </div>
             <div ref={analyticsDrillScrollRef} onScroll={handleAnalyticsDrillScroll} className="max-h-80 overflow-y-auto">
-              <table className="w-full text-left border-collapse min-w-[600px]">
+              <table className="table-fixed w-full text-left border-collapse min-w-[600px]">
+                <colgroup>
+                  <col />
+                  <col />
+                  <col />
+                  <col />
+                </colgroup>
                 <thead className="sticky top-0 bg-white">
-                  <tr className="border-b border-slate-100 text-[11px] font-bold text-slate-500">
-                    <th className="px-5 py-2.5">Name</th>
-                    <th className="px-5 py-2.5">Phone</th>
-                    <th className="px-5 py-2.5">Status</th>
-                    <th className="px-5 py-2.5">Assigned To</th>
+                  <tr className="border-b border-slate-100 text-left text-xs font-bold text-slate-800 whitespace-nowrap">
+                    <th className="px-4 py-3 whitespace-nowrap">Name</th>
+                    <th className="px-4 py-3 whitespace-nowrap">Phone</th>
+                    <th className="px-4 py-3 whitespace-nowrap">Status</th>
+                    <th className="px-4 py-3 whitespace-nowrap">Assigned To</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-[12px] text-slate-700">
@@ -938,7 +937,7 @@ export default function DataCallingPage() {
                     <TableRowsSkeleton rows={6} columns={4} />
                   ) : shownLeads.length === 0 ? (
                     <tr>
-                      <td colSpan={4} className="px-5 py-6 text-center text-slate-400 italic">
+                      <td colSpan={4} className="px-4 py-6 text-center text-slate-400 italic">
                         No leads found for this category.
                       </td>
                     </tr>
@@ -949,10 +948,10 @@ export default function DataCallingPage() {
                         ref={idx % analyticsDrillRowsPerPage === 0 ? (el) => { analyticsDrillPageRowRefs.current[Math.floor(idx / analyticsDrillRowsPerPage)] = el; } : undefined}
                         className="hover:bg-slate-50/50 transition-colors"
                       >
-                        <td className="px-5 py-2.5 font-semibold text-slate-900">{l.name}</td>
-                        <td className="px-5 py-2.5 font-mono">{l.phone}</td>
-                        <td className="px-5 py-2.5">{l.status}</td>
-                        <td className="px-5 py-2.5">{l.assignedAgent || "—"}</td>
+                        <td className="px-4 py-2.5 font-semibold text-slate-900 [overflow-wrap:anywhere]">{l.name}</td>
+                        <td className="px-4 py-2.5 font-mono [overflow-wrap:anywhere]">{l.phone}</td>
+                        <td className="px-4 py-2.5">{l.status}</td>
+                        <td className="px-4 py-2.5 [overflow-wrap:anywhere]">{l.assignedAgent || "—"}</td>
                       </tr>
                     )))
                   )}
@@ -1014,13 +1013,19 @@ export default function DataCallingPage() {
               </div>
             </div>
             <div ref={drillScrollRef} onScroll={handleDrillScroll} className="max-h-80 overflow-y-auto">
-              <table className="w-full text-left border-collapse min-w-[600px]">
+              <table className="table-fixed w-full text-left border-collapse min-w-[600px]">
+                <colgroup>
+                  <col />
+                  <col />
+                  <col />
+                  <col />
+                </colgroup>
                 <thead className="sticky top-0 bg-white">
-                  <tr className="border-b border-slate-100 text-[11px] font-bold text-slate-500">
-                    <th className="px-5 py-2.5">Name</th>
-                    <th className="px-5 py-2.5">Phone</th>
-                    <th className="px-5 py-2.5">Status</th>
-                    <th className="px-5 py-2.5">Assigned To</th>
+                  <tr className="border-b border-slate-100 text-left text-xs font-bold text-slate-800 whitespace-nowrap">
+                    <th className="px-4 py-3 whitespace-nowrap">Name</th>
+                    <th className="px-4 py-3 whitespace-nowrap">Phone</th>
+                    <th className="px-4 py-3 whitespace-nowrap">Status</th>
+                    <th className="px-4 py-3 whitespace-nowrap">Assigned To</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-[12px] text-slate-700">
@@ -1028,7 +1033,7 @@ export default function DataCallingPage() {
                     <TableRowsSkeleton rows={6} columns={4} />
                   ) : shownLeads.length === 0 ? (
                     <tr>
-                      <td colSpan={4} className="px-5 py-6 text-center text-slate-400 italic">
+                      <td colSpan={4} className="px-4 py-6 text-center text-slate-400 italic">
                         No leads found for this category.
                       </td>
                     </tr>
@@ -1039,10 +1044,10 @@ export default function DataCallingPage() {
                         ref={idx % drillRowsPerPage === 0 ? (el) => { drillPageRowRefs.current[Math.floor(idx / drillRowsPerPage)] = el; } : undefined}
                         className="hover:bg-slate-50/50 transition-colors"
                       >
-                        <td className="px-5 py-2.5 font-semibold text-slate-900">{l.name}</td>
-                        <td className="px-5 py-2.5 font-mono">{l.phone}</td>
-                        <td className="px-5 py-2.5">{l.status}</td>
-                        <td className="px-5 py-2.5">{l.assignedAgent || "—"}</td>
+                        <td className="px-4 py-2.5 font-semibold text-slate-900 [overflow-wrap:anywhere]">{l.name}</td>
+                        <td className="px-4 py-2.5 font-mono [overflow-wrap:anywhere]">{l.phone}</td>
+                        <td className="px-4 py-2.5">{l.status}</td>
+                        <td className="px-4 py-2.5 [overflow-wrap:anywhere]">{l.assignedAgent || "—"}</td>
                       </tr>
                     )))
                   )}
@@ -1074,44 +1079,46 @@ export default function DataCallingPage() {
               shared by both tabs; the Filter button targets whichever tab's own
               column drawer is relevant, and the calendar always drives the
               same appliedCustomRange so both tabs agree on "when". */}
-          <div className="flex flex-wrap items-center justify-end gap-2.5 pt-1">
-            {activeTab === "DataCalling" && isAdmin && selectedUnassignedIds.length > 0 && (
-              <button
-                type="button"
-                onClick={() => openAssignFlow("assign")}
-                className="flex items-center gap-2 bg-white border border-slate-300/80 rounded-xl px-3.5 py-1.5 text-xs text-slate-700 font-semibold hover:bg-slate-50 shadow-2xs transition-colors"
-              >
-                <Users className="h-3.5 w-3.5 text-blue-600" />
-                Assign
-              </button>
-            )}
-            {activeTab === "DataCalling" && isAdmin && selectedAssignedIds.length > 0 && (
-              <button
-                type="button"
-                onClick={() => openAssignFlow("reshuffle")}
-                className="flex items-center gap-2 bg-white border border-slate-300/80 rounded-xl px-3.5 py-1.5 text-xs text-slate-700 font-semibold hover:bg-slate-50 shadow-2xs transition-colors"
-              >
-                <Users className="h-3.5 w-3.5 text-blue-600" />
-                Reshuffle
-              </button>
-            )}
-            <DateRangePicker
-              value={appliedCustomRange}
-              onChange={(v) => {
-                setAppliedCustomRange(v);
-                setCurrentPage(1);
-              }}
-              emptyLabel={formatDisplayDate(todayIso())}
-            />
+          <div className="flex flex-wrap items-center justify-end gap-3 pt-1">
+            <div className="flex flex-wrap items-center justify-end gap-2.5 ml-auto">
+              {activeTab === "DataCalling" && isAdmin && selectedUnassignedIds.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => openAssignFlow("assign")}
+                  className="inline-flex items-center justify-center gap-2 h-9 bg-white border border-slate-300/80 rounded-xl px-3.5 text-xs text-slate-700 font-bold hover:bg-slate-50 shadow-2xs transition-colors"
+                >
+                  <Users className="h-4 w-4 text-blue-600" />
+                  Assign
+                </button>
+              )}
+              {activeTab === "DataCalling" && isAdmin && selectedAssignedIds.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => openAssignFlow("reshuffle")}
+                  className="inline-flex items-center justify-center gap-2 h-9 bg-white border border-slate-300/80 rounded-xl px-3.5 text-xs text-slate-700 font-bold hover:bg-slate-50 shadow-2xs transition-colors"
+                >
+                  <Users className="h-4 w-4 text-blue-600" />
+                  Reshuffle
+                </button>
+              )}
+              <DateRangePicker
+                value={appliedCustomRange}
+                onChange={(v) => {
+                  setAppliedCustomRange(v);
+                  setCurrentPage(1);
+                }}
+                emptyLabel={formatDisplayDate(todayIso())}
+              />
 
-            <button
-              type="button"
-              onClick={() => (activeTab === "DataCalling" ? setIsFilterOpen(true) : setIsAnalyticsFilterOpen(true))}
-              className="flex items-center gap-2 border border-slate-300/80 bg-white rounded-xl px-3.5 py-1.5 text-xs text-slate-700 font-semibold hover:bg-slate-50 shadow-2xs transition-colors"
-            >
-              <Sliders className="h-3.5 w-3.5 text-blue-600" />
-              Filter
-            </button>
+              <button
+                type="button"
+                onClick={() => (activeTab === "DataCalling" ? setIsFilterOpen(true) : setIsAnalyticsFilterOpen(true))}
+                className="inline-flex items-center justify-center gap-2 h-9 border border-slate-300/80 bg-white rounded-xl px-3.5 text-xs text-slate-700 font-bold hover:bg-slate-50 shadow-2xs transition-colors"
+              >
+                <Sliders className="h-4 w-4 text-blue-600" />
+                Filter
+              </button>
+            </div>
           </div>
 
           {activeTab === "Analytics" ? (
@@ -1122,10 +1129,19 @@ export default function DataCallingPage() {
                 <h3 className="text-sm font-bold text-slate-900">Salesperson Performance</h3>
               </div>
               <div className="overflow-auto max-h-[55vh]">
-                <table className="w-full text-left border-collapse min-w-[720px]">
+                <table className="table-fixed w-full text-left border-collapse min-w-[1050px]">
+                  <colgroup>
+                    <col />
+                    <col />
+                    <col />
+                    <col />
+                    <col />
+                    <col />
+                    <col />
+                  </colgroup>
                   <thead className="sticky top-0 z-10 bg-white">
-                    <tr className="border-b border-slate-200/80 text-[12px] font-bold text-slate-900">
-                      <th className="px-5 py-3 w-48">
+                    <tr className="border-b border-slate-200/80 text-left text-xs font-bold text-slate-800 whitespace-nowrap">
+                      <th className="px-4 py-3 whitespace-nowrap">
                         {salespersonSearchOpen ? (
                           <div className="flex items-center gap-1">
                             <input
@@ -1133,7 +1149,7 @@ export default function DataCallingPage() {
                               value={salespersonSearch}
                               onChange={(e) => setSalespersonSearch(e.target.value)}
                               placeholder="Filter salesperson..."
-                              className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs font-normal focus:outline-none w-36"
+                              className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs font-normal focus:outline-none w-full min-w-0"
                             />
                             <button onClick={() => { setSalespersonSearch(""); setSalespersonSearchOpen(false); }} className="text-slate-400 hover:text-slate-600">
                               <X className="h-3.5 w-3.5" />
@@ -1148,12 +1164,12 @@ export default function DataCallingPage() {
                           </div>
                         )}
                       </th>
-                      <th className="px-5 py-3 whitespace-nowrap">Leads Assgned</th>
-                      <th className="px-5 py-3 whitespace-nowrap">Calls Made</th>
-                      <th className="px-5 py-3 whitespace-nowrap">Connected</th>
-                      <th className="px-5 py-3 whitespace-nowrap">Qualified Leads</th>
-                      <th className="px-5 py-3 whitespace-nowrap">RNR</th>
-                      <th className="px-5 py-3 whitespace-nowrap">Qualification Rate</th>
+                      <th className="px-4 py-3 whitespace-nowrap">Leads Assgned</th>
+                      <th className="px-4 py-3 whitespace-nowrap">Calls Made</th>
+                      <th className="px-4 py-3 whitespace-nowrap">Connected</th>
+                      <th className="px-4 py-3 whitespace-nowrap">Qualified Leads</th>
+                      <th className="px-4 py-3 whitespace-nowrap">RNR</th>
+                      <th className="px-4 py-3 whitespace-nowrap">Qualification Rate</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-[13px] text-slate-700">
@@ -1161,18 +1177,18 @@ export default function DataCallingPage() {
                       <TableRowsSkeleton rows={6} columns={7} />
                     ) : filteredSalespersonRows.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="px-5 py-8 text-center text-slate-400 italic">No salesperson activity found for this scope.</td>
+                        <td colSpan={7} className="px-4 py-8 text-center text-slate-400 italic">No salesperson activity found for this scope.</td>
                       </tr>
                     ) : (
                       salespersonPagination.pageRows.map(r => (
                         <tr key={r.name} className="hover:bg-slate-50/50 transition-colors">
-                          <td className="px-5 py-3 font-semibold text-slate-900">{r.name}</td>
-                          <td className="px-5 py-3">{r.totalLeads}</td>
-                          <td className="px-5 py-3">{r.callsMade}</td>
-                          <td className="px-5 py-3">{r.connected}</td>
-                          <td className="px-5 py-3">{r.qualifiedLeads}</td>
-                          <td className="px-5 py-3">{r.rnr}</td>
-                          <td className="px-5 py-3">{r.qualificationRate}</td>
+                          <td className="px-4 py-3 font-semibold text-slate-900 [overflow-wrap:anywhere]">{r.name}</td>
+                          <td className="px-4 py-3">{r.totalLeads}</td>
+                          <td className="px-4 py-3">{r.callsMade}</td>
+                          <td className="px-4 py-3">{r.connected}</td>
+                          <td className="px-4 py-3">{r.qualifiedLeads}</td>
+                          <td className="px-4 py-3">{r.rnr}</td>
+                          <td className="px-4 py-3">{r.qualificationRate}</td>
                         </tr>
                       ))
                     )}
@@ -1232,10 +1248,30 @@ export default function DataCallingPage() {
             <div className="bg-white rounded-2xl p-5">
               <h3 className="text-sm font-bold text-slate-900 mb-4">Source Performance</h3>
               <div className="overflow-auto max-h-[55vh]">
-                <table className="w-full text-left border-collapse min-w-[900px]">
+                <table className="table-fixed w-full text-left border-collapse" style={{ minWidth: (7 + ANALYTICS_COLUMNS.filter(c => c.key !== "qualifiedLeads" && analyticsVisibleColumns[c.key]).length) * 150 }}>
+                  <colgroup>
+                    <col />
+                    <col />
+                    <col />
+                    <col />
+                    <col />
+                    <col />
+                    <col />
+                    {analyticsVisibleColumns.unqualifiedLeads && <col />}
+                    {analyticsVisibleColumns.siteVisit && <col />}
+                    {analyticsVisibleColumns.status && <col />}
+                    {analyticsVisibleColumns.cpl && <col />}
+                    {analyticsVisibleColumns.qcpl && <col />}
+                    {analyticsVisibleColumns.ctr && <col />}
+                    {analyticsVisibleColumns.clicks && <col />}
+                    {analyticsVisibleColumns.impressions && <col />}
+                    {analyticsVisibleColumns.adSetName && <col />}
+                    {analyticsVisibleColumns.source && <col />}
+                    {analyticsVisibleColumns.date && <col />}
+                  </colgroup>
                   <thead className="sticky top-0 z-10 bg-white">
-                    <tr className="border-b border-slate-200 text-[12px] font-bold text-slate-900">
-                      <th className="pr-5 pb-3 w-48">
+                    <tr className="border-b border-slate-200 text-left text-xs font-bold text-slate-800 whitespace-nowrap">
+                      <th className="px-4 py-3 whitespace-nowrap">
                         {sourceSearchOpen ? (
                           <div className="flex items-center gap-1">
                             <input
@@ -1243,7 +1279,7 @@ export default function DataCallingPage() {
                               value={sourceSearch}
                               onChange={(e) => setSourceSearch(e.target.value)}
                               placeholder="Filter source..."
-                              className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs font-normal focus:outline-none w-36"
+                              className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs font-normal focus:outline-none w-full min-w-0"
                             />
                             <button onClick={() => { setSourceSearch(""); setSourceSearchOpen(false); }} className="text-slate-400 hover:text-slate-600">
                               <X className="h-3.5 w-3.5" />
@@ -1258,23 +1294,23 @@ export default function DataCallingPage() {
                           </div>
                         )}
                       </th>
-                      <th className="px-5 pb-3 whitespace-nowrap">Total Leads</th>
-                      <th className="px-5 pb-3 whitespace-nowrap">Calls Made</th>
-                      <th className="px-5 pb-3 whitespace-nowrap">Connected</th>
-                      <th className="px-5 pb-3 whitespace-nowrap">Qualified Leads</th>
-                      <th className="px-5 pb-3 whitespace-nowrap">RNR</th>
-                      <th className="px-5 pb-3 whitespace-nowrap">Qualification Rate</th>
-                      {analyticsVisibleColumns.unqualifiedLeads && <th className="px-5 pb-3 whitespace-nowrap">Unqualified Leads</th>}
-                      {analyticsVisibleColumns.siteVisit && <th className="px-5 pb-3 whitespace-nowrap">Site Visits</th>}
-                      {analyticsVisibleColumns.status && <th className="px-5 pb-3 whitespace-nowrap">Status</th>}
-                      {analyticsVisibleColumns.cpl && <th className="px-5 pb-3 whitespace-nowrap">CPL</th>}
-                      {analyticsVisibleColumns.qcpl && <th className="px-5 pb-3 whitespace-nowrap">QCPL</th>}
-                      {analyticsVisibleColumns.ctr && <th className="px-5 pb-3 whitespace-nowrap">CTR</th>}
-                      {analyticsVisibleColumns.clicks && <th className="px-5 pb-3 whitespace-nowrap">Clicks</th>}
-                      {analyticsVisibleColumns.impressions && <th className="px-5 pb-3 whitespace-nowrap">Impressions</th>}
-                      {analyticsVisibleColumns.adSetName && <th className="px-5 pb-3 whitespace-nowrap">Ad set name</th>}
-                      {analyticsVisibleColumns.source && <th className="px-5 pb-3 whitespace-nowrap">Source</th>}
-                      {analyticsVisibleColumns.date && <th className="px-5 pb-3 whitespace-nowrap">Date</th>}
+                      <th className="px-4 py-3 whitespace-nowrap">Total Leads</th>
+                      <th className="px-4 py-3 whitespace-nowrap">Calls Made</th>
+                      <th className="px-4 py-3 whitespace-nowrap">Connected</th>
+                      <th className="px-4 py-3 whitespace-nowrap">Qualified Leads</th>
+                      <th className="px-4 py-3 whitespace-nowrap">RNR</th>
+                      <th className="px-4 py-3 whitespace-nowrap">Qualification Rate</th>
+                      {analyticsVisibleColumns.unqualifiedLeads && <th className="px-4 py-3 whitespace-nowrap">Unqualified Leads</th>}
+                      {analyticsVisibleColumns.siteVisit && <th className="px-4 py-3 whitespace-nowrap">Site Visits</th>}
+                      {analyticsVisibleColumns.status && <th className="px-4 py-3 whitespace-nowrap">Status</th>}
+                      {analyticsVisibleColumns.cpl && <th className="px-4 py-3 whitespace-nowrap">CPL</th>}
+                      {analyticsVisibleColumns.qcpl && <th className="px-4 py-3 whitespace-nowrap">QCPL</th>}
+                      {analyticsVisibleColumns.ctr && <th className="px-4 py-3 whitespace-nowrap">CTR</th>}
+                      {analyticsVisibleColumns.clicks && <th className="px-4 py-3 whitespace-nowrap">Clicks</th>}
+                      {analyticsVisibleColumns.impressions && <th className="px-4 py-3 whitespace-nowrap">Impressions</th>}
+                      {analyticsVisibleColumns.adSetName && <th className="px-4 py-3 whitespace-nowrap">Ad set name</th>}
+                      {analyticsVisibleColumns.source && <th className="px-4 py-3 whitespace-nowrap">Source</th>}
+                      {analyticsVisibleColumns.date && <th className="px-4 py-3 whitespace-nowrap">Date</th>}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-[13px] text-slate-700">
@@ -1282,31 +1318,31 @@ export default function DataCallingPage() {
                       <TableRowsSkeleton rows={6} columns={7 + ANALYTICS_COLUMNS.filter(c => c.key !== "qualifiedLeads" && analyticsVisibleColumns[c.key]).length} />
                     ) : filteredSourceRows.length === 0 ? (
                       <tr>
-                        <td colSpan={7 + ANALYTICS_COLUMNS.filter(c => c.key !== "qualifiedLeads" && analyticsVisibleColumns[c.key]).length} className="px-5 py-8 text-center text-slate-400 italic">
+                        <td colSpan={7 + ANALYTICS_COLUMNS.filter(c => c.key !== "qualifiedLeads" && analyticsVisibleColumns[c.key]).length} className="px-4 py-8 text-center text-slate-400 italic">
                           No data-call source activity found.
                         </td>
                       </tr>
                     ) : (
                       sourcePagination.pageRows.map(r => (
                         <tr key={r.name} className="hover:bg-slate-50/50 transition-colors">
-                          <td className="pr-5 py-3 font-medium text-slate-900">{r.name}</td>
-                          <td className="px-5 py-3">{r.totalLeads.toLocaleString()}</td>
-                          <td className="px-5 py-3">{r.callsMade.toLocaleString()}</td>
-                          <td className="px-5 py-3">{r.connected.toLocaleString()}</td>
-                          <td className="px-5 py-3">{r.qualifiedLeads.toLocaleString()}</td>
-                          <td className="px-5 py-3">{r.rnr.toLocaleString()}</td>
-                          <td className="px-5 py-3">{r.qualificationRate}</td>
-                          {analyticsVisibleColumns.unqualifiedLeads && <td className="px-5 py-3">{r.unqualifiedLeads.toLocaleString()}</td>}
-                          {analyticsVisibleColumns.siteVisit && <td className="px-5 py-3">{r.siteVisits.toLocaleString()}</td>}
-                          {analyticsVisibleColumns.status && <td className="px-5 py-3 text-slate-300" title="Not applicable — this is an aggregate row, not a single lead">—</td>}
-                          {analyticsVisibleColumns.cpl && <td className="px-5 py-3 text-slate-300" title="No spend tracking exists for data-call sources">—</td>}
-                          {analyticsVisibleColumns.qcpl && <td className="px-5 py-3 text-slate-300" title="No spend tracking exists for data-call sources">—</td>}
-                          {analyticsVisibleColumns.ctr && <td className="px-5 py-3 text-slate-300" title="No click/impression tracking exists for data-call sources">—</td>}
-                          {analyticsVisibleColumns.clicks && <td className="px-5 py-3 text-slate-300" title="No click tracking exists for data-call sources">—</td>}
-                          {analyticsVisibleColumns.impressions && <td className="px-5 py-3 text-slate-300" title="No impression tracking exists for data-call sources">—</td>}
-                          {analyticsVisibleColumns.adSetName && <td className="px-5 py-3 text-slate-300" title="No ad-set tracking exists for data-call sources">—</td>}
-                          {analyticsVisibleColumns.source && <td className="px-5 py-3">{r.name}</td>}
-                          {analyticsVisibleColumns.date && <td className="px-5 py-3 text-slate-300" title="Not applicable — this is an aggregate row, not a single lead">—</td>}
+                          <td className="px-4 py-3 font-medium text-slate-900 [overflow-wrap:anywhere]">{r.name}</td>
+                          <td className="px-4 py-3">{r.totalLeads.toLocaleString()}</td>
+                          <td className="px-4 py-3">{r.callsMade.toLocaleString()}</td>
+                          <td className="px-4 py-3">{r.connected.toLocaleString()}</td>
+                          <td className="px-4 py-3">{r.qualifiedLeads.toLocaleString()}</td>
+                          <td className="px-4 py-3">{r.rnr.toLocaleString()}</td>
+                          <td className="px-4 py-3">{r.qualificationRate}</td>
+                          {analyticsVisibleColumns.unqualifiedLeads && <td className="px-4 py-3">{r.unqualifiedLeads.toLocaleString()}</td>}
+                          {analyticsVisibleColumns.siteVisit && <td className="px-4 py-3">{r.siteVisits.toLocaleString()}</td>}
+                          {analyticsVisibleColumns.status && <td className="px-4 py-3 text-slate-300" title="Not applicable — this is an aggregate row, not a single lead">—</td>}
+                          {analyticsVisibleColumns.cpl && <td className="px-4 py-3 text-slate-300" title="No spend tracking exists for data-call sources">—</td>}
+                          {analyticsVisibleColumns.qcpl && <td className="px-4 py-3 text-slate-300" title="No spend tracking exists for data-call sources">—</td>}
+                          {analyticsVisibleColumns.ctr && <td className="px-4 py-3 text-slate-300" title="No click/impression tracking exists for data-call sources">—</td>}
+                          {analyticsVisibleColumns.clicks && <td className="px-4 py-3 text-slate-300" title="No click tracking exists for data-call sources">—</td>}
+                          {analyticsVisibleColumns.impressions && <td className="px-4 py-3 text-slate-300" title="No impression tracking exists for data-call sources">—</td>}
+                          {analyticsVisibleColumns.adSetName && <td className="px-4 py-3 text-slate-300" title="No ad-set tracking exists for data-call sources">—</td>}
+                          {analyticsVisibleColumns.source && <td className="px-4 py-3 [overflow-wrap:anywhere]">{r.name}</td>}
+                          {analyticsVisibleColumns.date && <td className="px-4 py-3 text-slate-300" title="Not applicable — this is an aggregate row, not a single lead">—</td>}
                         </tr>
                       ))
                     )}
@@ -1321,11 +1357,29 @@ export default function DataCallingPage() {
           {/* Main Data Calling Table */}
           <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden">
             <div className="overflow-auto max-h-[55vh]">
-              <table className="w-full text-left border-collapse table-auto min-w-[900px]">
+              <table className="table-fixed w-full text-left border-collapse" style={{ minWidth: (isAdmin ? 44 : 0) + (visibleColCount - (isAdmin ? 1 : 0)) * 150 }}>
+                <colgroup>
+                  {isAdmin && <col className="w-[44px]" />}
+                  <col />
+                  <col />
+                  <col />
+                  <col />
+                  {visibleColumns.assignedTo && <col />}
+                  {visibleColumns.date && <col />}
+                  {visibleColumns.notes && <col />}
+                  <col />
+                  {visibleColumns.property && <col />}
+                  {visibleColumns.dataCallSource && <col />}
+                  {visibleColumns.usageCount && <col />}
+                  {visibleColumns.qualifiedLeads && <col />}
+                  {visibleColumns.unqualifiedLeads && <col />}
+                  {visibleColumns.cpl && <col />}
+                  {visibleColumns.qualifiedPercent && <col />}
+                </colgroup>
                 <thead className="sticky top-0 z-10 bg-white">
-                  <tr className="border-b border-slate-200/80 text-[12px] font-bold text-slate-900">
+                  <tr className="border-b border-slate-200/80 text-left text-xs font-bold text-slate-800 whitespace-nowrap">
                     {isAdmin && (
-                      <th className="px-4 py-3.5 w-10">
+                      <th className="px-3.5 py-3 whitespace-nowrap">
                         <input
                           type="checkbox"
                           checked={allOnPageSelected}
@@ -1334,7 +1388,7 @@ export default function DataCallingPage() {
                         />
                       </th>
                     )}
-                    <th className="px-5 py-3.5 w-56">
+                    <th className="px-4 py-3 whitespace-nowrap">
                       {searchOpen ? (
                         <div className="flex items-center gap-1">
                           <input
@@ -1342,7 +1396,7 @@ export default function DataCallingPage() {
                             value={searchQuery}
                             onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
                             placeholder="Filter lead..."
-                            className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs font-normal focus:outline-none w-36"
+                            className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs font-normal focus:outline-none w-full min-w-0"
                           />
                           <button onClick={() => { setSearchQuery(""); setSearchOpen(false); }} className="text-slate-400 hover:text-slate-600">
                             <X className="h-3.5 w-3.5" />
@@ -1357,8 +1411,8 @@ export default function DataCallingPage() {
                         </div>
                       )}
                     </th>
-                    <th className="px-5 py-3.5 whitespace-nowrap">Email</th>
-                    <th className="px-5 py-3.5 whitespace-nowrap">
+                    <th className="px-4 py-3 whitespace-nowrap">Email</th>
+                    <th className="px-4 py-3 whitespace-nowrap">
                       <SearchableMultiSelect
                         variant="inline"
                         label="Status"
@@ -1369,7 +1423,7 @@ export default function DataCallingPage() {
                         panelWidth={180}
                       />
                     </th>
-                    <th className="px-5 py-3.5 whitespace-nowrap">
+                    <th className="px-4 py-3 whitespace-nowrap">
                       <SearchableMultiSelect
                         variant="inline"
                         label="Sub-status"
@@ -1381,7 +1435,7 @@ export default function DataCallingPage() {
                       />
                     </th>
                     {visibleColumns.assignedTo && (
-                      <th className="px-5 py-3.5 whitespace-nowrap">
+                      <th className="px-4 py-3 whitespace-nowrap">
                         <SearchableMultiSelect
                           variant="inline"
                           label="Assigned To"
@@ -1393,12 +1447,12 @@ export default function DataCallingPage() {
                         />
                       </th>
                     )}
-                    {visibleColumns.date && <th className="px-5 py-3.5 whitespace-nowrap">Date</th>}
-                    {visibleColumns.notes && <th className="px-5 py-3.5 whitespace-nowrap">Notes</th>}
-                    <th className="px-5 py-3.5 whitespace-nowrap">Next Call Date</th>
-                    {visibleColumns.property && <th className="px-5 py-3.5 whitespace-nowrap">Property</th>}
+                    {visibleColumns.date && <th className="px-4 py-3 whitespace-nowrap">Date</th>}
+                    {visibleColumns.notes && <th className="px-4 py-3 whitespace-nowrap">Notes</th>}
+                    <th className="px-4 py-3 whitespace-nowrap">Next Call Date</th>
+                    {visibleColumns.property && <th className="px-4 py-3 whitespace-nowrap">Property</th>}
                     {visibleColumns.dataCallSource && (
-                      <th className="px-5 py-3.5 whitespace-nowrap">
+                      <th className="px-4 py-3 whitespace-nowrap">
                         <SearchableMultiSelect
                           variant="inline"
                           label="Data Call Source"
@@ -1410,11 +1464,11 @@ export default function DataCallingPage() {
                         />
                       </th>
                     )}
-                    {visibleColumns.usageCount && <th className="px-5 py-3.5 whitespace-nowrap">Usage Count</th>}
-                    {visibleColumns.qualifiedLeads && <th className="px-5 py-3.5 whitespace-nowrap">Qualified Leads</th>}
-                    {visibleColumns.unqualifiedLeads && <th className="px-5 py-3.5 whitespace-nowrap">Unqualified Leads</th>}
-                    {visibleColumns.cpl && <th className="px-5 py-3.5 whitespace-nowrap">CPL</th>}
-                    {visibleColumns.qualifiedPercent && <th className="px-5 py-3.5 whitespace-nowrap">Qualified %age</th>}
+                    {visibleColumns.usageCount && <th className="px-4 py-3 whitespace-nowrap">Usage Count</th>}
+                    {visibleColumns.qualifiedLeads && <th className="px-4 py-3 whitespace-nowrap">Qualified Leads</th>}
+                    {visibleColumns.unqualifiedLeads && <th className="px-4 py-3 whitespace-nowrap">Unqualified Leads</th>}
+                    {visibleColumns.cpl && <th className="px-4 py-3 whitespace-nowrap">CPL</th>}
+                    {visibleColumns.qualifiedPercent && <th className="px-4 py-3 whitespace-nowrap">Qualified %age</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-[12px] font-medium text-slate-700">
@@ -1422,13 +1476,13 @@ export default function DataCallingPage() {
                     <TableRowsSkeleton rows={8} columns={visibleColCount} />
                   ) : paginatedLeads.length === 0 ? (
                     <tr>
-                      <td colSpan={visibleColCount} className="px-5 py-8 text-center text-slate-400 italic">No leads found matching filter.</td>
+                      <td colSpan={visibleColCount} className="px-4 py-8 text-center text-slate-400 italic">No leads found matching filter.</td>
                     </tr>
                   ) : (
                     paginatedLeads.map(l => (
                       <tr key={l.id} className="hover:bg-slate-50/50 transition-colors">
                         {isAdmin && (
-                          <td className="px-4 py-3.5">
+                          <td className="px-3.5 py-3.5">
                             <input
                               type="checkbox"
                               checked={selectedIds.has(l.id)}
@@ -1437,46 +1491,50 @@ export default function DataCallingPage() {
                             />
                           </td>
                         )}
-                        <td className="px-5 py-3.5 max-w-[224px]">
+                        <td className="px-4 py-3.5">
                           <button
                             onClick={() => setSelectedLead(l)}
-                            className="font-semibold text-[#0B1E6E] hover:underline text-left truncate block max-w-full"
+                            className="font-semibold text-[#0B1E6E] hover:underline text-left [overflow-wrap:anywhere] block max-w-full"
                             title={l.name}
                           >
                             {l.name}
                           </button>
                           {l.phone && (
                             <div className="flex items-center gap-1 mt-0.5 text-[10px] text-slate-400 font-medium">
-                              <span className="truncate">{l.phone}</span>
+                              <span className="[overflow-wrap:anywhere]">{l.phone}</span>
                               <button onClick={() => copyToClipboard(l.phone)} className="text-slate-300 hover:text-slate-500 shrink-0" title="Copy phone number">
                                 <Copy className="h-2.5 w-2.5" />
                               </button>
                             </div>
                           )}
                         </td>
-                        <td className="px-5 py-3.5 max-w-[160px]">
+                        <td className="px-4 py-3.5">
                           {l.email ? (
                             <div className="flex items-center gap-1">
-                              <span className="truncate" title={l.email}>{l.email}</span>
+                              <span className="min-w-0 [overflow-wrap:anywhere]" title={l.email}>{l.email}</span>
                               <button onClick={() => copyToClipboard(l.email)} className="text-slate-300 hover:text-slate-500 shrink-0" title="Copy email">
                                 <Copy className="h-2.5 w-2.5" />
                               </button>
                             </div>
                           ) : "—"}
                         </td>
-                        <td className="px-5 py-3.5 whitespace-nowrap">
-                          <SearchableSelect
-                            variant="inline"
-                            value={l.status}
-                            onChange={(v) => openStatusChange(l, v as Lead["status"])}
-                            options={ROW_STATUS_OPTIONS}
-                            searchPlaceholder="Search status..."
-                            panelWidth={176}
-                            className="text-slate-900"
-                          />
+                        <td className="px-4 py-3.5 whitespace-nowrap">
+                          {canChangeLeadStatus(l, currentUser, users) ? (
+                            <SearchableSelect
+                              variant="inline"
+                              value={l.status}
+                              onChange={(v) => openStatusChange(l, v as Lead["status"])}
+                              options={ROW_STATUS_OPTIONS}
+                              searchPlaceholder="Search status..."
+                              panelWidth={176}
+                              className="text-slate-900"
+                            />
+                          ) : (
+                            <span className="text-slate-900" title={STATUS_LOCKED_HINT}>{l.status}</span>
+                          )}
                         </td>
-                        <td className="px-5 py-3.5 whitespace-nowrap">
-                          {l.status === "Connected" ? (
+                        <td className="px-4 py-3.5 whitespace-nowrap">
+                          {l.status === "Connected" && canChangeLeadStatus(l, currentUser, users) ? (
                             // Sub-status can also be changed on an already-Connected
                             // lead without re-picking the status itself (e.g. flipping
                             // Not Qualified -> Qualified once a second call confirms interest).
@@ -1496,34 +1554,36 @@ export default function DataCallingPage() {
                                     : "text-slate-400"
                               }
                             />
+                          ) : l.status === "Connected" && l.subStatus ? (
+                            <span className="text-slate-700" title={STATUS_LOCKED_HINT}>{l.subStatus}</span>
                           ) : (
                             <span className="text-slate-300">—</span>
                           )}
                         </td>
                         {visibleColumns.assignedTo && (
-                          <td className="px-5 py-3.5">
+                          <td className="px-4 py-3.5">
                             <SearchableSelect
                               variant="inline"
                               value={l.assignedAgent || ""}
-                              onChange={(v) => reassignLead(l.id, v)}
+                              onChange={(v) => reassignLead(l.id, v).catch((err) => console.warn("Could not reassign lead:", err))}
                               options={assignedOptions}
                               placeholder="—"
                               searchPlaceholder="Search agents..."
                               panelWidth={176}
-                              className="max-w-[140px] text-slate-700"
+                              className="max-w-full text-slate-700"
                             />
                           </td>
                         )}
-                        {visibleColumns.date && <td className="px-5 py-3.5 whitespace-nowrap">{formatDateTime(l.createdAtStr)}</td>}
-                        {visibleColumns.notes && <td className="px-5 py-3.5 truncate max-w-[200px]" title={latestLogMessage(l)}>{latestLogMessage(l)}</td>}
-                        <td className="px-5 py-3.5 whitespace-nowrap">{nextCallDateFor(l.id)}</td>
-                        {visibleColumns.property && <td className="px-5 py-3.5">{l.property || "—"}</td>}
-                        {visibleColumns.dataCallSource && <td className="px-5 py-3.5">{l.subSource || l.source || "—"}</td>}
-                        {visibleColumns.usageCount && <td className="px-5 py-3.5">{l.logs ? l.logs.length : 0}</td>}
-                        {visibleColumns.qualifiedLeads && <td className="px-5 py-3.5 text-slate-300" title="Not applicable — this is a per-lead row, not an aggregate">—</td>}
-                        {visibleColumns.unqualifiedLeads && <td className="px-5 py-3.5 text-slate-300" title="Not applicable — this is a per-lead row, not an aggregate">—</td>}
-                        {visibleColumns.cpl && <td className="px-5 py-3.5 text-slate-300" title="Not applicable — this is a per-lead row, not an aggregate">—</td>}
-                        {visibleColumns.qualifiedPercent && <td className="px-5 py-3.5 text-slate-300" title="Not applicable — this is a per-lead row, not an aggregate">—</td>}
+                        {visibleColumns.date && <td className="px-4 py-3.5">{formatDateTime(l.createdAtStr)}</td>}
+                        {visibleColumns.notes && <td className="px-4 py-3.5"><div className="line-clamp-3 [overflow-wrap:anywhere]" title={latestLogMessage(l)}>{latestLogMessage(l)}</div></td>}
+                        <td className="px-4 py-3.5"><NextCallCell next={nextCallDateFor(l.id)} /></td>
+                        {visibleColumns.property && <td className="px-4 py-3.5 [overflow-wrap:anywhere]">{l.property || "—"}</td>}
+                        {visibleColumns.dataCallSource && <td className="px-4 py-3.5 [overflow-wrap:anywhere]">{l.subSource || l.source || "—"}</td>}
+                        {visibleColumns.usageCount && <td className="px-4 py-3.5">{l.logs ? l.logs.length : 0}</td>}
+                        {visibleColumns.qualifiedLeads && <td className="px-4 py-3.5 text-slate-300" title="Not applicable — this is a per-lead row, not an aggregate">—</td>}
+                        {visibleColumns.unqualifiedLeads && <td className="px-4 py-3.5 text-slate-300" title="Not applicable — this is a per-lead row, not an aggregate">—</td>}
+                        {visibleColumns.cpl && <td className="px-4 py-3.5 text-slate-300" title="Not applicable — this is a per-lead row, not an aggregate">—</td>}
+                        {visibleColumns.qualifiedPercent && <td className="px-4 py-3.5 text-slate-300" title="Not applicable — this is a per-lead row, not an aggregate">—</td>}
                       </tr>
                     ))
                   )}
@@ -1777,14 +1837,14 @@ export default function DataCallingPage() {
                     <button
                       type="button"
                       onClick={() => setPendingStatusAction(null)}
-                      className="bg-slate-100 border border-slate-200 text-slate-700 font-bold px-4 py-2 rounded-xl text-xs hover:bg-slate-200 transition-colors"
+                      className="bg-slate-100 border border-slate-200 text-slate-700 font-bold px-5 py-2 rounded-xl text-sm hover:bg-slate-200 transition-colors"
                     >
                       Cancel
                     </button>
                     <button
                       type="button"
                       onClick={confirmRnr}
-                      className="bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold px-5 py-2 rounded-xl text-xs transition-colors"
+                      className="bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold px-5 py-2 rounded-xl text-sm transition-colors"
                     >
                       Schedule
                     </button>
@@ -1815,7 +1875,7 @@ export default function DataCallingPage() {
                     <button
                       type="button"
                       onClick={() => setPendingStatusAction(null)}
-                      className="bg-slate-100 border border-slate-200 text-slate-700 font-bold px-4 py-2 rounded-xl text-xs hover:bg-slate-200 transition-colors"
+                      className="bg-slate-100 border border-slate-200 text-slate-700 font-bold px-5 py-2 rounded-xl text-sm hover:bg-slate-200 transition-colors"
                     >
                       Cancel
                     </button>
