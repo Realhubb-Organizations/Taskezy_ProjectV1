@@ -99,7 +99,22 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
       toast("Please enter a valid team member name from the roster.", "warning");
       return;
     }
-    reassignLead(leadId, target).catch((err) => console.warn("Could not reassign lead:", err));
+    const note = await promptDialog({
+      title: `Reassign to ${target}`,
+      message: leadName,
+      label: "Note (required)",
+      placeholder: "Note for the new agent — e.g. Prefers WhatsApp, call after 6 pm",
+      confirmLabel: "Reassign",
+      multiline: true,
+      validate: (v) => (!v ? "Please write a note." : null)
+    });
+    if (note === null) return;
+    try {
+      await reassignLead(leadId, target, note);
+      toast(`${leadName} reassigned to ${target}.`, "success");
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Could not reassign this lead. Please try again.", "error");
+    }
   };
 
   return (

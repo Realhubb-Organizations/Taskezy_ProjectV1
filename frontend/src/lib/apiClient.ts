@@ -179,6 +179,9 @@ export interface ApiLeadRow {
   assigned_agent_id: string;
   assigned_agent_name: string;
   previous_agent_name: string | null;
+  notes: string | null;
+  notes_updated_at: string | null;
+  notes_updated_by_name: string | null;
   reassigned_at: string | null;
   property_id: string | null;
   property_name: string | null;
@@ -357,10 +360,17 @@ export function apiEditLead(leadId: string, input: EditLeadApiInput): Promise<Ap
   return request<ApiLeadRow>(`/api/v1/leads/${leadId}`, { method: "PATCH", body: JSON.stringify(input) });
 }
 
-export function apiReassignLead(leadId: string, newAgentId: string): Promise<ApiLeadRow> {
+export function apiReassignLead(leadId: string, newAgentId: string, note: string): Promise<ApiLeadRow> {
   return request<ApiLeadRow>(`/api/v1/leads/${leadId}/reassign`, {
     method: "PATCH",
-    body: JSON.stringify({ newAgentId })
+    body: JSON.stringify({ newAgentId, note })
+  });
+}
+
+export function apiUpdateLeadNote(leadId: string, note: string): Promise<ApiLeadRow> {
+  return request<ApiLeadRow>(`/api/v1/leads/${leadId}/notes`, {
+    method: "PATCH",
+    body: JSON.stringify({ note })
   });
 }
 

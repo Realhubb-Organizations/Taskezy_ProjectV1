@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { X, Phone, MessageSquare, Mail, Share2, Calendar, ArrowRight, Bell, Repeat, Copy, Check, User } from "lucide-react";
+import { X, Phone, MessageSquare, Mail, Share2, Calendar, ArrowRight, Bell, Repeat, Copy, Check, User, Pencil } from "lucide-react";
 import { useApp, Lead, LeadStatus } from "@/context/AppContext";
 import { useDialog } from "@/components/ui/DialogProvider";
 import { SearchableSelect } from "@/components/ui/SearchableDropdown";
@@ -28,6 +28,8 @@ interface LeadDetailDrawerProps {
   onRestrictedStatus?: (leadId: string, leadName: string, status: LeadStatus) => void;
   /** Called after a reassignment has been saved, so the caller can refresh its list. */
   onReassigned?: (leadId: string) => void;
+  /** Called after the lead's note is saved, so the caller can update its list. */
+  onNoteSaved?: (leadId: string, note: string, updated: Lead | null) => void;
 }
 
 export default function LeadDetailDrawer({
@@ -38,9 +40,10 @@ export default function LeadDetailDrawer({
   statusOptions,
   restrictedStatuses,
   onRestrictedStatus,
-  onReassigned
+  onReassigned,
+  onNoteSaved
 }: LeadDetailDrawerProps) {
-  const { addNotification, addCalendarEvent, addFollowupCall, users, currentUser, activeRole, reassignLead } = useApp();
+  const { addNotification, addCalendarEvent, addFollowupCall, users, currentUser, activeRole, reassignLead, updateLeadNote } = useApp();
   const { toast } = useDialog();
   const [localStatus, setLocalStatus] = useState<LeadStatus>("New Lead");
   const [reminderDate, setReminderDate] = useState("");
@@ -49,6 +52,11 @@ export default function LeadDetailDrawer({
   const [reassignTarget, setReassignTarget] = useState("");
   const [reassigning, setReassigning] = useState(false);
   const [reassignError, setReassignError] = useState("");
+  const [reassignNote, setReassignNote] = useState("");
+  // The lead's current note: what's saved, and the text being edited.
+  const [savedNote, setSavedNote] = useState("");
+  const [noteDraft, setNoteDraft] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
   // Who this lead can be handed to: ADMIN can reassign to anyone; a Manager
@@ -77,6 +85,9 @@ export default function LeadDetailDrawer({
       setCopiedField(null);
       setReassignTarget("");
       setReassignError("");
+      setReassignNote("");
+      setSavedNote(lead.notes ?? "");
+      setNoteDraft(lead.notes ?? "");
     }
   }, [lead]);
 
@@ -136,13 +147,31 @@ export default function LeadDetailDrawer({
     toast(`Reminder saved for ${lead.name}.`, "success");
   };
 
+  const handleSaveNote = async () => {
+    const note = noteDraft.trim();
+    if (!note || note === savedNote || savingNote) return;
+    setSavingNote(true);
+    try {
+      const updated = await updateLeadNote(lead.id, note);
+      setSavedNote(note);
+      setNoteDraft(note);
+      onNoteSaved?.(lead.id, note, updated);
+      toast("Note saved.", "success");
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Could not save the note. Please try again.", "error");
+    } finally {
+      setSavingNote(false);
+    }
+  };
+
   const handleReassign = async () => {
-    if (!reassignTarget || reassigning) return;
+    if (!reassignTarget || !reassignNote.trim() || reassigning) return;
     setReassigning(true);
     setReassignError("");
     try {
-      await reassignLead(lead.id, reassignTarget);
+      await reassignLead(lead.id, reassignTarget, reassignNote.trim());
       setReassignTarget("");
+      setReassignNote("");
       onReassigned?.(lead.id);
       onClose();
     } catch (err) {
@@ -396,15 +425,62 @@ export default function LeadDetailDrawer({
               <button
                 type="button"
                 onClick={handleReassign}
-                disabled={!reassignTarget || reassigning}
+                disabled={!reassignTarget || !reassignNote.trim() || reassigning}
                 className="shrink-0 bg-[#0B1E6E] hover:bg-[#081650] disabled:opacity-40 text-white font-bold px-5 py-2 rounded-xl text-sm transition-all"
               >
                 {reassigning ? "Saving..." : "Reassign"}
               </button>
             </div>
           )}
+          {reassignTargets.length > 0 && (
+            <textarea
+              aria-label="Reassign note"
+              value={reassignNote}
+              onChange={(e) => setReassignNote(e.target.value)}
+              rows={2}
+              maxLength={2000}
+              placeholder="Note for the new agent (required) — e.g. Prefers WhatsApp, site visit pending"
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 resize-y focus:outline-none focus:border-brand-500"
+            />
+          )}
           {reassignError && (
             <p className="text-[11px] text-red-600 font-semibold">{reassignError}</p>
+          )}
+        </div>
+
+        {/* Notes — the lead's current note (people only, not system events) */}
+        <div className="px-5 py-3 border-b border-slate-100 space-y-2">
+          <span className="text-[11px] font-bold text-slate-500 flex items-center gap-1.5">
+            <Pencil className="h-3.5 w-3.5 text-slate-400" />
+            Notes
+          </span>
+          {canChangeLeadStatus(lead, currentUser, users) ? (
+            <>
+              <textarea
+                aria-label="Lead note"
+                value={noteDraft}
+                onChange={(e) => setNoteDraft(e.target.value)}
+                rows={3}
+                maxLength={2000}
+                placeholder="Write a note about this lead — e.g. Wants a 3BHK under 1.5 Cr, call after 6 pm"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 resize-y focus:outline-none focus:border-brand-500"
+              />
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] text-slate-400">
+                  {lead.notesUpdatedBy && savedNote === (lead.notes ?? "") ? `Last edited by ${lead.notesUpdatedBy}` : ""}
+                </span>
+                <button
+                  type="button"
+                  onClick={handleSaveNote}
+                  disabled={!noteDraft.trim() || noteDraft.trim() === savedNote || savingNote}
+                  className="shrink-0 bg-[#0B1E6E] hover:bg-[#081650] disabled:opacity-40 text-white font-bold px-4 py-1.5 rounded-xl text-xs transition-all"
+                >
+                  {savingNote ? "Saving..." : savedNote ? "Update note" : "Save note"}
+                </button>
+              </div>
+            </>
+          ) : (
+            <p className="text-xs text-slate-700 whitespace-pre-line [overflow-wrap:anywhere]">{savedNote || "No note yet."}</p>
           )}
         </div>
 

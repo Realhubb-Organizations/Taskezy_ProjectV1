@@ -47,7 +47,12 @@ export async function bulkImportLeadsHandler(req: Request, res: Response): Promi
 }
 
 export async function reassignLeadHandler(req: Request, res: Response): Promise<void> {
-  const lead = await leadsService.reassignLead(req.user!, req.params.id, req.body.newAgentId);
+  const lead = await leadsService.reassignLead(req.user!, req.params.id, req.body.newAgentId, req.body.note);
+  sendOk(res, lead);
+}
+
+export async function updateLeadNoteHandler(req: Request, res: Response): Promise<void> {
+  const lead = await leadsService.updateLeadNote(req.user!, req.params.id, req.body.note);
   sendOk(res, lead);
 }
 
