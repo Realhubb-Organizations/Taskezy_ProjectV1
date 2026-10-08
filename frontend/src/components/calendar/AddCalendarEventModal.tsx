@@ -5,6 +5,7 @@ import { X } from "lucide-react";
 import { CalendarEventType } from "@/context/AppContext";
 import { SearchableSelect } from "@/components/ui/SearchableDropdown";
 import { DatePicker } from "@/components/ui/DateRangePicker";
+import { toast } from "@/lib/toast";
 
 interface TypeOption {
   value: CalendarEventType;
@@ -40,7 +41,7 @@ export default function AddCalendarEventModal({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title || !date) {
-      alert("Title and date are required.");
+      toast.error("Title and date are required.");
       return;
     }
     onSubmit({

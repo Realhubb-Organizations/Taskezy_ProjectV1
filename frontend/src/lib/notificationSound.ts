@@ -133,10 +133,11 @@ export function playNotificationSound(category: string, system: string): void {
   const kind = resolveNotificationSoundKind(category, system);
   const audio = new Audio(SOUND_FILES[kind]);
   audio.volume = 0.85;
-  audio.play().catch(() => {
+  audio.play().catch((err) => {
     // File missing, wrong format, or genuinely still autoplay-blocked —
     // fall back to the synthesized chime, which only needs the
     // AudioContext (not <audio> element autoplay) to have been unlocked.
+    console.warn(`Notification sound "${SOUND_FILES[kind]}" failed to play:`, err?.name, err?.message);
     if (unlocked) playSynthesizedFallback(kind);
   });
 }

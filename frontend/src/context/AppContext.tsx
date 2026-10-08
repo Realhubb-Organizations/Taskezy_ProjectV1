@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect, useMemo } from "react";
+import React, { createContext, useContext, useState, useEffect, useMemo, useRef } from "react";
 import {
   apiLogin,
   apiLogout,
@@ -471,6 +471,14 @@ interface AppState {
   // loading" apart from "genuinely empty" instead of flashing a false
   // empty state.
   isDataLoading: boolean;
+  // Increments whenever the server reports a lead changed anywhere (status,
+  // reassignment, edit, delete, new lead) — list a page's own fetch effect's
+  // deps on this to have it refetch live. See the "leads-changed" SSE listener.
+  leadsChangedSignal: number;
+  // Pull-to-refresh (mobile) calls this — same refresh path the live signal
+  // uses, plus a full reload of every bulk-loaded domain, so there's one
+  // refresh mechanism in the app, not two.
+  triggerManualRefresh: () => void;
   activeRole: Role; // For easy switcher
   activeSystem: SystemType;
   showLoginSplash: boolean;
@@ -634,6 +642,7 @@ export function mapApiLeadToFrontendLead(row: ApiLeadRow): Lead {
     dealValue: row.deal_value ? Number(row.deal_value) : undefined,
     kycVerified: false, // not included in the leads list endpoint yet
     assignedAgent: row.assigned_agent_name,
+    previousAgent: row.previous_agent_name || undefined,
     logs: row.logs.map(l => ({ message: l.message, timestamp: l.timestamp, user: l.user })),
     source: row.source || undefined,
     subSource: row.sub_source || undefined,
@@ -1147,6 +1156,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return initNotificationSoundUnlock();
   }, []);
 
+  // Bumped whenever the server says a lead changed (see the "leads-changed"
+  // SSE listener below) — pages with their own server-paginated lead fetch
+  // (LeadDashboard) list this in their fetch effect's deps to refetch their
+  // current page live, without ever holding the full leads list themselves.
+  const [leadsChangedSignal, setLeadsChangedSignal] = useState(0);
+  const leadsChangedQueueRef = useRef<Set<string>>(new Set());
+  const leadsChangedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const triggerManualRefresh = () => {
+    setLeadsChangedSignal((s) => s + 1);
+    loadAllRealData(currentUser?.role);
+  };
+
   // Live notifications (Meta leads, etc.) over Server-Sent Events — one
   // connection per session, reopened whenever the signed-in user changes.
   // Each connection attempt mints a fresh one-time ticket first (see
@@ -1175,6 +1196,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (cancelled) return;
 
       source = new EventSource(buildNotificationStreamUrl(ticket));
+
+      // Content-free: the payload is only { leadId }, never lead data. Pages
+      // refetch their own page through the normal authorized API, which is
+      // the only place access is decided — broadcasting data itself here
+      // would mean re-deciding who-sees-what a second time, and any gap
+      // between the two becomes a real leak. Queued + debounced so a bulk
+      // import touching 100 leads causes one refetch, not 100.
+      source.addEventListener("leads-changed", (event) => {
+        const { leadId } = JSON.parse((event as MessageEvent).data) as { leadId: string };
+        leadsChangedQueueRef.current.add(leadId);
+        if (leadsChangedTimerRef.current) clearTimeout(leadsChangedTimerRef.current);
+        leadsChangedTimerRef.current = setTimeout(() => {
+          const ids = Array.from(leadsChangedQueueRef.current);
+          leadsChangedQueueRef.current.clear();
+          setLeadsChangedSignal((s) => s + 1);
+          // Keep the full bulk-loaded array (Reports, etc.) live too —
+          // refetch each changed lead; a 404 means deleted or no longer
+          // visible to this user, so drop it rather than leave it stale.
+          ids.forEach((id) => {
+            apiGetLead(id)
+              .then((row) => {
+                const mapped = mapApiLeadToFrontendLead(row);
+                setAllLeads((prev) =>
+                  prev.some((l) => l.id === mapped.id) ? prev.map((l) => (l.id === mapped.id ? mapped : l)) : [mapped, ...prev]
+                );
+              })
+              .catch(() => setAllLeads((prev) => prev.filter((l) => l.id !== id)));
+          });
+        }, 600);
+      });
+
       source.addEventListener("notification", (event) => {
         const row = JSON.parse((event as MessageEvent).data) as ApiNotificationRow;
         const notif = mapApiNotificationToFrontend(row);
@@ -1645,7 +1697,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     lead.firstResponseAt = undefined;
     lead.logs.push({
       timestamp: new Date().toISOString(),
-      message: `Reassigned from ${previousAgent} to ${newAgent}`,
+      message: `Reassigned to ${newAgent}`,
       user: currentUser?.name || "System"
     });
     setAllLeads([...allLeads]);
@@ -2174,6 +2226,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         currentUser,
         authLoading,
         isDataLoading,
+        leadsChangedSignal,
+        triggerManualRefresh,
         activeRole,
         activeSystem,
         showLoginSplash,

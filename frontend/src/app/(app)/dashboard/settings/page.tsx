@@ -14,6 +14,8 @@ import {
   apiListUsersPage
 } from "@/lib/apiClient";
 import { isNotificationSoundMuted, setNotificationSoundMuted } from "@/lib/notificationSound";
+import { toast } from "@/lib/toast";
+import { confirmAction } from "@/lib/confirmDialog";
 import {
   Settings,
   Plus,
@@ -154,7 +156,7 @@ export default function SettingsPage() {
   };
 
   const handleRequestIntegration = () => {
-    alert("Thanks — we don't have a request form wired up yet. Reach out to support with which platform you need and we'll take it from there.");
+    toast.info("Request form coming soon", "Thanks — we don't have a request form wired up yet. Reach out to support with which platform you need and we'll take it from there.");
   };
 
   // --- Meta Ads: real OAuth connection ---
@@ -221,13 +223,13 @@ export default function SettingsPage() {
   };
 
   const handleDisconnectMeta = async (connectionId: string, pageName: string) => {
-    if (!confirm(`Disconnect "${pageName}"? New leads from this Page will stop arriving until you reconnect it.`)) return;
+    if (!(await confirmAction({ message: `Disconnect "${pageName}"? New leads from this Page will stop arriving until you reconnect it.`, danger: true, confirmLabel: "Disconnect" }))) return;
     try {
       await apiDisconnectMeta(connectionId);
       await loadMetaConnections();
       await refreshMetaConnectionStatus();
     } catch (err) {
-      alert("Could not disconnect this Page. Please try again.");
+      toast.error("Could not disconnect this Page. Please try again.");
       console.warn("Meta disconnect failed:", err);
     }
   };
@@ -462,7 +464,7 @@ export default function SettingsPage() {
     e.preventDefault();
     if (!selectedUser) return;
     if (passwordHash.length < 4) {
-      alert("Password must be at least 4 characters.");
+      toast.error("Password must be at least 4 characters.");
       return;
     }
     updateUserFields(selectedUser.id, firstName, lastName, passwordHash, designation, roleType, status, managerId || null);
@@ -477,7 +479,7 @@ export default function SettingsPage() {
   const handleAddSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!addFirstName || !addEmail || !addPassword) {
-      alert("First name, email, and password are required.");
+      toast.error("First name, email, and password are required.");
       return;
     }
     addTeamMember({
@@ -516,8 +518,8 @@ export default function SettingsPage() {
     setTimeout(() => setUsersRefreshKey(k => k + 1), 400);
   };
 
-  const handleSignOut = () => {
-    if (confirm("Are you sure you want to sign out?")) {
+  const handleSignOut = async () => {
+    if (await confirmAction({ message: "Are you sure you want to sign out?", danger: true, confirmLabel: "Sign Out" })) {
       logout();
       router.push("/auth/login");
     }
@@ -1651,8 +1653,8 @@ export default function SettingsPage() {
               {selectedUser.role !== "ADMIN" && (
                 <button
                   type="button"
-                  onClick={() => {
-                    if (confirm(`Are you sure you want to delete ${selectedUser.name}?`)) {
+                  onClick={async () => {
+                    if (await confirmAction({ message: `Are you sure you want to delete ${selectedUser.name}?`, danger: true, confirmLabel: "Delete" })) {
                       deleteTeamMember(selectedUser.id);
                       setSelectedUser(null);
                       setSuccessMsg(`Removed ${selectedUser.name} from the roster.`);

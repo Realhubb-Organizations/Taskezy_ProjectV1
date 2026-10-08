@@ -4,6 +4,8 @@ import React, { useState } from "react";
 import { useApp, User, Role } from "@/context/AppContext";
 import { ShieldCheck, Edit, X, AlertTriangle, Eye, EyeOff, CheckCircle, Plus } from "lucide-react";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
+import { toast } from "@/lib/toast";
+import { confirmAction } from "@/lib/confirmDialog";
 
 export default function AdminPage() {
   const { users, activeRole, updateUserFields, addTeamMember, deleteTeamMember, isDataLoading } = useApp();
@@ -50,7 +52,7 @@ export default function AdminPage() {
     if (!selectedUser) return;
 
     if (passwordHash.length < 4) {
-      alert("Password must be at least 4 characters.");
+      toast.error("Password must be at least 4 characters.");
       return;
     }
 
@@ -72,7 +74,7 @@ export default function AdminPage() {
   const handleAddSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!addFirstName || !addEmail || !addPassword) {
-      alert("First name, email, and password are required.");
+      toast.error("First name, email, and password are required.");
       return;
     }
 
@@ -227,8 +229,8 @@ export default function AdminPage() {
                             Edit
                           </button>
                           <button
-                            onClick={() => {
-                              if (confirm(`Are you sure you want to delete ${user.name}?`)) {
+                            onClick={async () => {
+                              if (await confirmAction({ message: `Are you sure you want to delete ${user.name}?`, danger: true, confirmLabel: "Delete" })) {
                                 deleteTeamMember(user.id);
                               }
                             }}

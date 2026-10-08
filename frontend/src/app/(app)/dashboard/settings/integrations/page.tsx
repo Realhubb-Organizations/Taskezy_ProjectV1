@@ -15,6 +15,8 @@ import {
 import { ChevronRight, CheckCircle, AlertTriangle, Info, Search, HelpCircle, ArrowRight, Users, TrendingUp, LayoutGrid, Calendar, RefreshCw, Clock, Zap, ExternalLink, Mail, Hash, IndianRupee, ShieldCheck, Edit } from "lucide-react";
 import { LineSkeleton } from "@/components/ui/Skeletons";
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
+import { toast } from "@/lib/toast";
+import { confirmAction } from "@/lib/confirmDialog";
 
 type IntegrationKey = "meta" | "google";
 
@@ -222,12 +224,12 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
   };
 
   const handleDisconnectMeta = async (connectionId: string, pageName: string) => {
-    if (!confirm(`Disconnect "${pageName}"? New leads from this Page will stop arriving until you reconnect it.`)) return;
+    if (!(await confirmAction({ message: `Disconnect "${pageName}"? New leads from this Page will stop arriving until you reconnect it.`, danger: true, confirmLabel: "Disconnect" }))) return;
     try {
       await apiDisconnectMeta(connectionId);
       await loadMetaConnections();
     } catch (err) {
-      alert("Could not disconnect this Page. Please try again.");
+      toast.error("Could not disconnect this Page. Please try again.");
       console.warn("Meta disconnect failed:", err);
     }
   };
@@ -608,10 +610,13 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
                     active ? (
                       <>
                         <button
-                          onClick={() => {
-                            if (!confirm(activeMetaConnections.length === 1
-                              ? `Disconnect "${activeMetaConnections[0].page_name}"? New leads from this Page will stop arriving until you reconnect it.`
-                              : `Disconnect all ${activeMetaConnections.length} connected Pages? New leads will stop arriving from every one of them until you reconnect.`)) return;
+                          onClick={async () => {
+                            if (!(await confirmAction({
+                              message: activeMetaConnections.length === 1
+                                ? `Disconnect "${activeMetaConnections[0].page_name}"? New leads from this Page will stop arriving until you reconnect it.`
+                                : `Disconnect all ${activeMetaConnections.length} connected Pages? New leads will stop arriving from every one of them until you reconnect.`,
+                              danger: true
+                            }))) return;
                             Promise.all(activeMetaConnections.map(c => apiDisconnectMeta(c.id))).then(loadMetaConnections);
                           }}
                           className="w-full px-3.5 py-2 rounded-lg text-xs font-bold border bg-red-50 border-red-200 text-red-700 hover:bg-red-100 transition-all"
@@ -657,7 +662,7 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
                       <p className="text-[11px] font-bold text-slate-700">Need Help?</p>
                       <p className="text-[11px] text-slate-500 mt-0.5">Follow our step-by-step guide to set up {info.name} integration.</p>
                       <button
-                        onClick={() => alert("A written setup guide isn't published yet — use Contact Support in the sidebar and we'll walk you through it.")}
+                        onClick={() => toast.info("Setup guide coming soon", "A written setup guide isn't published yet — use Contact Support in the sidebar and we'll walk you through it.")}
                         className="mt-2 inline-flex items-center gap-1.5 bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-[11px] font-bold text-slate-700 hover:bg-slate-50 transition-colors"
                       >
                         View Setup Guide <ExternalLink className="h-3 w-3" />

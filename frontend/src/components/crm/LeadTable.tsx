@@ -1,6 +1,7 @@
 import React from "react";
 import { Phone, MessageSquare, Mail, Eye, Trash2, ShieldAlert, Award } from "lucide-react";
 import { Lead, LeadStatus } from "@/context/AppContext";
+import { toast } from "@/lib/toast";
 
 interface LeadTableProps {
   leads: Lead[];
@@ -48,7 +49,7 @@ export default function LeadTable({
 
   const triggerCall = (phone: string, name: string) => {
     // API Integration Point: Wire up dialer system call action
-    alert(`Dialing ${name} at ${phone}... Connecting cloud telephony...`);
+    toast.info("Dialing", `Dialing ${name} at ${phone}... Connecting cloud telephony...`);
     window.location.href = `tel:${phone}`;
   };
 

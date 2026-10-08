@@ -13,6 +13,7 @@ import { ChevronDown, Plus, CheckCircle } from "lucide-react";
 import { LineSkeleton } from "@/components/ui/Skeletons";
 import DateRangeSelect from "@/components/ui/DateRangeSelect";
 import { DateRangeValue, toIsoDate } from "@/components/ui/DateRangePicker";
+import { toast } from "@/lib/toast";
 
 // CRM's own overview — moved out of the old bare /dashboard route (which
 // branched its content by department/activeSystem, so the same URL showed a
@@ -158,12 +159,12 @@ export default function CrmDashboardPage() {
       setUploadMsg(`Successfully ingested lead for: ${data.name}`);
       setTimeout(() => setUploadMsg(""), 4000);
     } else {
-      alert(`Ingestion failed: ${res.error}`);
+      toast.error("Ingestion failed", res.error);
     }
   };
 
   const handleUploadBulkLeads = (data: { assignmentMode: "project" | "agent"; target: string; fileName: string }) => {
-    alert(`Bulk Import Started!\nFile: ${data.fileName}\nAssignment Mode: ${data.assignmentMode} (${data.target})\nProcessing rows...`);
+    toast.success("Bulk import started", `File: ${data.fileName} — Assignment Mode: ${data.assignmentMode} (${data.target}). Processing rows...`);
     setIsUploadOpen(false);
   };
 

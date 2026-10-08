@@ -7,6 +7,8 @@ import { useApp, Property, LeadAssignmentMode, PropertyTeamAssignmentMode, Prope
 import { CardListSkeleton } from "@/components/ui/Skeletons";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
 import { DatePicker } from "@/components/ui/DateRangePicker";
+import { toast } from "@/lib/toast";
+import { confirmAction } from "@/lib/confirmDialog";
 
 interface AddPropertyModalProps {
   isOpen: boolean;
@@ -144,7 +146,7 @@ export default function AddPropertyModal({ isOpen, onClose, onSuccess, duplicate
   const validateDetailsTab = (): boolean => {
     const missing = REQUIRED_FIELDS.filter(f => !fieldValues[f].trim());
     if (missing.length > 0) {
-      alert("Please fill in Builder Name, Property Name, Property Type, and Location before continuing.");
+      toast.error("Please fill in Builder Name, Property Name, Property Type, and Location before continuing.");
       return false;
     }
     return true;
@@ -154,17 +156,17 @@ export default function AddPropertyModal({ isOpen, onClose, onSuccess, duplicate
     if (validateDetailsTab()) setActiveTab("team");
   };
 
-  const handleCreateProperty = () => {
+  const handleCreateProperty = async () => {
     if (!validateDetailsTab()) {
       setActiveTab("details");
       return;
     }
     if (teamAssignmentMode === "CUSTOM_MEMBERS" && selectedMemberIds.length === 0) {
-      alert("Select at least one team member, or switch to All Members.");
+      toast.error("Select at least one team member, or switch to All Members.");
       return;
     }
     if (teamAssignmentMode === "CUSTOM_MEMBERS" && leadAssignmentMode === "PERCENTAGE" && selectedPercentageTotal !== 100) {
-      if (!confirm(`Selected member percentages add up to ${selectedPercentageTotal}%, not 100%. Save anyway?`)) return;
+      if (!(await confirmAction({ message: `Selected member percentages add up to ${selectedPercentageTotal}%, not 100%. Save anyway?`, confirmLabel: "Save Anyway" }))) return;
     }
 
     const assignedTeam: PropertyTeamMember[] | undefined =

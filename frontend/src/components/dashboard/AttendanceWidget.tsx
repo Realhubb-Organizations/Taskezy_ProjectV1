@@ -4,6 +4,7 @@ import SubActionsMenu, { ActionItem } from "./SubActionsMenu";
 import { useRouter } from "next/navigation";
 import { User, TimesheetLog } from "@/context/AppContext";
 import { todayIso } from "@/components/ui/DateRangePicker";
+import { toast } from "@/lib/toast";
 
 interface AttendanceWidgetProps {
   users: User[];
@@ -20,7 +21,7 @@ export default function AttendanceWidget({ users, timesheets }: AttendanceWidget
   const getSubActions = (): ActionItem[] => [
     { label: "View Attendance Roster", href: "/dashboard/hrms?tab=attendance" },
     { label: "View Roster Directory", href: "/dashboard/hrms?tab=teams" },
-    { label: "Trigger Geofence Check", onClick: () => alert("Testing geofencing audit checks...") }
+    { label: "Trigger Geofence Check", onClick: () => toast.info("Coming soon", "Testing geofencing audit checks...") }
   ];
 
   const employeeList = users.filter(u => u.role !== "ADMIN");

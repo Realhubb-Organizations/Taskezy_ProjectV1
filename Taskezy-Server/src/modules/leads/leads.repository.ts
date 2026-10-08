@@ -19,6 +19,7 @@ export interface LeadListRow {
   lead_score: number | null;
   assigned_agent_id: string;
   assigned_agent_name: string;
+  previous_agent_name: string | null;
   property_id: string | null;
   property_name: string | null;
   assigned_at: string | null;
@@ -127,6 +128,7 @@ const LIST_SELECT = `
     l.id, l.name, l.phone, l.email, l.status_code, ls.label AS status_label,
     l.deal_value, l.lead_score, l.assigned_agent_id,
     u.first_name || COALESCE(' ' || u.last_name, '') AS assigned_agent_name,
+    pu.first_name || COALESCE(' ' || pu.last_name, '') AS previous_agent_name,
     l.property_id, p.name AS property_name,
     l.assigned_at, l.first_response_at, l.created_at,
     l.source, l.sub_source, l.sub_status, l.campaign, l.meta_page_name, l.meta_form_id, l.meta_ad_id,
@@ -138,6 +140,7 @@ const LIST_SELECT = `
     ) AS logs
   FROM leads l
   JOIN users u ON u.id = l.assigned_agent_id
+  LEFT JOIN users pu ON pu.id = l.previous_agent_id
   JOIN lead_statuses ls ON ls.code = l.status_code
   LEFT JOIN properties p ON p.id = l.property_id
 `;

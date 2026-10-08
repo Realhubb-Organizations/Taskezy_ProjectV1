@@ -178,6 +178,7 @@ export interface ApiLeadRow {
   lead_score: number | null;
   assigned_agent_id: string;
   assigned_agent_name: string;
+  previous_agent_name: string | null;
   property_id: string | null;
   property_name: string | null;
   assigned_at: string | null;

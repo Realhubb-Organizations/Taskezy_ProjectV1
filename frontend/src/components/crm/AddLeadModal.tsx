@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { X, Upload, FileSpreadsheet, Info, Download, Plus, Trash2 } from "lucide-react";
 import { PlatformLabel } from "@/components/icons/ContactIcons";
 import { SearchableSelect } from "@/components/ui/SearchableDropdown";
+import { toast } from "@/lib/toast";
 
 const BASE_LEAD_SOURCES = ["Meta Ads", "Google Ads", "Referral Code", "Offline Event", "Direct Walkin"];
 const CUSTOM_LEAD_SOURCES_KEY = "taskezy_custom_lead_sources";
@@ -120,7 +121,7 @@ export default function AddLeadModal({
   const handleManualSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name || !phone) {
-      alert("Name and Phone are required.");
+      toast.error("Missing details", "Name and Phone are required.");
       return;
     }
     onSubmitManual({ name, phone, email, agent, source, property, note });
@@ -134,7 +135,7 @@ export default function AddLeadModal({
   const handleBulkSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!uploadedFile) {
-      alert("Please upload a lead spreadsheet file first.");
+      toast.error("Missing file", "Please upload a lead spreadsheet file first.");
       return;
     }
     onSubmitBulk({ assignmentMode: bulkMode, target: bulkTarget, fileName: uploadedFile });
@@ -166,7 +167,7 @@ export default function AddLeadModal({
   };
 
   const triggerDownloadTemplate = () => {
-    alert("Downloading Excel spreadsheet template sheet: taskezy_bulk_leads_v2.xlsx...");
+    toast.info("Downloading template", "Excel spreadsheet template sheet: taskezy_bulk_leads_v2.xlsx...");
   };
 
   // Rendered via a portal straight into <body>: this component's caller

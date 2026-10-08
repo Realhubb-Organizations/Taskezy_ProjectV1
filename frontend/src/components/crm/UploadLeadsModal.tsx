@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { X, UploadCloud, Download, ChevronDown, CheckCircle2, AlertTriangle } from "lucide-react";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
+import { toast } from "@/lib/toast";
 
 // exceljs is a ~260KB dependency used only by this modal (template
 // generation + file parsing) — dynamically imported so it's fetched when an
@@ -470,7 +471,7 @@ export default function UploadLeadsModal({ isOpen, onClose, onSubmit, properties
           <div className="shrink-0 flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-t border-slate-100">
             <p className="text-[11px] text-slate-400">
               Still facing issues?{" "}
-              <button type="button" className="text-[#0B1E6E] font-bold hover:underline" onClick={() => alert("Support request sent — our team will reach out shortly.")}>
+              <button type="button" className="text-[#0B1E6E] font-bold hover:underline" onClick={() => toast.success("Support request sent", "Our team will reach out shortly.")}>
                 Contact support
               </button>
             </p>

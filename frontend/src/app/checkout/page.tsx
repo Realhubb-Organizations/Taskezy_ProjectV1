@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useApp } from "@/context/AppContext";
 import { ArrowLeft, CreditCard, CheckCircle, ShieldAlert, Sparkles } from "lucide-react";
 import Link from "next/link";
+import { toast } from "@/lib/toast";
 
 export default function CheckoutPage() {
   const router = useRouter();
@@ -36,7 +37,7 @@ export default function CheckoutPage() {
   const handleCheckout = async (e: React.FormEvent) => {
     e.preventDefault();
     if (selectedMethod === "upi" && !upiId) {
-      alert("Please enter a UPI ID");
+      toast.error("Please enter a UPI ID");
       return;
     }
     setLoading(true);

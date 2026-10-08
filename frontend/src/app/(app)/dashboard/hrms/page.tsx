@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { useApp, AttendanceRecord, TimesheetLog, CalendarEventType, mapApiTimesheetToFrontend, mapApiAttendanceToFrontend } from "@/context/AppContext";
 import { apiListTimesheetsPage, apiListAttendancePage } from "@/lib/apiClient";
+import { toast } from "@/lib/toast";
 import { useSearchParams } from "next/navigation";
 import MonthCalendar from "@/components/calendar/MonthCalendar";
 import AddCalendarEventModal from "@/components/calendar/AddCalendarEventModal";
@@ -77,7 +78,7 @@ export default function HRMSPage() {
   const handleAddMember = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name || !email) {
-      alert("Name and email are required.");
+      toast.error("Name and email are required.");
       return;
     }
     setSuccessMsg(`Successfully invited and provisioned account for ${name}.`);

@@ -10,6 +10,7 @@ import { type LeadSummaryStats } from "@/lib/leadSummaryStats";
 import { apiListLeadsPage, apiGetLeadStats, apiDeleteLead, apiBulkDeleteLeads, type LeadListFilters } from "@/lib/apiClient";
 import { WhatsAppIcon, CallIcon, PlatformLabel } from "@/components/icons/ContactIcons";
 import { LineSkeleton, TableRowsSkeleton } from "@/components/ui/Skeletons";
+import Tooltip from "@/components/ui/Tooltip";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
 import { eligibleAssignees, isUnassignedLead } from "@/lib/leadAssignment";
 import DateRangePicker, { type DateRangeValue, todayIso } from "@/components/ui/DateRangePicker";
@@ -18,6 +19,7 @@ import TablePagination, { usePagination } from "@/components/ui/TablePagination"
 import AddLeadModal from "./AddLeadModal";
 import LeadDetailDrawer from "./LeadDetailDrawer";
 import LeadDrillDownPanel from "./LeadDrillDownPanel";
+import { toast } from "@/lib/toast";
 
 // The admin leads table's togglable columns (beyond the always-shown Lead
 // Name/Email/Assigned To) — driven by the Filter panel's Settings modal.
@@ -32,7 +34,7 @@ type AdminColumnKey =
 const ADMIN_COLUMNS: { key: AdminColumnKey; label: string; width: number }[] = [
   { key: "date", label: "Date", width: 140 },
   { key: "property", label: "Property", width: 150 },
-  { key: "reassignedTo", label: "Reassigned To", width: 140 },
+  { key: "reassignedTo", label: "Reassign From", width: 140 },
   { key: "source", label: "Source", width: 130 },
   { key: "leadScore", label: "Lead Score", width: 100 },
   { key: "status", label: "Status", width: 130 },
@@ -116,6 +118,7 @@ export default function LeadDashboard() {
     followupCalls,
     reassignLead,
     isDataLoading,
+    leadsChangedSignal,
     removeLeadsLocally
   } = useApp();
 
@@ -185,12 +188,14 @@ export default function LeadDashboard() {
       const input = prompt("Enter the real deal value for this booking (INR):");
       const dealValue = input ? parseFloat(input.replace(/[^0-9.]/g, "")) : NaN;
       if (!input || isNaN(dealValue) || dealValue <= 0) {
-        alert("A valid deal value is required to mark a lead as Booked.");
+        toast.error("Missing details", "A valid deal value is required to mark a lead as Booked.");
         return;
       }
       updateLeadStatus(leadId, status, dealValue);
+      setServerLeads(prev => prev.map(l => (l.id === leadId ? { ...l, status, dealValue } : l)));
     } else {
       updateLeadStatus(leadId, status);
+      setServerLeads(prev => prev.map(l => (l.id === leadId ? { ...l, status } : l)));
     }
 
     // Update local drawer state if active
@@ -245,7 +250,7 @@ export default function LeadDashboard() {
       setSuccessMsg(`Successfully ingested lead for: ${data.name}`);
       setTimeout(() => setSuccessMsg(""), 4000);
     } else {
-      alert(`Ingestion failed: ${res.error}`);
+      toast.error("Ingestion failed", res.error);
     }
   };
 
@@ -258,7 +263,7 @@ export default function LeadDashboard() {
     // Jasprit Bumrah) into the real database on every click, regardless of
     // the file's actual contents, and then claim the import succeeded.
     // Bulk CSV/XLSX parsing isn't wired to a real backend endpoint yet.
-    alert("Bulk import isn't wired up to a real backend yet — please use Manual Ingestion Entry for now.");
+    toast.info("Bulk import not available", "Bulk import isn't wired up to a real backend yet — please use Manual Ingestion Entry for now.");
     setIsAddOpen(false);
   };
 
@@ -430,7 +435,7 @@ export default function LeadDashboard() {
     // so this effect re-fires exactly when a real filter value changes,
     // without needing every individual filter piece listed separately.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adminTab, adminPage, adminRowsPerPage, adminServerFiltersKey, leadsRefreshKey]);
+  }, [adminTab, adminPage, adminRowsPerPage, adminServerFiltersKey, leadsRefreshKey, leadsChangedSignal]);
 
   // Filter button → Settings panel for which table columns are shown — both
   // roles get the full-height right-docked drawer (same pattern as the lead
@@ -752,6 +757,12 @@ export default function LeadDashboard() {
       reassignLead(l.id, assignee.name);
       if (assignFlowMode === "assign" && l.status === "Unassigned") updateLeadStatus(l.id, "New Lead");
     });
+    setServerLeads(prev => prev.map(l => {
+      const moved = toMove.find(m => m.id === l.id);
+      if (!moved) return l;
+      const becomesNewLead = assignFlowMode === "assign" && moved.status === "Unassigned";
+      return { ...l, assignedAgent: assignee.name, status: becomesNewLead ? "New Lead" : l.status };
+    }));
     const skipped = flowTargetLeads.length - toMove.length;
     setSelectedLeadIds(prev => {
       const next = new Set(prev);
@@ -1228,7 +1239,7 @@ export default function LeadDashboard() {
                       {/* Togglable, in the same order as the Filter panel */}
                       {adminVisibleColumns.date && <th className="px-4 py-2.5 whitespace-nowrap">Date</th>}
                       {adminVisibleColumns.property && <th className="px-4 py-2.5 whitespace-nowrap">Property</th>}
-                      {adminVisibleColumns.reassignedTo && <th className="px-4 py-2.5 whitespace-nowrap">Reassigned To</th>}
+                      {adminVisibleColumns.reassignedTo && <th className="px-4 py-2.5 whitespace-nowrap">Reassign From</th>}
                       {adminVisibleColumns.source && <th className="px-4 py-2.5 whitespace-nowrap">Source</th>}
                       {adminVisibleColumns.leadScore && <th className="px-4 py-2.5 whitespace-nowrap">Lead Score</th>}
                       {adminVisibleColumns.status && (
@@ -1312,7 +1323,17 @@ export default function LeadDashboard() {
                             <td className="px-4 py-3 text-slate-700 font-medium align-top truncate" title={l.property || "Not set"}>{l.property || "Not set"}</td>
                           )}
                           {adminVisibleColumns.reassignedTo && (
-                            <td className="px-4 py-3 text-slate-700 font-medium align-top truncate" title={l.previousAgent || "—"}>{l.previousAgent || "—"}</td>
+                            <td className="px-4 py-3 text-slate-700 font-medium align-top truncate">
+                              <Tooltip text="Click to see activity log of this lead">
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedLead(l)}
+                                  className="truncate text-left hover:text-[#0B1E6E] hover:underline"
+                                >
+                                  {l.previousAgent || "—"}
+                                </button>
+                              </Tooltip>
+                            </td>
                           )}
                           {adminVisibleColumns.source && (
                             <td className="px-4 py-3 text-slate-700 font-medium align-top truncate" title={l.source || "—"}>

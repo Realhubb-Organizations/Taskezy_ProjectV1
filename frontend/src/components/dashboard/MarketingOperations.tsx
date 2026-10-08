@@ -2,6 +2,7 @@ import React from "react";
 import { Globe, TrendingUp, DollarSign, Activity, Eye, ArrowUpRight } from "lucide-react";
 import SubActionsMenu, { ActionItem } from "./SubActionsMenu";
 import { useRouter } from "next/navigation";
+import { toast } from "@/lib/toast";
 
 interface MarketingOperationsProps {
   metaTotalSpend: number;
@@ -31,9 +32,9 @@ export default function MarketingOperations({
   };
 
   const getCampaignActions = (source: string): ActionItem[] => [
-    { label: `View ${source} Campaign Details`, onClick: () => alert(`Redirecting to ${source} details...`) },
-    { label: `Optimize Bid Strategy`, onClick: () => alert(`Adjusting bid strategy for ${source}...`) },
-    { label: `Sync Ads Manager`, onClick: () => alert(`Syncing ads data for ${source}...`) }
+    { label: `View ${source} Campaign Details`, onClick: () => toast.info("Coming soon", `Redirecting to ${source} details...`) },
+    { label: `Optimize Bid Strategy`, onClick: () => toast.info("Coming soon", `Adjusting bid strategy for ${source}...`) },
+    { label: `Sync Ads Manager`, onClick: () => toast.info("Coming soon", `Syncing ads data for ${source}...`) }
   ];
 
   return (

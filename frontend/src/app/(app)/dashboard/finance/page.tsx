@@ -8,6 +8,7 @@ import AddCalendarEventModal from "@/components/calendar/AddCalendarEventModal";
 import { LineSkeleton, TableRowsSkeleton, CardListSkeleton } from "@/components/ui/Skeletons";
 import TablePagination from "@/components/ui/TablePagination";
 import { apiListInvoicesPage, apiListReimbursementsPage } from "@/lib/apiClient";
+import { confirmAction } from "@/lib/confirmDialog";
 import {
   CreditCard,
   DollarSign,
@@ -187,8 +188,8 @@ export default function FinancePage() {
     updateLeadStatus(leadId, "Finance Rejected");
   };
 
-  const handleDeleteInvoice = (id: string) => {
-    if (confirm("Are you sure you want to delete this invoice ledger?")) {
+  const handleDeleteInvoice = async (id: string) => {
+    if (await confirmAction({ message: "Are you sure you want to delete this invoice ledger?", danger: true, confirmLabel: "Delete" })) {
       deleteInvoice(id);
     }
   };
@@ -399,8 +400,8 @@ export default function FinancePage() {
                           )}
                           {activeRole === "ADMIN" && (
                             <button
-                              onClick={() => {
-                                if (confirm("Are you sure you want to delete this claim?")) {
+                              onClick={async () => {
+                                if (await confirmAction({ message: "Are you sure you want to delete this claim?", danger: true, confirmLabel: "Delete" })) {
                                   deleteClaim(c.id);
                                 }
                               }}

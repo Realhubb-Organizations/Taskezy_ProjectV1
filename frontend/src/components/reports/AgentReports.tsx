@@ -19,6 +19,7 @@ import {
 } from "@/lib/reportMetrics";
 import { LineSkeleton, TableRowsSkeleton, CardListSkeleton } from "@/components/ui/Skeletons";
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
+import { toast } from "@/lib/toast";
 
 export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
   const { leads, adSpendRecords, followupCalls, users, currentUser, activeRole, reassignLead, isDataLoading } = useApp();
@@ -87,7 +88,7 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
     const target = prompt(`Reassign "${leadName}" to which team member?`, agentSalesTeamOptions.find(n => n !== activeAgent) || "");
     if (!target) return;
     if (!agentSalesTeamOptions.includes(target)) {
-      alert("Please enter a valid team member name from the roster.");
+      toast.error("Please enter a valid team member name from the roster.");
       return;
     }
     reassignLead(leadId, target);

@@ -27,3 +27,11 @@ export function publishToUser(userId: string, event: string, data: unknown): voi
   const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
   for (const res of set) res.write(payload);
 }
+
+/** Same as publishToUser but fans out to every connected client, regardless of user. */
+export function publishToAll(event: string, data: unknown): void {
+  const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  for (const set of clientsByUser.values()) {
+    for (const res of set) res.write(payload);
+  }
+}

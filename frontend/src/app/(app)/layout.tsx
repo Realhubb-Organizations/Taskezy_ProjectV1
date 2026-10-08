@@ -10,6 +10,7 @@ import { useApp, SystemType } from "@/context/AppContext";
 import { apiRegisterDevice, apiRemoveDevice } from "@/lib/apiClient";
 import NotificationBell from "@/components/dashboard/NotificationBell";
 import LoginAnimationOverlay from "@/components/LoginAnimationOverlay";
+import PullToRefresh from "@/components/PullToRefresh";
 import {
   LayoutDashboard,
   LayoutGrid,
@@ -840,30 +841,32 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
 
         {/* Core Container — bottom padding on mobile clears the fixed tab bar */}
         <main className="flex-1 p-3 sm:p-6 lg:p-8 pb-24 md:pb-8 bg-slate-50/50 overflow-y-auto overflow-x-hidden">
-          {hasPageAccess ? children : (
-            <div className="min-h-[60vh] flex flex-col items-center justify-center p-6 text-center space-y-6 bg-white border border-slate-200 rounded-3xl shadow-sm max-w-2xl mx-auto my-8 animate-fade-in">
-              <div className="h-16 w-16 rounded-2xl bg-red-50 border border-red-200 flex items-center justify-center text-red-650 shadow-md">
-                <Shield className="h-8 w-8 animate-pulse" />
+          <PullToRefresh>
+            {hasPageAccess ? children : (
+              <div className="min-h-[60vh] flex flex-col items-center justify-center p-6 text-center space-y-6 bg-white border border-slate-200 rounded-3xl shadow-sm max-w-2xl mx-auto my-8 animate-fade-in">
+                <div className="h-16 w-16 rounded-2xl bg-red-50 border border-red-200 flex items-center justify-center text-red-650 shadow-md">
+                  <Shield className="h-8 w-8 animate-pulse" />
+                </div>
+                <div className="space-y-2 max-w-md">
+                  <h3 className="text-lg font-black text-slate-800 tracking-tight">Security Access Gated</h3>
+                  <p className="text-xs text-slate-500 leading-relaxed font-semibold">
+                    Your profile <span className="text-brand-700 font-bold">({currentUser?.email})</span> in the <span className="font-semibold text-brand-700">{currentUser?.department || "unassigned"}</span> department is unauthorized to access <span className="font-mono bg-slate-100 text-red-650 px-1 py-0.5 rounded font-bold">{pathname}</span>.
+                  </p>
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    The TaskEzy multi-tenant security architecture enforces strict separation between CRM lead pipelines, HRMS telemetry, and Finance ledgers.
+                  </p>
+                </div>
+                <div className="pt-2">
+                  <Link
+                    href="/home"
+                    className="bg-brand-700 hover:bg-brand-600 text-white font-bold px-4 py-2.5 rounded-lg text-xs transition-all shadow-md shadow-brand-700/10"
+                  >
+                    Return to Home
+                  </Link>
+                </div>
               </div>
-              <div className="space-y-2 max-w-md">
-                <h3 className="text-lg font-black text-slate-800 tracking-tight">Security Access Gated</h3>
-                <p className="text-xs text-slate-500 leading-relaxed font-semibold">
-                  Your profile <span className="text-brand-700 font-bold">({currentUser?.email})</span> in the <span className="font-semibold text-brand-700">{currentUser?.department || "unassigned"}</span> department is unauthorized to access <span className="font-mono bg-slate-100 text-red-650 px-1 py-0.5 rounded font-bold">{pathname}</span>.
-                </p>
-                <p className="text-[10px] text-slate-400 leading-relaxed">
-                  The TaskEzy multi-tenant security architecture enforces strict separation between CRM lead pipelines, HRMS telemetry, and Finance ledgers.
-                </p>
-              </div>
-              <div className="pt-2">
-                <Link
-                  href="/home"
-                  className="bg-brand-700 hover:bg-brand-600 text-white font-bold px-4 py-2.5 rounded-lg text-xs transition-all shadow-md shadow-brand-700/10"
-                >
-                  Return to Home
-                </Link>
-              </div>
-            </div>
-          )}
+            )}
+          </PullToRefresh>
         </main>
       </div>
 

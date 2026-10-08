@@ -3,6 +3,8 @@
 import React, { useEffect, useState } from "react";
 import { useApp, mapApiPropertyToFrontend, Property, PropertyTeamAssignmentMode, LeadAssignmentMode, PropertyTeamMember } from "@/context/AppContext";
 import { apiListPropertiesPage, type PropertyListFilters } from "@/lib/apiClient";
+import { toast } from "@/lib/toast";
+import { confirmAction } from "@/lib/confirmDialog";
 import {
   Search,
   ArrowUp,
@@ -154,7 +156,7 @@ export default function PropertiesPage() {
 
   const handleContactProperty = (p: Property) => {
     if (!p.contactNumber) {
-      alert("No contact number is set for this property yet.");
+      toast.error("No contact number is set for this property yet.");
       return;
     }
     window.open(`tel:${p.contactNumber}`, "_self");
@@ -240,7 +242,7 @@ export default function PropertiesPage() {
   const handleRegisterInterest = (e: React.FormEvent) => {
     e.preventDefault();
     if (!interestName || !interestPhone) {
-      alert("Name and phone number are required.");
+      toast.error("Name and phone number are required.");
       return;
     }
     setInterestSuccess("Thank you! Your interest has been successfully registered. An agent will contact you shortly.");
@@ -267,22 +269,22 @@ export default function PropertiesPage() {
     refreshPropertiesTable();
   };
 
-  const handleSavePropertyEdit = (e: React.FormEvent) => {
+  const handleSavePropertyEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedProperty) return;
 
     // Property type is required server-side; the multi-select can be emptied.
     if (!editType.trim()) {
-      alert("Select at least one property type.");
+      toast.error("Select at least one property type.");
       return;
     }
 
     if (editTeamAssignmentMode === "CUSTOM_MEMBERS" && editSelectedMemberIds.length === 0) {
-      alert("Select at least one team member, or switch to All Members.");
+      toast.error("Select at least one team member, or switch to All Members.");
       return;
     }
     if (editTeamAssignmentMode === "CUSTOM_MEMBERS" && editLeadAssignmentMode === "PERCENTAGE" && editPercentageTotal !== 100) {
-      if (!confirm(`Selected member percentages add up to ${editPercentageTotal}%, not 100%. Save anyway?`)) return;
+      if (!(await confirmAction({ message: `Selected member percentages add up to ${editPercentageTotal}%, not 100%. Save anyway?`, confirmLabel: "Save Anyway" }))) return;
     }
 
     const assignedTeam: PropertyTeamMember[] =
@@ -320,8 +322,8 @@ export default function PropertiesPage() {
     refreshPropertiesTable();
   };
 
-  const handleDeleteProperty = (p: Property) => {
-    if (confirm(`Are you sure you want to delete "${p.name}"?`)) {
+  const handleDeleteProperty = async (p: Property) => {
+    if (await confirmAction({ message: `Are you sure you want to delete "${p.name}"?`, danger: true, confirmLabel: "Delete" })) {
       deleteProperty(p.id);
       setSuccessMsg("Property deleted successfully.");
       if (selectedProperty?.id === p.id) closeDrawer();

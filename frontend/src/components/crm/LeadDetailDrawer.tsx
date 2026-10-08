@@ -5,6 +5,7 @@ import { useApp, Lead, LeadStatus } from "@/context/AppContext";
 import { SearchableSelect } from "@/components/ui/SearchableDropdown";
 import { DatePicker } from "@/components/ui/DateRangePicker";
 import { deriveActivityTimeline, STATUS_OPTIONS, statusBadgeClasses } from "@/lib/leadStatusMapping";
+import { toast } from "@/lib/toast";
 
 interface LeadDetailDrawerProps {
   lead: Lead | null;
@@ -87,7 +88,7 @@ export default function LeadDetailDrawer({
   const handleSaveReminder = (e: React.FormEvent) => {
     e.preventDefault();
     if (!reminderDate || !reminderTime) {
-      alert("Please select both Date and Time for the reminder.");
+      toast.error("Missing date or time", "Please select both Date and Time for the reminder.");
       return;
     }
     // API Integration Point: Save calendar task/reminder event details
@@ -123,7 +124,7 @@ export default function LeadDetailDrawer({
       callType: isSiteVisit ? "SITE_VISIT" : "CALLBACK",
       assignedToName: lead.assignedAgent
     });
-    alert(`Calendar Task Saved!\nLead: ${lead.name}\nStatus: ${localStatus}\nDate: ${reminderDate}\nTime: ${reminderTime}\nNotification scheduled.`);
+    toast.success("Reminder scheduled", `${lead.name} • ${localStatus} • ${reminderDate} at ${reminderTime}`);
   };
 
   const handleReassign = () => {
@@ -159,7 +160,7 @@ export default function LeadDetailDrawer({
   const shareLeadProfile = () => {
     // API Integration Point: Trigger Native Share API or Copy Link to Clipboard
     navigator.clipboard.writeText(`TaskEzy Lead Profile:\nName: ${lead.name}\nPhone: ${lead.phone}\nStatus: ${lead.status}`);
-    alert("Lead link and summary copied to clipboard!");
+    toast.success("Copied to clipboard", "Lead link and summary copied to clipboard.");
   };
 
   // Status check to see if we render the Date & Time picker
@@ -186,7 +187,7 @@ export default function LeadDetailDrawer({
     },
     { label: "Property", value: lead.property || "Not set" },
     {
-      label: "Reassigned To",
+      label: "Reassign From",
       value: (
         <span className="flex items-center gap-1">
           {lead.previousAgent && <User className="h-3 w-3 text-slate-400" />} {lead.previousAgent || "—"}

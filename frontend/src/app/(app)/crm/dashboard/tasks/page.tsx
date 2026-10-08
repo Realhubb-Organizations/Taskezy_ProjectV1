@@ -10,6 +10,7 @@ import { TAB_BUCKETS, TeamTaskTab } from "@/components/dashboard/TeamTasksTable"
 import LeadDetailDrawer from "@/components/crm/LeadDetailDrawer";
 import DateRangePicker, { DateRangeValue } from "@/components/ui/DateRangePicker";
 import { PendingTask } from "@/lib/salesPendingTasks";
+import { toast } from "@/lib/toast";
 
 // Admin / Manager only — one team member's open tasks, opened by clicking
 // their count in the dashboard's All Task / Pending Task table. Titled after
@@ -48,7 +49,7 @@ function AgentTasksView() {
       const input = prompt("Enter the real deal value for this booking (INR):");
       const dealValue = input ? parseFloat(input.replace(/[^0-9.]/g, "")) : NaN;
       if (!input || isNaN(dealValue) || dealValue <= 0) {
-        alert("A valid deal value is required to mark a lead as Booked.");
+        toast.error("Deal value required", "A valid deal value is required to mark a lead as Booked.");
         return;
       }
       updateLeadStatus(leadId, status, dealValue);

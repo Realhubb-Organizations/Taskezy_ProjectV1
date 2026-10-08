@@ -4,6 +4,7 @@ import React, { useMemo, useState, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useApp, Lead, LeadStatus } from "@/context/AppContext";
 import { deriveActivityTimeline, STATUS_OPTIONS, statusBadgeClasses } from "@/lib/leadStatusMapping";
+import { toast } from "@/lib/toast";
 import { WhatsAppIcon, CallIcon } from "@/components/icons/ContactIcons";
 import { Phone, Mail, X, Copy, Check, User, Search, ArrowRight } from "lucide-react";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
@@ -49,7 +50,7 @@ export function useLeadStatusChange() {
       const input = prompt("Enter the real deal value for this booking (INR):");
       const dealValue = input ? parseFloat(input.replace(/[^0-9.]/g, "")) : NaN;
       if (!input || isNaN(dealValue) || dealValue <= 0) {
-        alert("A valid deal value is required to mark a lead as Booked.");
+        toast.error("Deal value required", "A valid deal value is required to mark a lead as Booked.");
         return;
       }
       updateLeadStatus(leadId, status, dealValue);
@@ -161,7 +162,7 @@ export function LeadQuickViewDrawer({ lead, onLeadChange, onClose }: {
             <span className="text-slate-800 font-semibold">{lead.property || "Not set"}</span>
           </div>
           <div>
-            <span className="text-slate-400 font-bold text-[10px] block mb-0.5">Reassigned To :</span>
+            <span className="text-slate-400 font-bold text-[10px] block mb-0.5">Reassign From :</span>
             <span className="flex items-center gap-1 text-slate-800 font-semibold">
               {lead.previousAgent && <User className="h-3 w-3 text-slate-400" />} {lead.previousAgent || "—"}
             </span>

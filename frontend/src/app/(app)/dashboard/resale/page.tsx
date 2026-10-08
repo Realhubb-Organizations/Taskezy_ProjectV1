@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { useApp, mapApiResaleUnitToFrontend, ResaleUnit } from "@/context/AppContext";
 import { apiListResaleUnitsPage, type ResaleUnitListFilters } from "@/lib/apiClient";
+import { toast } from "@/lib/toast";
 import { Plus, X, Search, Landmark, PhoneCall, Link2, CheckCircle } from "lucide-react";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
 import TablePagination, { DEFAULT_ROWS_PER_PAGE_OPTIONS } from "@/components/ui/TablePagination";
@@ -102,7 +103,7 @@ export default function ResalePage() {
   const handlePostResale = (e: React.FormEvent) => {
     e.preventDefault();
     if (!resaleProp || !resalePrice) {
-      alert("Property name and price are required.");
+      toast.error("Property name and price are required.");
       return;
     }
     addResaleUnit({
