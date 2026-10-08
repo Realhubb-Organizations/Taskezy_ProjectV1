@@ -181,7 +181,7 @@ export default function ProvisioningPage() {
               </button>
               <button
                 onClick={() => router.push("/auth/login")}
-                className="flex-1 inline-flex items-center justify-center gap-2 bg-brand-700 hover:bg-brand-600 text-white font-semibold py-3 rounded-lg text-sm transition-all shadow-md shadow-brand-700/15"
+                className="flex-1 inline-flex items-center justify-center gap-2 bg-[#0B1E6E] hover:bg-[#081650] text-white font-semibold py-3 rounded-lg text-sm transition-all shadow-md"
               >
                 Proceed to Login
                 <ChevronRight className="h-4.5 w-4.5" />

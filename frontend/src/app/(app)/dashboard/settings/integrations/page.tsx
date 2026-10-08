@@ -647,7 +647,7 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
                           <p className="font-bold text-slate-700 -mt-1.5 pl-5.5">Real-time — no wait</p>
                           <div className="flex items-center justify-between pt-1">
                             <div className="flex items-center gap-2"><Zap className="h-3.5 w-3.5 text-slate-400 shrink-0" /><span className="text-slate-400 font-semibold">Auto Sync</span></div>
-                            <span className="relative inline-flex h-5 w-9 rounded-full bg-brand-600 shrink-0" title="Always on for a real-time integration">
+                            <span className="relative inline-flex h-5 w-9 rounded-full bg-[#0B1E6E] shrink-0" title="Always on for a real-time integration">
                               <span className="absolute top-0.5 right-0.5 h-4 w-4 rounded-full bg-white" />
                             </span>
                           </div>
@@ -658,7 +658,7 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
                       <button
                         onClick={handleConnectMeta}
                         disabled={metaLoading}
-                        className="w-full px-3.5 py-2 rounded-lg text-xs font-bold border bg-brand-50 border-brand-200 text-brand-700 hover:bg-brand-700 hover:text-white transition-all disabled:opacity-50"
+                        className="w-full px-3.5 py-2 rounded-lg text-xs font-bold border bg-brand-50 border-brand-200 text-brand-700 hover:bg-[#0B1E6E] hover:text-white transition-all disabled:opacity-50"
                       >
                         {metaLoading ? "Redirecting…" : "Connect Meta Ads"}
                       </button>

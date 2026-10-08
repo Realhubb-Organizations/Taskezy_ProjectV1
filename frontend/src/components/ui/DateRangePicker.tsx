@@ -134,9 +134,9 @@ function MonthGrid({
               onMouseEnter={() => onHover?.(iso)}
               className={`h-11 sm:h-9 text-[13px] tabular-nums transition-colors ${
                 end
-                  ? "bg-[#3370E8] text-white font-semibold"
+                  ? "bg-[#0B1E6E] text-white font-semibold"
                   : between
-                    ? "bg-[#9BB8F3] text-white"
+                    ? "bg-[#0B1E6E]/10 text-[#0B1E6E]"
                     : disabled
                       ? "text-slate-300 cursor-not-allowed"
                       : "text-slate-700 hover:bg-slate-100"
@@ -157,7 +157,7 @@ function PanelFooter({ onClose, onApply, canApply }: { onClose: () => void; onAp
       <button
         type="button"
         onClick={onClose}
-        className="px-4 py-1.5 rounded-lg border border-[#3370E8] text-[#3370E8] text-xs font-semibold hover:bg-blue-50 transition-colors"
+        className="px-4 py-1.5 rounded-lg border border-[#0B1E6E] text-[#0B1E6E] text-xs font-semibold hover:bg-[#0B1E6E]/5 transition-colors"
       >
         Close
       </button>
@@ -165,7 +165,7 @@ function PanelFooter({ onClose, onApply, canApply }: { onClose: () => void; onAp
         type="button"
         onClick={onApply}
         disabled={!canApply}
-        className="px-4 py-1.5 rounded-lg bg-[#3370E8] text-white text-xs font-semibold hover:bg-[#2A5FCC] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        className="px-4 py-1.5 rounded-lg bg-[#0B1E6E] text-white text-xs font-semibold hover:bg-[#081650] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
       >
         Apply
       </button>
@@ -208,7 +208,7 @@ function HeaderDateInput({
       onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commit(); } }}
       placeholder={placeholder}
       className={`w-[92px] bg-transparent text-center text-[13px] tabular-nums text-slate-700 placeholder:text-slate-400 outline-none border-b-2 pb-0.5 transition-colors ${
-        active ? "border-[#3370E8]" : "border-transparent"
+        active ? "border-[#0B1E6E]" : "border-transparent"
       }`}
     />
   );
@@ -368,7 +368,7 @@ export function RangeCalendarPanel({
                     type="button"
                     onClick={() => onPreset?.(p.value)}
                     className={`text-left px-3 py-2 rounded-lg text-xs font-semibold transition-colors ${
-                      activePreset === p.value ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"
+                      activePreset === p.value ? "bg-[#0B1E6E] text-white" : "text-slate-700 hover:bg-slate-50"
                     }`}
                   >
                     {p.label}

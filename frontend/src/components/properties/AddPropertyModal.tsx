@@ -422,14 +422,14 @@ export default function AddPropertyModal({ isOpen, onClose, onSuccess, duplicate
             {activeTab === "details" ? (
               <button
                 onClick={handleSaveAndNext}
-                className="px-5 py-2 rounded-xl text-sm font-bold bg-brand-700 hover:bg-brand-600 text-white transition-all shadow-sm"
+                className="px-5 py-2 rounded-xl text-sm font-bold bg-[#0B1E6E] hover:bg-[#081650] text-white transition-all shadow-sm"
               >
                 Save &amp; Next
               </button>
             ) : (
               <button
                 onClick={handleCreateProperty}
-                className="px-5 py-2 rounded-xl text-sm font-bold bg-brand-700 hover:bg-brand-600 text-white transition-all shadow-sm"
+                className="px-5 py-2 rounded-xl text-sm font-bold bg-[#0B1E6E] hover:bg-[#081650] text-white transition-all shadow-sm"
               >
                 Create Property
               </button>

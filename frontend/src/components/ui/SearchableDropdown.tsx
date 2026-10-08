@@ -221,7 +221,7 @@ function Trigger({
 }
 
 const CountBadge = ({ n }: { n: number }) =>
-  n > 0 ? <span className="bg-blue-600 text-white rounded-full px-1.5 text-[10px] leading-4 shrink-0">{n}</span> : null;
+  n > 0 ? <span className="bg-[#0B1E6E] text-white rounded-full px-1.5 text-[10px] leading-4 shrink-0">{n}</span> : null;
 
 export function SearchableMultiSelect({
   options,
@@ -257,7 +257,7 @@ export function SearchableMultiSelect({
     triggerContent = (
       <>
         <span className="truncate">{labelOf(selected[0])}</span>
-        <span className="bg-blue-600 text-white rounded-full px-1.5 text-[10px] leading-4 shrink-0">+{selected.length - 1}</span>
+        <span className="bg-[#0B1E6E] text-white rounded-full px-1.5 text-[10px] leading-4 shrink-0">+{selected.length - 1}</span>
       </>
     );
   }

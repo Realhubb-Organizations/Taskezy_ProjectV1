@@ -775,7 +775,7 @@ export default function SettingsPage() {
                 <button
                   onClick={handleConnectMeta}
                   disabled={metaLoading}
-                  className="px-3 py-1.5 rounded-lg text-[11px] font-bold border bg-brand-50 border-brand-200 text-brand-700 hover:bg-brand-700 hover:text-white transition-all disabled:opacity-50"
+                  className="px-3 py-1.5 rounded-lg text-[11px] font-bold border bg-brand-50 border-brand-200 text-brand-700 hover:bg-[#0B1E6E] hover:text-white transition-all disabled:opacity-50"
                 >
                   {metaLoading ? "Redirecting…" : activeMetaConnections.length > 0 ? "Connect Another Page" : "Connect"}
                 </button>
@@ -839,7 +839,7 @@ export default function SettingsPage() {
               {activeRole === "ADMIN" ? (
                 <Link
                   href="/dashboard/settings/integrations?app=google"
-                  className="px-3 py-1.5 rounded-lg text-[11px] font-bold border bg-brand-50 border-brand-200 text-brand-700 hover:bg-brand-700 hover:text-white transition-all"
+                  className="px-3 py-1.5 rounded-lg text-[11px] font-bold border bg-brand-50 border-brand-200 text-brand-700 hover:bg-[#0B1E6E] hover:text-white transition-all"
                 >
                   Manage
                 </Link>
@@ -885,7 +885,7 @@ export default function SettingsPage() {
                   className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-all ${
                     active
                       ? "bg-red-50 border-red-200 text-red-700 hover:bg-red-100"
-                      : "bg-brand-50 border-brand-200 text-brand-700 hover:bg-brand-700 hover:text-white"
+                      : "bg-brand-50 border-brand-200 text-brand-700 hover:bg-[#0B1E6E] hover:text-white"
                   }`}
                 >
                   {active ? "Disconnect" : "Connect"}
@@ -1122,7 +1122,7 @@ export default function SettingsPage() {
                 <button
                   type="submit"
                   disabled={hrmsSaving}
-                  className="w-full bg-brand-700 hover:bg-brand-600 text-white font-bold py-2.5 rounded-lg text-xs transition-all shadow-sm disabled:opacity-60"
+                  className="w-full bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold py-2.5 rounded-lg text-xs transition-all shadow-sm disabled:opacity-60"
                 >
                   {hrmsSaving ? "Saving…" : "Save HRMS Settings"}
                 </button>
@@ -1190,7 +1190,7 @@ export default function SettingsPage() {
                 <button
                   type="submit"
                   disabled={financeSaving}
-                  className="w-full bg-brand-700 hover:bg-brand-600 text-white font-bold py-2.5 rounded-lg text-xs transition-all shadow-sm disabled:opacity-60"
+                  className="w-full bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold py-2.5 rounded-lg text-xs transition-all shadow-sm disabled:opacity-60"
                 >
                   {financeSaving ? "Saving…" : "Save Finance Settings"}
                 </button>
@@ -1207,7 +1207,7 @@ export default function SettingsPage() {
             <h3 className="text-sm font-bold text-slate-700">Corporate User Directory</h3>
             <button
               onClick={() => setIsAddOpen(true)}
-              className="inline-flex items-center gap-1.5 bg-brand-700 hover:bg-brand-600 text-white px-4 py-2 rounded-lg text-xs font-bold transition-all shadow-md shadow-brand-700/10 shrink-0"
+              className="inline-flex items-center gap-1.5 bg-[#0B1E6E] hover:bg-[#081650] text-white px-4 py-2 rounded-lg text-xs font-bold transition-all shadow-md shrink-0"
             >
               <Plus className="h-4 w-4" />
               Add User
@@ -1334,7 +1334,7 @@ export default function SettingsPage() {
               <button
                 type="button"
                 onClick={handleToggleSoundMuted}
-                className={`relative shrink-0 h-6 w-11 rounded-full transition-colors ${!soundMuted ? "bg-brand-600" : "bg-slate-300"}`}
+                className={`relative shrink-0 h-6 w-11 rounded-full transition-colors ${!soundMuted ? "bg-[#0B1E6E]" : "bg-slate-300"}`}
               >
                 <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${!soundMuted ? "translate-x-5" : "translate-x-0.5"}`} />
               </button>
@@ -1543,7 +1543,7 @@ export default function SettingsPage() {
 
               <button
                 type="submit"
-                className="w-full bg-brand-700 hover:bg-brand-600 text-white font-bold py-2.5 rounded-lg text-xs transition-all shadow-sm"
+                className="w-full bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold py-2.5 rounded-lg text-xs transition-all shadow-sm"
               >
                 Create User
               </button>
@@ -1686,7 +1686,7 @@ export default function SettingsPage() {
 
               <button
                 type="submit"
-                className="w-full bg-brand-700 hover:bg-brand-600 text-white font-semibold py-2.5 rounded-lg text-xs transition-all shadow-md shadow-brand-700/10"
+                className="w-full bg-[#0B1E6E] hover:bg-[#081650] text-white font-semibold py-2.5 rounded-lg text-xs transition-all shadow-md"
               >
                 Save Changes
               </button>

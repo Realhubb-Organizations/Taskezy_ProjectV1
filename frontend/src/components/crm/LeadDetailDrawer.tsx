@@ -365,7 +365,7 @@ export default function LeadDetailDrawer({
               </div>
               <button
                 type="submit"
-                className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold px-5 py-2 rounded-xl text-sm transition-all flex items-center justify-center gap-2 shadow-sm"
+                className="w-full bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold px-5 py-2 rounded-xl text-sm transition-all flex items-center justify-center gap-2 shadow-sm"
               >
                 <Calendar className="h-4 w-4" />
                 <span>Save Task Reminder</span>
@@ -397,7 +397,7 @@ export default function LeadDetailDrawer({
                 type="button"
                 onClick={handleReassign}
                 disabled={!reassignTarget || reassigning}
-                className="shrink-0 bg-brand-700 hover:bg-brand-600 disabled:opacity-40 text-white font-bold px-5 py-2 rounded-xl text-sm transition-all"
+                className="shrink-0 bg-[#0B1E6E] hover:bg-[#081650] disabled:opacity-40 text-white font-bold px-5 py-2 rounded-xl text-sm transition-all"
               >
                 {reassigning ? "Saving..." : "Reassign"}
               </button>

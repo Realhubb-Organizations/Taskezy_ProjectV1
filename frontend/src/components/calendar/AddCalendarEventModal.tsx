@@ -138,7 +138,7 @@ export default function AddCalendarEventModal({
 
           <button
             type="submit"
-            className="w-full bg-brand-700 hover:bg-brand-600 text-white font-bold px-5 py-2 rounded-xl text-sm transition-all shadow-sm"
+            className="w-full bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold px-5 py-2 rounded-xl text-sm transition-all shadow-sm"
           >
             Save
           </button>

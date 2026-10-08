@@ -177,7 +177,7 @@ export default function CrmDashboardPage() {
       <div className="flex justify-end">
         <button
           onClick={() => setIsUploadOpen(true)}
-          className="inline-flex items-center justify-center gap-2 h-9 px-3.5 bg-[#0B0447] hover:opacity-90 text-white rounded-xl text-xs font-bold transition-all shadow-md shrink-0"
+          className="inline-flex items-center justify-center gap-2 h-9 px-3.5 bg-[#0B1E6E] hover:bg-[#081650] text-white rounded-xl text-xs font-bold transition-all shadow-md shrink-0"
         >
           <Plus className="h-4 w-4" />
           Upload Leads
