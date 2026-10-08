@@ -34,7 +34,7 @@ export default function Home() {
 
             <Link
               href="/checkout"
-              className="group relative inline-flex items-center gap-2 px-5 py-2.5 text-xs sm:text-sm font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-xl transition-all duration-300 shadow-md shadow-slate-900/10 hover:shadow-lg hover:shadow-slate-900/20 hover:-translate-y-0.5 active:translate-y-0 overflow-hidden"
+              className="group relative inline-flex items-center gap-2 px-5 py-2.5 text-xs sm:text-sm font-semibold text-white bg-[#0B1E6E] hover:bg-[#081650] rounded-xl transition-all duration-300 shadow-md shadow-slate-900/10 hover:shadow-lg hover:shadow-slate-900/20 hover:-translate-y-0.5 active:translate-y-0 overflow-hidden"
             >
               <span>Configure Plan</span>
               <ArrowRight className="w-4 h-4 text-slate-300 transition-transform duration-300 group-hover:translate-x-1 group-hover:text-white" />
@@ -73,7 +73,7 @@ export default function Home() {
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3 w-full sm:w-auto mb-16">
             <Link
               href="/checkout"
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 text-white font-medium text-sm px-6 py-3.5 rounded-xl transition-all shadow-sm hover:shadow active:scale-[0.99]"
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-[#0B1E6E] hover:bg-[#081650] text-white font-medium text-sm px-6 py-3.5 rounded-xl transition-all shadow-sm hover:shadow active:scale-[0.99]"
             >
               <span>Configure Subscription</span>
               <ArrowRight className="h-4 w-4 text-slate-400" />

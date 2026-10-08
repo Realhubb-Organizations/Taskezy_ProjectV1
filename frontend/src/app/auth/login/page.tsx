@@ -291,7 +291,7 @@ export default function LoginPage() {
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="w-full min-h-11 sm:min-h-0 bg-[#7CA8F6] hover:bg-blue-500 disabled:opacity-60 text-white font-medium py-2.5 rounded-md text-sm transition-colors mt-8 shadow-sm"
+                  className="w-full min-h-11 sm:min-h-0 bg-[#0B1E6E] hover:bg-[#081650] disabled:opacity-60 text-white font-medium py-2.5 rounded-md text-sm transition-colors mt-8 shadow-sm"
                 >
                   {isSubmitting ? "Signing in..." : "Continue"}
                 </button>
@@ -363,7 +363,7 @@ export default function LoginPage() {
 
                 <button
                   type="submit"
-                  className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-2.5 rounded-md text-sm transition-all shadow-sm flex items-center justify-center gap-1.5"
+                  className="w-full bg-[#0B1E6E] hover:bg-[#081650] text-white font-semibold py-2.5 rounded-md text-sm transition-all shadow-sm flex items-center justify-center gap-1.5"
                 >
                   <ShieldCheck className="h-4 w-4" />
                   Secure and Login

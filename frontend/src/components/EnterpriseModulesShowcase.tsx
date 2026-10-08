@@ -168,7 +168,7 @@ export default function EnterpriseModulesShowcase() {
               onClick={() => setActiveTab(tab.id)}
               className={`relative flex items-center gap-3 p-2.5 rounded-lg text-left transition-all duration-300 cursor-pointer ${
                 isActive
-                  ? "bg-blue-600 text-white shadow-xs shadow-blue-500/20 border border-blue-500 scale-[1.01]"
+                  ? "bg-[#0B1E6E] text-white shadow-xs border border-[#0B1E6E] scale-[1.01]"
                   : "text-slate-600 hover:text-slate-900 hover:bg-slate-100/70"
               }`}
             >

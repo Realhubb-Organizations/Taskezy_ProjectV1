@@ -150,7 +150,7 @@ export default function MetaCampaignLinker({ propertyId, isAdmin }: MetaCampaign
               type="button"
               onClick={handleAddSelected}
               disabled={saving || !selected}
-              className="shrink-0 bg-brand-700 hover:bg-brand-600 text-white font-bold px-5 py-2 rounded-xl text-sm transition-all disabled:opacity-40"
+              className="shrink-0 bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold px-5 py-2 rounded-xl text-sm transition-all disabled:opacity-40"
             >
               {saving ? "…" : "Add"}
             </button>
@@ -178,7 +178,7 @@ export default function MetaCampaignLinker({ propertyId, isAdmin }: MetaCampaign
                 type="button"
                 onClick={handleAddCustom}
                 disabled={saving}
-                className="shrink-0 bg-brand-700 hover:bg-brand-600 text-white font-bold px-5 py-2 rounded-xl text-sm transition-all disabled:opacity-50"
+                className="shrink-0 bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold px-5 py-2 rounded-xl text-sm transition-all disabled:opacity-50"
               >
                 {saving ? "…" : "Add"}
               </button>

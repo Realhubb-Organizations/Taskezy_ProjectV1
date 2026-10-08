@@ -349,7 +349,7 @@ export default function PropertiesPage() {
         <div className="flex justify-end">
           <button
             onClick={() => { setDuplicateSource(null); setIsAddOpen(true); }}
-            className="inline-flex items-center justify-center gap-2 h-9 px-3.5 bg-brand-800 hover:bg-brand-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-brand-800/15"
+            className="inline-flex items-center justify-center gap-2 h-9 px-3.5 bg-[#0B1E6E] hover:bg-[#081650] text-white rounded-xl text-xs font-bold transition-all shadow-md"
           >
             <Plus className="h-4 w-4" />
             Add Property
@@ -673,7 +673,7 @@ export default function PropertiesPage() {
                   </div>
 
                   <div className="flex gap-2 pt-2">
-                    <button type="submit" className="flex-1 bg-brand-700 hover:bg-brand-600 text-white font-bold px-5 py-2 rounded-xl text-sm transition-all shadow-sm">
+                    <button type="submit" className="flex-1 bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold px-5 py-2 rounded-xl text-sm transition-all shadow-sm">
                       Save Changes
                     </button>
                     <button type="button" onClick={() => handleDeleteProperty(selectedProperty)} className="bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 font-bold px-5 py-2 rounded-xl text-sm transition-all flex items-center justify-center">
@@ -748,7 +748,7 @@ export default function PropertiesPage() {
                       <input type="text" required placeholder="Client Name" value={interestName} onChange={(e) => setInterestName(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none" />
                       <input type="tel" required placeholder="Phone Number" value={interestPhone} onChange={(e) => setInterestPhone(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none" />
                       <input type="email" placeholder="Email address (optional)" value={interestEmail} onChange={(e) => setInterestEmail(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none" />
-                      <button type="submit" className="w-full px-5 py-2 bg-brand-700 hover:bg-brand-600 text-white font-bold rounded-xl text-sm transition-all shadow-sm">
+                      <button type="submit" className="w-full px-5 py-2 bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold rounded-xl text-sm transition-all shadow-sm">
                         Register Interest
                       </button>
                     </form>

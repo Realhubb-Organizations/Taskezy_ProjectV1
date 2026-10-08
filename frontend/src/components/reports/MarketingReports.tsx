@@ -188,7 +188,7 @@ export default function MarketingReports({ dateRange }: { dateRange: DateRange }
             key={t}
             onClick={() => setSubTab(t)}
             className={`px-3.5 py-1.5 rounded-lg text-[11px] font-bold border transition-all ${
-              subTab === t ? "bg-brand-700 border-brand-700 text-white shadow-sm" : "bg-white border-slate-200 text-slate-500 hover:text-slate-700"
+              subTab === t ? "bg-[#0B1E6E] border-[#0B1E6E] text-white shadow-sm" : "bg-white border-slate-200 text-slate-500 hover:text-slate-700"
             }`}
           >
             {t}

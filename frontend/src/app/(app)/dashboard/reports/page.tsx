@@ -85,7 +85,7 @@ function ReportsPageContent() {
         </div>
         <button
           onClick={handleExportCSV}
-          className="inline-flex items-center justify-center gap-2 h-9 px-3.5 bg-brand-700 hover:bg-brand-600 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-brand-700/10 shrink-0"
+          className="inline-flex items-center justify-center gap-2 h-9 px-3.5 bg-[#0B1E6E] hover:bg-[#081650] text-white rounded-xl text-xs font-bold transition-all shadow-md shrink-0"
         >
           <Download className="h-4 w-4" />
           Export Leads CSV

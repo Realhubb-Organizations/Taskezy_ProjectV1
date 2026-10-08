@@ -126,7 +126,7 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                       key={name}
                       onClick={() => setSelectedAgent(name)}
                       className={`w-full text-left px-3 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-between ${
-                        activeAgent === name ? "bg-brand-700 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"
+                        activeAgent === name ? "bg-[#0B1E6E] text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"
                       }`}
                     >
                       <span className="[overflow-wrap:anywhere]">

@@ -157,7 +157,7 @@ export default function AdminPage() {
           <h3 className="text-sm font-bold text-slate-700">Corporate Accounts &amp; Roster</h3>
           <button
             onClick={() => setIsAddOpen(true)}
-            className="inline-flex items-center gap-1.5 bg-brand-700 hover:bg-brand-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-md shadow-brand-700/10"
+            className="inline-flex items-center gap-1.5 bg-[#0B1E6E] hover:bg-[#081650] text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-md"
           >
             <Plus className="h-4 w-4" />
             Add Account
@@ -398,7 +398,7 @@ export default function AdminPage() {
 
               <button
                 type="submit"
-                className="w-full bg-brand-700 hover:bg-brand-600 text-white font-bold py-2.5 rounded-lg text-xs transition-all shadow-sm"
+                className="w-full bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold py-2.5 rounded-lg text-xs transition-all shadow-sm"
               >
                 Provision Account
               </button>
@@ -508,7 +508,7 @@ export default function AdminPage() {
 
               <button
                 type="submit"
-                className="w-full bg-brand-700 hover:bg-brand-600 text-white font-semibold py-2.5 rounded-lg text-xs transition-all shadow-md shadow-brand-700/10"
+                className="w-full bg-[#0B1E6E] hover:bg-[#081650] text-white font-semibold py-2.5 rounded-lg text-xs transition-all shadow-md"
               >
                 Apply Changes &amp; Synchronize
               </button>

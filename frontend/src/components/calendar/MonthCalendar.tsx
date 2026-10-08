@@ -109,7 +109,7 @@ export default function MonthCalendar({ events, selectedDate, onSelectDate, colo
             >
               <span
                 className={`text-[10px] font-bold h-5 w-5 flex items-center justify-center rounded-full ${
-                  isToday ? "bg-brand-600 text-white" : "text-slate-600"
+                  isToday ? "bg-[#0B1E6E] text-white" : "text-slate-600"
                 }`}
               >
                 {d}

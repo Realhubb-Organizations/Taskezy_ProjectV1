@@ -278,7 +278,7 @@ export default function CheckoutPage() {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full mt-6 bg-brand-700 hover:bg-brand-600 text-white py-3 rounded-lg text-sm font-semibold transition-all shadow-lg shadow-brand-700/15 flex items-center justify-center gap-2"
+                className="w-full mt-6 bg-[#0B1E6E] hover:bg-[#081650] text-white py-3 rounded-lg text-sm font-semibold transition-all shadow-md flex items-center justify-center gap-2"
               >
                 {loading ? "Authorizing Gateway..." : `Pay ₹${total.toLocaleString("en-IN")} and Subscribe`}
               </button>
