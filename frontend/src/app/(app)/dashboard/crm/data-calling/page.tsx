@@ -170,6 +170,12 @@ export default function DataCallingPage() {
   // agent has no one to hand leads off to in that sense, so the checkbox
   // column and both toolbar buttons stay admin-only.
   const isAdmin = activeRole === "ADMIN";
+  // Data Calling Analytics tab — same tier as the main Leads page's Leads
+  // Analytics (Admin or Manager); a sales Member doesn't get it (2026-10-09).
+  // The tab switcher button below is the only way to reach "Analytics" (no
+  // URL param drives it on this page), so gating that one spot is enough —
+  // a Member can never set activeTab to "Analytics" through the UI.
+  const canViewDataCallingAnalytics = isAdmin || currentUser?.role_type === "Manager";
   const propertiesList = properties.map(p => p.name);
   // Bulk upload's own property/agent pickers need real ids (they drive
   // server-side assignment), unlike propertiesList above which only ever
@@ -776,14 +782,16 @@ export default function DataCallingPage() {
           >
             Data Calling
           </button>
-          <button
-            onClick={() => setActiveTab("Analytics")}
-            className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-              activeTab === "Analytics" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-800"
-            }`}
-          >
-            Data Calling Analytics
-          </button>
+          {canViewDataCallingAnalytics && (
+            <button
+              onClick={() => setActiveTab("Analytics")}
+              className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                activeTab === "Analytics" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-800"
+              }`}
+            >
+              Data Calling Analytics
+            </button>
+          )}
         </div>
         {isAdmin && activeTab === "DataCalling" && (
           <button

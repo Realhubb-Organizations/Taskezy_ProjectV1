@@ -150,25 +150,36 @@ export default function LeadDashboard() {
 
   // Scoping check: is the current user a Sales Member?
   const isSalesMember = currentUser?.role_type === "Member" && currentUser?.role !== "ADMIN";
+  const isManager = currentUser?.role_type === "Manager" && currentUser?.role !== "ADMIN";
   // Admin-only UI within the (now shared) Leads console — the top Campaigns
   // quick-filter stays admin-exclusive; a Sales Member gets the same Leads
   // table and stat bar without it.
   const isAdmin = currentUser?.role === "ADMIN";
   // The Leads Analytics tab (and its "View Detailed Analytics" links) is
-  // the one piece of this admin-only UI a Manager also gets — Managers
-  // already see the exact same unscoped, company-wide `scopedLeads` as
-  // Admin everywhere else on this page (see isSalesMember above), so
-  // showing them the same per-agent breakdown here exposes nothing they
-  // couldn't already see on the plain Leads tab.
+  // the one piece of this admin-only UI a Manager also gets — now safe to
+  // show, since (2026-10-09) a Manager's `scopedLeads` below is restricted
+  // to their own team, same as everywhere else on this page: the breakdown
+  // can't expose any lead a Manager couldn't already see on the plain
+  // Leads tab. See project_crm_role_based_lead_scoping memory.
   const canViewLeadsAnalytics = isAdmin || currentUser?.role_type === "Manager";
   // Bulk select + Assign/Reshuffle (same workflow as Data Calling) — Admin
   // and Manager only; who they can pick is scoped in lib/leadAssignment.ts.
   const canBulkAssign = isAdmin || currentUser?.role_type === "Manager";
 
-  // Data scoping based on role
+  // Data scoping based on role. The backend's own GET /api/v1/leads already
+  // restricts what a sales Member/Manager's session ever receives (see
+  // leads.service.ts's scopeForCaller) — this client-side pass is a second,
+  // defense-in-depth layer (and covers any locally-seeded/demo leads that
+  // never went through that endpoint), not the real security boundary.
+  const myTeamNames = isManager && currentUser
+    ? new Set([currentUser.name, ...users.filter(u => u.managerId === currentUser.id).map(u => u.name)])
+    : null;
   const scopedLeads = leads.filter(l => {
     if (isSalesMember) {
       return l.assignedAgent.toLowerCase() === currentUser?.name.toLowerCase();
+    }
+    if (myTeamNames) {
+      return myTeamNames.has(l.assignedAgent);
     }
     return true;
   });
@@ -585,7 +596,11 @@ export default function LeadDashboard() {
   // Sales Member/Manager never gets a Campaign column or its filter (see the
   // Campaign <th>/<td> guards below) — excluded here too so the <colgroup>'s
   // <col> count still matches the actual rendered <th> count for them.
-  const adminVisibleColumnList = ADMIN_COLUMNS.filter(c => adminVisibleColumns[c.key] && (isAdmin || c.key !== "campaign"));
+  // Campaign/Source/Ad Set Name are Admin-only columns (ad-source
+  // attribution) — never offered or rendered for Manager/Member, on this
+  // list or in the header/cell checks below. See
+  // project_crm_role_based_lead_scoping memory (2026-10-09).
+  const adminVisibleColumnList = ADMIN_COLUMNS.filter(c => adminVisibleColumns[c.key] && (isAdmin || !["campaign", "source", "adSetName"].includes(c.key)));
 
   const [analyticsVisibleColumns, setAnalyticsVisibleColumns] = useState<Record<AnalyticsColumnKey, boolean>>(ANALYTICS_DEFAULT_VISIBLE_COLUMNS);
 
@@ -949,11 +964,19 @@ export default function LeadDashboard() {
     return { agentName, isManager, directReports, teamTotal, ...stats };
   }).filter(row => row.isManager && (row.total > 0 || row.directReports.some(d => d.total > 0)));
 
-  // Leads held by anyone outside a manager's team (no manager set, an admin,
-  // or a non-sales user) are grouped under one "No manager assigned" row so
-  // they never silently disappear from this table.
+  // Leads held by anyone outside a manager's team (no manager set, or a
+  // non-sales user) are grouped under one "No manager assigned" row so they
+  // never silently disappear from this table. Leads parked on an Admin
+  // account (e.g. an orphaned sheet-import's fallback holder, see
+  // reassignUnassignedSheetLeads) are excluded entirely rather than shown
+  // as a named row here — an Admin isn't a salesperson, and this table is a
+  // per-agent *performance* breakdown, so listing "Admin" alongside real
+  // agents misrepresents it as one (2026-10-09 fix).
+  const adminNames = new Set(users.filter(u => u.role === "ADMIN").map(u => u.name));
   const teamCoveredNames = new Set(adminManagerRows.flatMap(r => [r.agentName, ...r.directReports.map(d => d.name)]));
-  const noTeamNames = Array.from(new Set(analyticsScopedLeads.map(l => l.assignedAgent).filter(n => n && !teamCoveredNames.has(n))));
+  const noTeamNames = Array.from(new Set(
+    analyticsScopedLeads.map(l => l.assignedAgent).filter(n => n && !teamCoveredNames.has(n) && !adminNames.has(n))
+  ));
   const noTeamReports = noTeamNames.map(name => ({
     name,
     ...computeLeadStats(analyticsScopedLeads.filter(l => l.assignedAgent === name))
@@ -1314,7 +1337,7 @@ export default function LeadDashboard() {
                       {adminVisibleColumns.date && <th className="px-4 py-3 whitespace-nowrap">Date</th>}
                       {adminVisibleColumns.property && <th className="px-4 py-3 whitespace-nowrap">Property</th>}
                       {adminVisibleColumns.reassignedTo && <th className="px-4 py-3 whitespace-nowrap">Reassign From</th>}
-                      {adminVisibleColumns.source && <th className="px-4 py-3 whitespace-nowrap">Source</th>}
+                      {isAdmin && adminVisibleColumns.source && <th className="px-4 py-3 whitespace-nowrap">Source</th>}
                       {adminVisibleColumns.leadScore && <th className="px-4 py-3 whitespace-nowrap">Lead Score</th>}
                       {adminVisibleColumns.status && (
                         <th className="px-4 py-3 whitespace-nowrap">
@@ -1331,7 +1354,7 @@ export default function LeadDashboard() {
                       )}
                       {adminVisibleColumns.nextCallDate && <th className="px-4 py-3 whitespace-nowrap">Next Call Date</th>}
                       {adminVisibleColumns.actions && <th className="px-4 py-3 text-right whitespace-nowrap">Actions</th>}
-                      {adminVisibleColumns.adSetName && <th className="px-4 py-3 whitespace-nowrap">Ad Set Name</th>}
+                      {isAdmin && adminVisibleColumns.adSetName && <th className="px-4 py-3 whitespace-nowrap">Ad Set Name</th>}
                       {isAdmin && adminVisibleColumns.campaign && (
                         <th className="px-4 py-3 whitespace-nowrap">Campaign</th>
                       )}
@@ -1397,7 +1420,7 @@ export default function LeadDashboard() {
                               ) : "—"}
                             </td>
                           )}
-                          {adminVisibleColumns.source && (
+                          {isAdmin && adminVisibleColumns.source && (
                             <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]" title={l.source || "—"}>
                               <PlatformLabel text={l.source || "—"} iconOnly />
                             </td>
@@ -1443,7 +1466,7 @@ export default function LeadDashboard() {
                               )}
                             </td>
                           )}
-                          {adminVisibleColumns.adSetName && (
+                          {isAdmin && adminVisibleColumns.adSetName && (
                             <td className="px-4 py-3 text-slate-400 align-top [overflow-wrap:anywhere] italic" title="Not tracked yet — no ad-set-level data ingested">—</td>
                           )}
                           {isAdmin && adminVisibleColumns.campaign && (
@@ -1535,17 +1558,22 @@ export default function LeadDashboard() {
                   panelWidth={200}
                 />
 
-                {/* Campaigns — grouped by ad platform, same as the Leads tab's own Campaigns dropdown */}
-                <SearchableMultiSelect
-                  options={analyticsCampaignOptions}
-                  selected={analyticsCampaignFilter}
-                  onChange={(next) => { setAnalyticsPage(1); setAnalyticsCampaignFilter(next); }}
-                  placeholder="Campaigns"
-                  searchPlaceholder="Search campaigns..."
-                  renderLabel={(l) => <PlatformLabel text={l} />}
-                  panelWidth={260}
-                  align="right"
-                />
+                {/* Campaigns — grouped by ad platform, same as the Leads tab's own
+                    Campaigns dropdown — Admin-only, same tier as that one and the
+                    Source/Ad Set Name columns. See
+                    project_crm_role_based_lead_scoping memory (2026-10-09). */}
+                {isAdmin && (
+                  <SearchableMultiSelect
+                    options={analyticsCampaignOptions}
+                    selected={analyticsCampaignFilter}
+                    onChange={(next) => { setAnalyticsPage(1); setAnalyticsCampaignFilter(next); }}
+                    placeholder="Campaigns"
+                    searchPlaceholder="Search campaigns..."
+                    renderLabel={(l) => <PlatformLabel text={l} />}
+                    panelWidth={260}
+                    align="right"
+                  />
+                )}
               </div>
 
               <>
@@ -2222,7 +2250,7 @@ export default function LeadDashboard() {
                     </button>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
-                    {ADMIN_COLUMNS.filter(c => c.key !== "campaign").map(c => {
+                    {ADMIN_COLUMNS.filter(c => c.key !== "campaign" && c.key !== "source" && c.key !== "adSetName").map(c => {
                       const isOn = adminVisibleColumns[c.key];
                       return (
                         <button
