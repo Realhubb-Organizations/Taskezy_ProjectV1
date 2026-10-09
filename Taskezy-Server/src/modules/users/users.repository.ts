@@ -87,6 +87,12 @@ export async function findById(id: string): Promise<FullUserRow | undefined> {
   return rows[0];
 }
 
+/** Ids of every user reporting directly to `managerId` — used to scope a Manager's CRM lead visibility to their own team. */
+export async function findDirectReportIds(managerId: string): Promise<string[]> {
+  const { rows } = await query<{ id: string }>(`SELECT id FROM users WHERE manager_id = $1`, [managerId]);
+  return rows.map(r => r.id);
+}
+
 /** True if `id` refers to an ACTIVE user with role_type MANAGER — the only valid managerId target. */
 export async function isActiveManager(id: string): Promise<boolean> {
   const { rows } = await query<{ ok: boolean }>(

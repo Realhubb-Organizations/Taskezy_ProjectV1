@@ -10,16 +10,25 @@ import { pickAgentForProperty, createPropertyAgentPicker } from "../properties/p
 import { broadcastLeadChanged } from "./leads.realtime";
 
 /**
- * Mirrors the frontend's isSalesMember scoping rule (AppContext.tsx /
- * LeadDashboard.tsx): a SALES department "Member" only ever sees their own
- * leads; Managers, Finance, and Admin see everything. This is the server-side
- * enforcement of that rule — the frontend's version was only ever a UI
- * filter, trivially bypassable by calling the API directly, which is exactly
- * why this needs to be re-checked here, not trusted from the client.
+ * Mirrors the frontend's role-based lead-scoping convention (see the
+ * project_crm_role_based_lead_scoping memory / AppContext.tsx /
+ * LeadDashboard.tsx): a sales "Member" only ever sees their own leads; a
+ * "Manager" sees themself plus their own direct reports' leads — never the
+ * whole company; Finance and Admin see everything. This is the server-side
+ * enforcement of that rule — the frontend's version is only ever a UI
+ * filter, trivially bypassable by calling the API directly, which is
+ * exactly why this needs to be re-checked here, not trusted from the
+ * client. Returns the list of agent ids the caller's leads are restricted
+ * to, or undefined for "no restriction" (Finance/Admin).
  */
-function scopeForCaller(caller: AccessTokenPayload): string | undefined {
-  const isSalesMember = caller.role === "AGENT" && caller.roleType === "MEMBER";
-  return isSalesMember ? caller.sub : undefined;
+async function scopeForCaller(caller: AccessTokenPayload): Promise<string[] | undefined> {
+  if (caller.role !== "AGENT") return undefined;
+  if (caller.roleType === "MEMBER") return [caller.sub];
+  if (caller.roleType === "MANAGER") {
+    const reportIds = await usersRepo.findDirectReportIds(caller.sub);
+    return [caller.sub, ...reportIds];
+  }
+  return undefined;
 }
 
 export async function listLeads(caller: AccessTokenPayload, filter: {
@@ -33,7 +42,7 @@ export async function listLeads(caller: AccessTokenPayload, filter: {
   search?: string;
   excludeBulkUpload?: boolean;
 }) {
-  const scopedToAgentId = scopeForCaller(caller);
+  const scopedToAgentIds = await scopeForCaller(caller);
   const { rows, totalCount } = await repo.findMany({
     page: filter.page,
     pageSize: filter.pageSize,
@@ -44,7 +53,7 @@ export async function listLeads(caller: AccessTokenPayload, filter: {
     dateTo: filter.dateTo,
     search: filter.search,
     excludeBulkUpload: filter.excludeBulkUpload,
-    scopedToAgentId
+    scopedToAgentIds
   });
   return {
     rows,
@@ -103,7 +112,7 @@ export async function getLeadStats(caller: AccessTokenPayload, filter: {
   search?: string;
   excludeBulkUpload?: boolean;
 }): Promise<LeadSummaryStats> {
-  const scopedToAgentId = scopeForCaller(caller);
+  const scopedToAgentIds = await scopeForCaller(caller);
   const grouped = await repo.getStats({
     statusCodes: filter.status,
     assignedAgentId: filter.assignedAgentId,
@@ -112,7 +121,7 @@ export async function getLeadStats(caller: AccessTokenPayload, filter: {
     dateTo: filter.dateTo,
     search: filter.search,
     excludeBulkUpload: filter.excludeBulkUpload,
-    scopedToAgentId
+    scopedToAgentIds
   });
 
   const countFor = (code: string): number =>
@@ -131,8 +140,8 @@ export async function getLeadStats(caller: AccessTokenPayload, filter: {
 }
 
 export async function getLead(caller: AccessTokenPayload, id: string) {
-  const scopedToAgentId = scopeForCaller(caller);
-  const lead = await repo.findById(id, scopedToAgentId);
+  const scopedToAgentIds = await scopeForCaller(caller);
+  const lead = await repo.findById(id, scopedToAgentIds);
   if (!lead) throw ApiError.notFound("Lead not found");
   return lead;
 }
@@ -388,8 +397,8 @@ export async function updateLeadStatus(
   dealValue: number | undefined,
   subStatus?: string
 ) {
-  const scopedToAgentId = scopeForCaller(caller);
-  const existing = await repo.findById(leadId, scopedToAgentId);
+  const scopedToAgentIds = await scopeForCaller(caller);
+  const existing = await repo.findById(leadId, scopedToAgentIds);
   if (!existing) throw ApiError.notFound("Lead not found");
   await assertStatusChangeAllowed(caller, existing.assigned_agent_id);
 
@@ -445,14 +454,14 @@ export async function updateLeadStatus(
   await deleteLeadActivityNotifications(leadId);
 
   broadcastLeadChanged(leadId);
-  return repo.findById(leadId, scopedToAgentId);
+  return repo.findById(leadId, scopedToAgentIds);
 }
 
 export async function editLead(caller: AccessTokenPayload, leadId: string, input: repo.EditLeadInput) {
   // Same ownership rule as read access: a sales member may only edit their
   // own leads; managers/finance/admin may edit any lead.
-  const scopedToAgentId = scopeForCaller(caller);
-  const existing = await repo.findById(leadId, scopedToAgentId);
+  const scopedToAgentIds = await scopeForCaller(caller);
+  const existing = await repo.findById(leadId, scopedToAgentIds);
   if (!existing) throw ApiError.notFound("Lead not found");
 
   await repo.update(leadId, input);
@@ -491,15 +500,15 @@ async function assertReassignAllowed(caller: AccessTokenPayload, newAgentId: str
 // is a normal CRM action, not an admin-only one.
 /** Sets the lead's current note (owner, their manager or an admin) and records it in Activity History. */
 export async function updateLeadNote(caller: AccessTokenPayload, leadId: string, note: string) {
-  const scopedToAgentId = scopeForCaller(caller);
-  const existing = await repo.findById(leadId, scopedToAgentId);
+  const scopedToAgentIds = await scopeForCaller(caller);
+  const existing = await repo.findById(leadId, scopedToAgentIds);
   if (!existing) throw ApiError.notFound("Lead not found");
   await assertStatusChangeAllowed(caller, existing.assigned_agent_id, "edit its notes");
   await withTransaction(async (client) => {
     await repo.setNote(client, leadId, note, caller.sub);
     await repo.insertLeadLog(client, leadId, caller.sub, caller.name, `Note: ${note}`);
   });
-  return repo.findById(leadId, scopedToAgentId);
+  return repo.findById(leadId, scopedToAgentIds);
 }
 
 // `note` is required from the API (reassignLeadSchema); automatic internal

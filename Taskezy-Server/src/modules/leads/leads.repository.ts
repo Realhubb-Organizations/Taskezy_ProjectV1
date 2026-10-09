@@ -58,7 +58,7 @@ export interface LeadListRow {
 export interface LeadFilterConditions {
   /** Multi-select — admin CRM lets admins check multiple statuses at once. */
   statusCodes?: string[];
-  /** Multi-select, ignored when scopedToAgentId is set (see findMany). */
+  /** Multi-select, ANDed with scopedToAgentIds when both are set (see findMany). */
   assignedAgentId?: string[];
   /** Matches lead.campaign || lead.source, mirroring the frontend's client-side filter. */
   campaign?: string[];
@@ -68,8 +68,8 @@ export interface LeadFilterConditions {
   search?: string;
   /** Leave out Data Calling leads (source "Bulk Upload"). */
   excludeBulkUpload?: boolean;
-  /** When set (non-admin/manager caller), results are hard-restricted to this agent's own leads. */
-  scopedToAgentId?: string;
+  /** When set (a sales Member or Manager caller — see leads.service.ts's scopeForCaller), results are hard-restricted to these agent ids: just the caller for a Member, the caller plus their direct reports for a Manager. Always ANDed with assignedAgentId, never overridden by it — this is a security boundary, the client's own filter choice is not allowed to widen it. */
+  scopedToAgentIds?: string[];
 }
 
 export interface LeadListFilter extends LeadFilterConditions {
@@ -82,10 +82,12 @@ function buildLeadWhereClause(filter: LeadFilterConditions): { whereClause: stri
   const conditions: string[] = [];
   const params: unknown[] = [];
 
-  if (filter.scopedToAgentId) {
-    params.push(filter.scopedToAgentId);
-    conditions.push(`l.assigned_agent_id = $${params.length}`);
-  } else if (filter.assignedAgentId && filter.assignedAgentId.length > 0) {
+  if (filter.scopedToAgentIds && filter.scopedToAgentIds.length > 0) {
+    params.push(filter.scopedToAgentIds);
+    conditions.push(`l.assigned_agent_id = ANY($${params.length}::uuid[])`);
+  }
+
+  if (filter.assignedAgentId && filter.assignedAgentId.length > 0) {
     if (filter.assignedAgentId.length === 1) {
       params.push(filter.assignedAgentId[0]);
       conditions.push(`l.assigned_agent_id = $${params.length}`);
@@ -202,12 +204,12 @@ export async function getStats(filter: LeadFilterConditions): Promise<StatusCode
   return rows;
 }
 
-export async function findById(id: string, scopedToAgentId?: string): Promise<LeadListRow | undefined> {
+export async function findById(id: string, scopedToAgentIds?: string[]): Promise<LeadListRow | undefined> {
   const params: unknown[] = [id];
   let whereExtra = "";
-  if (scopedToAgentId) {
-    params.push(scopedToAgentId);
-    whereExtra = `AND l.assigned_agent_id = $2`;
+  if (scopedToAgentIds && scopedToAgentIds.length > 0) {
+    params.push(scopedToAgentIds);
+    whereExtra = `AND l.assigned_agent_id = ANY($2::uuid[])`;
   }
   const { rows } = await query<LeadListRow>(`${LIST_SELECT} WHERE l.id = $1 ${whereExtra}`, params);
   return rows[0];
