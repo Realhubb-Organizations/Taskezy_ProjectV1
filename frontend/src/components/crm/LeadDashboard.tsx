@@ -268,7 +268,13 @@ export default function LeadDashboard() {
   };
 
   const renderStatusCell = (l: Lead) => {
-    if (!canChangeLeadStatus(l, currentUser, users)) {
+    // Manager can see but never change a lead's status directly — only an
+    // Admin can; this was already true for this page's LeadDetailDrawer
+    // (managerStatusReadOnly below), now extended to the table row too, so
+    // there's no remaining spot here where a Manager could edit status
+    // outside the drawer's existing lock.
+    // See project_crm_role_based_lead_scoping memory (2026-10-10).
+    if (!canChangeLeadStatus(l, currentUser, users) || isManager) {
       return <span className="inline-block max-w-[110px] text-[11px] text-slate-700" title={STATUS_LOCKED_HINT}>{l.status}</span>;
     }
     const allOptions = STATUS_OPTIONS.includes(l.status) ? STATUS_OPTIONS : [l.status, ...STATUS_OPTIONS];
@@ -603,7 +609,13 @@ export default function LeadDashboard() {
 
   const QUALIFIED_STATUS_OPTIONS = STATUS_OPTIONS.filter(s => !UNQUALIFIED_STATUSES.includes(s));
 
-  const [adminVisibleColumns, setAdminVisibleColumns] = useState<Record<AdminColumnKey, boolean>>(ADMIN_DEFAULT_VISIBLE_COLUMNS);
+  // Manager/Member actually work this table by calling/WhatsApping leads
+  // straight from the row, so the Actions column starts visible for them
+  // instead of buried behind the Filter panel. Admin's default is
+  // untouched. See project_crm_role_based_lead_scoping memory (2026-10-10).
+  const [adminVisibleColumns, setAdminVisibleColumns] = useState<Record<AdminColumnKey, boolean>>(
+    isAdmin ? ADMIN_DEFAULT_VISIBLE_COLUMNS : { ...ADMIN_DEFAULT_VISIBLE_COLUMNS, actions: true }
+  );
 
   const toggleAdminColumn = (key: AdminColumnKey) => {
     setAdminVisibleColumns(prev => ({ ...prev, [key]: !prev[key] }));
@@ -1614,6 +1626,8 @@ export default function LeadDashboard() {
               </div>
 
               <>
+                {isAdmin ? (
+                  <>
                   <div className="overflow-x-auto">
                     <table
                       className="w-full text-left text-xs border-collapse table-fixed"
@@ -1832,6 +1846,114 @@ export default function LeadDashboard() {
                     onRowsPerPageChange={setAnalyticsRowsPerPage}
                     rowLabel="Manager"
                   />
+                  </>
+                ) : (
+                  // Manager viewer: scopeForCaller already restricts this tab
+                  // to exactly one row (the manager's own) — a "Manager Name"
+                  // table with one row and a click to expand it is a pointless
+                  // extra layer, so skip straight to a flat list: the manager's
+                  // own individual stats as the first row, then each direct
+                  // report, using the same "Team Member" columns the nested
+                  // view already used. See project_crm_role_based_lead_scoping
+                  // memory (2026-10-10).
+                  (() => {
+                    const ownRow = adminAgentBreakdown[0];
+                    const flatMembers = ownRow
+                      ? [
+                          {
+                            name: ownRow.agentName,
+                            total: ownRow.total,
+                            qualified: ownRow.qualified,
+                            unqualified: ownRow.unqualified,
+                            siteVisits: ownRow.siteVisits,
+                            qlPct: ownRow.qlPct,
+                            ql2svPct: ownRow.ql2svPct
+                          },
+                          ...ownRow.directReports
+                        ]
+                      : [];
+                    if (isDataLoading && flatMembers.length === 0) {
+                      return <TableRowsSkeleton rows={6} columns={1 + ANALYTICS_COLUMNS.filter(c => c.key !== "teamTotal" && analyticsVisibleColumns[c.key]).length} />;
+                    }
+                    if (flatMembers.length === 0) {
+                      return (
+                        <div className="px-4 py-10 text-center">
+                          <p className="text-sm font-semibold text-slate-600">No leads in this date range</p>
+                          <p className="text-[11px] text-slate-400 mt-1">Try a wider date range or clear the filters above.</p>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="overflow-x-auto">
+                        <PaginatedSubList items={flatMembers} rowLabel="Member">
+                          {(pageRows) => (
+                            <table className="w-full text-left text-xs border-collapse table-fixed">
+                              <colgroup>
+                                <col />
+                                {analyticsVisibleColumns.total && <col />}
+                                {analyticsVisibleColumns.qualified && <col />}
+                                {analyticsVisibleColumns.unqualified && <col />}
+                                {analyticsVisibleColumns.siteVisits && <col />}
+                                {analyticsVisibleColumns.qlPct && <col />}
+                                {analyticsVisibleColumns.ql2svPct && <col />}
+                              </colgroup>
+                              <thead>
+                                <tr className="border-b border-slate-200 text-left text-xs font-bold text-slate-800">
+                                  <th className="px-4 py-3 whitespace-nowrap">Team Member</th>
+                                  {analyticsVisibleColumns.total && <th className="px-4 py-3 whitespace-nowrap">Total Leads Assigned</th>}
+                                  {analyticsVisibleColumns.qualified && <th className="px-4 py-3 whitespace-nowrap">Qualified Leads</th>}
+                                  {analyticsVisibleColumns.unqualified && <th className="px-4 py-3 whitespace-nowrap">Unqualified Leads</th>}
+                                  {analyticsVisibleColumns.siteVisits && <th className="px-4 py-3 whitespace-nowrap">Site Visit Leads</th>}
+                                  {analyticsVisibleColumns.qlPct && <th className="px-4 py-3 whitespace-nowrap">QL&apos;s %age</th>}
+                                  {analyticsVisibleColumns.ql2svPct && <th className="px-4 py-3 whitespace-nowrap">QL2SV %age</th>}
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100 text-slate-700">
+                                {pageRows.map(member => (
+                                  <tr key={member.name}>
+                                    <td className="px-4 py-3 font-semibold">
+                                      <StatCell value={member.name} onClick={() => openAnalyticsDrilldown([member.name], null, `${member.name} — All Leads`)} />
+                                    </td>
+                                    {analyticsVisibleColumns.total && (
+                                      <td className="px-4 py-3">
+                                        <StatCell value={member.total} onClick={() => openAnalyticsDrilldown([member.name], null, `${member.name} — All Leads`)} />
+                                      </td>
+                                    )}
+                                    {analyticsVisibleColumns.qualified && (
+                                      <td className="px-4 py-3">
+                                        <StatCell value={member.qualified} onClick={() => openAnalyticsDrilldown([member.name], QUALIFIED_STATUS_OPTIONS, `${member.name} — Qualified Leads`)} />
+                                      </td>
+                                    )}
+                                    {analyticsVisibleColumns.unqualified && (
+                                      <td className="px-4 py-3">
+                                        <StatCell value={member.unqualified} onClick={() => openAnalyticsDrilldown([member.name], UNQUALIFIED_STATUSES, `${member.name} — Unqualified Leads`)} />
+                                      </td>
+                                    )}
+                                    {analyticsVisibleColumns.siteVisits && (
+                                      <td className="px-4 py-3">
+                                        <StatCell value={member.siteVisits} onClick={() => openAnalyticsDrilldown([member.name], SITE_VISIT_STATUSES, `${member.name} — Site Visit Leads`)} />
+                                      </td>
+                                    )}
+                                    {analyticsVisibleColumns.qlPct && (
+                                      <td className="px-4 py-3">
+                                        <StatCell value={`${member.qlPct.toFixed(2)}%`} onClick={() => openAnalyticsDrilldown([member.name], QUALIFIED_STATUS_OPTIONS, `${member.name} — Qualified Leads`)} />
+                                      </td>
+                                    )}
+                                    {analyticsVisibleColumns.ql2svPct && (
+                                      <td className="px-4 py-3">
+                                        <StatCell value={`${member.ql2svPct.toFixed(2)}%`} onClick={() => openAnalyticsDrilldown([member.name], SITE_VISIT_STATUSES, `${member.name} — Site Visit Leads`)} />
+                                      </td>
+                                    )}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          )}
+                        </PaginatedSubList>
+                      </div>
+                    );
+                  })()
+                )}
               </>
             </div>
 
@@ -2181,6 +2303,7 @@ export default function LeadDashboard() {
           onUpdateStatus={handleUpdateLeadStatus}
           onReassigned={() => setLeadsRefreshKey(k => k + 1)}
           onNoteSaved={handleNoteSaved}
+          managerStatusReadOnly
         />
 
         {/* Filter panel (column visibility) — opened from both the Leads
