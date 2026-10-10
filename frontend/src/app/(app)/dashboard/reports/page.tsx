@@ -9,6 +9,7 @@ import MarketingReports from "@/components/reports/MarketingReports";
 import ManagerReports from "@/components/reports/ManagerReports";
 import AgentReports from "@/components/reports/AgentReports";
 import { todayIso, toIsoDate } from "@/components/ui/DateRangePicker";
+import { maskPhone, maskEmail } from "@/lib/maskPII";
 
 const MAIN_TABS = [
   { key: "marketing", label: "Marketing Reports", icon: Megaphone },
@@ -27,9 +28,10 @@ function daysAgo(n: number): string {
 }
 
 function ReportsPageContent() {
-  const { leads, currentUser } = useApp();
+  const { leads, currentUser, activeRole } = useApp();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const isAdmin = activeRole === "ADMIN";
 
   // Marketing spend/CPL/campaign data and other managers' team performance
   // aren't a sales agent's concern — hide both tabs entirely for a Member,
@@ -52,7 +54,9 @@ function ReportsPageContent() {
     let csvContent = "data:text/csv;charset=utf-8,";
     csvContent += "ID,Name,Phone,Email,Status,Assigned Agent,Property,Assigned At,First Response At\n";
     leads.forEach(l => {
-      csvContent += `"${l.id}","${l.name}","${l.phone}","${l.email}","${l.status}","${l.assignedAgent}","${l.property || "N/A"}","${l.assignedAt || ""}","${l.firstResponseAt || ""}"\n`;
+      const phone = isAdmin ? l.phone : maskPhone(l.phone);
+      const email = isAdmin ? l.email : maskEmail(l.email);
+      csvContent += `"${l.id}","${l.name}","${phone}","${email}","${l.status}","${l.assignedAgent}","${l.property || "N/A"}","${l.assignedAt || ""}","${l.firstResponseAt || ""}"\n`;
     });
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");

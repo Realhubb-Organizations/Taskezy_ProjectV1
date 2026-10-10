@@ -2,12 +2,13 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { Search, Copy, Check, X } from "lucide-react";
-import { Lead, FollowupCall, LeadStatus } from "@/context/AppContext";
+import { Lead, FollowupCall, LeadStatus, useApp } from "@/context/AppContext";
 import { STATUS_OPTIONS } from "@/lib/leadStatusMapping";
 import { buildSalesPendingTasks, PendingTask, TaskBucket } from "@/lib/salesPendingTasks";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
+import { maskPhone, maskEmail } from "@/lib/maskPII";
 
 // Row colors per the sales-dashboard design: missed (no action taken),
 // pending (due now — becomes missed if not acted on within 10 min),
@@ -47,6 +48,9 @@ export default function SalesPendingTasksTable({
   taskFilter?: (t: PendingTask) => boolean;
   visibleBuckets?: TaskBucket[]; // legend entries to show — e.g. a Pending Task view has no Upcoming
 }) {
+  const { currentUser } = useApp();
+  const isAdmin = currentUser?.role === "ADMIN";
+
   // Buckets are time-based (pending → missed after 10 min), so re-evaluate
   // periodically rather than only when data changes.
   const [now, setNow] = useState(() => new Date());
@@ -244,20 +248,24 @@ export default function SalesPendingTasksTable({
                       )}
                       {t.phone && (
                         <div className="flex items-center gap-1.5 mt-0.5">
-                          <span className="text-[11px] text-slate-600 [overflow-wrap:anywhere]">{t.phone}</span>
-                          <button onClick={() => copy(`${t.id}-phone`, t.phone)} className="text-slate-400 hover:text-brand-700 shrink-0" title="Copy phone number">
-                            {copied === `${t.id}-phone` ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
-                          </button>
+                          <span className="text-[11px] text-slate-600 [overflow-wrap:anywhere]">{isAdmin ? t.phone : maskPhone(t.phone)}</span>
+                          {isAdmin && (
+                            <button onClick={() => copy(`${t.id}-phone`, t.phone)} className="text-slate-400 hover:text-brand-700 shrink-0" title="Copy phone number">
+                              {copied === `${t.id}-phone` ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
+                            </button>
+                          )}
                         </div>
                       )}
                     </td>
                     <td className={`${cell} px-4 overflow-hidden`}>
                       {t.email ? (
                         <div className="flex items-center gap-1.5">
-                          <span className="text-slate-700 [overflow-wrap:anywhere]" title={t.email}>{t.email}</span>
-                          <button onClick={() => copy(`${t.id}-email`, t.email)} className="text-slate-400 hover:text-brand-700 shrink-0" title="Copy email">
-                            {copied === `${t.id}-email` ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
-                          </button>
+                          <span className="text-slate-700 [overflow-wrap:anywhere]" title={isAdmin ? t.email : undefined}>{isAdmin ? t.email : maskEmail(t.email)}</span>
+                          {isAdmin && (
+                            <button onClick={() => copy(`${t.id}-email`, t.email)} className="text-slate-400 hover:text-brand-700 shrink-0" title="Copy email">
+                              {copied === `${t.id}-email` ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
+                            </button>
+                          )}
                         </div>
                       ) : (
                         <span className="text-slate-400">—</span>

@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import { useApp, Invoice, ReimbursementClaim, Lead, CalendarEventType, mapApiInvoiceToFrontend, mapApiReimbursementToFrontend } from "@/context/AppContext";
+import { maskPhone, maskEmail } from "@/lib/maskPII";
 import { useSearchParams } from "next/navigation";
 import { useDialog } from "@/components/ui/DialogProvider";
 import MonthCalendar from "@/components/calendar/MonthCalendar";
@@ -570,7 +571,7 @@ export default function FinancePage() {
                   <div key={l.id} className="p-4 rounded-xl border border-slate-200 bg-slate-50 flex flex-col sm:flex-row justify-between sm:items-center gap-4 text-xs">
                     <div>
                       <p className="font-bold text-slate-800">{l.name}</p>
-                      <p className="text-[10px] text-slate-500 font-mono mt-0.5">+91-{l.phone} • {l.email}</p>
+                      <p className="text-[10px] text-slate-500 font-mono mt-0.5">+91-{activeRole === "ADMIN" ? l.phone : maskPhone(l.phone)} • {activeRole === "ADMIN" ? l.email : maskEmail(l.email)}</p>
                       <div className="flex gap-2 mt-2">
                         <span className="bg-brand-50 border border-brand-100 text-brand-700 px-1.5 py-0.5 rounded text-[9px] font-bold">
                           Property: {l.property || "Not set"}
@@ -732,7 +733,7 @@ export default function FinancePage() {
                 >
                   <option value="">Select the lead this invoice is for…</option>
                   {leads.map(l => (
-                    <option key={l.id} value={l.id}>{l.name} — {l.phone}</option>
+                    <option key={l.id} value={l.id}>{l.name} — {activeRole === "ADMIN" ? l.phone : maskPhone(l.phone)}</option>
                   ))}
                 </select>
               </div>

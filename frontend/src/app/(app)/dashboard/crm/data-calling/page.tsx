@@ -17,6 +17,7 @@ import { nextFollowupFor } from "@/lib/followups";
 import NextCallCell from "@/components/crm/NextCallCell";
 import { useDialog } from "@/components/ui/DialogProvider";
 import LeadNoteCell from "@/components/crm/LeadNoteCell";
+import { maskPhone, maskEmail } from "@/lib/maskPII";
 
 // Data Calling's whole status model is deliberately just these three — a
 // cold-outreach triage pipeline, not the full CRM pipeline: a fresh
@@ -980,7 +981,7 @@ export default function DataCallingPage() {
                         className="hover:bg-slate-50/50 transition-colors"
                       >
                         <td className="px-4 py-2.5 font-semibold text-slate-900 [overflow-wrap:anywhere]">{l.name}</td>
-                        <td className="px-4 py-2.5 font-mono [overflow-wrap:anywhere]">{l.phone}</td>
+                        <td className="px-4 py-2.5 font-mono [overflow-wrap:anywhere]">{isAdmin ? l.phone : maskPhone(l.phone)}</td>
                         <td className="px-4 py-2.5">{l.status}</td>
                         <td className="px-4 py-2.5 [overflow-wrap:anywhere]">{l.assignedAgent || "—"}</td>
                       </tr>
@@ -1076,7 +1077,7 @@ export default function DataCallingPage() {
                         className="hover:bg-slate-50/50 transition-colors"
                       >
                         <td className="px-4 py-2.5 font-semibold text-slate-900 [overflow-wrap:anywhere]">{l.name}</td>
-                        <td className="px-4 py-2.5 font-mono [overflow-wrap:anywhere]">{l.phone}</td>
+                        <td className="px-4 py-2.5 font-mono [overflow-wrap:anywhere]">{isAdmin ? l.phone : maskPhone(l.phone)}</td>
                         <td className="px-4 py-2.5">{l.status}</td>
                         <td className="px-4 py-2.5 [overflow-wrap:anywhere]">{l.assignedAgent || "—"}</td>
                       </tr>
@@ -1532,20 +1533,24 @@ export default function DataCallingPage() {
                           </button>
                           {l.phone && (
                             <div className="flex items-center gap-1 mt-0.5 text-[10px] text-slate-400 font-medium">
-                              <span className="[overflow-wrap:anywhere]">{l.phone}</span>
-                              <button onClick={() => copyToClipboard(l.phone)} className="text-slate-300 hover:text-slate-500 shrink-0" title="Copy phone number">
-                                <Copy className="h-2.5 w-2.5" />
-                              </button>
+                              <span className="[overflow-wrap:anywhere]">{isAdmin ? l.phone : maskPhone(l.phone)}</span>
+                              {isAdmin && (
+                                <button onClick={() => copyToClipboard(l.phone)} className="text-slate-300 hover:text-slate-500 shrink-0" title="Copy phone number">
+                                  <Copy className="h-2.5 w-2.5" />
+                                </button>
+                              )}
                             </div>
                           )}
                         </td>
                         <td className="px-4 py-3.5">
                           {l.email ? (
                             <div className="flex items-center gap-1">
-                              <span className="min-w-0 [overflow-wrap:anywhere]" title={l.email}>{l.email}</span>
-                              <button onClick={() => copyToClipboard(l.email)} className="text-slate-300 hover:text-slate-500 shrink-0" title="Copy email">
-                                <Copy className="h-2.5 w-2.5" />
-                              </button>
+                              <span className="min-w-0 [overflow-wrap:anywhere]" title={isAdmin ? l.email : undefined}>{isAdmin ? l.email : maskEmail(l.email)}</span>
+                              {isAdmin && (
+                                <button onClick={() => copyToClipboard(l.email)} className="text-slate-300 hover:text-slate-500 shrink-0" title="Copy email">
+                                  <Copy className="h-2.5 w-2.5" />
+                                </button>
+                              )}
                             </div>
                           ) : "—"}
                         </td>

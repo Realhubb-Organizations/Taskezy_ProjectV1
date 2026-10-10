@@ -6,6 +6,9 @@ import { WhatsAppIcon, CallIcon } from "@/components/icons/ContactIcons";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
 import { SearchableMultiSelect } from "@/components/ui/SearchableDropdown";
 import TablePagination from "@/components/ui/TablePagination";
+import { useApp } from "@/context/AppContext";
+import { maskPhone } from "@/lib/maskPII";
+import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/callTrigger";
 
 export interface PendingRow {
   id: string;
@@ -29,6 +32,39 @@ export default function PendingLeadsTable({
   onViewLead?: (leadId: string) => void;
   isLoading?: boolean;
 }) {
+  const { currentUser, recordCallEnded, recordWhatsAppOpened } = useApp();
+  const isAdmin = currentUser?.role === "ADMIN";
+
+  // A pending row without a real leadId isn't an actual CRM lead yet — there's
+  // nothing to attach a call-feedback record to, so Manager/Member can't call
+  // it from here at all (rather than silently placing an untracked call).
+  // Admin is unaffected either way.
+  const handleCall = (row: PendingRow) => {
+    if (!row.leadId) {
+      window.location.href = `tel:${row.phone}`;
+      return;
+    }
+    triggerLeadCall({ id: row.leadId, phone: row.phone, name: row.name }, {
+      isAdmin,
+      onCallEnded: (leadId, startedAt, durationSeconds) => {
+        recordCallEnded(leadId, startedAt, durationSeconds).catch((err) => console.warn("Could not record call feedback gate:", err));
+      }
+    });
+  };
+  // Same "no leadId → nothing to track yet" fallback as handleCall above:
+  // plain wa.me open, no feedback-gate watcher armed.
+  const handleWhatsApp = (row: PendingRow) => {
+    if (!row.leadId) {
+      window.open(`https://wa.me/${row.phone.replace(/[^0-9]/g, "")}`, "_blank");
+      return;
+    }
+    triggerLeadWhatsApp({ id: row.leadId, phone: row.phone, name: row.name }, {
+      isAdmin,
+      onReturn: (leadId) => {
+        recordWhatsAppOpened(leadId).catch((err) => console.warn("Could not record WhatsApp feedback gate:", err));
+      }
+    });
+  };
   const [search, setSearch] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [assignedFilter, setAssignedFilter] = useState<string[]>([]);
@@ -207,10 +243,12 @@ export default function PendingLeadsTable({
                       <p className="font-bold text-slate-900 text-xs [overflow-wrap:anywhere]">{row.name}</p>
                     )}
                     <div className="flex items-center gap-1.5 mt-0.5">
-                      <span className="text-[11px] text-slate-500 font-mono [overflow-wrap:anywhere]">{row.phone}</span>
-                      <button onClick={() => handleCopy(row)} className="text-slate-350 hover:text-brand-700 shrink-0" title="Copy phone number">
-                        {copiedId === row.id ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
-                      </button>
+                      <span className="text-[11px] text-slate-500 font-mono [overflow-wrap:anywhere]">{isAdmin ? row.phone : maskPhone(row.phone)}</span>
+                      {isAdmin && (
+                        <button onClick={() => handleCopy(row)} className="text-slate-350 hover:text-brand-700 shrink-0" title="Copy phone number">
+                          {copiedId === row.id ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
+                        </button>
+                      )}
                     </div>
                   </td>
                   <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]" title={row.assignedTo}>{row.assignedTo}</td>
@@ -218,22 +256,28 @@ export default function PendingLeadsTable({
                   <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]" title={row.property}>{row.property}</td>
                   <td className="px-4 py-3 align-top">
                     <div className="flex items-center justify-end gap-1.5">
-                      <a
-                        href={`https://wa.me/${row.phone.replace(/[^0-9]/g, "")}`}
-                        target="_blank"
-                        rel="noreferrer"
+                      <button
+                        type="button"
+                        onClick={() => handleWhatsApp(row)}
                         className="inline-flex items-center justify-center h-10 w-10 sm:h-7 sm:w-7 rounded-lg bg-slate-100 text-slate-700 hover:bg-emerald-50 hover:text-emerald-600 transition-colors shrink-0"
                         title="WhatsApp"
                       >
                         <WhatsAppIcon className="h-3.5 w-3.5" />
-                      </a>
-                      <a
-                        href={`tel:${row.phone}`}
-                        className="inline-flex items-center justify-center h-10 w-10 sm:h-7 sm:w-7 rounded-lg bg-slate-100 text-slate-700 hover:bg-brand-50 hover:text-brand-700 transition-colors shrink-0"
-                        title="Call"
-                      >
-                        <CallIcon className="h-3.5 w-3.5" />
-                      </a>
+                      </button>
+                      {(() => {
+                        const rowCallAllowed = canTriggerLeadCall(isAdmin) && (isAdmin || !!row.leadId);
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => rowCallAllowed && handleCall(row)}
+                            disabled={!rowCallAllowed}
+                            className="inline-flex items-center justify-center h-10 w-10 sm:h-7 sm:w-7 rounded-lg bg-slate-100 text-slate-700 hover:bg-brand-50 hover:text-brand-700 transition-colors shrink-0 disabled:opacity-30 disabled:hover:bg-slate-100 disabled:hover:text-slate-700"
+                            title={rowCallAllowed ? "Call" : "Calling is only available on the mobile app for your role"}
+                          >
+                            <CallIcon className="h-3.5 w-3.5" />
+                          </button>
+                        );
+                      })()}
                     </div>
                   </td>
                 </tr>

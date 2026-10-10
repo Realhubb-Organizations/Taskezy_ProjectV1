@@ -10,6 +10,7 @@ import { STATUS_OPTIONS, frontendStatusToDbCode } from "@/lib/leadStatusMapping"
 import { type LeadSummaryStats } from "@/lib/leadSummaryStats";
 import { apiListLeadsPage, apiGetLeadStats, apiDeleteLead, apiBulkDeleteLeads, apiReassignLead, apiUpdateLeadStatus, type LeadListFilters } from "@/lib/apiClient";
 import { WhatsAppIcon, CallIcon, PlatformLabel } from "@/components/icons/ContactIcons";
+import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/callTrigger";
 import { LineSkeleton, TableRowsSkeleton } from "@/components/ui/Skeletons";
 import Tooltip from "@/components/ui/Tooltip";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
@@ -24,6 +25,7 @@ import { DateTimeLines, dateTimeParts } from "@/components/ui/DateTimeLines";
 import { nextFollowupFor } from "@/lib/followups";
 import NextCallCell from "./NextCallCell";
 import LeadNoteCell from "./LeadNoteCell";
+import { maskPhone, maskEmail } from "@/lib/maskPII";
 
 // The admin leads table's togglable columns (beyond the always-shown Lead
 // Name/Email/Assigned To) — driven by the Filter panel's Settings modal.
@@ -123,7 +125,9 @@ export default function LeadDashboard() {
     reassignLead,
     isDataLoading,
     leadsChangedSignal,
-    removeLeadsLocally
+    removeLeadsLocally,
+    recordCallEnded,
+    recordWhatsAppOpened
   } = useApp();
   const { toast, prompt: promptDialog } = useDialog();
 
@@ -155,6 +159,26 @@ export default function LeadDashboard() {
   // quick-filter stays admin-exclusive; a Sales Member gets the same Leads
   // table and stat bar without it.
   const isAdmin = currentUser?.role === "ADMIN";
+  const callAllowed = canTriggerLeadCall(isAdmin);
+  const handleCall = (lead: Lead) => {
+    triggerLeadCall(lead, {
+      isAdmin,
+      toast,
+      onCallEnded: (leadId, startedAt, durationSeconds) => {
+        recordCallEnded(leadId, startedAt, durationSeconds).catch((err) =>
+          console.warn("Could not record call feedback gate:", err)
+        );
+      }
+    });
+  };
+  const handleWhatsApp = (lead: Lead) => {
+    triggerLeadWhatsApp(lead, {
+      isAdmin,
+      onReturn: (leadId) => {
+        recordWhatsAppOpened(leadId).catch((err) => console.warn("Could not record WhatsApp feedback gate:", err));
+      }
+    });
+  };
   // The Leads Analytics tab (and its "View Detailed Analytics" links) is
   // the one piece of this admin-only UI a Manager also gets — now safe to
   // show, since (2026-10-09) a Manager's `scopedLeads` below is restricted
@@ -1397,9 +1421,9 @@ export default function LeadDashboard() {
                             >
                               {l.name}
                             </button>
-                            <p className="text-[11px] text-slate-500 font-mono mt-0.5 [overflow-wrap:anywhere]">{l.phone}</p>
+                            <p className="text-[11px] text-slate-500 font-mono mt-0.5 [overflow-wrap:anywhere]">{isAdmin ? l.phone : maskPhone(l.phone)}</p>
                           </td>
-                          <td className="px-4 py-3 text-slate-600 align-top [overflow-wrap:anywhere]" title={l.email || "—"}>{l.email || "—"}</td>
+                          <td className="px-4 py-3 text-slate-600 align-top [overflow-wrap:anywhere]" title={l.email ? (isAdmin ? l.email : maskEmail(l.email)) : "—"}>{l.email ? (isAdmin ? l.email : maskEmail(l.email)) : "—"}</td>
                           <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]" title={l.assignedAgent || "Unassigned"}>{l.assignedAgent || "Unassigned"}</td>
 
                           {adminVisibleColumns.date && (
@@ -1438,22 +1462,23 @@ export default function LeadDashboard() {
                           )}
                           {adminVisibleColumns.actions && (
                             <td className="px-4 py-3 align-top text-right">
-                              <a
-                                href={`https://wa.me/${l.phone.replace(/[^0-9]/g, "")}`}
-                                target="_blank"
-                                rel="noreferrer"
+                              <button
+                                type="button"
+                                onClick={() => handleWhatsApp(l)}
                                 className="inline-flex items-center justify-center h-10 w-10 sm:h-7 sm:w-7 rounded-lg bg-slate-100 text-slate-700 hover:bg-emerald-50 hover:text-emerald-600 transition-colors"
                                 title="WhatsApp"
                               >
                                 <WhatsAppIcon className="h-3.5 w-3.5" />
-                              </a>
-                              <a
-                                href={`tel:${l.phone}`}
-                                className="inline-flex items-center justify-center h-10 w-10 sm:h-7 sm:w-7 rounded-lg bg-slate-100 text-slate-700 hover:bg-brand-50 hover:text-brand-700 transition-colors ml-1.5"
-                                title="Call"
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => callAllowed && handleCall(l)}
+                                disabled={!callAllowed}
+                                className="inline-flex items-center justify-center h-10 w-10 sm:h-7 sm:w-7 rounded-lg bg-slate-100 text-slate-700 hover:bg-brand-50 hover:text-brand-700 transition-colors ml-1.5 disabled:opacity-30 disabled:hover:bg-slate-100 disabled:hover:text-slate-700"
+                                title={callAllowed ? "Call" : "Calling is only available on the mobile app for your role"}
                               >
                                 <CallIcon className="h-3.5 w-3.5" />
-                              </a>
+                              </button>
                               {isAdmin && (
                                 <button
                                   type="button"
@@ -1890,9 +1915,9 @@ export default function LeadDashboard() {
                                   >
                                     {l.name}
                                   </button>
-                                  <p className="text-[11px] text-slate-500 font-mono mt-0.5 [overflow-wrap:anywhere]">{l.phone}</p>
+                                  <p className="text-[11px] text-slate-500 font-mono mt-0.5 [overflow-wrap:anywhere]">{isAdmin ? l.phone : maskPhone(l.phone)}</p>
                                 </td>
-                                <td className="px-4 py-3 text-slate-600 align-top [overflow-wrap:anywhere]" title={l.email || "—"}>{l.email || "—"}</td>
+                                <td className="px-4 py-3 text-slate-600 align-top [overflow-wrap:anywhere]" title={l.email ? (isAdmin ? l.email : maskEmail(l.email)) : "—"}>{l.email ? (isAdmin ? l.email : maskEmail(l.email)) : "—"}</td>
                                 <td className="px-4 py-3 align-top">
                                   {renderStatusCell(l)}
                                 </td>

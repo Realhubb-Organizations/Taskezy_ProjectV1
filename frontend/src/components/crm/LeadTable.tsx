@@ -1,7 +1,9 @@
 import React from "react";
 import { Phone, MessageSquare, Mail, Eye, Trash2, ShieldAlert, Award } from "lucide-react";
-import { Lead, LeadStatus } from "@/context/AppContext";
+import { Lead, LeadStatus, useApp } from "@/context/AppContext";
 import { useDialog } from "@/components/ui/DialogProvider";
+import { maskPhone } from "@/lib/maskPII";
+import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/callTrigger";
 
 interface LeadTableProps {
   leads: Lead[];
@@ -17,6 +19,9 @@ export default function LeadTable({
   activeRole
 }: LeadTableProps) {
   const { toast } = useDialog();
+  const { recordCallEnded, recordWhatsAppOpened } = useApp();
+  const isAdmin = activeRole === "ADMIN";
+  const callAllowed = canTriggerLeadCall(isAdmin);
 
   const getStatusColor = (status: LeadStatus) => {
     switch (status) {
@@ -48,17 +53,25 @@ export default function LeadTable({
     }
   };
 
-  const triggerCall = (phone: string, name: string) => {
-    // API Integration Point: Wire up dialer system call action
-    toast(`Dialing ${name} at ${phone}...`, "info");
-    window.location.href = `tel:${phone}`;
+  const handleCall = (lead: Lead) => {
+    triggerLeadCall(lead, {
+      isAdmin,
+      toast,
+      onCallEnded: (leadId, startedAt, durationSeconds) => {
+        recordCallEnded(leadId, startedAt, durationSeconds).catch((err) =>
+          console.warn("Could not record call feedback gate:", err)
+        );
+      }
+    });
   };
 
-  const triggerWhatsApp = (phone: string, name: string) => {
-    // API Integration Point: Open WhatsApp API chat
-    const formattedPhone = phone.replace(/[^0-9]/g, "");
-    const msg = encodeURIComponent(`Hello ${name}, this is Gautham from TaskEzy regarding your real estate inquiry.`);
-    window.open(`https://wa.me/${formattedPhone}?text=${msg}`, "_blank");
+  const handleWhatsApp = (lead: Lead) => {
+    triggerLeadWhatsApp(lead, {
+      isAdmin,
+      onReturn: (leadId) => {
+        recordWhatsAppOpened(leadId).catch((err) => console.warn("Could not record WhatsApp feedback gate:", err));
+      }
+    });
   };
 
   const triggerMail = (email: string, name: string) => {
@@ -87,7 +100,7 @@ export default function LeadTable({
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="font-extrabold text-slate-800 text-xs truncate">{lead.name}</p>
-                  <p className="text-[10px] text-slate-400 font-mono">{lead.phone}</p>
+                  <p className="text-[10px] text-slate-400 font-mono">{activeRole === "ADMIN" ? lead.phone : maskPhone(lead.phone)}</p>
                 </div>
                 <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold border shrink-0 ${getStatusColor(lead.status)}`}>
                   {lead.status}
@@ -118,14 +131,15 @@ export default function LeadTable({
 
               <div className="flex items-center justify-end gap-1 pt-1 border-t border-slate-100" onClick={(e) => e.stopPropagation()}>
                 <button
-                  onClick={() => triggerCall(lead.phone, lead.name)}
-                  className="p-2 hover:bg-emerald-50 rounded-xl text-slate-400 hover:text-emerald-700 transition-all"
-                  title="Telephony Call"
+                  onClick={() => callAllowed && handleCall(lead)}
+                  disabled={!callAllowed}
+                  className="p-2 hover:bg-emerald-50 rounded-xl text-slate-400 hover:text-emerald-700 transition-all disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-400"
+                  title={callAllowed ? "Telephony Call" : "Calling is only available on the mobile app for your role"}
                 >
                   <Phone className="h-3.5 w-3.5" />
                 </button>
                 <button
-                  onClick={() => triggerWhatsApp(lead.phone, lead.name)}
+                  onClick={() => handleWhatsApp(lead)}
                   className="p-2 hover:bg-emerald-50 rounded-xl text-slate-400 hover:text-emerald-700 transition-all"
                   title="WhatsApp Chat"
                 >
@@ -194,7 +208,7 @@ export default function LeadTable({
                       </div>
                       <div className="min-w-0">
                         <p className="font-extrabold text-slate-800 truncate">{lead.name}</p>
-                        <p className="text-[10px] text-slate-400 font-mono mt-0.5">{lead.phone}</p>
+                        <p className="text-[10px] text-slate-400 font-mono mt-0.5">{activeRole === "ADMIN" ? lead.phone : maskPhone(lead.phone)}</p>
                       </div>
                     </div>
                   </td>
@@ -235,16 +249,17 @@ export default function LeadTable({
                     <div className="flex items-center justify-center gap-2">
                       {/* Call Action */}
                       <button
-                        onClick={() => triggerCall(lead.phone, lead.name)}
-                        className="p-2 hover:bg-emerald-50 border border-transparent hover:border-emerald-200 rounded-xl text-slate-400 hover:text-emerald-700 transition-all"
-                        title="Telephony Call"
+                        onClick={() => callAllowed && handleCall(lead)}
+                        disabled={!callAllowed}
+                        className="p-2 hover:bg-emerald-50 border border-transparent hover:border-emerald-200 rounded-xl text-slate-400 hover:text-emerald-700 transition-all disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:border-transparent disabled:hover:text-slate-400"
+                        title={callAllowed ? "Telephony Call" : "Calling is only available on the mobile app for your role"}
                       >
                         <Phone className="h-3.5 w-3.5" />
                       </button>
 
                       {/* WhatsApp Action */}
                       <button
-                        onClick={() => triggerWhatsApp(lead.phone, lead.name)}
+                        onClick={() => handleWhatsApp(lead)}
                         className="p-2 hover:bg-emerald-50 border border-transparent hover:border-emerald-200 rounded-xl text-slate-400 hover:text-emerald-700 transition-all"
                         title="WhatsApp Chat"
                       >
