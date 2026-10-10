@@ -24,8 +24,11 @@ fi
 NEW_VERSION="$(printf "%d.%02d" "$MAJOR" "$MINOR")"
 VERSION_CODE=$((MAJOR * 100 + MINOR))
 
-echo "== Bumping version: $CURRENT -> $NEW_VERSION (versionCode $VERSION_CODE) =="
+NEW_RELEASE_DATE="$(date +'%d %b %Y')"
+
+echo "== Bumping version: $CURRENT -> $NEW_VERSION (versionCode $VERSION_CODE), released $NEW_RELEASE_DATE =="
 echo "$NEW_VERSION" > VERSION
+echo "$NEW_RELEASE_DATE" > RELEASE_DATE
 
 GRADLE_FILE="android/app/build.gradle"
 sed -i -E "s/versionCode [0-9]+/versionCode $VERSION_CODE/" "$GRADLE_FILE"
@@ -57,7 +60,7 @@ echo "== Done =="
 echo "  android/releases/app-debug-v${NEW_VERSION}.apk"
 echo "  android/releases/app-release-v${NEW_VERSION}.aab"
 
-git add VERSION "$GRADLE_FILE"
+git add VERSION RELEASE_DATE "$GRADLE_FILE"
 git commit -m "chore: bump app version to v${NEW_VERSION}"
 
 echo ""

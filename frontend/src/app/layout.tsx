@@ -6,6 +6,7 @@ import { SkeletonTheme } from "react-loading-skeleton";
 import { AppProvider } from "@/context/AppContext";
 import NativeStatusBar from "@/components/NativeStatusBar";
 import { DialogProvider } from "@/components/ui/DialogProvider";
+import CallFeedbackGate from "@/components/CallFeedbackGate";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -39,7 +40,10 @@ export default function RootLayout({
         <NativeStatusBar />
         <SkeletonTheme baseColor="#e2e8f0" highlightColor="#f1f5f9" borderRadius={8}>
           <DialogProvider>
-            <AppProvider>{children}</AppProvider>
+            <AppProvider>
+              {children}
+              <CallFeedbackGate />
+            </AppProvider>
           </DialogProvider>
         </SkeletonTheme>
       </body>

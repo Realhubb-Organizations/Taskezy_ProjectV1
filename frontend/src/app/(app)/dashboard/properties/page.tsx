@@ -51,7 +51,7 @@ function formatDateTime(iso?: string): string {
 
 export default function PropertiesPage() {
   const { toast, confirm: confirmDialog } = useDialog();
-  const { properties, users, leads, deleteProperty, editProperty, activeRole } = useApp();
+  const { properties, users, leads, deleteProperty, editProperty, activeRole, currentUser } = useApp();
   const isAdmin = activeRole === "ADMIN";
 
   // Drawer (view/edit) state
@@ -107,11 +107,38 @@ export default function PropertiesPage() {
 
   const types = Array.from(new Set(properties.flatMap(p => splitPropertyTypes(p.type || ""))));
 
+  // Admin's label is exactly what it always was (real total, or "All
+  // Members" for the implicit-whole-roster mode) — untouched. A Manager
+  // instead sees only how many of THEIR OWN direct reports are on the
+  // property's team (blank if none of them are); a sales agent sees only
+  // whether THEY themselves are on it ("Assigned" or blank) — never a
+  // headcount or teammates' names. See project_crm_role_based_lead_scoping
+  // memory for the matching convention this follows (scope by viewer role,
+  // Admin path never touched).
   const teamLabelForProperty = (p: Property): string => {
-    if (p.teamAssignmentMode === "CUSTOM_MEMBERS" && p.assignedTeam && p.assignedTeam.length > 0) {
-      return p.assignedTeam.length === 1 ? p.assignedTeam[0].name : `${p.assignedTeam.length} Members`;
+    if (isAdmin) {
+      if (p.teamAssignmentMode === "CUSTOM_MEMBERS" && p.assignedTeam && p.assignedTeam.length > 0) {
+        return p.assignedTeam.length === 1 ? p.assignedTeam[0].name : `${p.assignedTeam.length} Members`;
+      }
+      return "All Members";
     }
-    return "All Members";
+
+    // ALL_MEMBERS mode has no explicit assignedTeam list — it means every
+    // sales-team member implicitly has the property, so expand it to the
+    // real roster before scoping rather than treating it as a separate case.
+    const assigned: { userId: string; name: string }[] =
+      p.teamAssignmentMode === "CUSTOM_MEMBERS" && p.assignedTeam && p.assignedTeam.length > 0
+        ? p.assignedTeam
+        : salesTeam.map(u => ({ userId: u.id, name: u.name }));
+
+    if (currentUser?.role_type === "Manager") {
+      const myTeamIds = new Set(users.filter(u => u.managerId === currentUser.id).map(u => u.id));
+      const mine = assigned.filter(m => myTeamIds.has(m.userId));
+      if (mine.length === 0) return "";
+      return mine.length === 1 ? mine[0].name : `${mine.length} Members`;
+    }
+
+    return currentUser && assigned.some(m => m.userId === currentUser.id) ? "Assigned" : "";
   };
 
   // Which ad platform(s) are actually generating leads for this property —
@@ -405,7 +432,8 @@ export default function PropertiesPage() {
               <col />
               <col />
               <col />
-              <col />
+              {/* Campaigns column — Admin-only, see below */}
+              {isAdmin && <col />}
               <col className={isAdmin ? "w-[220px]" : "w-[100px]"} />
             </colgroup>
             <thead>
@@ -432,16 +460,20 @@ export default function PropertiesPage() {
                   </button>
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Assigned To</th>
-                <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Campaigns</th>
+                {/* Ad-campaign source attribution is an Admin-only concern (same
+                    reasoning as the campaign linkers in the detail drawer) —
+                    hidden entirely for Manager/Member, not just emptied out.
+                    See project_crm_role_based_lead_scoping memory. */}
+                {isAdmin && <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Campaigns</th>}
                 <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {serverPropertiesLoading && pageRows.length === 0 ? (
-                <TableRowsSkeleton rows={6} columns={8} />
+                <TableRowsSkeleton rows={6} columns={isAdmin ? 8 : 7} />
               ) : pageRows.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="p-8 text-center text-slate-400 font-semibold italic">
+                  <td colSpan={isAdmin ? 8 : 7} className="p-8 text-center text-slate-400 font-semibold italic">
                     No properties match the current filters.
                   </td>
                 </tr>
@@ -459,18 +491,20 @@ export default function PropertiesPage() {
                     <td className="px-4 py-3 align-top font-semibold text-slate-800 whitespace-nowrap">{p.price ? `${p.price}*` : "—"}</td>
                     <td className="px-4 py-3 align-top text-slate-500"><DateTimeLines {...dateTimeParts(p.createdAt)} /></td>
                     <td className="px-4 py-3 align-top text-slate-600"><div className="[overflow-wrap:anywhere]">{teamLabelForProperty(p)}</div></td>
-                    <td className="px-4 py-3 align-top">
-                      {(() => {
-                        const platforms = propertySourcePlatforms(p.name);
-                        if (platforms.length === 0) return <span className="text-slate-400">—</span>;
-                        return (
-                          <div className="flex items-center gap-1.5" title={platforms.join(" & ")}>
-                            {platforms.includes("Meta") && <MetaIcon className="h-4 w-4" />}
-                            {platforms.includes("Google") && <GoogleIcon className="h-4 w-4" />}
-                          </div>
-                        );
-                      })()}
-                    </td>
+                    {isAdmin && (
+                      <td className="px-4 py-3 align-top">
+                        {(() => {
+                          const platforms = propertySourcePlatforms(p.name);
+                          if (platforms.length === 0) return <span className="text-slate-400">—</span>;
+                          return (
+                            <div className="flex items-center gap-1.5" title={platforms.join(" & ")}>
+                              {platforms.includes("Meta") && <MetaIcon className="h-4 w-4" />}
+                              {platforms.includes("Google") && <GoogleIcon className="h-4 w-4" />}
+                            </div>
+                          );
+                        })()}
+                      </td>
+                    )}
                     <td className="px-4 py-3 align-top">
                       <div className="flex items-center gap-1 whitespace-nowrap">
                         <button onClick={() => openDrawer(p, false)} className="inline-flex items-center justify-center h-10 w-10 sm:h-7 sm:w-7 rounded-lg text-slate-500 hover:text-brand-700 hover:bg-brand-50 transition-colors" title="View details">
@@ -723,7 +757,7 @@ export default function PropertiesPage() {
                     <div>
                       <span className="text-slate-450 block mb-0.5">Assigned Team</span>
                       <span className="font-bold text-slate-800 flex items-center gap-1">
-                        <Users className="h-3 w-3 text-slate-400" />
+                        {teamLabelForProperty(selectedProperty) && <Users className="h-3 w-3 text-slate-400" />}
                         {teamLabelForProperty(selectedProperty)}
                       </span>
                     </div>
@@ -746,15 +780,23 @@ export default function PropertiesPage() {
                     </div>
                   )}
 
-                  <div className="border-t border-slate-200 pt-4">
-                    <MetaCampaignLinker propertyId={selectedProperty.id} isAdmin={isAdmin} />
-                  </div>
-                  <div className="border-t border-slate-200 pt-4">
-                    <GoogleCampaignLinker propertyId={selectedProperty.id} isAdmin={isAdmin} />
-                  </div>
-                  <div className="border-t border-slate-200 pt-4">
-                    <SheetSourceLinker propertyId={selectedProperty.id} isAdmin={isAdmin} />
-                  </div>
+                  {/* Ad-source connection management is an Admin-only concern (API
+                      credentials, platform account linking) — hidden entirely for
+                      Manager/Member, not just made read-only, per the 2026-10-09
+                      instruction. See project_crm_role_based_lead_scoping memory. */}
+                  {isAdmin && (
+                    <>
+                      <div className="border-t border-slate-200 pt-4">
+                        <MetaCampaignLinker propertyId={selectedProperty.id} isAdmin={isAdmin} />
+                      </div>
+                      <div className="border-t border-slate-200 pt-4">
+                        <GoogleCampaignLinker propertyId={selectedProperty.id} isAdmin={isAdmin} />
+                      </div>
+                      <div className="border-t border-slate-200 pt-4">
+                        <SheetSourceLinker propertyId={selectedProperty.id} isAdmin={isAdmin} />
+                      </div>
+                    </>
+                  )}
 
                   <div className="border-t border-slate-200 pt-4 space-y-4">
                     <div>

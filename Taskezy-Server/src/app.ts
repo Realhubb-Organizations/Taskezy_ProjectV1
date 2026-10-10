@@ -27,6 +27,7 @@ import { metaRouter } from "./modules/meta/meta.routes";
 import { googleAdsRouter } from "./modules/google-ads/google-ads.routes";
 import { tenantSettingsRouter } from "./modules/tenant-settings/tenant-settings.routes";
 import { sheetImportRouter } from "./modules/sheet-import/sheet-import.routes";
+import { callAttemptsRouter } from "./modules/call-attempts/call-attempts.routes";
 
 export function createApp(): Express {
   const app = express();
@@ -79,6 +80,7 @@ export function createApp(): Express {
   app.use("/api/v1/properties", propertiesRouter);
   app.use("/api/v1/resale-units", resaleUnitsRouter);
   app.use("/api/v1/followups", followupsRouter);
+  app.use("/api/v1/call-attempts", callAttemptsRouter);
   app.use("/api/v1/attendance", attendanceRouter);
   app.use("/api/v1/timesheets", timesheetsRouter);
   app.use("/api/v1/reimbursements", reimbursementsRouter);

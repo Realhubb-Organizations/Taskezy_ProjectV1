@@ -897,6 +897,44 @@ export function apiCreateFollowup(input: CreateFollowupApiInput): Promise<ApiFol
   return request<ApiFollowupRow>("/api/v1/followups", { method: "POST", body: JSON.stringify(input) });
 }
 
+// --- Call/WhatsApp attempts (mandatory post-contact feedback gate) ---
+// CALL: native app only, closed by the real call-state plugin. WHATSAPP:
+// web + app, closed by "did you send it?" self-report (no send-state API
+// exists for WhatsApp on any platform). Same table/gate either way — see
+// Taskezy-Server/migrations-archive/025_call_attempts.sql.
+export interface ApiCallAttemptRow {
+  id: string;
+  lead_id: string;
+  caller_user_id: string;
+  channel: "CALL" | "WHATSAPP";
+  started_at: string | null;
+  ended_at: string;
+  duration_seconds: number | null;
+  status: "PENDING_FEEDBACK" | "COMPLETED";
+  outcome: string | null;
+  notes: string | null;
+  created_at: string;
+}
+
+// CALL: called the moment the native call-state listener fires "call
+// ended" — before the blocking feedback modal even renders, so the
+// PENDING_FEEDBACK row exists even if the app is force-quit right after the
+// call. WHATSAPP: called the moment the agent returns to Taskezy after the
+// WhatsApp button opened wa.me.
+export function apiCreateCallAttempt(input: { leadId: string; channel: "CALL" | "WHATSAPP"; startedAt?: string; durationSeconds?: number }): Promise<ApiCallAttemptRow> {
+  return request<ApiCallAttemptRow>("/api/v1/call-attempts", { method: "POST", body: JSON.stringify(input) });
+}
+
+// Checked once on every app load/session-restore so the gate re-appears
+// after a force-quit/relaunch, not just within the same in-memory session.
+export function apiGetPendingCallAttempt(): Promise<ApiCallAttemptRow | null> {
+  return request<ApiCallAttemptRow | null>("/api/v1/call-attempts/pending");
+}
+
+export function apiSubmitCallFeedback(id: string, input: { outcome: string; notes: string }): Promise<ApiCallAttemptRow> {
+  return request<ApiCallAttemptRow>(`/api/v1/call-attempts/${id}`, { method: "PATCH", body: JSON.stringify(input) });
+}
+
 // --- Attendance (derived view) ---
 export interface ApiAttendanceRow {
   user_id: string;

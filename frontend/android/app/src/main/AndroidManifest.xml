@@ -32,4 +32,9 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- CallStatePlugin: only call STATE (idle/offhook), never call history
+         (no READ_CALL_LOG) — enough to know when an agent's call to a lead
+         ends, since the lead/number is already known app-side before the
+         call is placed. -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
 </manifest>

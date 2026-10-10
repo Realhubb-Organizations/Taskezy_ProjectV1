@@ -3,14 +3,17 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "node scripts/write-version-env.js",
     "dev": "next dev",
+    "prebuild": "node scripts/write-version-env.js",
     "build": "next build",
-    "build:capacitor": "cross-env CAPACITOR_BUILD=true NEXT_PUBLIC_API_URL=https://api.taskezy.in next build",
+    "build:capacitor": "node scripts/write-version-env.js && cross-env CAPACITOR_BUILD=true NEXT_PUBLIC_API_URL=https://api.taskezy.in next build",
     "start": "next start",
     "lint": "next lint"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.2",
+    "@capacitor/app": "^8.1.2",
     "@capacitor/core": "^8.5.2",
     "@capacitor/push-notifications": "8.0.4",
     "@capacitor/status-bar": "8.0.4",

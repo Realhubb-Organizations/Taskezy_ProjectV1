@@ -81,11 +81,16 @@ import {
   ApiAdLevelSpendRow,
   ApiTimesheetRow,
   ApiTenantSettings,
-  ApiRequestError
+  ApiRequestError,
+  apiCreateCallAttempt,
+  apiGetPendingCallAttempt,
+  apiSubmitCallFeedback,
+  ApiCallAttemptRow
 } from "@/lib/apiClient";
 import { dbCodeToFrontendStatus, frontendStatusToDbCode, isRealLeadId, isRealId } from "@/lib/leadStatusMapping";
 import { initNotificationSoundUnlock, playNotificationSound } from "@/lib/notificationSound";
 import { todayIso, toIsoDate } from "@/components/ui/DateRangePicker";
+import { Capacitor } from "@capacitor/core";
 
 // --- Types ---
 export type Role = "ADMIN" | "FINANCE" | "AGENT";
@@ -502,6 +507,12 @@ interface AppState {
   invoices: Invoice[];
   notifications: Notification[];
   calendarEvents: CalendarEvent[];
+  // Set once the native call-state plugin reports a call ended (and
+  // restored on session start if one was left unresolved by a force-quit)
+  // — non-null blocks the whole app behind CallFeedbackGate until
+  // submitCallFeedback resolves it. Native app + Manager/Member only; see
+  // project_crm_role_based_lead_scoping memory (2026-10-10).
+  pendingCallAttempt: ApiCallAttemptRow | null;
   adSpendRecords: AdSpendRecord[];
   adLevelSpendRecords: AdLevelSpendRecord[];
   refetchAdLevelSpend: () => Promise<void>;
@@ -518,6 +529,17 @@ interface AppState {
 
 interface AppActions {
   refreshMetaConnectionStatus: () => Promise<void>;
+  // Called by the CallState plugin's "callEnded" listener (native app only)
+  // right as the call ends, before the feedback modal even renders — this
+  // is what makes the gate durable across a force-quit (see
+  // pendingCallAttempt above).
+  recordCallEnded: (leadId: string, startedAt: string | undefined, durationSeconds: number) => Promise<void>;
+  // Called by the WhatsApp trigger (web + app) once the agent returns to
+  // Taskezy after wa.me opened — see recordCallEnded above for the call
+  // equivalent; same gate, no call-state plugin involved for this channel.
+  recordWhatsAppOpened: (leadId: string) => Promise<void>;
+  // Submits the blocking gate's form and clears pendingCallAttempt.
+  submitCallFeedback: (outcome: string, notes: string) => Promise<void>;
   updateTenantSettings: (input: UpdateTenantSettingsInput) => Promise<{ success: boolean; error?: string }>;
   // SaaS actions
   setSeats: (role: Role, count: number) => void;
@@ -1000,6 +1022,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
+  const [pendingCallAttempt, setPendingCallAttempt] = useState<ApiCallAttemptRow | null>(null);
   const [adSpendRecords, setAdSpendRecords] = useState<AdSpendRecord[]>([]);
   const [adLevelSpendRecords, setAdLevelSpendRecords] = useState<AdLevelSpendRecord[]>([]);
 
@@ -1099,6 +1122,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return apiTriggerAdSpendSync();
   };
 
+  // Fired by CallState's "callEnded" listener (lib/callTrigger.ts). Creates
+  // the PENDING_FEEDBACK row immediately — before CallFeedbackGate even
+  // renders — so the block survives a force-quit right after the call.
+  const recordCallEnded = async (leadId: string, startedAt: string | undefined, durationSeconds: number) => {
+    const attempt = await apiCreateCallAttempt({ leadId, channel: "CALL", startedAt, durationSeconds });
+    setPendingCallAttempt(attempt);
+  };
+
+  // Fired when the agent returns to Taskezy after the WhatsApp button
+  // opened wa.me (lib/callTrigger.ts's triggerLeadWhatsApp) — there's no
+  // "message sent" signal to wait for, so this is the trigger itself, not
+  // a confirmation of anything. CallFeedbackGate asks Yes/No from here.
+  const recordWhatsAppOpened = async (leadId: string) => {
+    const attempt = await apiCreateCallAttempt({ leadId, channel: "WHATSAPP" });
+    setPendingCallAttempt(attempt);
+  };
+
+  const submitCallFeedback = async (outcome: string, notes: string) => {
+    if (!pendingCallAttempt) return;
+    await apiSubmitCallFeedback(pendingCallAttempt.id, { outcome, notes });
+    setPendingCallAttempt(null);
+  };
+
   // On mount: if a token survived a page refresh, restore the session and
   // pull all real data. If not (or the server is down), currentUser stays
   // null and RequireAuth (dashboard/layout.tsx) redirects to /auth/login.
@@ -1121,6 +1167,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         // itself still runs, just in the background — see isDataLoading.
         setAuthLoading(false);
         loadAllRealData(mapped.role);
+        // Re-shows CallFeedbackGate after a force-quit/relaunch mid-feedback
+        // — not just within the same in-memory session. Native app only
+        // (web never creates one of these rows in the first place).
+        if (Capacitor.isNativePlatform()) {
+          apiGetPendingCallAttempt()
+            .then(setPendingCallAttempt)
+            .catch((err) => console.warn("Could not check for a pending call-feedback gate:", err));
+        }
       })
       .catch(() => {
         clearApiSession();
@@ -2276,6 +2330,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         invoices,
         notifications,
         calendarEvents,
+        pendingCallAttempt,
+        recordCallEnded,
+        recordWhatsAppOpened,
+        submitCallFeedback,
         adSpendRecords,
         adLevelSpendRecords,
         refetchAdLevelSpend,

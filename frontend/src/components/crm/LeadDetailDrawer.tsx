@@ -1,12 +1,15 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
-import { X, Phone, MessageSquare, Mail, Share2, Calendar, ArrowRight, Bell, Repeat, Copy, Check, User, Pencil } from "lucide-react";
+import { X, Phone, Mail, Share2, Calendar, ArrowRight, Bell, Repeat, Copy, Check, User, Pencil } from "lucide-react";
 import { useApp, Lead, LeadStatus } from "@/context/AppContext";
 import { useDialog } from "@/components/ui/DialogProvider";
 import { SearchableSelect } from "@/components/ui/SearchableDropdown";
 import { DatePicker } from "@/components/ui/DateRangePicker";
 import { deriveActivityTimeline, STATUS_OPTIONS, statusBadgeClasses } from "@/lib/leadStatusMapping";
 import { canChangeLeadStatus, isLeadAssignableUser, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
+import { maskPhone, maskEmail } from "@/lib/maskPII";
+import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/callTrigger";
+import { WhatsAppIcon } from "@/components/icons/ContactIcons";
 
 interface LeadDetailDrawerProps {
   lead: Lead | null;
@@ -43,8 +46,9 @@ export default function LeadDetailDrawer({
   onReassigned,
   onNoteSaved
 }: LeadDetailDrawerProps) {
-  const { addNotification, addCalendarEvent, addFollowupCall, users, currentUser, activeRole, reassignLead, updateLeadNote } = useApp();
+  const { addNotification, addCalendarEvent, addFollowupCall, users, currentUser, activeRole, reassignLead, updateLeadNote, recordCallEnded, recordWhatsAppOpened } = useApp();
   const { toast } = useDialog();
+  const callAllowed = canTriggerLeadCall(activeRole === "ADMIN");
   const [localStatus, setLocalStatus] = useState<LeadStatus>("New Lead");
   const [reminderDate, setReminderDate] = useState("");
   const [reminderTime, setReminderTime] = useState("");
@@ -107,6 +111,27 @@ export default function LeadDetailDrawer({
   }, [lead]);
 
   if (!isOpen || !lead) return null;
+
+  const handleCall = () => {
+    triggerLeadCall(lead, {
+      isAdmin: activeRole === "ADMIN",
+      toast,
+      onCallEnded: (leadId, startedAt, durationSeconds) => {
+        recordCallEnded(leadId, startedAt, durationSeconds).catch((err) =>
+          console.warn("Could not record call feedback gate:", err)
+        );
+      }
+    });
+  };
+
+  const handleWhatsApp = () => {
+    triggerLeadWhatsApp(lead, {
+      isAdmin: activeRole === "ADMIN",
+      onReturn: (leadId) => {
+        recordWhatsAppOpened(leadId).catch((err) => console.warn("Could not record WhatsApp feedback gate:", err));
+      }
+    });
+  };
 
   const handleSelectStatus = (nextStatus: LeadStatus) => {
     if (restrictedStatuses?.includes(nextStatus) && onRestrictedStatus) {
@@ -260,9 +285,11 @@ export default function LeadDetailDrawer({
       ) : "—"
     },
     { label: "Captured at", value: lead.createdAtStr ? formatLogTimestamp(lead.createdAtStr) : "—" },
-    ...(lead.campaign ? [{ label: "Campaign", value: lead.campaign as React.ReactNode }] : []),
-    ...(lead.metaPageName ? [{ label: "Meta Page", value: lead.metaPageName as React.ReactNode }] : []),
-    ...(lead.metaFormId ? [{ label: "Lead Form ID", value: lead.metaFormId as React.ReactNode }] : [])
+    // Ad-source attribution (ad-platform/marketing concern) — Admin-only,
+    // not just "shown when the lead has it" (2026-10-10).
+    ...(activeRole === "ADMIN" && lead.campaign ? [{ label: "Campaign", value: lead.campaign as React.ReactNode }] : []),
+    ...(activeRole === "ADMIN" && lead.metaPageName ? [{ label: "Meta Page", value: lead.metaPageName as React.ReactNode }] : []),
+    ...(activeRole === "ADMIN" && lead.metaFormId ? [{ label: "Lead Form ID", value: lead.metaFormId as React.ReactNode }] : [])
   ];
 
   // Rendered via a portal straight into <body> — the caller (the Leads page)
@@ -287,41 +314,64 @@ export default function LeadDetailDrawer({
               <X className="h-4.5 w-4.5" />
             </button>
           </div>
+          {/* Phone/email text is masked for Manager/sales agent — Admin
+              always sees the real value. The tel:/mailto: hrefs always use
+              the REAL lead.phone/lead.email regardless of role (masking is
+              display-only; calling/emailing still has to work), and the
+              copy button is removed entirely for non-admin since copying
+              would otherwise leak the real value despite the masked text.
+              See project_crm_role_based_lead_scoping memory (2026-10-10). */}
           <div className="mt-2 space-y-1">
             <div className="flex items-center gap-1.5 text-xs text-slate-600">
               <Phone className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-              <a href={`tel:${lead.phone}`} className="hover:text-brand-700">{lead.phone}</a>
-              <button onClick={() => copyToClipboard("phone", lead.phone)} className="text-slate-350 hover:text-brand-700" title="Copy phone">
-                {copiedField === "phone" ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
+              <button
+                type="button"
+                onClick={() => callAllowed && handleCall()}
+                disabled={!callAllowed}
+                className="hover:text-brand-700 disabled:opacity-30 disabled:hover:text-slate-600"
+                title={callAllowed ? undefined : "Calling is only available on the mobile app for your role"}
+              >
+                {activeRole === "ADMIN" ? lead.phone : maskPhone(lead.phone)}
               </button>
+              {activeRole === "ADMIN" && (
+                <button onClick={() => copyToClipboard("phone", lead.phone)} className="text-slate-350 hover:text-brand-700" title="Copy phone">
+                  {copiedField === "phone" ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
+                </button>
+              )}
             </div>
             {lead.email && (
               <div className="flex items-center gap-1.5 text-xs text-slate-600">
                 <Mail className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                <a href={`mailto:${lead.email}`} className="hover:text-brand-700 truncate">{lead.email}</a>
-                <button onClick={() => copyToClipboard("email", lead.email)} className="text-slate-350 hover:text-brand-700 shrink-0" title="Copy email">
-                  {copiedField === "email" ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
-                </button>
+                <a href={`mailto:${lead.email}`} className="hover:text-brand-700 truncate">{activeRole === "ADMIN" ? lead.email : maskEmail(lead.email)}</a>
+                {activeRole === "ADMIN" && (
+                  <button onClick={() => copyToClipboard("email", lead.email)} className="text-slate-350 hover:text-brand-700 shrink-0" title="Copy email">
+                    {copiedField === "email" ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
+                  </button>
+                )}
               </div>
             )}
           </div>
           <div className="flex items-center gap-2 mt-3">
-            <a
-              href={`https://wa.me/${lead.phone.replace(/[^0-9]/g, "")}`}
-              target="_blank"
-              rel="noreferrer"
+            <button
+              type="button"
+              onClick={handleWhatsApp}
               className="inline-flex h-10 w-10 sm:h-7 sm:w-7 bg-slate-50 hover:bg-emerald-50 border border-slate-200 rounded-lg items-center justify-center text-slate-500 hover:text-emerald-600 transition-colors"
               title="WhatsApp Message"
             >
-              <MessageSquare className="h-3.5 w-3.5" />
-            </a>
-            <button
-              onClick={shareLeadProfile}
-              className="inline-flex h-10 w-10 sm:h-7 sm:w-7 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg items-center justify-center text-slate-500 hover:text-slate-700 transition-colors"
-              title="Copy Summary"
-            >
-              <Share2 className="h-3.5 w-3.5" />
+              <WhatsAppIcon className="h-4 w-4" />
             </button>
+            {/* Share Summary — Admin-only; it copies the real phone number
+                to the clipboard, the same leak vector the copy buttons
+                above are removed for. */}
+            {activeRole === "ADMIN" && (
+              <button
+                onClick={shareLeadProfile}
+                className="inline-flex h-10 w-10 sm:h-7 sm:w-7 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg items-center justify-center text-slate-500 hover:text-slate-700 transition-colors"
+                title="Copy Summary"
+              >
+                <Share2 className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
         </div>
 
@@ -365,11 +415,15 @@ export default function LeadDetailDrawer({
           </div>
           <div className="flex items-center justify-between text-[10px] text-slate-400 font-semibold">
             <span>Last Updated : {lastActivityTime(lead)}</span>
-            <span>Source : {lead.source || lead.campaign || "Direct / Manual Entry"}</span>
+            {/* Ad-source attribution — Admin-only, same tier as Campaign/Meta
+                Page/Lead Form ID below. See project_crm_role_based_lead_scoping
+                memory (2026-10-10). */}
+            {activeRole === "ADMIN" && <span>Source : {lead.source || lead.campaign || "Direct / Manual Entry"}</span>}
           </div>
         </div>
 
-        {/* Assigned / Property / Reassigned / Captured (+ ad footprint, when present) */}
+        {/* Assigned / Property / Reassigned / Captured (+ ad footprint, when
+            present and Admin — see metaFields above) */}
         <div className="px-5 py-3 border-b border-slate-100 grid grid-cols-2 gap-x-3 gap-y-2.5 text-xs">
           {metaFields.map(f => (
             <div key={f.label}>

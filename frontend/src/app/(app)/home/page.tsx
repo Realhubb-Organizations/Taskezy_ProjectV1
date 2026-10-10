@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useMemo } from "react";
 import Link from "next/link";
 import { useApp } from "@/context/AppContext";
 import { Activity, Users, TrendingUp, ArrowRight } from "lucide-react";
@@ -42,18 +42,39 @@ function ComingSoonRibbon() {
 }
 
 export default function HomePage() {
-  const { leads, followupCalls, currentUser, invoices, reimbursements, timesheets, adSpendRecords, isDataLoading } = useApp();
+  const { leads, followupCalls, currentUser, invoices, reimbursements, timesheets, adSpendRecords, isDataLoading, users } = useApp();
 
   const now = new Date();
   const sevenDaysAgo = new Date(now);
   sevenDaysAgo.setDate(now.getDate() - 7);
   const isWithinLast7Days = (iso?: string) => !!iso && new Date(iso) >= sevenDaysAgo;
 
-  // CRM — all real: leads created in the window, campaigns the ad-spend
-  // sync currently reports ACTIVE, spend/lead-count in the same window
-  // (CPL derived from those, not a separate estimate), and follow-ups
-  // still pending action.
-  const leadsLast7Days = leads.filter(l => isWithinLast7Days(l.createdAtStr)).length;
+  // This is a personal "Hey, {name}!" front door, so the CRM lead count on
+  // it has to read as that person's own pipeline — not an org-wide number —
+  // for anyone below Admin. Mirrors the isSalesMember/scopedLeads scoping
+  // already used on the CRM dashboard (crm/dashboard/page.tsx) for sales
+  // agents, extended here to also scope Managers to their own direct team
+  // (matched by name, same convention every other lead-scoping spot in this
+  // app uses — see LeadDetailDrawer's reassignTargets). Admin is untouched:
+  // myAgentNames stays null and every leads.filter below falls through to
+  // the full, unscoped list exactly as before.
+  const isAdmin = currentUser?.role === "ADMIN";
+  const myAgentNames = useMemo(() => {
+    if (isAdmin || !currentUser) return null;
+    const names = new Set([currentUser.name]);
+    if (currentUser.role_type === "Manager") {
+      users.filter(u => u.managerId === currentUser.id).forEach(u => names.add(u.name));
+    }
+    return names;
+  }, [isAdmin, currentUser, users]);
+  const crmScopedLeads = myAgentNames ? leads.filter(l => myAgentNames.has(l.assignedAgent)) : leads;
+
+  // CRM — all real: leads created in the window (scoped above for
+  // non-admins), campaigns the ad-spend sync currently reports ACTIVE,
+  // spend/lead-count in the same window (CPL derived from those, not a
+  // separate estimate — these stay org-wide, since an ad campaign isn't
+  // owned by one agent), and follow-ups still pending action.
+  const leadsLast7Days = crmScopedLeads.filter(l => isWithinLast7Days(l.createdAtStr)).length;
   const activeCampaignsCount = new Set(
     adSpendRecords.filter(r => r.campaignStatus === "ACTIVE").map(r => r.accountName)
   ).size;
