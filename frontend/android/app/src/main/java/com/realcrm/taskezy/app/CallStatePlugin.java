@@ -11,6 +11,7 @@ import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
+import com.getcapacitor.PermissionState;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 
@@ -36,14 +37,19 @@ public class CallStatePlugin extends Plugin {
 
     private TelephonyManager telephonyManager;
     private PhoneStateListener legacyListener; // API < 31
-    private TelephonyCallback modernCallback; // API 31+
+    // Declared as the nested interface, not the bare TelephonyCallback base —
+    // javac doesn't resolve the "CallStateListener extends TelephonyCallback"
+    // relationship for an anonymous-class assignment here (a known compiler
+    // quirk with this particular Android API), so registering/unregistering
+    // below casts explicitly to TelephonyCallback instead.
+    private TelephonyCallback.CallStateListener modernCallback; // API 31+
     private boolean watching = false;
     private boolean reachedOffHook = false;
     private long callStartElapsedMillis = 0;
 
     @PluginMethod
     public void startWatching(PluginCall call) {
-        if (getPermissionState(PHONE_STATE) != com.getcapacitor.annotation.PermissionState.GRANTED) {
+        if (getPermissionState(PHONE_STATE) != PermissionState.GRANTED) {
             call.reject("READ_PHONE_STATE permission not granted");
             return;
         }
@@ -64,18 +70,17 @@ public class CallStatePlugin extends Plugin {
         watching = true;
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            // TelephonyCallback.CallStateListener is a nested interface
-            // designed to be instantiated directly like this and passed
-            // straight to registerTelephonyCallback (it implements the
-            // TelephonyCallback contract itself) — not a regular
-            // extend-then-implement anonymous class.
+            // TelephonyCallback.CallStateListener is a nested interface that
+            // extends TelephonyCallback itself, instantiated directly like
+            // this (see the field's cast-on-use comment above for why it's
+            // held as CallStateListener rather than TelephonyCallback).
             modernCallback = new TelephonyCallback.CallStateListener() {
                 @Override
                 public void onCallStateChanged(int state) {
                     handleStateChange(state);
                 }
             };
-            telephonyManager.registerTelephonyCallback(getContext().getMainExecutor(), modernCallback);
+            telephonyManager.registerTelephonyCallback(getContext().getMainExecutor(), (TelephonyCallback) modernCallback);
         } else {
             legacyListener = new PhoneStateListener() {
                 @Override
@@ -119,7 +124,7 @@ public class CallStatePlugin extends Plugin {
                 legacyListener = null;
             }
             if (modernCallback != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                telephonyManager.unregisterTelephonyCallback(modernCallback);
+                telephonyManager.unregisterTelephonyCallback((TelephonyCallback) modernCallback);
                 modernCallback = null;
             }
         }
