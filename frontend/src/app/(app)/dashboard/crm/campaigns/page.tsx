@@ -41,6 +41,7 @@ import {
 } from "@/lib/campaignBuilder";
 import { formatNextFollowup, nextFollowupFor } from "@/lib/followups";
 import NextCallCell from "@/components/crm/NextCallCell";
+import { maskPhone, maskEmail } from "@/lib/maskPII";
 
 // Same icon URLs the admin leads page uses for these platforms (LeadDashboard.tsx).
 const PLATFORM_ICON_URL: Partial<Record<CampaignItem["platform"], string>> = {
@@ -161,7 +162,8 @@ const STATUS_DEFAULT_VISIBLE_COLUMNS: Record<StatusColumnKey, boolean> = {
 };
 
 export default function AdminCampaignsPage() {
-  const { leads, adSpendRecords, adLevelSpendRecords, followupCalls, refetchAdLevelSpend, triggerAdSpendSync, isDataLoading } = useApp();
+  const { leads, adSpendRecords, adLevelSpendRecords, followupCalls, refetchAdLevelSpend, triggerAdSpendSync, isDataLoading, activeRole } = useApp();
+  const isAdmin = activeRole === "ADMIN";
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -817,7 +819,7 @@ export default function AdminCampaignsPage() {
     const rows = [
       ["Lead Name", "Phone", "Email", "Status", "Assigned To", "Date", "Notes", "Next Call Date", "Campaign"],
       ...qualifiedLeadsDrillList.map(l => [
-        l.name, l.phone, l.email, l.status, l.assignedAgent,
+        l.name, isAdmin ? l.phone : maskPhone(l.phone), isAdmin ? l.email : maskEmail(l.email || ""), l.status, l.assignedAgent,
         l.createdAtStr || "—", latestLogMessage(l), formatNextFollowup(nextCallDateFor(l.id)), l.campaign || l.source || "—"
       ])
     ];
@@ -1199,7 +1201,7 @@ export default function AdminCampaignsPage() {
                               className="hover:bg-slate-50/50 transition-colors"
                             >
                               <td className="px-4 py-2.5 font-semibold text-slate-900 [overflow-wrap:anywhere]">{l.name}</td>
-                              <td className="px-4 py-2.5 font-mono [overflow-wrap:anywhere]">{l.phone}</td>
+                              <td className="px-4 py-2.5 font-mono [overflow-wrap:anywhere]">{isAdmin ? l.phone : maskPhone(l.phone)}</td>
                               <td className="px-4 py-2.5">{l.status}</td>
                               <td className="px-4 py-2.5 [overflow-wrap:anywhere]">{l.campaign || l.source || "—"}</td>
                             </tr>
@@ -1371,7 +1373,7 @@ export default function AdminCampaignsPage() {
                         qualifiedLeadsPagination.pageRows.map(l => (
                           <tr key={l.id} className="hover:bg-slate-50/50 transition-colors">
                             <td className="px-4 py-3 text-slate-900 font-semibold [overflow-wrap:anywhere]">{l.name}</td>
-                            <td className="px-4 py-3 [overflow-wrap:anywhere]" title={l.email}>{l.email || "—"}</td>
+                            <td className="px-4 py-3 [overflow-wrap:anywhere]" title={isAdmin ? l.email : undefined}>{l.email ? (isAdmin ? l.email : maskEmail(l.email)) : "—"}</td>
                             <td className="px-4 py-3 whitespace-nowrap">{l.status}</td>
                             <td className="px-4 py-3 [overflow-wrap:anywhere]">{l.assignedAgent || "—"}</td>
                             <td className="px-4 py-3">{l.createdAtStr || "—"}</td>
@@ -2199,7 +2201,7 @@ export default function AdminCampaignsPage() {
             <div className="px-5 pt-5 pb-4 border-b border-slate-100 flex items-start justify-between">
               <div>
                 <p className="text-base font-bold text-slate-900">{quickViewLead.name}</p>
-                <p className="text-xs text-slate-500 font-mono mt-0.5">{quickViewLead.phone}</p>
+                <p className="text-xs text-slate-500 font-mono mt-0.5">{isAdmin ? quickViewLead.phone : maskPhone(quickViewLead.phone)}</p>
               </div>
               <button onClick={() => setQuickViewLead(null)} className="text-slate-400 hover:text-slate-700">
                 <X className="h-4.5 w-4.5" />

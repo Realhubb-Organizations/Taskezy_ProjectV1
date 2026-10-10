@@ -3,6 +3,7 @@
 import React, { useMemo, useState } from "react";
 import { useApp } from "@/context/AppContext";
 import { useDialog } from "@/components/ui/DialogProvider";
+import { maskPhone } from "@/lib/maskPII";
 import { AlertTriangle, DollarSign, TrendingUp, Users, UserCog, RefreshCw } from "lucide-react";
 import { DateRange } from "./DateRangeFilter";
 import {
@@ -303,7 +304,7 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                             <tr key={lead.id} className="hover:bg-slate-50/50">
                               <td className="px-4 py-3">
                                 <p className="font-bold text-slate-800">{lead.name}</p>
-                                <p className="text-[9px] text-slate-450 font-mono">{lead.phone}</p>
+                                <p className="text-[9px] text-slate-450 font-mono">{activeRole === "ADMIN" ? lead.phone : maskPhone(lead.phone)}</p>
                               </td>
                               <td className="px-4 py-3 font-mono text-slate-600">
                                 {lead.assignedAt ? new Date(lead.assignedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—"}
@@ -397,7 +398,7 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                             <tr key={f.id} className="hover:bg-slate-50/50">
                               <td className="px-4 py-3">
                                 <p className="font-bold text-slate-800">{f.leadName}</p>
-                                <p className="text-[9px] text-slate-450 font-mono">{f.phone}</p>
+                                <p className="text-[9px] text-slate-450 font-mono">{activeRole === "ADMIN" ? f.phone : maskPhone(f.phone)}</p>
                               </td>
                               <td className="px-4 py-3 text-slate-600">{f.type}</td>
                               <td className="px-4 py-3 font-mono text-slate-600">{f.date} • {f.time}</td>

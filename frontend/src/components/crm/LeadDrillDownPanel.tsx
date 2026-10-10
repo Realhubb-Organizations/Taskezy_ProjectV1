@@ -13,6 +13,8 @@ import TablePagination, { usePagination } from "@/components/ui/TablePagination"
 import { DateTimeLines, dateTimeParts } from "@/components/ui/DateTimeLines";
 import { canChangeLeadStatus, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
 import { nextFollowupFor } from "@/lib/followups";
+import { maskPhone, maskEmail } from "@/lib/maskPII";
+import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/callTrigger";
 import NextCallCell from "./NextCallCell";
 
 // Drill-down table + lead quick-view drawer behind the 7 lead stat cards
@@ -80,8 +82,20 @@ export function LeadQuickViewDrawer({ lead, onLeadChange, onClose }: {
   onLeadChange: (lead: Lead) => void;
   onClose: () => void;
 }) {
+  const { activeRole, recordCallEnded } = useApp();
   const handleStatusChange = useLeadStatusChange();
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  const callAllowed = canTriggerLeadCall(activeRole === "ADMIN");
+  const handleCall = () => {
+    triggerLeadCall(lead, {
+      isAdmin: activeRole === "ADMIN",
+      onCallEnded: (leadId, startedAt, durationSeconds) => {
+        recordCallEnded(leadId, startedAt, durationSeconds).catch((err) =>
+          console.warn("Could not record call feedback gate:", err)
+        );
+      }
+    });
+  };
 
   // Activity History is paged (10 entries a page) — a long-lived lead can
   // carry an unbounded number of logs. The timeline is derived from the full
@@ -115,21 +129,38 @@ export function LeadQuickViewDrawer({ lead, onLeadChange, onClose }: {
               <X className="h-4.5 w-4.5" />
             </button>
           </div>
+          {/* Masked for Manager/sales agent, real for Admin — display-only,
+              the tel:/mailto: hrefs always use the real value. Copy buttons
+              removed entirely for non-admin (would otherwise leak the real
+              value despite the masked text). See
+              project_crm_role_based_lead_scoping memory (2026-10-10). */}
           <div className="mt-2 space-y-1">
             <div className="flex items-center gap-1.5 text-xs text-slate-600">
               <Phone className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-              <a href={`tel:${lead.phone}`} className="hover:text-brand-700">{lead.phone}</a>
-              <button onClick={() => copyToClipboard("phone", lead.phone)} className="text-slate-350 hover:text-brand-700" title="Copy phone">
-                {copiedField === "phone" ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
+              <button
+                type="button"
+                onClick={() => callAllowed && handleCall()}
+                disabled={!callAllowed}
+                className="hover:text-brand-700 disabled:opacity-30 disabled:hover:text-slate-600"
+                title={callAllowed ? undefined : "Calling is only available on the mobile app for your role"}
+              >
+                {activeRole === "ADMIN" ? lead.phone : maskPhone(lead.phone)}
               </button>
+              {activeRole === "ADMIN" && (
+                <button onClick={() => copyToClipboard("phone", lead.phone)} className="text-slate-350 hover:text-brand-700" title="Copy phone">
+                  {copiedField === "phone" ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
+                </button>
+              )}
             </div>
             {lead.email && (
               <div className="flex items-center gap-1.5 text-xs text-slate-600">
                 <Mail className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                <a href={`mailto:${lead.email}`} className="hover:text-brand-700 truncate">{lead.email}</a>
-                <button onClick={() => copyToClipboard("email", lead.email!)} className="text-slate-350 hover:text-brand-700 shrink-0" title="Copy email">
-                  {copiedField === "email" ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
-                </button>
+                <a href={`mailto:${lead.email}`} className="hover:text-brand-700 truncate">{activeRole === "ADMIN" ? lead.email : maskEmail(lead.email)}</a>
+                {activeRole === "ADMIN" && (
+                  <button onClick={() => copyToClipboard("email", lead.email!)} className="text-slate-350 hover:text-brand-700 shrink-0" title="Copy email">
+                    {copiedField === "email" ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -155,7 +186,10 @@ export function LeadQuickViewDrawer({ lead, onLeadChange, onClose }: {
           </div>
           <div className="flex items-center justify-between text-[10px] text-slate-400 font-semibold">
             <span>Last Updated : {lastActivityTime(lead)}</span>
-            <span>Source : {lead.source || lead.campaign || "Direct / Manual Entry"}</span>
+            {/* Ad-source attribution — Admin-only, same tier as the shared
+                LeadDetailDrawer's Source/Campaign/Meta Page/Lead Form ID.
+                See project_crm_role_based_lead_scoping memory (2026-10-10). */}
+            {activeRole === "ADMIN" && <span>Source : {lead.source || lead.campaign || "Direct / Manual Entry"}</span>}
           </div>
         </div>
 
@@ -250,8 +284,27 @@ export default function LeadDrillDownPanel({ title, leads, onClose }: {
   leads: Lead[];
   onClose: () => void;
 }) {
-  const { followupCalls, isDataLoading, currentUser, users } = useApp();
+  const { followupCalls, isDataLoading, currentUser, users, activeRole, recordCallEnded, recordWhatsAppOpened } = useApp();
   const handleDrillStatusChange = useLeadStatusChange();
+  const callAllowed = canTriggerLeadCall(activeRole === "ADMIN");
+  const handleCall = (lead: Lead) => {
+    triggerLeadCall(lead, {
+      isAdmin: activeRole === "ADMIN",
+      onCallEnded: (leadId, startedAt, durationSeconds) => {
+        recordCallEnded(leadId, startedAt, durationSeconds).catch((err) =>
+          console.warn("Could not record call feedback gate:", err)
+        );
+      }
+    });
+  };
+  const handleWhatsApp = (lead: Lead) => {
+    triggerLeadWhatsApp(lead, {
+      isAdmin: activeRole === "ADMIN",
+      onReturn: (leadId) => {
+        recordWhatsAppOpened(leadId).catch((err) => console.warn("Could not record WhatsApp feedback gate:", err));
+      }
+    });
+  };
 
   const [drillPage, setDrillPage] = useState(1);
   const [drillRowsPerPage, setDrillRowsPerPage] = useState(10);
@@ -472,9 +525,9 @@ export default function LeadDrillDownPanel({ title, leads, onClose }: {
                         >
                           {l.name}
                         </button>
-                        <p className="text-[11px] text-slate-500 font-mono mt-0.5 [overflow-wrap:anywhere]">{l.phone}</p>
+                        <p className="text-[11px] text-slate-500 font-mono mt-0.5 [overflow-wrap:anywhere]">{activeRole === "ADMIN" ? l.phone : maskPhone(l.phone)}</p>
                       </td>
-                      <td className="px-4 py-3 text-slate-600 align-top [overflow-wrap:anywhere]" title={l.email || "—"}>{l.email || "—"}</td>
+                      <td className="px-4 py-3 text-slate-600 align-top [overflow-wrap:anywhere]" title={activeRole === "ADMIN" ? (l.email || "—") : "—"}>{l.email ? (activeRole === "ADMIN" ? l.email : maskEmail(l.email)) : "—"}</td>
                       <td className="px-4 py-3 align-top">
                         {renderRowStatusCell(l)}
                       </td>
@@ -484,22 +537,23 @@ export default function LeadDrillDownPanel({ title, leads, onClose }: {
                       <td className="px-4 py-3 text-slate-500 align-top"><NextCallCell next={nextCallDateFor(l.id)} /></td>
                       <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]" title={l.campaign || l.source || "—"}>{l.campaign || l.source || "—"}</td>
                       <td className="px-4 py-3 align-top text-right">
-                        <a
-                          href={`https://wa.me/${l.phone.replace(/[^0-9]/g, "")}`}
-                          target="_blank"
-                          rel="noreferrer"
+                        <button
+                          type="button"
+                          onClick={() => handleWhatsApp(l)}
                           className="inline-flex items-center justify-center h-10 w-10 sm:h-7 sm:w-7 rounded-lg bg-slate-100 text-slate-700 hover:bg-emerald-50 hover:text-emerald-600 transition-colors"
                           title="WhatsApp"
                         >
                           <WhatsAppIcon className="h-3.5 w-3.5" />
-                        </a>
-                        <a
-                          href={`tel:${l.phone}`}
-                          className="inline-flex items-center justify-center h-10 w-10 sm:h-7 sm:w-7 rounded-lg bg-slate-100 text-slate-700 hover:bg-brand-50 hover:text-brand-700 transition-colors ml-1.5"
-                          title="Call"
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => callAllowed && handleCall(l)}
+                          disabled={!callAllowed}
+                          className="inline-flex items-center justify-center h-10 w-10 sm:h-7 sm:w-7 rounded-lg bg-slate-100 text-slate-700 hover:bg-brand-50 hover:text-brand-700 transition-colors ml-1.5 disabled:opacity-30 disabled:hover:bg-slate-100 disabled:hover:text-slate-700"
+                          title={callAllowed ? "Call" : "Calling is only available on the mobile app for your role"}
                         >
                           <CallIcon className="h-3.5 w-3.5" />
-                        </a>
+                        </button>
                       </td>
                     </tr>
                   )))
