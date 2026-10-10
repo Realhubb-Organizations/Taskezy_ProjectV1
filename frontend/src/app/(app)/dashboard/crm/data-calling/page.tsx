@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useState, useRef, useMemo } from "react";
+import React, { useState, useRef, useMemo, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useApp, Lead } from "@/context/AppContext";
-import { ChevronRight, Search, Sliders, Minus, X, Copy, Users, Plus, Check } from "lucide-react";
+import { ChevronRight, Search, Sliders, Minus, X, Copy, Users, Plus, Check, Trash2, AlertTriangle } from "lucide-react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine } from "recharts";
 import UploadLeadsModal from "@/components/crm/UploadLeadsModal";
 import LeadDetailDrawer from "@/components/crm/LeadDetailDrawer";
@@ -17,6 +17,7 @@ import { nextFollowupFor } from "@/lib/followups";
 import NextCallCell from "@/components/crm/NextCallCell";
 import { useDialog } from "@/components/ui/DialogProvider";
 import LeadNoteCell from "@/components/crm/LeadNoteCell";
+import { apiBulkDeleteLeads, apiDeleteLead } from "@/lib/apiClient";
 import { maskPhone, maskEmail } from "@/lib/maskPII";
 
 // Data Calling's whole status model is deliberately just these three — a
@@ -165,7 +166,7 @@ export default function DataCallingPage() {
   // the ONLY-bulk-upload view AppContext derives for exactly this page (see
   // AppContext.tsx), aliased to `leads` here so the rest of this large file
   // needs no other changes.
-  const { dataCallingLeads: leads, followupCalls, properties, users, currentUser, activeRole, updateLeadStatus, reassignLead, bulkImportLeads, addFollowupCall, isDataLoading } = useApp();
+  const { dataCallingLeads: leads, followupCalls, properties, users, currentUser, activeRole, updateLeadStatus, reassignLead, bulkImportLeads, addFollowupCall, removeLeadsLocally, isDataLoading } = useApp();
   const { toast, prompt: promptDialog } = useDialog();
   // Bulk select + Assign/Reshuffle are an admin-only workflow — a sales
   // agent has no one to hand leads off to in that sense, so the checkbox
@@ -565,6 +566,45 @@ export default function DataCallingPage() {
     return next;
   });
 
+  // ---- Admin delete (single from the row's trash icon, bulk from the
+  // toolbar) — same archive-then-delete endpoints as the Leads page ----
+  const [deleteTarget, setDeleteTarget] = useState<{ ids: string[]; name?: string } | null>(null);
+  const [deleteSubmitting, setDeleteSubmitting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+  const closeDeleteDialog = () => { if (!deleteSubmitting) { setDeleteTarget(null); setDeleteError(""); } };
+  const confirmDelete = async () => {
+    if (!deleteTarget || deleteSubmitting) return;
+    setDeleteSubmitting(true);
+    setDeleteError("");
+    const ids = deleteTarget.ids;
+    try {
+      let removedIds = ids;
+      if (ids.length === 1) {
+        await apiDeleteLead(ids[0]);
+        toast(`Deleted lead${deleteTarget.name ? `: ${deleteTarget.name}` : ""}.`, "success");
+      } else {
+        const res = await apiBulkDeleteLeads(ids);
+        removedIds = ids.filter(id => !res.blocked.some(b => b.id === id));
+        toast(
+          `Deleted ${res.deleted} lead${res.deleted === 1 ? "" : "s"}.${res.blocked.length > 0 ? ` ${res.blocked.length} skipped because they have invoices.` : ""}`,
+          res.blocked.length > 0 ? "warning" : "success"
+        );
+      }
+      removeLeadsLocally(removedIds);
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        removedIds.forEach(id => next.delete(id));
+        return next;
+      });
+      if (selectedLead && removedIds.includes(selectedLead.id)) setSelectedLead(null);
+      setDeleteTarget(null);
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Could not delete the lead(s). Please try again.");
+    } finally {
+      setDeleteSubmitting(false);
+    }
+  };
+
   // Bulk "Assign" toolbar button — only surfaces once the selection actually
   // contains an unassigned lead (per product decision: it's for handing out
   // fresh/unassigned leads, not for reassigning already-worked ones).
@@ -759,6 +799,12 @@ export default function DataCallingPage() {
   const totalPages = Math.max(1, Math.ceil(filteredLeads.length / rowsPerPage));
   const currentPageClamped = Math.min(currentPage, totalPages);
   const paginatedLeads = filteredLeads.slice((currentPageClamped - 1) * rowsPerPage, currentPageClamped * rowsPerPage);
+  // The table scrolls inside its own box; a new page (or page size) starts
+  // at its first row instead of wherever the previous page was scrolled to.
+  const tableScrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    tableScrollRef.current?.scrollTo({ top: 0 });
+  }, [currentPageClamped, rowsPerPage]);
 
   const allOnPageSelected = paginatedLeads.length > 0 && paginatedLeads.every(l => selectedIds.has(l.id));
   const toggleSelectAllOnPage = () => setSelectedIds(prev => {
@@ -768,7 +814,8 @@ export default function DataCallingPage() {
     return next;
   });
 
-  const visibleColCount = (isAdmin ? 5 : 4) + DATA_CALLING_COLUMNS.filter(c => visibleColumns[c.key]).length;
+  // +1 for admins' checkbox and +1 for their trash-icon column.
+  const visibleColCount = (isAdmin ? 6 : 4) + DATA_CALLING_COLUMNS.filter(c => visibleColumns[c.key]).length;
 
   return (
     <div className="space-y-4 pb-8 animate-fade-in text-slate-800">
@@ -1133,6 +1180,16 @@ export default function DataCallingPage() {
                   Reshuffle
                 </button>
               )}
+              {activeTab === "DataCalling" && isAdmin && selectedIds.size > 0 && (
+                <button
+                  type="button"
+                  onClick={() => { setDeleteError(""); setDeleteTarget({ ids: Array.from(selectedIds) }); }}
+                  className="inline-flex items-center justify-center gap-2 h-9 bg-white border border-slate-300/80 rounded-xl px-3.5 text-xs text-red-600 font-bold hover:bg-red-50 shadow-2xs transition-colors"
+                >
+                  <Trash2 className="h-4 w-4 text-red-600" />
+                  Delete ({selectedIds.size})
+                </button>
+              )}
               <DateRangePicker
                 value={appliedCustomRange}
                 onChange={(v) => {
@@ -1388,8 +1445,8 @@ export default function DataCallingPage() {
           <>
           {/* Main Data Calling Table */}
           <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden">
-            <div className="overflow-auto max-h-[55vh]">
-              <table className="table-fixed w-full text-left border-collapse" style={{ minWidth: (isAdmin ? 44 : 0) + (visibleColCount - (isAdmin ? 1 : 0)) * 150 }}>
+            <div ref={tableScrollRef} className="overflow-auto max-h-[55vh]">
+              <table className="table-fixed w-full text-left border-collapse" style={{ minWidth: (isAdmin ? 44 + 64 : 0) + (visibleColCount - (isAdmin ? 2 : 0)) * 150 }}>
                 <colgroup>
                   {isAdmin && <col className="w-[44px]" />}
                   <col />
@@ -1407,6 +1464,7 @@ export default function DataCallingPage() {
                   {visibleColumns.unqualifiedLeads && <col />}
                   {visibleColumns.cpl && <col />}
                   {visibleColumns.qualifiedPercent && <col />}
+                  {isAdmin && <col className="w-[64px]" />}
                 </colgroup>
                 <thead className="sticky top-0 z-10 bg-white">
                   <tr className="border-b border-slate-200/80 text-left text-xs font-bold text-slate-800 whitespace-nowrap">
@@ -1501,6 +1559,7 @@ export default function DataCallingPage() {
                     {visibleColumns.unqualifiedLeads && <th className="px-4 py-3 whitespace-nowrap">Unqualified Leads</th>}
                     {visibleColumns.cpl && <th className="px-4 py-3 whitespace-nowrap">CPL</th>}
                     {visibleColumns.qualifiedPercent && <th className="px-4 py-3 whitespace-nowrap">Qualified %age</th>}
+                    {isAdmin && <th className="px-3 py-3 whitespace-nowrap"><span className="sr-only">Actions</span></th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-[12px] font-medium text-slate-700">
@@ -1620,6 +1679,19 @@ export default function DataCallingPage() {
                         {visibleColumns.unqualifiedLeads && <td className="px-4 py-3.5 text-slate-300" title="Not applicable — this is a per-lead row, not an aggregate">—</td>}
                         {visibleColumns.cpl && <td className="px-4 py-3.5 text-slate-300" title="Not applicable — this is a per-lead row, not an aggregate">—</td>}
                         {visibleColumns.qualifiedPercent && <td className="px-4 py-3.5 text-slate-300" title="Not applicable — this is a per-lead row, not an aggregate">—</td>}
+                        {isAdmin && (
+                          <td className="px-3 py-3.5">
+                            <button
+                              type="button"
+                              onClick={() => { setDeleteError(""); setDeleteTarget({ ids: [l.id], name: l.name }); }}
+                              title="Delete lead"
+                              aria-label={`Delete ${l.name}`}
+                              className="inline-flex items-center justify-center h-8 w-8 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </td>
+                        )}
                       </tr>
                     ))
                   )}
@@ -1632,7 +1704,7 @@ export default function DataCallingPage() {
               page={currentPageClamped}
               rowsPerPage={rowsPerPage}
               onPageChange={setCurrentPage}
-              onRowsPerPageChange={setRowsPerPage}
+              onRowsPerPageChange={(n) => { setRowsPerPage(n); setCurrentPage(1); }}
               rowLabel="Lead"
             />
           </div>
@@ -1852,6 +1924,53 @@ export default function DataCallingPage() {
           Qualified/Not Qualified sub-status — neither commits until this is
           filled in, so the row Status dropdown opens this instead of
           setting the status directly for those two. */}
+      {/* Delete confirmation — same modal as the Leads page's delete */}
+      {isAdmin && deleteTarget && createPortal(
+        <div className="fixed inset-0 z-[150] flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-slate-900/40" onClick={closeDeleteDialog} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="px-6 pt-6 pb-4 border-b border-slate-100">
+              <h3 className="text-xl font-extrabold text-slate-900">{deleteTarget.ids.length === 1 ? "Delete Lead" : "Delete Leads"}</h3>
+            </div>
+            <div className="px-6 py-5 space-y-3">
+              <p className="text-sm text-slate-700">
+                {deleteTarget.ids.length === 1
+                  ? `Permanently delete ${deleteTarget.name ? `"${deleteTarget.name}"` : "this lead"}? This cannot be undone.`
+                  : `Permanently delete ${deleteTarget.ids.length} selected leads? This cannot be undone.`}
+              </p>
+              {deleteTarget.ids.length > 1 && (
+                <p className="text-[11px] text-slate-400">Leads with invoices cannot be deleted and will be skipped.</p>
+              )}
+              {deleteError && (
+                <div className="p-2.5 bg-red-50 border border-red-100 text-[11px] text-red-700 rounded-xl font-bold flex items-center gap-2">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                  <span>{deleteError}</span>
+                </div>
+              )}
+            </div>
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100">
+              <button
+                type="button"
+                disabled={deleteSubmitting}
+                onClick={closeDeleteDialog}
+                className="px-5 py-2 rounded-xl border border-slate-300 font-bold text-slate-700 text-sm hover:bg-slate-50 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deleteSubmitting}
+                onClick={confirmDelete}
+                className="px-5 py-2 rounded-xl font-bold text-sm text-white bg-red-600 hover:bg-red-700 transition-colors disabled:bg-slate-300 disabled:cursor-not-allowed"
+              >
+                {deleteSubmitting ? "Deleting..." : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
       {pendingStatusAction && createPortal(
         <>
           <div className="fixed inset-0 bg-slate-900/40 z-[80]" onClick={() => setPendingStatusAction(null)} />

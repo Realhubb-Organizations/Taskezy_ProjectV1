@@ -4,6 +4,8 @@ import { X, Upload, FileSpreadsheet, Info, Download, Plus, Trash2 } from "lucide
 import { PlatformLabel } from "@/components/icons/ContactIcons";
 import { SearchableSelect } from "@/components/ui/SearchableDropdown";
 import { useDialog } from "@/components/ui/DialogProvider";
+import FieldError, { fieldErrorClass } from "@/components/ui/FieldError";
+import { collectErrors, normalizeIndianMobile, phoneInputProps, sanitizePhoneInput, validateEmail, validatePersonName, validatePhone } from "@/lib/validation";
 
 const BASE_LEAD_SOURCES = ["Meta Ads", "Google Ads", "Referral Code", "Offline Event", "Direct Walkin"];
 const CUSTOM_LEAD_SOURCES_KEY = "taskezy_custom_lead_sources";
@@ -42,6 +44,10 @@ export default function AddLeadModal({
 
   // Tab 1 Form State
   const [name, setName] = useState("");
+  // Per-field messages shown under the manual-entry inputs.
+  const [manualErrors, setManualErrors] = useState<Partial<Record<"name" | "phone" | "email", string>>>({});
+  const clearError = (field: "name" | "phone" | "email") =>
+    setManualErrors(prev => (prev[field] ? { ...prev, [field]: undefined } : prev));
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [agent, setAgent] = useState(agentsList[0] || "");
@@ -121,11 +127,15 @@ export default function AddLeadModal({
 
   const handleManualSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name || !phone) {
-      toast("Name and Phone are required.", "warning");
-      return;
-    }
-    onSubmitManual({ name, phone, email, agent, source, property, note });
+    const errors = collectErrors({
+      name: validatePersonName(name, { label: "Buyer name" }),
+      phone: validatePhone(phone, { required: true }),
+      email: validateEmail(email)
+    });
+    setManualErrors(errors);
+    if (Object.keys(errors).length > 0) return;
+    // "+91 98450 12345" → "9845012345", the format the server stores.
+    onSubmitManual({ name: name.trim(), phone: normalizeIndianMobile(phone)!, email: email.trim(), agent, source, property, note });
     // Reset manual form fields
     setName("");
     setPhone("");
@@ -228,7 +238,7 @@ export default function AddLeadModal({
 
           {activeTab === "manual" ? (
             /* MANUAL TAB */
-            <form onSubmit={handleManualSubmit} className="flex-1 min-h-0 flex flex-col">
+            <form onSubmit={handleManualSubmit} noValidate className="flex-1 min-h-0 flex flex-col">
               <div className="flex-1 overflow-y-auto p-6 space-y-4">
                 {/* Horizontal 3-across grid on wide/PC screens, single column
                     (naturally vertical) on narrower/mobile viewports. */}
@@ -238,32 +248,45 @@ export default function AddLeadModal({
                     <input
                       type="text"
                       required
+                      maxLength={100}
+                      autoComplete="name"
                       value={name}
-                      onChange={(e) => setName(e.target.value)}
+                      onChange={(e) => { setName(e.target.value); clearError("name"); }}
+                      onBlur={() => name && setManualErrors(prev => ({ ...prev, name: validatePersonName(name, { label: "Buyer name" }) ?? undefined }))}
                       placeholder="e.g. Priyanth Kumar"
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:outline-none focus:bg-white focus:border-[#0B1E6E] transition-all shadow-sm"
+                      aria-invalid={!!manualErrors.name}
+                      className={`w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:outline-none focus:bg-white focus:border-[#0B1E6E] transition-all shadow-sm ${fieldErrorClass(!!manualErrors.name)}`}
                     />
+                    <FieldError message={manualErrors.name} />
                   </div>
                   <div className="space-y-1">
                     <label className="block text-[9px] font-bold text-slate-400 uppercase">Contact Phone Number</label>
                     <input
-                      type="tel"
+                      {...phoneInputProps}
                       required
                       value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      placeholder="e.g. +91 9845012345"
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:outline-none focus:bg-white focus:border-[#0B1E6E] transition-all shadow-sm"
+                      onChange={(e) => { setPhone(sanitizePhoneInput(e.target.value)); clearError("phone"); }}
+                      onBlur={() => phone && setManualErrors(prev => ({ ...prev, phone: validatePhone(phone) ?? undefined }))}
+                      placeholder="e.g. 9845012345"
+                      aria-invalid={!!manualErrors.phone}
+                      className={`w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:outline-none focus:bg-white focus:border-[#0B1E6E] transition-all shadow-sm ${fieldErrorClass(!!manualErrors.phone)}`}
                     />
+                    <FieldError message={manualErrors.phone} />
                   </div>
                   <div className="space-y-1">
                     <label className="block text-[9px] font-bold text-slate-400 uppercase">Email Address</label>
                     <input
                       type="email"
+                      maxLength={254}
+                      autoComplete="email"
                       value={email}
-                      onChange={(e) => setEmail(e.target.value)}
+                      onChange={(e) => { setEmail(e.target.value); clearError("email"); }}
+                      onBlur={() => email && setManualErrors(prev => ({ ...prev, email: validateEmail(email) ?? undefined }))}
                       placeholder="e.g. buyer@example.com"
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:outline-none focus:bg-white focus:border-[#0B1E6E] transition-all shadow-sm"
+                      aria-invalid={!!manualErrors.email}
+                      className={`w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:outline-none focus:bg-white focus:border-[#0B1E6E] transition-all shadow-sm ${fieldErrorClass(!!manualErrors.email)}`}
                     />
+                    <FieldError message={manualErrors.email} />
                   </div>
                   <div className="space-y-1">
                     <label className="block text-[9px] font-bold text-slate-400 uppercase">Assigned Agent</label>

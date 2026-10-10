@@ -326,6 +326,37 @@ export async function setNote(client: PoolClient, leadId: string, note: string, 
   );
 }
 
+/** Locks and returns every lead held by `agentId`, oldest first (for handing them over before the agent is deleted). */
+export async function lockLeadIdsForAgent(client: PoolClient, agentId: string): Promise<string[]> {
+  const { rows } = await client.query<{ id: string }>(
+    `SELECT id FROM leads WHERE assigned_agent_id = $1 ORDER BY created_at, id FOR UPDATE`,
+    [agentId]
+  );
+  return rows.map(r => r.id);
+}
+
+/**
+ * Moves follow-ups assigned to `fromUserId` to the current owner of their
+ * lead (run after that user's leads were handed over). Returns how many
+ * follow-ups are still assigned to them (e.g. ones with no lead).
+ */
+export async function moveFollowupsToLeadOwners(client: PoolClient, fromUserId: string): Promise<number> {
+  await client.query(
+    `UPDATE followup_calls fc SET assigned_to_id = l.assigned_agent_id
+     FROM leads l
+     WHERE fc.lead_id = l.id AND fc.assigned_to_id = $1 AND l.assigned_agent_id IS NOT NULL AND l.assigned_agent_id <> $1`,
+    [fromUserId]
+  );
+  const { rows } = await client.query<{ count: string }>(`SELECT count(*) FROM followup_calls WHERE assigned_to_id = $1`, [fromUserId]);
+  return Number(rows[0]?.count ?? 0);
+}
+
+/** Leads currently held by `agentId`. */
+export async function countLeadsForAgent(agentId: string): Promise<number> {
+  const { rows } = await query<{ count: string }>(`SELECT count(*) FROM leads WHERE assigned_agent_id = $1`, [agentId]);
+  return Number(rows[0]?.count ?? 0);
+}
+
 export async function insertLeadLog(client: PoolClient, leadId: string, userId: string, userName: string, message: string): Promise<void> {
   await client.query(
     `INSERT INTO lead_logs (lead_id, user_id, user_name_snapshot, message) VALUES ($1, $2, $3, $4)`,

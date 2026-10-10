@@ -77,13 +77,11 @@ export function useLeadStatusChange() {
 // since the pages' root wrappers carry animate-fade-in, which would
 // otherwise become the containing block for a fixed-position overlay.
 // Render it only while a lead is open.
-export function LeadQuickViewDrawer({ lead, onLeadChange, onClose }: {
+export function LeadQuickViewDrawer({ lead, onClose }: {
   lead: Lead;
-  onLeadChange: (lead: Lead) => void;
   onClose: () => void;
 }) {
   const { activeRole, recordCallEnded } = useApp();
-  const handleStatusChange = useLeadStatusChange();
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const callAllowed = canTriggerLeadCall(activeRole === "ADMIN");
   const handleCall = () => {
@@ -170,19 +168,22 @@ export function LeadQuickViewDrawer({ lead, onLeadChange, onClose }: {
         <div className="px-5 py-3 border-b border-slate-100 shrink-0 space-y-1.5">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold text-slate-500">Current Status :</span>
-            <SearchableSelect
-              variant="pill"
-              align="right"
-              options={STATUS_OPTIONS.includes(lead.status) ? STATUS_OPTIONS : [lead.status, ...STATUS_OPTIONS]}
-              value={lead.status}
-              onChange={(v) => {
-                const st = v as LeadStatus;
-                handleStatusChange(lead.id, st);
-                onLeadChange({ ...lead, status: st });
-              }}
-              searchPlaceholder="Search status..."
-              panelWidth={192}
-            />
+            {/* Read-only here (every role): the dashboard quick view only shows
+                the status; it's changed from the Leads table or lead drawer. */}
+            <div className="flex items-center gap-1.5">
+              {lead.status === "Connected" && lead.subStatus && (
+                <span
+                  className={`text-[10px] font-extrabold px-2 py-0.5 rounded-lg border ${
+                    lead.subStatus === "Qualified" ? "text-emerald-700 bg-emerald-50 border-emerald-200" : "text-red-600 bg-red-50 border-red-200"
+                  }`}
+                >
+                  {lead.subStatus}
+                </span>
+              )}
+              <span className={`border rounded-lg px-2 py-0.5 text-[11px] font-semibold ${statusBadgeClasses(lead.status)}`}>
+                {lead.status}
+              </span>
+            </div>
           </div>
           <div className="flex items-center justify-between text-[10px] text-slate-400 font-semibold">
             <span>Last Updated : {lastActivityTime(lead)}</span>
@@ -582,7 +583,7 @@ export default function LeadDrillDownPanel({ title, leads, onClose }: {
 
       {/* Lead quick-view — opened by clicking a lead's name in the table above */}
       {quickViewLead && (
-        <LeadQuickViewDrawer lead={quickViewLead} onLeadChange={setQuickViewLead} onClose={() => setQuickViewLead(null)} />
+        <LeadQuickViewDrawer lead={quickViewLead} onClose={() => setQuickViewLead(null)} />
       )}
     </>
   );

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { optionalIndianMobile, personName } from "../../utils/validation";
 
 export const userIdParamSchema = z.object({ id: z.string().uuid() });
 
@@ -14,14 +15,20 @@ export const listUsersQuerySchema = z.object({
   page: z.coerce.number().int().positive().optional(),
   pageSize: z.coerce.number().int().positive().max(200).optional(),
   // Matches the Settings "Manage Users" search box (name/email/phone).
-  search: z.string().trim().max(200).optional()
+  search: z.string().trim().max(200).optional(),
+  // The CRM Manage Users stat cards (Admin / Managers / Agents); same
+  // definitions as the card counts on that page.
+  // "crm" = all three together (everyone the CRM's user directory shows).
+  group: z.enum(["crm", "admin", "sales-managers", "sales-agents"]).optional()
 });
 
 export const createUserSchema = z.object({
-  firstName: z.string().trim().min(1).max(100),
-  lastName: z.string().trim().max(100).optional(),
-  email: z.string().email(),
-  phoneNumber: z.string().max(30).optional(),
+  firstName: personName(100),
+  // Initials are common surnames ("K", "N"), so one letter is enough here.
+  lastName: personName(100, 1).optional().or(z.literal("")),
+  email: z.string().trim().email("Enter a valid email address").max(254),
+  // Empty means no phone on file; otherwise a 10-digit mobile (stored bare).
+  phoneNumber: optionalIndianMobile,
   designation: z.string().max(200).optional(),
   role: z.enum(["ADMIN", "FINANCE", "AGENT"]),
   roleType: z.enum(["MANAGER", "MEMBER"]).optional(),
@@ -37,8 +44,8 @@ export const createUserSchema = z.object({
 });
 
 export const editUserSchema = z.object({
-  firstName: z.string().trim().min(1).max(100).optional(),
-  lastName: z.string().trim().max(100).optional(),
+  firstName: personName(100).optional(),
+  lastName: personName(100, 1).optional().or(z.literal("")),
   designation: z.string().max(200).optional(),
   roleType: z.enum(["MANAGER", "MEMBER"]).optional(),
   department: z.enum(["SALES", "TECH", "MARKETING", "FINANCE"]).optional(),
@@ -51,3 +58,15 @@ export const editUserSchema = z.object({
 export const resetPasswordSchema = z.object({
   newPassword: z.string().min(8, "Password must be at least 8 characters")
 });
+
+// Deleting a user who still holds leads: their leads are handed round-robin
+// to `reassignTo` (active sales agents/managers, in the order given) and
+// every reassigned lead gets `note`, required like any other reassign. A user
+// with no leads can be deleted with an empty body.
+export const deleteUserSchema = z.preprocess(
+  (body) => body ?? {},
+  z.object({
+    reassignTo: z.array(z.string().uuid()).min(1).max(100).optional(),
+    note: z.string().trim().min(1).max(2000).optional()
+  }).refine((d) => !d.reassignTo || !!d.note, { message: "A note is required when reassigning leads.", path: ["note"] })
+);

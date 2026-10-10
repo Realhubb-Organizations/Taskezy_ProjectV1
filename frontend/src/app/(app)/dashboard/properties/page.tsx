@@ -23,12 +23,15 @@ import AddPropertyModal, {
   splitPropertyTypes,
   joinPropertyTypes,
   propertyTypeOptions,
-  PROPERTY_STATUSES
+  PROPERTY_STATUSES,
+  validatePropertyDetails
 } from "@/components/properties/AddPropertyModal";
 import MetaCampaignLinker from "@/components/properties/MetaCampaignLinker";
 import GoogleCampaignLinker from "@/components/properties/GoogleCampaignLinker";
 import SheetSourceLinker from "@/components/properties/SheetSourceLinker";
 import { useDialog } from "@/components/ui/DialogProvider";
+import FieldError, { fieldErrorClass } from "@/components/ui/FieldError";
+import { collectErrors, normalizeIndianMobile, phoneInputProps, sanitizePhoneInput, validateEmail, validatePersonName, validatePhone } from "@/lib/validation";
 import { MetaIcon, GoogleIcon, platformFromText } from "@/components/icons/ContactIcons";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
 import TablePagination from "@/components/ui/TablePagination";
@@ -72,6 +75,7 @@ export default function PropertiesPage() {
   const [interestPhone, setInterestPhone] = useState("");
   const [interestEmail, setInterestEmail] = useState("");
   const [interestSuccess, setInterestSuccess] = useState("");
+  const [interestErrors, setInterestErrors] = useState<Partial<Record<"name" | "phone" | "email", string>>>({});
 
   // Edit form state
   const [editName, setEditName] = useState("");
@@ -85,6 +89,9 @@ export default function PropertiesPage() {
   const [editContactNumber, setEditContactNumber] = useState("");
   const [editMapUrl, setEditMapUrl] = useState("");
   const [editDesc, setEditDesc] = useState("");
+  // Inline messages under the Edit drawer's fields (same rules as Add Property).
+  const [editErrors, setEditErrors] = useState<Partial<Record<string, string>>>({});
+  const clearEditError = (field: string) => setEditErrors(prev => (prev[field] ? { ...prev, [field]: undefined } : prev));
   const [editTeamAssignmentMode, setEditTeamAssignmentMode] = useState<PropertyTeamAssignmentMode>("ALL_MEMBERS");
   const [editLeadAssignmentMode, setEditLeadAssignmentMode] = useState<LeadAssignmentMode>("ROUND_ROBIN");
   const [editSelectedMemberIds, setEditSelectedMemberIds] = useState<string[]>([]);
@@ -160,6 +167,7 @@ export default function PropertiesPage() {
     setEditDev(p.developer);
     setEditLoc(p.location);
     setEditPrice(p.price || "");
+    setEditErrors({});
     setEditType(p.type || "Apartment");
     setEditStatus(p.propertyStatus || "");
     setEditPossessionDate(p.possessionDate || "");
@@ -269,10 +277,13 @@ export default function PropertiesPage() {
 
   const handleRegisterInterest = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!interestName || !interestPhone) {
-      toast("Name and phone number are required.", "warning");
-      return;
-    }
+    const errors = collectErrors({
+      name: validatePersonName(interestName, { label: "Client name" }),
+      phone: validatePhone(interestPhone, { required: true }),
+      email: validateEmail(interestEmail)
+    });
+    setInterestErrors(errors);
+    if (Object.keys(errors).length > 0) return;
     setInterestSuccess("Thank you! Your interest has been successfully registered. An agent will contact you shortly.");
     setInterestName("");
     setInterestPhone("");
@@ -301,9 +312,13 @@ export default function PropertiesPage() {
     e.preventDefault();
     if (!selectedProperty) return;
 
-    // Property type is required server-side; the multi-select can be emptied.
-    if (!editType.trim()) {
-      toast("Select at least one property type.", "warning");
+    const errors = validatePropertyDetails({
+      developer: editDev, name: editName, propertyType: editType, price: editPrice,
+      leadRegistrationUrl: editLeadRegUrl, contactNumber: editContactNumber, location: editLoc, mapUrl: editMapUrl
+    });
+    setEditErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      toast("Please fix the highlighted fields.", "warning");
       return;
     }
 
@@ -332,16 +347,17 @@ export default function PropertiesPage() {
         : [];
 
     editProperty(selectedProperty.id, {
-      name: editName,
-      developer: editDev,
-      location: editLoc,
-      price: editPrice,
+      name: editName.trim(),
+      developer: editDev.trim(),
+      location: editLoc.trim(),
+      price: editPrice.trim(),
       type: editType,
       propertyStatus: editStatus || undefined,
       possessionDate: editPossessionDate || undefined,
-      leadRegistrationUrl: editLeadRegUrl || undefined,
-      contactNumber: editContactNumber || undefined,
-      mapUrl: editMapUrl || undefined,
+      // "" (not undefined) so clearing an optional field really clears it.
+      leadRegistrationUrl: editLeadRegUrl.trim(),
+      contactNumber: editContactNumber.trim() ? normalizeIndianMobile(editContactNumber) ?? "" : "",
+      mapUrl: editMapUrl.trim(),
       description: editDesc,
       teamAssignmentMode: editTeamAssignmentMode,
       leadAssignmentMode: editTeamAssignmentMode === "CUSTOM_MEMBERS" ? editLeadAssignmentMode : undefined,
@@ -571,14 +587,16 @@ export default function PropertiesPage() {
               </div>
 
               {isEditing && isAdmin ? (
-                <form onSubmit={handleSavePropertyEdit} className="space-y-4 text-xs">
+                <form onSubmit={handleSavePropertyEdit} noValidate className="space-y-4 text-xs">
                   <div>
                     <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Property Name</label>
-                    <input type="text" required value={editName} onChange={(e) => setEditName(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none" />
+                    <input type="text" maxLength={200} value={editName} onChange={(e) => { setEditName(e.target.value); clearEditError("name"); }} aria-invalid={!!editErrors.name} className={`w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none ${fieldErrorClass(!!editErrors.name)}`} />
+                    <FieldError message={editErrors.name} />
                   </div>
                   <div>
                     <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Builder Name</label>
-                    <input type="text" required value={editDev} onChange={(e) => setEditDev(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none" />
+                    <input type="text" maxLength={200} value={editDev} onChange={(e) => { setEditDev(e.target.value); clearEditError("developer"); }} aria-invalid={!!editErrors.developer} className={`w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none ${fieldErrorClass(!!editErrors.developer)}`} />
+                    <FieldError message={editErrors.developer} />
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
@@ -587,10 +605,11 @@ export default function PropertiesPage() {
                         variant="field"
                         options={propertyTypeOptions(editType)}
                         selected={splitPropertyTypes(editType)}
-                        onChange={(next) => setEditType(joinPropertyTypes(next))}
+                        onChange={(next) => { setEditType(joinPropertyTypes(next)); clearEditError("propertyType"); }}
                         placeholder="Select property type(s)"
                         searchPlaceholder="Search property types..."
                       />
+                      <FieldError message={editErrors.propertyType} />
                     </div>
                     <div>
                       <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Property Status</label>
@@ -611,30 +630,35 @@ export default function PropertiesPage() {
                     </div>
                     <div>
                       <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Quoted Price</label>
-                      <input type="text" value={editPrice} onChange={(e) => setEditPrice(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none font-mono" />
+                      <input type="text" maxLength={40} placeholder="e.g. 1.91 Cr or 85 Lakh" value={editPrice} onChange={(e) => { setEditPrice(e.target.value); clearEditError("price"); }} aria-invalid={!!editErrors.price} className={`w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none font-mono ${fieldErrorClass(!!editErrors.price)}`} />
+                      <FieldError message={editErrors.price} />
                     </div>
                   </div>
                   <div>
                     <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Lead Registration URL</label>
-                    <input type="text" value={editLeadRegUrl} onChange={(e) => setEditLeadRegUrl(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none" />
+                    <input type="url" inputMode="url" maxLength={1000} placeholder="https://..." value={editLeadRegUrl} onChange={(e) => { setEditLeadRegUrl(e.target.value); clearEditError("leadRegistrationUrl"); }} aria-invalid={!!editErrors.leadRegistrationUrl} className={`w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none ${fieldErrorClass(!!editErrors.leadRegistrationUrl)}`} />
+                    <FieldError message={editErrors.leadRegistrationUrl} />
                   </div>
                   <div>
                     <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Contact Number</label>
-                    <input type="tel" value={editContactNumber} onChange={(e) => setEditContactNumber(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none" />
+                    <input {...phoneInputProps} placeholder="e.g. 9845012345" value={editContactNumber} onChange={(e) => { setEditContactNumber(sanitizePhoneInput(e.target.value)); clearEditError("contactNumber"); }} aria-invalid={!!editErrors.contactNumber} className={`w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none ${fieldErrorClass(!!editErrors.contactNumber)}`} />
+                    <FieldError message={editErrors.contactNumber} />
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Location</label>
-                      <input type="text" required value={editLoc} onChange={(e) => setEditLoc(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none" />
+                      <input type="text" maxLength={300} value={editLoc} onChange={(e) => { setEditLoc(e.target.value); clearEditError("location"); }} aria-invalid={!!editErrors.location} className={`w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none ${fieldErrorClass(!!editErrors.location)}`} />
+                      <FieldError message={editErrors.location} />
                     </div>
                     <div>
                       <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Map URL</label>
-                      <input type="text" value={editMapUrl} onChange={(e) => setEditMapUrl(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none" />
+                      <input type="url" inputMode="url" maxLength={1000} placeholder="https://maps.google.com/..." value={editMapUrl} onChange={(e) => { setEditMapUrl(e.target.value); clearEditError("mapUrl"); }} aria-invalid={!!editErrors.mapUrl} className={`w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none ${fieldErrorClass(!!editErrors.mapUrl)}`} />
+                      <FieldError message={editErrors.mapUrl} />
                     </div>
                   </div>
                   <div>
                     <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Description</label>
-                    <textarea value={editDesc} onChange={(e) => setEditDesc(e.target.value)} rows={3} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none" />
+                    <textarea value={editDesc} maxLength={5000} onChange={(e) => setEditDesc(e.target.value)} rows={3} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none" />
                   </div>
 
                   <div className="border-t border-slate-200 pt-4 space-y-3">
@@ -786,10 +810,19 @@ export default function PropertiesPage() {
                       </div>
                     )}
 
-                    <form onSubmit={handleRegisterInterest} className="space-y-3">
-                      <input type="text" required placeholder="Client Name" value={interestName} onChange={(e) => setInterestName(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none" />
-                      <input type="tel" required placeholder="Phone Number" value={interestPhone} onChange={(e) => setInterestPhone(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none" />
-                      <input type="email" placeholder="Email address (optional)" value={interestEmail} onChange={(e) => setInterestEmail(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none" />
+                    <form onSubmit={handleRegisterInterest} noValidate className="space-y-3">
+                      <div>
+                        <input type="text" maxLength={100} autoComplete="name" placeholder="Client Name" value={interestName} onChange={(e) => { setInterestName(e.target.value); setInterestErrors(p => ({ ...p, name: undefined })); }} aria-invalid={!!interestErrors.name} className={`w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none ${fieldErrorClass(!!interestErrors.name)}`} />
+                        <FieldError message={interestErrors.name} />
+                      </div>
+                      <div>
+                        <input {...phoneInputProps} placeholder="Phone Number" value={interestPhone} onChange={(e) => { setInterestPhone(sanitizePhoneInput(e.target.value)); setInterestErrors(p => ({ ...p, phone: undefined })); }} aria-invalid={!!interestErrors.phone} className={`w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none ${fieldErrorClass(!!interestErrors.phone)}`} />
+                        <FieldError message={interestErrors.phone} />
+                      </div>
+                      <div>
+                        <input type="email" maxLength={254} autoComplete="email" placeholder="Email address (optional)" value={interestEmail} onChange={(e) => { setInterestEmail(e.target.value); setInterestErrors(p => ({ ...p, email: undefined })); }} aria-invalid={!!interestErrors.email} className={`w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none ${fieldErrorClass(!!interestErrors.email)}`} />
+                        <FieldError message={interestErrors.email} />
+                      </div>
                       <button type="submit" className="w-full px-5 py-2 bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold rounded-xl text-sm transition-all shadow-sm">
                         Register Interest
                       </button>

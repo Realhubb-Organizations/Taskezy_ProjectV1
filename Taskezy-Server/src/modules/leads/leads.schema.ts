@@ -1,9 +1,5 @@
 import { z } from "zod";
-
-// Same 10-digit Indian mobile rule already enforced as a CHECK constraint in
-// schema.sql — validated here too so a bad request is rejected with a clean
-// 400 before it ever reaches the database.
-const phoneRegex = /^[6-9][0-9]{9}$/;
+import { indianMobile } from "../../utils/validation";
 
 // Express's default `qs` query parser turns a single `?status=A` into a bare
 // string but repeated `?status=A&status=B` into an array — these two helpers
@@ -58,9 +54,10 @@ export const leadIdParamSchema = z.object({
 });
 
 export const createLeadSchema = z.object({
-  name: z.string().trim().min(1).max(200),
-  phone: z.string().regex(phoneRegex, "Phone must be a valid 10-digit Indian mobile number"),
-  email: z.string().email().optional(),
+  name: z.string().trim().min(2, "Name must be at least 2 characters").max(200),
+  // "+91 98450 12345", "098450…" etc. are accepted and stored as 10 bare digits.
+  phone: indianMobile,
+  email: z.string().trim().email("Enter a valid email address").max(254).optional(),
   source: z.string().max(200).optional(),
   campaign: z.string().max(200).optional(),
   propertyId: z.string().uuid().optional(),

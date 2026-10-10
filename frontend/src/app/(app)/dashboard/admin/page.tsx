@@ -5,12 +5,16 @@ import { useApp, User, Role } from "@/context/AppContext";
 import { ShieldCheck, Edit, X, AlertTriangle, Eye, EyeOff, CheckCircle, Plus } from "lucide-react";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
 import { useDialog } from "@/components/ui/DialogProvider";
+import DeleteUserModal from "@/components/dashboard/DeleteUserModal";
+import FieldError, { fieldErrorClass } from "@/components/ui/FieldError";
+import { collectErrors, normalizeIndianMobile, phoneInputProps, sanitizePhoneInput, validateEmail, validatePassword, validatePersonName, validatePhone, validateText } from "@/lib/validation";
 
 export default function AdminPage() {
-  const { users, activeRole, updateUserFields, addTeamMember, deleteTeamMember, isDataLoading } = useApp();
-  const { toast, confirm: confirmDialog } = useDialog();
+  const { users, activeRole, updateUserFields, addTeamMember, isDataLoading } = useApp();
+  const { toast } = useDialog();
 
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [deletingUser, setDeletingUser] = useState<{ id: string; name: string } | null>(null);
   
   // Editor form states
   const [firstName, setFirstName] = useState("");
@@ -36,6 +40,15 @@ export default function AdminPage() {
   
   const [successMsg, setSuccessMsg] = useState("");
 
+  // Inline field messages (+ "_form" for a server refusal) and in-flight flags.
+  type UserFormErrors = Partial<Record<"firstName" | "lastName" | "email" | "phone" | "designation" | "password" | "_form", string>>;
+  const [addErrors, setAddErrors] = useState<UserFormErrors>({});
+  const [editErrors, setEditErrors] = useState<UserFormErrors>({});
+  const [addSaving, setAddSaving] = useState(false);
+  const [editSaving, setEditSaving] = useState(false);
+  const clearAddError = (k: keyof UserFormErrors) => setAddErrors(prev => (prev[k] || prev._form ? { ...prev, [k]: undefined, _form: undefined } : prev));
+  const clearEditError = (k: keyof UserFormErrors) => setEditErrors(prev => (prev[k] || prev._form ? { ...prev, [k]: undefined, _form: undefined } : prev));
+
   const handleEditClick = (user: User) => {
     setSelectedUser(user);
     setFirstName(user.first_name || user.name.split(" ")[0] || "");
@@ -43,61 +56,78 @@ export default function AdminPage() {
     setDesignation(user.designation || "");
     setRoleType(user.role_type || "Member");
     setStatus(user.status || "ACTIVE");
-    setPasswordHash(user.password_hash || user.tempPassword || "password123");
+    // Blank = keep the current password; it's only reset when one is typed.
+    setPasswordHash("");
+    setEditErrors({});
     setShowPassword(false);
   };
 
-  const handleEditorSubmit = (e: React.FormEvent) => {
+  const handleEditorSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedUser) return;
-
-    if (passwordHash.length < 4) {
-      toast("Password must be at least 4 characters.", "warning");
-      return;
+    if (!selectedUser || editSaving) return;
+    const errors = collectErrors({
+      firstName: validatePersonName(firstName, { label: "First name" }),
+      lastName: validatePersonName(lastName, { label: "Last name", required: false, min: 1 }),
+      designation: validateText(designation, { label: "Designation", max: 200 }),
+      password: passwordHash ? validatePassword(passwordHash, { label: "New password" }) : null
+    });
+    setEditErrors(errors);
+    if (Object.keys(errors).length > 0) return;
+    setEditSaving(true);
+    try {
+      await updateUserFields(selectedUser.id, firstName.trim(), lastName.trim(), passwordHash, designation.trim(), roleType, status);
+      setSuccessMsg(`Successfully updated ${firstName.trim()} ${lastName.trim()}${passwordHash ? " and set a new password" : ""}.`);
+      setSelectedUser(null);
+      setTimeout(() => setSuccessMsg(""), 5000);
+    } catch (err) {
+      setEditErrors({ _form: err instanceof Error ? err.message : "Could not save the changes. Please try again." });
+    } finally {
+      setEditSaving(false);
     }
-
-    updateUserFields(
-      selectedUser.id,
-      firstName,
-      lastName,
-      passwordHash,
-      designation,
-      roleType,
-      status
-    );
-
-    setSuccessMsg(`Successfully updated credentials and profile for ${firstName} ${lastName}.`);
-    setSelectedUser(null);
-    setTimeout(() => setSuccessMsg(""), 5000);
   };
 
-  const handleAddSubmit = (e: React.FormEvent) => {
+  const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!addFirstName || !addEmail || !addPassword) {
-      toast("First name, email, and password are required.", "warning");
+    if (addSaving) return;
+    const errors = collectErrors({
+      firstName: validatePersonName(addFirstName, { label: "First name" }),
+      lastName: validatePersonName(addLastName, { label: "Last name", required: false, min: 1 }),
+      email: validateEmail(addEmail, { required: true }),
+      phone: validatePhone(addPhone),
+      designation: validateText(addDesignation, { label: "Designation", max: 200 }),
+      password: validatePassword(addPassword, { label: "Initial password" })
+    });
+    setAddErrors(errors);
+    if (Object.keys(errors).length > 0) return;
+    setAddSaving(true);
+    try {
+      await addTeamMember({
+        name: `${addFirstName.trim()} ${addLastName.trim()}`.trim(),
+        first_name: addFirstName.trim(),
+        last_name: addLastName.trim(),
+        email: addEmail.trim(),
+        company_email: addEmail.trim(),
+        // No phone on file rather than a made-up placeholder number.
+        phone_number: addPhone.trim() ? normalizeIndianMobile(addPhone) ?? "" : "",
+        role: addRole,
+        passwordStatus: "ACTIVE",
+        password_hash: addPassword,
+        tempPassword: addPassword,
+        designation: addDesignation.trim(),
+        role_type: addRoleType,
+        employment_type: "FULL TIME",
+        department: addDepartment,
+        status: "ACTIVE"
+      });
+    } catch (err) {
+      setAddErrors({ _form: err instanceof Error ? err.message : "Could not create the account. Please try again." });
+      setAddSaving(false);
       return;
     }
-
-    addTeamMember({
-      name: `${addFirstName} ${addLastName}`.trim(),
-      first_name: addFirstName,
-      last_name: addLastName,
-      email: addEmail,
-      company_email: addEmail,
-      phone_number: addPhone || "9876500000",
-      role: addRole,
-      passwordStatus: "ACTIVE",
-      password_hash: addPassword,
-      tempPassword: addPassword,
-      designation: addDesignation,
-      role_type: addRoleType,
-      employment_type: "FULL TIME",
-      department: addDepartment,
-      status: "ACTIVE"
-    });
-
-    setSuccessMsg(`Successfully created account for ${addFirstName} ${addLastName}.`);
+    setAddSaving(false);
+    setSuccessMsg(`Successfully created account for ${addFirstName.trim()} ${addLastName.trim()}.`);
     setIsAddOpen(false);
+    setAddErrors({});
 
     // Reset
     setAddFirstName("");
@@ -156,7 +186,7 @@ export default function AdminPage() {
         <div className="flex justify-between items-center border-b border-slate-100 pb-3">
           <h3 className="text-sm font-bold text-slate-700">Corporate Accounts &amp; Roster</h3>
           <button
-            onClick={() => setIsAddOpen(true)}
+            onClick={() => { setAddErrors({}); setIsAddOpen(true); }}
             className="inline-flex items-center gap-1.5 bg-[#0B1E6E] hover:bg-[#081650] text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-md"
           >
             <Plus className="h-4 w-4" />
@@ -193,7 +223,7 @@ export default function AdminPage() {
                     </td>
                     <td className="p-4 text-slate-500 space-y-0.5">
                       <p className="font-semibold text-slate-700">{user.email}</p>
-                      <p className="font-mono text-[10px] text-slate-450">+91-{user.phone_number || "9876543210"}</p>
+                      <p className="font-mono text-[10px] text-slate-450">{user.phone_number ? `+91-${user.phone_number}` : "—"}</p>
                     </td>
                     <td className="p-4 text-slate-500 space-y-0.5">
                       <span className="inline-block px-1.5 py-0.5 text-[9px] font-bold rounded bg-slate-100 border border-slate-200 text-slate-600">
@@ -204,8 +234,9 @@ export default function AdminPage() {
                     <td className="p-4 text-slate-500 font-semibold">
                       {user.role_type || (user.role === "ADMIN" ? "Manager" : "Member")}
                     </td>
-                    <td className="p-4 font-mono text-brand-600 font-black">
-                      {user.password_hash || user.tempPassword || "password123"}
+                    {/* Passwords are never readable (only a hash is stored server-side). */}
+                    <td className="p-4 font-mono text-slate-400 font-black" title="Passwords are hidden; set a new one with Edit">
+                      ••••••••
                     </td>
                     <td className="p-4">
                       <span
@@ -229,16 +260,7 @@ export default function AdminPage() {
                             Edit
                           </button>
                           <button
-                            onClick={async () => {
-                              if (await confirmDialog({
-                                title: "Delete user?",
-                                message: `Are you sure you want to delete ${user.name}?`,
-                                confirmLabel: "Delete",
-                                danger: true
-                              })) {
-                                deleteTeamMember(user.id);
-                              }
-                            }}
+                            onClick={() => setDeletingUser({ id: user.id, name: user.name })}
                             className="inline-flex items-center gap-1 text-xs font-bold text-red-600 hover:text-red-700 transition-colors"
                           >
                             <X className="h-3.5 w-3.5" />
@@ -273,28 +295,33 @@ export default function AdminPage() {
               </button>
             </div>
 
-            <form onSubmit={handleAddSubmit} className="space-y-4">
+            <form onSubmit={handleAddSubmit} noValidate className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">First Name</label>
                   <input
                     type="text"
-                    required
+                    maxLength={100}
                     value={addFirstName}
-                    onChange={(e) => setAddFirstName(e.target.value)}
+                    onChange={(e) => { setAddFirstName(e.target.value); clearAddError("firstName"); }}
+                    aria-invalid={!!addErrors.firstName}
                     placeholder="Sanjeev"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none"
+                    className={`w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none ${fieldErrorClass(!!addErrors.firstName)}`}
                   />
+                  <FieldError message={addErrors.firstName} />
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Last Name</label>
                   <input
                     type="text"
+                    maxLength={100}
                     value={addLastName}
-                    onChange={(e) => setAddLastName(e.target.value)}
+                    onChange={(e) => { setAddLastName(e.target.value); clearAddError("lastName"); }}
+                    aria-invalid={!!addErrors.lastName}
                     placeholder="Singh"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none"
+                    className={`w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none ${fieldErrorClass(!!addErrors.lastName)}`}
                   />
+                  <FieldError message={addErrors.lastName} />
                 </div>
               </div>
 
@@ -303,22 +330,28 @@ export default function AdminPage() {
                   <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Corporate Email</label>
                   <input
                     type="email"
-                    required
+                    maxLength={254}
+                    autoComplete="off"
                     value={addEmail}
-                    onChange={(e) => setAddEmail(e.target.value)}
+                    onChange={(e) => { setAddEmail(e.target.value); clearAddError("email"); }}
+                    aria-invalid={!!addErrors.email}
                     placeholder="name@realhubb.in"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none"
+                    className={`w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none ${fieldErrorClass(!!addErrors.email)}`}
                   />
+                  <FieldError message={addErrors.email} />
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Phone Number</label>
                   <input
-                    type="text"
+                    {...phoneInputProps}
+                    autoComplete="off"
                     value={addPhone}
-                    onChange={(e) => setAddPhone(e.target.value)}
+                    onChange={(e) => { setAddPhone(sanitizePhoneInput(e.target.value)); clearAddError("phone"); }}
+                    aria-invalid={!!addErrors.phone}
                     placeholder="9980189914"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none"
+                    className={`w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none ${fieldErrorClass(!!addErrors.phone)}`}
                   />
+                  <FieldError message={addErrors.phone} />
                 </div>
               </div>
 
@@ -340,12 +373,14 @@ export default function AdminPage() {
                   <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Designation</label>
                   <input
                     type="text"
-                    required
+                    maxLength={200}
                     value={addDesignation}
-                    onChange={(e) => setAddDesignation(e.target.value)}
+                    onChange={(e) => { setAddDesignation(e.target.value); clearAddError("designation"); }}
+                    aria-invalid={!!addErrors.designation}
                     placeholder="e.g. Sales Associate"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none"
+                    className={`w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none ${fieldErrorClass(!!addErrors.designation)}`}
                   />
+                  <FieldError message={addErrors.designation} />
                 </div>
               </div>
 
@@ -380,11 +415,13 @@ export default function AdminPage() {
                 <div className="relative">
                   <input
                     type={addShowPassword ? "text" : "password"}
-                    required
+                    maxLength={128}
+                    autoComplete="new-password"
                     value={addPassword}
-                    onChange={(e) => setAddPassword(e.target.value)}
-                    placeholder="Enter account password"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-3 pr-10 py-2.5 text-xs focus:outline-none focus:border-brand-500"
+                    onChange={(e) => { setAddPassword(e.target.value); clearAddError("password"); }}
+                    aria-invalid={!!addErrors.password}
+                    placeholder="At least 8 characters"
+                    className={`w-full bg-slate-50 border border-slate-200 rounded-lg pl-3 pr-10 py-2.5 text-xs focus:outline-none focus:border-brand-500 ${fieldErrorClass(!!addErrors.password)}`}
                   />
                   <button
                     type="button"
@@ -394,13 +431,16 @@ export default function AdminPage() {
                     {addShowPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </div>
+                <FieldError message={addErrors.password} />
               </div>
 
+              <FieldError message={addErrors._form} />
               <button
                 type="submit"
-                className="w-full bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold py-2.5 rounded-lg text-xs transition-all shadow-sm"
+                disabled={addSaving}
+                className="w-full bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold py-2.5 rounded-lg text-xs transition-all shadow-sm disabled:opacity-60"
               >
-                Provision Account
+                {addSaving ? "Provisioning..." : "Provision Account"}
               </button>
             </form>
           </div>
@@ -426,27 +466,31 @@ export default function AdminPage() {
               Updating details for <strong>{selectedUser.email}</strong>. Changes commit instantly to the simulated SQL database partition.
             </p>
 
-            <form onSubmit={handleEditorSubmit} className="space-y-4">
+            <form onSubmit={handleEditorSubmit} noValidate className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[10px] font-bold text-slate-500 mb-1.5 uppercase">First Name</label>
                   <input
                     type="text"
-                    required
+                    maxLength={100}
                     value={firstName}
-                    onChange={(e) => setFirstName(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-805 focus:outline-none focus:border-brand-500"
+                    onChange={(e) => { setFirstName(e.target.value); clearEditError("firstName"); }}
+                    aria-invalid={!!editErrors.firstName}
+                    className={`w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-805 focus:outline-none focus:border-brand-500 ${fieldErrorClass(!!editErrors.firstName)}`}
                   />
+                  <FieldError message={editErrors.firstName} />
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold text-slate-500 mb-1.5 uppercase">Last Name</label>
                   <input
                     type="text"
-                    required
+                    maxLength={100}
                     value={lastName}
-                    onChange={(e) => setLastName(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-805 focus:outline-none focus:border-brand-500"
+                    onChange={(e) => { setLastName(e.target.value); clearEditError("lastName"); }}
+                    aria-invalid={!!editErrors.lastName}
+                    className={`w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-805 focus:outline-none focus:border-brand-500 ${fieldErrorClass(!!editErrors.lastName)}`}
                   />
+                  <FieldError message={editErrors.lastName} />
                 </div>
               </div>
 
@@ -454,11 +498,13 @@ export default function AdminPage() {
                 <label className="block text-[10px] font-bold text-slate-500 mb-1.5 uppercase">Designation</label>
                 <input
                   type="text"
-                  required
+                  maxLength={200}
                   value={designation}
-                  onChange={(e) => setDesignation(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-805 focus:outline-none"
+                  onChange={(e) => { setDesignation(e.target.value); clearEditError("designation"); }}
+                  aria-invalid={!!editErrors.designation}
+                  className={`w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-805 focus:outline-none ${fieldErrorClass(!!editErrors.designation)}`}
                 />
+                <FieldError message={editErrors.designation} />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -487,14 +533,17 @@ export default function AdminPage() {
               </div>
 
               <div>
-                <label className="block text-[10px] font-bold text-slate-500 mb-1.5 uppercase">Password Hash (Key)</label>
+                <label className="block text-[10px] font-bold text-slate-500 mb-1.5 uppercase">New Password</label>
                 <div className="relative">
                   <input
                     type={showPassword ? "text" : "password"}
-                    required
+                    maxLength={128}
+                    autoComplete="new-password"
+                    placeholder="Leave blank to keep the current password"
                     value={passwordHash}
-                    onChange={(e) => setPasswordHash(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-3 pr-10 py-2 text-xs text-slate-805 focus:outline-none focus:border-brand-500"
+                    onChange={(e) => { setPasswordHash(e.target.value); clearEditError("password"); }}
+                    aria-invalid={!!editErrors.password}
+                    className={`w-full bg-slate-50 border border-slate-200 rounded-lg pl-3 pr-10 py-2 text-xs text-slate-805 focus:outline-none focus:border-brand-500 ${fieldErrorClass(!!editErrors.password)}`}
                   />
                   <button
                     type="button"
@@ -504,17 +553,31 @@ export default function AdminPage() {
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </div>
+                <FieldError message={editErrors.password} />
               </div>
 
+              <FieldError message={editErrors._form} />
               <button
                 type="submit"
-                className="w-full bg-[#0B1E6E] hover:bg-[#081650] text-white font-semibold py-2.5 rounded-lg text-xs transition-all shadow-md"
+                disabled={editSaving}
+                className="w-full bg-[#0B1E6E] hover:bg-[#081650] text-white font-semibold py-2.5 rounded-lg text-xs transition-all shadow-md disabled:opacity-60"
               >
-                Apply Changes &amp; Synchronize
+                {editSaving ? "Saving..." : <>Apply Changes &amp; Synchronize</>}
               </button>
             </form>
           </div>
         </>
+      )}
+
+      {deletingUser && (
+        <DeleteUserModal
+          user={deletingUser}
+          onClose={() => setDeletingUser(null)}
+          onDeleted={(message) => {
+            setDeletingUser(null);
+            toast(message, "success");
+          }}
+        />
       )}
     </div>
   );

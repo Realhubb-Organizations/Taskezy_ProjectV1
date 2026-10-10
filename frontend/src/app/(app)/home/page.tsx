@@ -25,6 +25,22 @@ function Metric({ loading, className, children }: { loading: boolean; className:
   return <p className={className}>{children}</p>;
 }
 
+// "Coming soon" corner ribbon for modules that aren't open yet (HRMS,
+// Finance): a diagonal band wrapped over the card's top-right corner, with
+// darker folds where it tucks behind the top and right edges. The card's own
+// content is greyed and blurred underneath. Only CRM is clickable for now.
+function ComingSoonRibbon() {
+  return (
+    <div aria-label="Coming soon" className="pointer-events-none absolute -top-2 -right-2 z-10 h-[100px] w-[100px] overflow-hidden">
+      <span aria-hidden="true" className="absolute top-0 left-[14px] h-2 w-2 bg-[#050F3D]" />
+      <span aria-hidden="true" className="absolute top-[78px] right-0 h-2 w-2 bg-[#050F3D]" />
+      <span className="absolute top-[24px] -left-[10px] w-[150px] rotate-45 bg-[#0B1E6E] py-1 text-center text-[10px] font-extrabold leading-[14px] tracking-wider text-white shadow-md">
+        COMING SOON
+      </span>
+    </div>
+  );
+}
+
 export default function HomePage() {
   const { leads, followupCalls, currentUser, invoices, reimbursements, timesheets, adSpendRecords, isDataLoading, users } = useApp();
 
@@ -128,68 +144,74 @@ export default function HomePage() {
         </Link>
 
         {/* HRMS */}
-        <Link href="/hrms/dashboard" className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 flex flex-col justify-between hover:shadow-md hover:border-brand-200 transition-all cursor-pointer">
-          <div className="space-y-3.5">
-            <h3 className="text-sm font-extrabold text-brand-700 flex items-center gap-1.5">
-              <Users className="h-4 w-4 text-brand-600" />
-              HRMS
-            </h3>
-            <div>
-              <p className="text-xs text-slate-450">Applied Leaves in last 7 days</p>
-              <p className="text-xl font-black text-slate-900 mt-0.5">{leavesAppliedLast7Days}</p>
-              <p className="text-xs font-bold text-[#006AFF] mt-0.5">{employeesOnLeave} Employees Applied</p>
+        <div aria-disabled="true" className="relative bg-slate-50 rounded-2xl shadow-sm border border-slate-100 p-5 flex flex-col cursor-default">
+          <ComingSoonRibbon />
+          <div className="flex flex-1 flex-col justify-between grayscale opacity-60 blur-[1.5px] select-none">
+            <div className="space-y-3.5">
+              <h3 className="text-sm font-extrabold text-brand-700 flex items-center gap-1.5">
+                <Users className="h-4 w-4 text-brand-600" />
+                HRMS
+              </h3>
+              <div>
+                <p className="text-xs text-slate-450">Applied Leaves in last 7 days</p>
+                <p className="text-xl font-black text-slate-900 mt-0.5">{leavesAppliedLast7Days}</p>
+                <p className="text-xs font-bold text-[#006AFF] mt-0.5">{employeesOnLeave} Employees Applied</p>
+              </div>
+              <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-100">
+                <div>
+                  <p className="text-[10px] text-slate-450">Present</p>
+                  <Metric loading={isDataLoading} className="text-sm font-bold text-slate-900">{presentTodayCount}</Metric>
+                </div>
+                <div>
+                  <p className="text-[10px] text-slate-450">Pending Info</p>
+                  <Metric loading={isDataLoading} className="text-sm font-bold text-red-600">{pendingRegularizations}</Metric>
+                </div>
+                <div>
+                  <p className="text-[10px] text-slate-450">WFH</p>
+                  <p className="text-sm font-bold text-slate-900">{wfhCount}</p>
+                </div>
+              </div>
             </div>
-            <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-100">
-              <div>
-                <p className="text-[10px] text-slate-450">Present</p>
-                <Metric loading={isDataLoading} className="text-sm font-bold text-slate-900">{presentTodayCount}</Metric>
-              </div>
-              <div>
-                <p className="text-[10px] text-slate-450">Pending Info</p>
-                <Metric loading={isDataLoading} className="text-sm font-bold text-red-600">{pendingRegularizations}</Metric>
-              </div>
-              <div>
-                <p className="text-[10px] text-slate-450">WFH</p>
-                <p className="text-sm font-bold text-slate-900">{wfhCount}</p>
-              </div>
-            </div>
+            <span className="text-xs font-bold text-slate-400 mt-4 inline-flex items-center gap-1">
+              Know More <ArrowRight className="h-3 w-3" />
+            </span>
           </div>
-          <span className="text-xs font-bold text-[#006AFF] mt-4 inline-flex items-center gap-1">
-            Know More <ArrowRight className="h-3 w-3" />
-          </span>
-        </Link>
+        </div>
 
         {/* Finance */}
-        <Link href="/finance/dashboard" className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 flex flex-col justify-between hover:shadow-md hover:border-brand-200 transition-all cursor-pointer">
-          <div className="space-y-3.5">
-            <h3 className="text-sm font-extrabold text-brand-700 flex items-center gap-1.5">
-              <TrendingUp className="h-4 w-4 text-brand-600" />
-              Finance
-            </h3>
-            <div>
-              <p className="text-xs text-slate-450">Raised Invoices in last 7 days</p>
-              <Metric loading={isDataLoading} className="text-xl font-black text-slate-900 mt-0.5">{invoicesLast7Days.length}</Metric>
-              <Metric loading={isDataLoading} className="text-xs font-bold text-[#006AFF] mt-0.5">{propertiesInvoicedLast7Days} Properties Included</Metric>
+        <div aria-disabled="true" className="relative bg-slate-50 rounded-2xl shadow-sm border border-slate-100 p-5 flex flex-col cursor-default">
+          <ComingSoonRibbon />
+          <div className="flex flex-1 flex-col justify-between grayscale opacity-60 blur-[1.5px] select-none">
+            <div className="space-y-3.5">
+              <h3 className="text-sm font-extrabold text-brand-700 flex items-center gap-1.5">
+                <TrendingUp className="h-4 w-4 text-brand-600" />
+                Finance
+              </h3>
+              <div>
+                <p className="text-xs text-slate-450">Raised Invoices in last 7 days</p>
+                <Metric loading={isDataLoading} className="text-xl font-black text-slate-900 mt-0.5">{invoicesLast7Days.length}</Metric>
+                <Metric loading={isDataLoading} className="text-xs font-bold text-[#006AFF] mt-0.5">{propertiesInvoicedLast7Days} Properties Included</Metric>
+              </div>
+              <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-100">
+                <div>
+                  <p className="text-[10px] text-slate-450">Bookings</p>
+                  <Metric loading={isDataLoading} className="text-sm font-bold text-slate-900">{bookingsCount}</Metric>
+                </div>
+                <div>
+                  <p className="text-[10px] text-slate-450">Transactions</p>
+                  <Metric loading={isDataLoading} className="text-sm font-bold text-slate-900">{invoices.length}</Metric>
+                </div>
+                <div>
+                  <p className="text-[10px] text-slate-450">Reimbursements</p>
+                  <Metric loading={isDataLoading} className="text-sm font-bold text-slate-900">{reimbursements.length}</Metric>
+                </div>
+              </div>
             </div>
-            <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-100">
-              <div>
-                <p className="text-[10px] text-slate-450">Bookings</p>
-                <Metric loading={isDataLoading} className="text-sm font-bold text-slate-900">{bookingsCount}</Metric>
-              </div>
-              <div>
-                <p className="text-[10px] text-slate-450">Transactions</p>
-                <Metric loading={isDataLoading} className="text-sm font-bold text-slate-900">{invoices.length}</Metric>
-              </div>
-              <div>
-                <p className="text-[10px] text-slate-450">Reimbursements</p>
-                <Metric loading={isDataLoading} className="text-sm font-bold text-slate-900">{reimbursements.length}</Metric>
-              </div>
-            </div>
+            <span className="text-xs font-bold text-slate-400 mt-4 inline-flex items-center gap-1">
+              Know More <ArrowRight className="h-3 w-3" />
+            </span>
           </div>
-          <span className="text-xs font-bold text-[#006AFF] mt-4 inline-flex items-center gap-1">
-            Know More <ArrowRight className="h-3 w-3" />
-          </span>
-        </Link>
+        </div>
       </div>
     </div>
   );

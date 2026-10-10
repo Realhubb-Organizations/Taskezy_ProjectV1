@@ -2,6 +2,7 @@
 
 import React, { useMemo, useState } from "react";
 import { useApp } from "@/context/AppContext";
+import { isLeadAssignableUser } from "@/lib/leadAssignment";
 import { useDialog } from "@/components/ui/DialogProvider";
 import { maskPhone } from "@/lib/maskPII";
 import { AlertTriangle, DollarSign, TrendingUp, Users, UserCog, RefreshCw } from "lucide-react";
@@ -32,7 +33,7 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
 
   // Real reporting-line lookup (see Settings → Manage Users → "Reports To"),
   // not the old hardcoded name-string SALES_HIERARCHY table.
-  const managerNames = useMemo(() => new Set(users.filter(u => u.role_type === "Manager").map(u => u.name)), [users]);
+  const managerNames = useMemo(() => new Set(users.filter(u => u.role_type === "Manager" && isLeadAssignableUser(u)).map(u => u.name)), [users]);
   const reportsToByName = useMemo(() => {
     const map = new Map<string, string>();
     users.forEach(u => { if (u.managerName) map.set(u.name, u.managerName); });
@@ -45,10 +46,13 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
   // of role, letting a Member browse other agents' names/reports.
   const agentNames = useMemo(() => {
     const allNames = new Set<string>([
-      ...users.filter(u => u.role_type !== "Manager").map(u => u.name),
+      ...users.filter(u => u.role_type !== "Manager" && isLeadAssignableUser(u)).map(u => u.name),
       ...rangeLeads.map(l => l.assignedAgent)
     ]);
     managerNames.forEach(m => allNames.delete(m));
+    // Sales agents only: Finance/Admin users never appear here or as a
+    // reassign target, even when one holds a lead (e.g. an unassigned lead).
+    users.filter(u => !isLeadAssignableUser(u)).forEach(u => allNames.delete(u.name));
     const all = Array.from(allNames).sort();
 
     if (activeRole === "ADMIN") return all;

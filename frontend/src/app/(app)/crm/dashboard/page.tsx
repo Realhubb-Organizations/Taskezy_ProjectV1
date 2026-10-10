@@ -25,7 +25,9 @@ export default function CrmDashboardPage() {
   const { leads, properties, users, currentUser, addLead, followupCalls, isDataLoading } = useApp();
   const { toast } = useDialog();
 
-  const [dateRange, setDateRange] = useState<"today" | "yesterday" | "week" | "month" | "all" | "custom">("today");
+  // Opens on All Time (every role) so the cards' Total/New Leads match the
+  // lead counts people expect; narrow it with the picker.
+  const [dateRange, setDateRange] = useState<"today" | "yesterday" | "week" | "month" | "all" | "custom">("all");
   // The range picked via the Date Range dropdown's "Custom" option.
   const [customRange, setCustomRange] = useState<DateRangeValue | null>(null);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
@@ -282,7 +284,7 @@ export default function CrmDashboardPage() {
       {/* Lead quick-view for the sales Pending Tasks table above (the
           drill-down panel opens its own). */}
       {quickViewLead && (
-        <LeadQuickViewDrawer lead={quickViewLead} onLeadChange={setQuickViewLead} onClose={() => setQuickViewLead(null)} />
+        <LeadQuickViewDrawer lead={quickViewLead} onClose={() => setQuickViewLead(null)} />
       )}
     </div>
   );
