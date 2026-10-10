@@ -1,17 +1,31 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine } from "recharts";
+import dynamic from "next/dynamic";
+import type { ApexOptions } from "apexcharts";
 import { Lead, FollowupCall } from "@/context/AppContext";
 import { buildSalesPendingTasks, PendingTask } from "@/lib/salesPendingTasks";
 import { SearchableMultiSelect } from "@/components/ui/SearchableDropdown";
 import { TAB_BUCKETS, TeamTaskTab } from "@/components/dashboard/TeamTasksTable";
 
-const LINE_COLOR = "#6D3FD9";
+// ApexCharts touches `window`, so it only loads in the browser.
+const ApexChart = dynamic(() => import("react-apexcharts"), {
+  ssr: false,
+  loading: () => <div className="h-[300px] rounded-xl bg-slate-50 animate-pulse" />
+});
 
-// Trend window: the last 30 days through the next 7, by task due date.
-const DAYS_BACK = 30;
+// Due-date chart window: one bar per day from a week ago to a week ahead,
+// plus "Older" / "Later" bars so no task is ever left off the chart.
+const DAYS_BACK = 7;
 const DAYS_AHEAD = 7;
+// Stack colors, one per agent or task type; anything past the eighth is
+// "Other". Soft, evenly weighted tones so no single group shouts.
+const SERIES_COLORS = ["#4F46E5", "#8B5CF6", "#38BDF8", "#FBBF24", "#FB7185", "#34D399", "#F472B6", "#CBD5E1"];
+
+interface TrendSeries { key: string; name: string; color: string; total: number }
+interface TrendRow { label: string; total: number; [seriesKey: string]: string | number }
+
+const escapeHtml = (v: string) => v.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 
 // The design's 3D pie is used as-is (public/images/task-pie-3d.png). Its
 // seven slices, measured clockwise from 12 o'clock in that image, with the
@@ -113,27 +127,175 @@ export default function TaskInsightsCharts({
   // Built exactly like TeamTasksTable's Task Type options, so both list the same values.
   const taskTypeOptions = useMemo(() => Array.from(new Set(allTasks.map(t => t.taskType))).sort(), [allTasks]);
 
+  // Tasks by due date, stacked by agent when two or more agents are picked
+  // (to compare them), otherwise by task type.
   const trend = useMemo(() => {
     const filtered = filterTasks(tasks, lineFilter);
-    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - DAYS_BACK);
-    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + DAYS_AHEAD);
-    const counts = new Map<string, number>();
-    const data: { key: string; label: string; tasks: number }[] = [];
-    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-      data.push({ key: d.toDateString(), label: d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" }), tasks: 0 });
-      counts.set(d.toDateString(), 0);
-    }
-    let earlier = 0;
+    const splitBy: "agent" | "type" = lineFilter.agents.length >= 2 ? "agent" : "type";
+    const seriesOf = (t: PendingTask) => (splitBy === "agent" ? t.assignedTo || "Unassigned" : t.taskType || "Other");
+
+    const dayStart = (offset: number) => new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset);
+    const windowStart = dayStart(-DAYS_BACK);
+    const windowEnd = dayStart(DAYS_AHEAD + 1);
+    const dayLabel = (d: Date) => d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+
+    // Biggest groups first; past the palette, the rest fold into "Other".
+    const totals = new Map<string, number>();
+    filtered.forEach(t => { if (t.dueAt) totals.set(seriesOf(t), (totals.get(seriesOf(t)) || 0) + 1); });
+    const ranked = Array.from(totals.entries()).sort((a, b) => b[1] - a[1]);
+    const keep = ranked.length > SERIES_COLORS.length ? ranked.slice(0, SERIES_COLORS.length - 1) : ranked;
+    const otherTotal = ranked.slice(keep.length).reduce((sum, [, v]) => sum + v, 0);
+    const series: TrendSeries[] = keep.map(([name, total], i) => ({ key: `s${i}`, name, color: SERIES_COLORS[i], total }));
+    if (otherTotal > 0) series.push({ key: `s${series.length}`, name: "Other", color: SERIES_COLORS[SERIES_COLORS.length - 1], total: otherTotal });
+    const keyOf = new Map(keep.map(([name], i) => [name, `s${i}`]));
+    const otherKey = otherTotal > 0 ? series[series.length - 1].key : null;
+
+    const emptyRow = (label: string): TrendRow => {
+      const row: TrendRow = { label, total: 0 };
+      series.forEach(sr => { row[sr.key] = 0; });
+      return row;
+    };
+    const older = emptyRow("Older");
+    const later = emptyRow("Later");
+    const days = Array.from({ length: DAYS_BACK + DAYS_AHEAD + 1 }, (_, i) => {
+      const offset = i - DAYS_BACK;
+      return emptyRow(offset === 0 ? "Today" : dayLabel(dayStart(offset)));
+    });
+
+    let noDueDate = 0;
     for (const t of filtered) {
-      if (!t.dueAt) continue;
-      const k = t.dueAt.toDateString();
-      if (counts.has(k)) counts.set(k, (counts.get(k) || 0) + 1);
-      else if (t.dueAt < start) earlier += 1;
+      if (!t.dueAt) { noDueDate += 1; continue; }
+      const row = t.dueAt < windowStart ? older
+        : t.dueAt >= windowEnd ? later
+        : days[Math.floor((new Date(t.dueAt.getFullYear(), t.dueAt.getMonth(), t.dueAt.getDate()).getTime() - windowStart.getTime()) / 86_400_000)];
+      if (!row) continue;
+      const key = keyOf.get(seriesOf(t)) ?? otherKey;
+      if (!key) continue;
+      row[key] = Number(row[key]) + 1;
+      row.total += 1;
     }
-    for (const p of data) p.tasks = counts.get(p.key) || 0;
-    const inWindow = data.reduce((s, p) => s + p.tasks, 0);
-    return { data, total: filtered.length, earlier, average: data.length ? inWindow / data.length : 0, todayLabel: now.toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) };
+
+    const data = [...(older.total > 0 ? [older] : []), ...days, ...(later.total > 0 ? [later] : [])];
+    const firstOverdueLabel = data[0].label;
+    return { data, series, splitBy, total: filtered.length, noDueDate, firstOverdueLabel };
   }, [tasks, lineFilter, now]);
+
+  // Legend items the user has tapped off (by series name).
+  const [hiddenSeries, setHiddenSeries] = useState<Set<string>>(new Set());
+  useEffect(() => { setHiddenSeries(new Set()); }, [trend.splitBy]);
+  const toggleSeries = (name: string) => setHiddenSeries(prev => {
+    const next = new Set(prev);
+    if (next.has(name)) next.delete(name); else next.add(name);
+    return next;
+  });
+
+  const trendChart = useMemo(() => {
+    const labels = trend.data.map(r => r.label);
+    const todayIndex = labels.indexOf("Today");
+    const visible = trend.series.filter(sr => !hiddenSeries.has(sr.name));
+    // Zero → null so only the real top part of each stack gets rounded.
+    const series = visible.map(sr => ({ name: sr.name, data: trend.data.map(r => Number(r[sr.key]) || null) }));
+    const options: ApexOptions = {
+      chart: {
+        type: "bar",
+        stacked: true,
+        fontFamily: "inherit",
+        toolbar: { show: false },
+        zoom: { enabled: false },
+        animations: { enabled: true, speed: 450, animateGradually: { enabled: true, delay: 25 }, dynamicAnimation: { enabled: true, speed: 350 } }
+      },
+      colors: visible.map(sr => sr.color),
+      plotOptions: {
+        bar: { columnWidth: "48%", borderRadius: 6, borderRadiusApplication: "end", borderRadiusWhenStacked: "last" }
+      },
+      // A thin white edge between stacked parts keeps each one readable.
+      stroke: { show: true, width: 1.5, colors: ["#ffffff"] },
+      dataLabels: { enabled: false },
+      grid: {
+        borderColor: "#EEF2F7",
+        strokeDashArray: 4,
+        xaxis: { lines: { show: false } },
+        padding: { left: 8, right: 8, top: 0 }
+      },
+      xaxis: {
+        categories: labels,
+        axisBorder: { show: false },
+        axisTicks: { show: false },
+        tooltip: { enabled: false },
+        labels: {
+          rotate: 0,
+          hideOverlappingLabels: true,
+          style: { colors: labels.map((l, i) => (l === "Today" ? "#1E1B4B" : i < todayIndex ? "#FB7185" : "#94A3B8")), fontSize: "11px", fontWeight: 500 }
+        }
+      },
+      yaxis: {
+        min: 0,
+        forceNiceScale: true,
+        labels: { style: { colors: ["#94A3B8"], fontSize: "11px" }, formatter: (v: number) => String(Math.round(v)) }
+      },
+      // Overdue days are marked by rose date labels plus an "Overdue" tag
+      // (a shaded band would sit on top of the bars and wash them out).
+      annotations: {
+        xaxis: [
+          {
+            x: trend.firstOverdueLabel,
+            borderColor: "transparent",
+            label: {
+              text: "Overdue",
+              orientation: "horizontal",
+              position: "top",
+              textAnchor: "start",
+              offsetY: -6,
+              borderWidth: 0,
+              style: { background: "transparent", color: "#E11D48", fontSize: "11px", fontWeight: 600 }
+            }
+          },
+          {
+            x: "Today",
+            borderColor: "transparent",
+            label: {
+              text: "Today",
+              orientation: "horizontal",
+              position: "top",
+              offsetY: -6,
+              borderWidth: 0,
+              style: { background: "#EEF2FF", color: "#3730A3", fontSize: "10px", fontWeight: 700, padding: { left: 6, right: 6, top: 2, bottom: 2 } }
+            }
+          }
+        ]
+      },
+      // Our own legend below the chart (tap to hide/show a group).
+      legend: { show: false },
+      states: { hover: { filter: { type: "darken" } }, active: { filter: { type: "none" } } },
+      tooltip: {
+        shared: true,
+        intersect: false,
+        // One card per day: the date, its total, and only the non-zero parts.
+        custom: ({ series: values, dataPointIndex, w }: { series: number[][]; dataPointIndex: number; w: { globals: { seriesNames: string[]; colors: string[] } } }) => {
+          const label = labels[dataPointIndex] ?? "";
+          const title = label === "Older" ? "Older (overdue)" : label;
+          const rows = values
+            .map((vals, i) => ({ name: w.globals.seriesNames[i], color: w.globals.colors[i], value: Number(vals[dataPointIndex]) || 0 }))
+            .filter(r => r.value > 0);
+          const total = rows.reduce((sum, r) => sum + r.value, 0);
+          return `<div style="padding:10px 12px;min-width:170px;font-size:11px;font-family:inherit">
+            <div style="display:flex;justify-content:space-between;gap:12px;font-weight:700;color:#0f172a;margin-bottom:${rows.length ? 6 : 0}px">
+              <span>${escapeHtml(title)}</span><span>${total} task${total === 1 ? "" : "s"}</span>
+            </div>
+            ${rows.map(r => `<div style="display:flex;align-items:center;gap:6px;color:#475569;margin-top:3px">
+              <span style="width:8px;height:8px;border-radius:9999px;background:${r.color};flex-shrink:0"></span>
+              <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(r.name)}</span>
+              <span style="margin-left:auto;padding-left:12px;font-weight:600;color:#0f172a">${r.value}</span>
+            </div>`).join("")}
+          </div>`;
+        }
+      },
+      responsive: [
+        { breakpoint: 640, options: { plotOptions: { bar: { columnWidth: "62%", borderRadius: 4 } } } }
+      ]
+    };
+    return { series, options };
+  }, [trend, hiddenSeries]);
 
   // Task types → image slices. More than seven types: the smallest fold
   // into "Other" on the last slice. Fewer: the spare slices show "0 Task".
@@ -175,28 +337,45 @@ export default function TaskInsightsCharts({
           <div>
             <h3 className="text-base font-extrabold text-slate-900">{tab === "all" ? "All Task" : "Pending Task"}</h3>
             <p className="text-[11px] text-slate-500">
-              {trend.total} {tab === "all" ? "open" : "overdue"} task{trend.total === 1 ? "" : "s"} by due date
-              {trend.earlier > 0 && ` · ${trend.earlier} due before ${trend.data[0]?.label}`}
+              {trend.total} {tab === "all" ? "open" : "overdue"} task{trend.total === 1 ? "" : "s"} by due date · colored by {trend.splitBy === "agent" ? "agent" : "task type"}
+              {trend.noDueDate > 0 && ` · ${trend.noDueDate} with no due date`}
             </p>
           </div>
           <CardFilters filter={lineFilter} agents={agents} taskTypes={taskTypeOptions} onChange={setLineFilter} />
         </div>
-        <ResponsiveContainer width="100%" height={300}>
-          <LineChart data={trend.data} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-            <CartesianGrid vertical={false} stroke="#e2e8f0" />
-            <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} minTickGap={24} />
-            <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} allowDecimals={false} />
-            <Tooltip
-              formatter={(v) => [`${v} task${Number(v) === 1 ? "" : "s"}`, "Due"]}
-              labelStyle={{ fontSize: 11, fontWeight: 600 }}
-              contentStyle={{ fontSize: 11, borderRadius: 8, borderColor: "#e2e8f0" }}
-              cursor={{ stroke: "#cbd5e1", strokeWidth: 1 }}
-            />
-            <ReferenceLine y={trend.average} stroke="#a5b4fc" strokeDasharray="4 4" />
-            <ReferenceLine x={trend.todayLabel} stroke="#cbd5e1" label={{ value: "Today", position: "insideTopRight", fontSize: 10, fill: "#64748b" }} />
-            <Line type="monotone" dataKey="tasks" stroke={LINE_COLOR} strokeWidth={2} dot={false} isAnimationActive={false} activeDot={{ r: 4, stroke: "#fff", strokeWidth: 2 }} />
-          </LineChart>
-        </ResponsiveContainer>
+        {trend.total - trend.noDueDate === 0 ? (
+          <div className="h-[300px] flex items-center justify-center text-xs text-slate-400 italic">
+            No tasks for this selection.
+          </div>
+        ) : (
+          <>
+            <div className="-mx-2">
+              <ApexChart type="bar" height={290} series={trendChart.series} options={trendChart.options} />
+            </div>
+            <ul className="mt-1 flex flex-wrap gap-1.5">
+              {trend.series.map(sr => {
+                const off = hiddenSeries.has(sr.name);
+                return (
+                  <li key={sr.key}>
+                    <button
+                      type="button"
+                      aria-pressed={!off}
+                      onClick={() => toggleSeries(sr.name)}
+                      title={off ? `Show ${sr.name}` : `Hide ${sr.name}`}
+                      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-all duration-200 ${
+                        off ? "border-slate-200 bg-white text-slate-400" : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-white hover:shadow-sm"
+                      }`}
+                    >
+                      <span className="h-2 w-2 rounded-full shrink-0 transition-opacity" style={{ background: sr.color, opacity: off ? 0.3 : 1 }} />
+                      <span className={`truncate max-w-[150px] ${off ? "line-through" : ""}`}>{sr.name}</span>
+                      <span className={`font-semibold tabular-nums ${off ? "text-slate-400" : "text-slate-900"}`}>{sr.total}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </>
+        )}
       </div>
 
       {/* Task Type — the design's 3D pie image, labeled with real counts */}

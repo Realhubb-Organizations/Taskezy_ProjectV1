@@ -39,12 +39,16 @@ import {
   Percent,
   LayoutGrid,
   CreditCard,
-  MoreHorizontal
+  MoreHorizontal,
+  ChevronDown
 } from "lucide-react";
 import { LineSkeleton, CardListSkeleton } from "@/components/ui/Skeletons";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
 import { useDialog } from "@/components/ui/DialogProvider";
+import DeleteUserModal from "@/components/dashboard/DeleteUserModal";
+import FieldError, { fieldErrorClass } from "@/components/ui/FieldError";
+import { collectErrors, normalizeIndianMobile, phoneInputProps, sanitizePhoneInput, validateEmail, validatePassword, validatePersonName, validatePhone, validateText } from "@/lib/validation";
 
 const DEPARTMENT_OPTIONS = [
   { value: "SALES", label: "SALES" },
@@ -100,7 +104,7 @@ function initialsFor(name: string): string {
 export default function SettingsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { users, leads, activeRole, activeSystem, logout, updateUserFields, addTeamMember, deleteTeamMember, refreshMetaConnectionStatus, tenantSettings, updateTenantSettings, isDataLoading } = useApp();
+  const { users, leads, activeRole, activeSystem, logout, updateUserFields, addTeamMember, refreshMetaConnectionStatus, tenantSettings, updateTenantSettings, isDataLoading } = useApp();
   const { toast, confirm: confirmDialog } = useDialog();
 
   const initialTabParam = searchParams.get("tab");
@@ -358,6 +362,7 @@ export default function SettingsPage() {
   // --- Manage Users ---
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [deletingUser, setDeletingUser] = useState<{ id: string; name: string } | null>(null);
   const [successMsg, setSuccessMsg] = useState("");
 
   const [firstName, setFirstName] = useState("");
@@ -381,6 +386,16 @@ export default function SettingsPage() {
   const [addPassword, setAddPassword] = useState("");
   const [addShowPassword, setAddShowPassword] = useState(false);
   const [addManagerId, setAddManagerId] = useState<string>("");
+
+  // Inline field messages (+ "_form" for a server-side refusal) and in-flight
+  // flags for the Add / Edit User forms.
+  type UserFormErrors = Partial<Record<"firstName" | "lastName" | "email" | "phone" | "designation" | "password" | "_form", string>>;
+  const [addErrors, setAddErrors] = useState<UserFormErrors>({});
+  const [editErrors, setEditErrors] = useState<UserFormErrors>({});
+  const [addSaving, setAddSaving] = useState(false);
+  const [editSaving, setEditSaving] = useState(false);
+  const clearAddError = (k: keyof UserFormErrors) => setAddErrors(prev => (prev[k] || prev._form ? { ...prev, [k]: undefined, _form: undefined } : prev));
+  const clearEditError = (k: keyof UserFormErrors) => setEditErrors(prev => (prev[k] || prev._form ? { ...prev, [k]: undefined, _form: undefined } : prev));
 
   // Only active MANAGER-role_type users are valid "Reports To" targets —
   // matches the server-side check in users.routes.ts.
@@ -434,24 +449,76 @@ export default function SettingsPage() {
   // consumer) but not this table's separately-fetched serverUsers snapshot.
   const [usersRefreshKey, setUsersRefreshKey] = useState(0);
 
+  // CRM stat cards double as a filter: tapping Admin / Managers / Agents shows
+  // only that group (tap again for everyone). Same definitions as userCounts.
+  type UserGroup = "admin" | "sales-managers" | "sales-agents";
+  const [userGroup, setUserGroup] = useState<UserGroup | null>(null);
+  useEffect(() => {
+    setUsersPage(1);
+  }, [userGroup]);
+  // Manage Users is the CRM's user directory (admins, sales managers, sales
+  // agents) unless the HRMS/Finance side is open — including for an admin,
+  // whose default activeSystem is "ADMIN". There, with no card picked, the
+  // list is still limited to CRM people ("crm"), never IT/Marketing/Finance.
+  const isCrmUserDirectory = activeSystem !== "HRMS" && activeSystem !== "FINANCE";
+  const effectiveUserGroup = isCrmUserDirectory ? (userGroup ?? "crm") : null;
+  // Bumped when a page of rows arrives, so the new rows fade in.
+  const [usersListKey, setUsersListKey] = useState(0);
+  const [usersLoadError, setUsersLoadError] = useState(false);
+
+  // Managers card: tapping a manager's name opens a dropdown of the sales
+  // agents who report to them (from the full roster's reporting lines).
+  const [expandedManagerId, setExpandedManagerId] = useState<string | null>(null);
+  useEffect(() => {
+    setExpandedManagerId(null);
+  }, [userGroup]);
+  const salesReportsByManager = useMemo(() => {
+    const map = new Map<string, User[]>();
+    users
+      .filter(u => u.managerId && u.department === "SALES" && u.role !== "ADMIN" && u.status !== "INACTIVE")
+      .forEach(u => map.set(u.managerId!, [...(map.get(u.managerId!) ?? []), u]));
+    map.forEach(list => list.sort((a, b) => a.name.localeCompare(b.name)));
+    return map;
+  }, [users]);
+
   useEffect(() => {
     if (activeTab !== "Manage Users") return;
     let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
     setServerUsersLoading(true);
-    apiListUsersPage(usersPage, usersRowsPerPage, { search: debouncedSearchQuery || undefined })
-      .then((result) => {
-        if (cancelled) return;
-        setServerUsers(result.rows.map(mapApiUserDirectoryEntryToFrontendUser));
-        setServerUsersTotalCount(result.totalCount);
-      })
-      .catch((err) => {
-        if (!cancelled) console.error("Could not load the Manage Users list page:", err);
-      })
-      .finally(() => {
-        if (!cancelled) setServerUsersLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, [activeTab, usersPage, usersRowsPerPage, debouncedSearchQuery, usersRefreshKey]);
+    setUsersLoadError(false);
+    // A failed load (rate limit, network blip) is retried quietly a few
+    // times. If it still fails, the old rows are cleared and an error shown,
+    // so a card/search never looks applied while the previous list remains.
+    const RETRY_DELAYS_MS = [1000, 3000, 6000];
+    const load = (attempt: number) => {
+      apiListUsersPage(usersPage, usersRowsPerPage, { search: debouncedSearchQuery || undefined, group: effectiveUserGroup ?? undefined })
+        .then((result) => {
+          if (cancelled) return;
+          setServerUsers(result.rows.map(mapApiUserDirectoryEntryToFrontendUser));
+          setServerUsersTotalCount(result.totalCount);
+          setUsersListKey(k => k + 1);
+          setServerUsersLoading(false);
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          if (attempt < RETRY_DELAYS_MS.length) {
+            retryTimer = setTimeout(() => load(attempt + 1), RETRY_DELAYS_MS[attempt]);
+            return;
+          }
+          console.error("Could not load the Manage Users list page:", err);
+          setServerUsers([]);
+          setServerUsersTotalCount(0);
+          setUsersLoadError(true);
+          setServerUsersLoading(false);
+        });
+    };
+    load(0);
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+    };
+  }, [activeTab, usersPage, usersRowsPerPage, debouncedSearchQuery, usersRefreshKey, effectiveUserGroup]);
 
   const handleEditClick = (user: User) => {
     setSelectedUser(user);
@@ -460,53 +527,81 @@ export default function SettingsPage() {
     setDesignation(user.designation || "");
     setRoleType(user.role_type || "Member");
     setStatus(user.status || "ACTIVE");
-    setPasswordHash(user.password_hash || user.tempPassword || "password123");
+    // Blank = keep the current password; it's only reset when one is typed.
+    setPasswordHash("");
+    setEditErrors({});
     setShowPassword(false);
     setManagerId(user.managerId || "");
   };
 
-  const handleEditorSubmit = (e: React.FormEvent) => {
+  const handleEditorSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedUser) return;
-    if (passwordHash.length < 4) {
-      toast("Password must be at least 4 characters.", "warning");
-      return;
+    if (!selectedUser || editSaving) return;
+    const errors = collectErrors({
+      firstName: validatePersonName(firstName, { label: "First name" }),
+      lastName: validatePersonName(lastName, { label: "Last name", required: false, min: 1 }),
+      designation: validateText(designation, { label: "Designation", max: 200 }),
+      password: passwordHash ? validatePassword(passwordHash, { label: "New password" }) : null
+    });
+    setEditErrors(errors);
+    if (Object.keys(errors).length > 0) return;
+    setEditSaving(true);
+    try {
+      await updateUserFields(selectedUser.id, firstName.trim(), lastName.trim(), passwordHash, designation.trim(), roleType, status, managerId || null);
+      setSuccessMsg(`Successfully updated ${firstName.trim()} ${lastName.trim()}${passwordHash ? " and set a new password" : ""}.`);
+      setSelectedUser(null);
+      setTimeout(() => setSuccessMsg(""), 5000);
+      setUsersRefreshKey(k => k + 1);
+    } catch (err) {
+      setEditErrors({ _form: err instanceof Error ? err.message : "Could not save the changes. Please try again." });
+    } finally {
+      setEditSaving(false);
     }
-    updateUserFields(selectedUser.id, firstName, lastName, passwordHash, designation, roleType, status, managerId || null);
-    setSuccessMsg(`Successfully updated credentials and profile for ${firstName} ${lastName}.`);
-    setSelectedUser(null);
-    setTimeout(() => setSuccessMsg(""), 5000);
-    // Small delay so the refetch lands after updateUserFields' fire-and-forget
-    // PATCH has had a moment to land server-side, rather than racing it.
-    setTimeout(() => setUsersRefreshKey(k => k + 1), 400);
   };
 
-  const handleAddSubmit = (e: React.FormEvent) => {
+  const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!addFirstName || !addEmail || !addPassword) {
-      toast("First name, email, and password are required.", "warning");
+    if (addSaving) return;
+    const errors = collectErrors({
+      firstName: validatePersonName(addFirstName, { label: "First name" }),
+      lastName: validatePersonName(addLastName, { label: "Last name", required: false, min: 1 }),
+      email: validateEmail(addEmail, { required: true }),
+      phone: validatePhone(addPhone),
+      designation: validateText(addDesignation, { label: "Designation", max: 200 }),
+      password: validatePassword(addPassword, { label: "Initial password" })
+    });
+    setAddErrors(errors);
+    if (Object.keys(errors).length > 0) return;
+    setAddSaving(true);
+    try {
+      await addTeamMember({
+        name: `${addFirstName.trim()} ${addLastName.trim()}`.trim(),
+        first_name: addFirstName.trim(),
+        last_name: addLastName.trim(),
+        email: addEmail.trim(),
+        company_email: addEmail.trim(),
+        // No phone on file rather than a made-up placeholder number.
+        phone_number: addPhone.trim() ? normalizeIndianMobile(addPhone) ?? "" : "",
+        role: addRole,
+        passwordStatus: "ACTIVE",
+        password_hash: addPassword,
+        tempPassword: addPassword,
+        designation: addDesignation.trim(),
+        role_type: addRoleType,
+        employment_type: "FULL TIME",
+        department: addDepartment,
+        managerId: addManagerId || undefined,
+        status: "ACTIVE"
+      });
+    } catch (err) {
+      setAddErrors({ _form: err instanceof Error ? err.message : "Could not create the account. Please try again." });
+      setAddSaving(false);
       return;
     }
-    addTeamMember({
-      name: `${addFirstName} ${addLastName}`.trim(),
-      first_name: addFirstName,
-      last_name: addLastName,
-      email: addEmail,
-      company_email: addEmail,
-      phone_number: addPhone || "9876500000",
-      role: addRole,
-      passwordStatus: "ACTIVE",
-      password_hash: addPassword,
-      tempPassword: addPassword,
-      designation: addDesignation,
-      role_type: addRoleType,
-      employment_type: "FULL TIME",
-      department: addDepartment,
-      managerId: addManagerId || undefined,
-      status: "ACTIVE"
-    });
-    setSuccessMsg(`Successfully created account for ${addFirstName} ${addLastName}.`);
+    setAddSaving(false);
+    setSuccessMsg(`Successfully created account for ${addFirstName.trim()} ${addLastName.trim()}.`);
     setIsAddOpen(false);
+    setAddErrors({});
     setAddFirstName("");
     setAddLastName("");
     setAddEmail("");
@@ -519,8 +614,7 @@ export default function SettingsPage() {
     setAddShowPassword(false);
     setAddManagerId("");
     setTimeout(() => setSuccessMsg(""), 5000);
-    // Same race-avoidance delay as handleEditorSubmit above.
-    setTimeout(() => setUsersRefreshKey(k => k + 1), 400);
+    setUsersRefreshKey(k => k + 1);
   };
 
   const handleSignOut = async () => {
@@ -1206,7 +1300,7 @@ export default function SettingsPage() {
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <h3 className="text-sm font-bold text-slate-700">Corporate User Directory</h3>
             <button
-              onClick={() => setIsAddOpen(true)}
+              onClick={() => { setAddErrors({}); setIsAddOpen(true); }}
               className="inline-flex items-center gap-1.5 bg-[#0B1E6E] hover:bg-[#081650] text-white px-4 py-2 rounded-lg text-xs font-bold transition-all shadow-md shrink-0"
             >
               <Plus className="h-4 w-4" />
@@ -1214,95 +1308,198 @@ export default function SettingsPage() {
             </button>
           </div>
 
-          {/* Stat cards — CRM only ever needs to see the sales team, not the whole company */}
-          <div className={`grid grid-cols-2 sm:grid-cols-3 gap-3 ${activeSystem === "CRM" ? "" : "lg:grid-cols-5"}`}>
-            {(activeSystem === "CRM"
-              ? [
-                  { label: "Admin", count: userCounts.admin, icon: ShieldCheck, color: "text-violet-600 bg-violet-50 border-violet-100" },
-                  { label: "Managers", count: userCounts.salesManagers, icon: UserCog, color: "text-blue-600 bg-blue-50 border-blue-100" },
-                  { label: "Agents", count: userCounts.salesAgents, icon: Users, color: "text-emerald-600 bg-emerald-50 border-emerald-100" }
-                ]
-              : [
-                  { label: "Admin", count: userCounts.admin, icon: ShieldCheck, color: "text-violet-600 bg-violet-50 border-violet-100" },
-                  { label: "Managers", count: userCounts.managers, icon: UserCog, color: "text-blue-600 bg-blue-50 border-blue-100" },
-                  { label: "IT", count: userCounts.it, icon: Wrench, color: "text-indigo-600 bg-indigo-50 border-indigo-100" },
-                  { label: "Marketing", count: userCounts.marketing, icon: Megaphone, color: "text-pink-600 bg-pink-50 border-pink-100" },
-                  { label: "Finance", count: userCounts.finance, icon: Wallet, color: "text-emerald-600 bg-emerald-50 border-emerald-100" }
-                ]
-            ).map(stat => (
-              <div key={stat.label} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
-                <div>
-                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">{stat.label}</span>
-                  <p className="text-lg font-black text-slate-800 mt-0.5">
-                    {isDataLoading ? <LineSkeleton width={32} height={18} /> : stat.count}
-                  </p>
+          {/* Stat cards — CRM only ever needs to see the sales team, not the whole company.
+              In CRM they're also the group filter for the list below. */}
+          {isCrmUserDirectory ? (
+            <div className="grid grid-cols-3 gap-2 sm:gap-3">
+              {([
+                { group: "admin", label: "Admin", count: userCounts.admin, icon: ShieldCheck, color: "text-violet-600 bg-violet-50 border-violet-100" },
+                { group: "sales-managers", label: "Managers", count: userCounts.salesManagers, icon: UserCog, color: "text-blue-600 bg-blue-50 border-blue-100" },
+                { group: "sales-agents", label: "Agents", count: userCounts.salesAgents, icon: Users, color: "text-emerald-600 bg-emerald-50 border-emerald-100" }
+              ] as const).map(stat => {
+                const active = userGroup === stat.group;
+                return (
+                  <button
+                    key={stat.group}
+                    type="button"
+                    aria-pressed={active}
+                    title={active ? "Show all users" : `Show ${stat.label.toLowerCase()}`}
+                    onClick={() => setUserGroup(g => (g === stat.group ? null : stat.group))}
+                    className={`text-left p-3 sm:p-4 rounded-2xl border flex items-center justify-between gap-2 min-w-0 transition-all duration-200 ease-out active:scale-[0.97] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0B1E6E]/40 ${
+                      active
+                        ? "bg-[#F4F6FC] border-[#0B1E6E] ring-1 ring-[#0B1E6E] shadow-md"
+                        : "bg-white border-slate-200 shadow-sm hover:border-slate-300 hover:shadow-md sm:hover:-translate-y-0.5"
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <span className={`text-[9px] font-bold uppercase tracking-wider block truncate transition-colors ${active ? "text-[#0B1E6E]" : "text-slate-400"}`}>{stat.label}</span>
+                      <p className="text-lg font-black text-slate-800 mt-0.5">
+                        {isDataLoading ? <LineSkeleton width={32} height={18} /> : stat.count}
+                      </p>
+                    </div>
+                    <div className={`h-7 w-7 sm:h-8 sm:w-8 rounded-lg border flex items-center justify-center shrink-0 transition-colors duration-200 ${active ? "bg-[#0B1E6E] border-[#0B1E6E] text-white" : stat.color}`}>
+                      <stat.icon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 lg:grid-cols-5">
+              {[
+                { label: "Admin", count: userCounts.admin, icon: ShieldCheck, color: "text-violet-600 bg-violet-50 border-violet-100" },
+                { label: "Managers", count: userCounts.managers, icon: UserCog, color: "text-blue-600 bg-blue-50 border-blue-100" },
+                { label: "IT", count: userCounts.it, icon: Wrench, color: "text-indigo-600 bg-indigo-50 border-indigo-100" },
+                { label: "Marketing", count: userCounts.marketing, icon: Megaphone, color: "text-pink-600 bg-pink-50 border-pink-100" },
+                { label: "Finance", count: userCounts.finance, icon: Wallet, color: "text-emerald-600 bg-emerald-50 border-emerald-100" }
+              ].map(stat => (
+                <div key={stat.label} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
+                  <div>
+                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">{stat.label}</span>
+                    <p className="text-lg font-black text-slate-800 mt-0.5">
+                      {isDataLoading ? <LineSkeleton width={32} height={18} /> : stat.count}
+                    </p>
+                  </div>
+                  <div className={`h-8 w-8 rounded-lg border flex items-center justify-center shrink-0 ${stat.color}`}>
+                    <stat.icon className="h-4 w-4" />
+                  </div>
                 </div>
-                <div className={`h-8 w-8 rounded-lg border flex items-center justify-center shrink-0 ${stat.color}`}>
-                  <stat.icon className="h-4 w-4" />
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
 
           {/* Search */}
-          <div className="relative max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Search by name, email, or phone..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-9 pr-4 py-2 text-xs focus:outline-none focus:border-brand-500"
-            />
+          <div className="flex items-center gap-3">
+            <div className="relative max-w-md flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Search by name, email, or phone..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-9 pr-4 py-2 text-xs focus:outline-none focus:border-brand-500"
+              />
+            </div>
+            {isCrmUserDirectory && userGroup && (
+              <button
+                type="button"
+                onClick={() => setUserGroup(null)}
+                className="shrink-0 text-xs font-bold text-[#0B1E6E] hover:underline animate-fade-in"
+              >
+                Show all users
+              </button>
+            )}
           </div>
 
-          {/* User records */}
-          <div className="space-y-2.5">
-            {serverUsersLoading && serverUsers.length === 0 ? (
+          {/* User records — dimmed while the next page/filter loads, then faded in */}
+          <div className={`space-y-2.5 transition-opacity duration-200 ${serverUsersLoading && serverUsers.length > 0 ? "opacity-50" : "opacity-100"}`}>
+            {usersLoadError ? (
+              <div className="flex flex-col items-center gap-3 py-10 text-center border border-dashed border-slate-200 rounded-xl">
+                <AlertTriangle className="h-5 w-5 text-amber-500" />
+                <p className="text-xs font-semibold text-slate-600">Couldn&apos;t load users.</p>
+                <button
+                  type="button"
+                  onClick={() => setUsersRefreshKey(k => k + 1)}
+                  className="px-4 py-1.5 rounded-lg bg-[#0B1E6E] hover:bg-[#081650] text-white text-xs font-bold transition-colors"
+                >
+                  Retry
+                </button>
+              </div>
+            ) : serverUsersLoading && serverUsers.length === 0 ? (
               <CardListSkeleton count={4} />
             ) : serverUsers.length === 0 ? (
               <div className="text-center py-10 text-xs text-slate-400 border border-dashed border-slate-200 rounded-xl">
-                No users match &quot;{searchQuery}&quot;.
+                {searchQuery.trim() ? <>No users match &quot;{searchQuery}&quot;.</> : "No users in this group."}
               </div>
             ) : (
-              serverUsers.map(user => {
-                const deptKey = user.role === "ADMIN" ? "ADMIN" : (user.department || "SALES");
-                return (
-                  <div key={user.id} className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="h-10 w-10 rounded-full bg-brand-50 border border-brand-100 flex items-center justify-center text-brand-700 font-black text-xs shrink-0">
-                        {initialsFor(user.name)}
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <p className="text-sm font-bold text-slate-800 truncate">{user.name}</p>
-                          <span className={`text-[9px] font-bold border px-1.5 py-0.5 rounded-full shrink-0 ${DEPT_BADGE[deptKey] || DEPT_BADGE.SALES}`}>
-                            {deptKey}
-                          </span>
+                <div key={usersListKey} className="space-y-2.5 animate-fade-in">
+                {serverUsers.map(user => {
+                  const deptKey = user.role === "ADMIN" ? "ADMIN" : (user.department || "SALES");
+                  const showTeam = isCrmUserDirectory && userGroup === "sales-managers";
+                  const team = showTeam ? salesReportsByManager.get(user.id) ?? [] : [];
+                  const teamOpen = showTeam && expandedManagerId === user.id;
+                  return (
+                    <div key={user.id} className={`bg-white border rounded-2xl shadow-sm overflow-hidden transition-colors duration-200 ${teamOpen ? "border-[#0B1E6E]/40" : "border-slate-200"}`}>
+                    <div className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="h-10 w-10 rounded-full bg-brand-50 border border-brand-100 flex items-center justify-center text-brand-700 font-black text-xs shrink-0">
+                          {initialsFor(user.name)}
                         </div>
-                        <p className="text-[10px] text-slate-500 truncate">{user.designation || "—"}</p>
-                        <p className="text-[10px] text-slate-500 font-mono truncate">{user.email}</p>
-                        <p className="text-[10px] text-slate-500 font-mono">{user.phone_number ? `+91-${user.phone_number}` : "—"}</p>
-                        {user.managerName && (
-                          <p className="text-[10px] text-brand-600 font-semibold truncate">Reports to {user.managerName}</p>
-                        )}
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {showTeam ? (
+                              <button
+                                type="button"
+                                aria-expanded={teamOpen}
+                                onClick={() => setExpandedManagerId(id => (id === user.id ? null : user.id))}
+                                className="group inline-flex items-center gap-1.5 min-w-0 rounded-md -mx-1 px-1 text-left hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0B1E6E]/40"
+                                title={teamOpen ? "Hide team" : "Show team"}
+                              >
+                                <span className={`text-sm font-bold truncate transition-colors ${teamOpen ? "text-[#0B1E6E]" : "text-slate-800 group-hover:text-[#0B1E6E]"}`}>{user.name}</span>
+                                <span className="text-[10px] font-bold text-slate-500 bg-slate-100 rounded-full px-1.5 py-0.5 shrink-0">
+                                  {team.length} agent{team.length === 1 ? "" : "s"}
+                                </span>
+                                <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform duration-300 ${teamOpen ? "rotate-180 text-[#0B1E6E]" : ""}`} />
+                              </button>
+                            ) : (
+                              <p className="text-sm font-bold text-slate-800 truncate">{user.name}</p>
+                            )}
+                            <span className={`text-[9px] font-bold border px-1.5 py-0.5 rounded-full shrink-0 ${DEPT_BADGE[deptKey] || DEPT_BADGE.SALES}`}>
+                              {deptKey}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-500 truncate">{user.designation || "—"}</p>
+                          <p className="text-[10px] text-slate-500 font-mono truncate">{user.email}</p>
+                          <p className="text-[10px] text-slate-500 font-mono">{user.phone_number ? `+91-${user.phone_number}` : "—"}</p>
+                          {user.managerName && (
+                            <p className="text-[10px] text-brand-600 font-semibold truncate">Reports to {user.managerName}</p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                        {user.role !== "ADMIN" || activeRole === "ADMIN" ? (
+                          <button
+                            onClick={() => handleEditClick(user)}
+                            className="p-2 rounded-lg text-slate-500 hover:text-brand-700 hover:bg-slate-50 border border-slate-200 transition-colors"
+                            title="Edit user"
+                          >
+                            <Edit className="h-4 w-4" />
+                          </button>
+                        ) : null}
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
-                      {user.role !== "ADMIN" || activeRole === "ADMIN" ? (
-                        <button
-                          onClick={() => handleEditClick(user)}
-                          className="p-2 rounded-lg text-slate-500 hover:text-brand-700 hover:bg-slate-50 border border-slate-200 transition-colors"
-                          title="Edit user"
-                        >
-                          <Edit className="h-4 w-4" />
-                        </button>
-                      ) : null}
+                    {/* Team dropdown — slides open by animating the grid row from 0fr to 1fr */}
+                    {showTeam && (
+                      <div className={`grid transition-[grid-template-rows] duration-300 ease-out ${teamOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
+                        <div className="overflow-hidden">
+                          <div className="border-t border-slate-100 bg-slate-50/70 px-4 py-3">
+                            {team.length === 0 ? (
+                              <p className="text-[11px] text-slate-400 italic py-1">No sales agents report to {user.name} yet.</p>
+                            ) : (
+                              <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                                {team.map(agent => (
+                                  <li key={agent.id} className="flex items-center gap-2.5 min-w-0 bg-white border border-slate-200 rounded-xl px-3 py-2">
+                                    <div className="h-7 w-7 rounded-full bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-700 font-black text-[10px] shrink-0">
+                                      {initialsFor(agent.name)}
+                                    </div>
+                                    <div className="min-w-0">
+                                      <p className="text-xs font-bold text-slate-800 truncate">{agent.name}</p>
+                                      <p className="text-[10px] text-slate-500 truncate">{agent.designation || agent.email}</p>
+                                    </div>
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
                     </div>
-                  </div>
-                );
-              })
+                  );
+                })}
+                </div>
             )}
           </div>
           {serverUsersTotalCount > 0 && (
@@ -1412,28 +1609,33 @@ export default function SettingsPage() {
               </button>
             </div>
 
-            <form onSubmit={handleAddSubmit} className="space-y-4">
+            <form onSubmit={handleAddSubmit} noValidate className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">First Name</label>
                   <input
                     type="text"
-                    required
+                    maxLength={100}
                     value={addFirstName}
-                    onChange={(e) => setAddFirstName(e.target.value)}
+                    onChange={(e) => { setAddFirstName(e.target.value); clearAddError("firstName"); }}
                     placeholder="Pradeep"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none"
+                    aria-invalid={!!addErrors.firstName}
+                    className={`w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none ${fieldErrorClass(!!addErrors.firstName)}`}
                   />
+                  <FieldError message={addErrors.firstName} />
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Last Name</label>
                   <input
                     type="text"
+                    maxLength={100}
                     value={addLastName}
-                    onChange={(e) => setAddLastName(e.target.value)}
+                    onChange={(e) => { setAddLastName(e.target.value); clearAddError("lastName"); }}
                     placeholder="Kumar"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none"
+                    aria-invalid={!!addErrors.lastName}
+                    className={`w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none ${fieldErrorClass(!!addErrors.lastName)}`}
                   />
+                  <FieldError message={addErrors.lastName} />
                 </div>
               </div>
 
@@ -1442,22 +1644,28 @@ export default function SettingsPage() {
                   <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Email</label>
                   <input
                     type="email"
-                    required
+                    maxLength={254}
+                    autoComplete="off"
                     value={addEmail}
-                    onChange={(e) => setAddEmail(e.target.value)}
+                    onChange={(e) => { setAddEmail(e.target.value); clearAddError("email"); }}
                     placeholder="name@realhubb.in"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none"
+                    aria-invalid={!!addErrors.email}
+                    className={`w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none ${fieldErrorClass(!!addErrors.email)}`}
                   />
+                  <FieldError message={addErrors.email} />
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Phone Number</label>
                   <input
-                    type="text"
+                    {...phoneInputProps}
+                    autoComplete="off"
                     value={addPhone}
-                    onChange={(e) => setAddPhone(e.target.value)}
+                    onChange={(e) => { setAddPhone(sanitizePhoneInput(e.target.value)); clearAddError("phone"); }}
                     placeholder="9980189914"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none"
+                    aria-invalid={!!addErrors.phone}
+                    className={`w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none ${fieldErrorClass(!!addErrors.phone)}`}
                   />
+                  <FieldError message={addErrors.phone} />
                 </div>
               </div>
 
@@ -1475,12 +1683,14 @@ export default function SettingsPage() {
                   <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Designation</label>
                   <input
                     type="text"
-                    required
+                    maxLength={200}
                     value={addDesignation}
-                    onChange={(e) => setAddDesignation(e.target.value)}
+                    onChange={(e) => { setAddDesignation(e.target.value); clearAddError("designation"); }}
                     placeholder="e.g. Sales Associate"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none"
+                    aria-invalid={!!addErrors.designation}
+                    className={`w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none ${fieldErrorClass(!!addErrors.designation)}`}
                   />
+                  <FieldError message={addErrors.designation} />
                 </div>
               </div>
 
@@ -1525,11 +1735,13 @@ export default function SettingsPage() {
                 <div className="relative">
                   <input
                     type={addShowPassword ? "text" : "password"}
-                    required
+                    maxLength={128}
+                    autoComplete="new-password"
                     value={addPassword}
-                    onChange={(e) => setAddPassword(e.target.value)}
-                    placeholder="Enter account password"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-3 pr-10 py-2.5 text-xs focus:outline-none focus:border-brand-500"
+                    onChange={(e) => { setAddPassword(e.target.value); clearAddError("password"); }}
+                    placeholder="At least 8 characters"
+                    aria-invalid={!!addErrors.password}
+                    className={`w-full bg-slate-50 border border-slate-200 rounded-lg pl-3 pr-10 py-2.5 text-xs focus:outline-none focus:border-brand-500 ${fieldErrorClass(!!addErrors.password)}`}
                   />
                   <button
                     type="button"
@@ -1539,13 +1751,16 @@ export default function SettingsPage() {
                     {addShowPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </div>
+                <FieldError message={addErrors.password} />
               </div>
 
+              <FieldError message={addErrors._form} />
               <button
                 type="submit"
-                className="w-full bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold py-2.5 rounded-lg text-xs transition-all shadow-sm"
+                disabled={addSaving}
+                className="w-full bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold py-2.5 rounded-lg text-xs transition-all shadow-sm disabled:opacity-60"
               >
-                Create User
+                {addSaving ? "Creating..." : "Create User"}
               </button>
             </form>
           </div>
@@ -1571,27 +1786,31 @@ export default function SettingsPage() {
               Updating details for <strong>{selectedUser.email}</strong>.
             </p>
 
-            <form onSubmit={handleEditorSubmit} className="space-y-4">
+            <form onSubmit={handleEditorSubmit} noValidate className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[10px] font-bold text-slate-500 mb-1.5 uppercase">First Name</label>
                   <input
                     type="text"
-                    required
+                    maxLength={100}
                     value={firstName}
-                    onChange={(e) => setFirstName(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-805 focus:outline-none focus:border-brand-500"
+                    onChange={(e) => { setFirstName(e.target.value); clearEditError("firstName"); }}
+                    aria-invalid={!!editErrors.firstName}
+                    className={`w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-805 focus:outline-none focus:border-brand-500 ${fieldErrorClass(!!editErrors.firstName)}`}
                   />
+                  <FieldError message={editErrors.firstName} />
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold text-slate-500 mb-1.5 uppercase">Last Name</label>
                   <input
                     type="text"
-                    required
+                    maxLength={100}
                     value={lastName}
-                    onChange={(e) => setLastName(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-805 focus:outline-none focus:border-brand-500"
+                    onChange={(e) => { setLastName(e.target.value); clearEditError("lastName"); }}
+                    aria-invalid={!!editErrors.lastName}
+                    className={`w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-805 focus:outline-none focus:border-brand-500 ${fieldErrorClass(!!editErrors.lastName)}`}
                   />
+                  <FieldError message={editErrors.lastName} />
                 </div>
               </div>
 
@@ -1599,11 +1818,13 @@ export default function SettingsPage() {
                 <label className="block text-[10px] font-bold text-slate-500 mb-1.5 uppercase">Designation</label>
                 <input
                   type="text"
-                  required
+                  maxLength={200}
                   value={designation}
-                  onChange={(e) => setDesignation(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-805 focus:outline-none"
+                  onChange={(e) => { setDesignation(e.target.value); clearEditError("designation"); }}
+                  aria-invalid={!!editErrors.designation}
+                  className={`w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-805 focus:outline-none ${fieldErrorClass(!!editErrors.designation)}`}
                 />
+                <FieldError message={editErrors.designation} />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1640,14 +1861,17 @@ export default function SettingsPage() {
               </div>
 
               <div>
-                <label className="block text-[10px] font-bold text-slate-500 mb-1.5 uppercase">Login Password</label>
+                <label className="block text-[10px] font-bold text-slate-500 mb-1.5 uppercase">New Password</label>
                 <div className="relative">
                   <input
                     type={showPassword ? "text" : "password"}
-                    required
+                    maxLength={128}
+                    autoComplete="new-password"
                     value={passwordHash}
-                    onChange={(e) => setPasswordHash(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-3 pr-10 py-2 text-xs text-slate-805 focus:outline-none focus:border-brand-500"
+                    onChange={(e) => { setPasswordHash(e.target.value); clearEditError("password"); }}
+                    placeholder="Leave blank to keep the current password"
+                    aria-invalid={!!editErrors.password}
+                    className={`w-full bg-slate-50 border border-slate-200 rounded-lg pl-3 pr-10 py-2 text-xs text-slate-805 focus:outline-none focus:border-brand-500 ${fieldErrorClass(!!editErrors.password)}`}
                   />
                   <button
                     type="button"
@@ -1657,38 +1881,41 @@ export default function SettingsPage() {
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </div>
+                <FieldError message={editErrors.password} />
               </div>
 
               {selectedUser.role !== "ADMIN" && (
                 <button
                   type="button"
-                  onClick={async () => {
-                    if (await confirmDialog({
-                      title: "Delete user?",
-                      message: `Are you sure you want to delete ${selectedUser.name}?`,
-                      confirmLabel: "Delete",
-                      danger: true
-                    })) {
-                      deleteTeamMember(selectedUser.id);
-                      setSelectedUser(null);
-                      setSuccessMsg(`Removed ${selectedUser.name} from the roster.`);
-                      setTimeout(() => setSuccessMsg(""), 5000);
-                      // Same race-avoidance delay as handleEditorSubmit above.
-                      setTimeout(() => setUsersRefreshKey(k => k + 1), 400);
-                    }
-                  }}
+                  onClick={() => setDeletingUser({ id: selectedUser.id, name: selectedUser.name })}
                   className="w-full flex items-center justify-center gap-1.5 text-red-600 hover:text-red-700 text-[11px] font-bold"
                 >
                   <AlertTriangle className="h-3.5 w-3.5" />
                   Delete this user
                 </button>
               )}
+              {deletingUser && (
+                <DeleteUserModal
+                  user={deletingUser}
+                  onClose={() => setDeletingUser(null)}
+                  onDeleted={(message) => {
+                    setDeletingUser(null);
+                    setSelectedUser(null);
+                    setSuccessMsg(message);
+                    setTimeout(() => setSuccessMsg(""), 5000);
+                    // Same race-avoidance delay as handleEditorSubmit above.
+                    setTimeout(() => setUsersRefreshKey(k => k + 1), 400);
+                  }}
+                />
+              )}
 
+              <FieldError message={editErrors._form} />
               <button
                 type="submit"
-                className="w-full bg-[#0B1E6E] hover:bg-[#081650] text-white font-semibold py-2.5 rounded-lg text-xs transition-all shadow-md"
+                disabled={editSaving}
+                className="w-full bg-[#0B1E6E] hover:bg-[#081650] text-white font-semibold py-2.5 rounded-lg text-xs transition-all shadow-md disabled:opacity-60"
               >
-                Save Changes
+                {editSaving ? "Saving..." : "Save Changes"}
               </button>
             </form>
           </div>

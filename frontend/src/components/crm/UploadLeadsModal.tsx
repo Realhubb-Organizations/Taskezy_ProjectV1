@@ -83,6 +83,7 @@ function SourceSearchSelect({ value, onChange }: { value: string; onChange: (v: 
     <div className="relative" ref={wrapRef}>
       <input
         type="text"
+        maxLength={200}
         value={query}
         onFocus={() => setOpen(true)}
         onChange={(e) => { setQuery(e.target.value); onChange(e.target.value); setOpen(true); }}

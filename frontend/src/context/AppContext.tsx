@@ -1,6 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect, useMemo, useRef } from "react";
+import { parseIndianPrice } from "@/lib/validation";
 import {
   apiLogin,
   apiLogout,
@@ -523,16 +524,20 @@ interface AppActions {
   processPayment: () => Promise<boolean>;
   provisionTenant: () => Promise<void>;
   resetRosterPassword: (userId: string, newPass: string) => void;
+  /**
+   * Waits for the server; throws its message on failure. `newPassword` empty
+   * keeps the user's current password — it's only reset when one is typed.
+   */
   updateUserFields: (
     userId: string,
     firstName: string,
     lastName: string,
-    passwordHash: string,
+    newPassword: string,
     designation: string,
     roleType: "Manager" | "Member",
     status: "ACTIVE" | "INACTIVE",
     managerId?: string | null
-  ) => void;
+  ) => Promise<void>;
   setCurrentUserPasswordActive: () => void;
   // errorType distinguishes genuinely wrong credentials (401/403) from the
   // login endpoint's own rate limiter (429 — 10 attempts/15min, real and
@@ -586,8 +591,10 @@ interface AppActions {
   markInvoicePaid: (invoiceId: string) => void;
 
   // CRUD actions for Admin
-  addTeamMember: (user: Omit<User, "id" | "created_at" | "updated_at">) => void;
-  deleteTeamMember: (userId: string) => void;
+  /** Waits for the server; throws its message (e.g. email already in use) on failure. */
+  addTeamMember: (user: Omit<User, "id" | "created_at" | "updated_at">) => Promise<void>;
+  /** Waits for the server; throws its message on failure. `handover` is required when the user holds leads. */
+  deleteTeamMember: (userId: string, handover?: { reassignTo: string[]; note: string }) => Promise<void>;
   deleteLead: (leadId: string) => void;
   removeLeadsLocally: (leadIds: string[]) => void;
   editLead: (leadId: string, updatedFields: Partial<Lead>) => void;
@@ -695,10 +702,14 @@ export function mapApiUserDirectoryEntryToFrontendUser(row: ApiUserDirectoryEntr
   };
 }
 
+// "₹1.255 Cr" / "₹85 L" — precise enough that re-saving an edited property
+// (which sends this string back through parsePriceToValue) keeps the price.
 function formatPriceValue(value: string | null, priceType: string | null): string | undefined {
   if (!value) return undefined;
-  const cr = Number(value) / 10000000;
-  const formatted = `₹${cr.toFixed(2)} Cr`;
+  const rupees = Number(value);
+  if (!Number.isFinite(rupees)) return undefined;
+  const trim = (n: number, digits: number) => String(Number(n.toFixed(digits)));
+  const formatted = rupees >= 1e7 ? `₹${trim(rupees / 1e7, 4)} Cr` : `₹${trim(rupees / 1e5, 2)} L`;
   return priceType === "STARTING_FROM" ? `${formatted}+` : formatted;
 }
 
@@ -737,17 +748,13 @@ export function mapApiPropertyToFrontend(row: ApiPropertyRow): Property {
   };
 }
 
-// Inverse of formatPriceValue below — the Add/Edit Property forms only ever
-// collect a free-text price string (e.g. "1.5" meaning ₹1.5 Cr), so this
-// pulls the first number out of it to reconstruct a raw rupee value for the
-// API. Best-effort only: if nothing numeric is found, priceValue is omitted
-// and the property still saves, just without a listed price server-side.
+// Inverse of formatPriceValue: turns the Add/Edit Property forms' free-text
+// price back into rupees for the API. Unparseable text is omitted (the forms
+// validate it first, so that only happens for legacy values).
+// Understands units ("85 Lakh", "1.91 Cr", "₹45,00,000"); see parseIndianPrice.
 function parsePriceToValue(price?: string): number | undefined {
   if (!price) return undefined;
-  const match = price.match(/[\d.]+/);
-  if (!match) return undefined;
-  const crores = Number(match[0]);
-  return Number.isFinite(crores) ? crores * 10000000 : undefined;
+  return parseIndianPrice(price) ?? undefined;
 }
 
 export function mapApiResaleUnitToFrontend(row: ApiResaleUnitRow): ResaleUnit {
@@ -1407,16 +1414,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Admin Direct Member Editor
-  const updateUserFields = (
+  const updateUserFields = async (
     userId: string,
     firstName: string,
     lastName: string,
-    passwordHash: string,
+    newPassword: string,
     designation: string,
     roleType: "Manager" | "Member",
     status: "ACTIVE" | "INACTIVE",
     managerId?: string | null
   ) => {
+    if (isApiSessionActive() && isRealId(userId)) {
+      await apiEditUser(userId, {
+        firstName,
+        lastName,
+        designation,
+        roleType: roleType === "Manager" ? "MANAGER" : "MEMBER",
+        status,
+        managerId: managerId !== undefined ? (managerId || null) : undefined
+      });
+      // Only when the admin typed a new one — a profile edit no longer
+      // resets the password (it used to, to whatever was in the box).
+      if (newPassword) await apiResetUserPassword(userId, newPassword);
+    }
     const managerName = managerId ? users.find(u => u.id === managerId)?.name : undefined;
     setUsers(prev => prev.map(u => {
       if (u.id === userId) {
@@ -1424,9 +1444,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           ...u,
           first_name: firstName,
           last_name: lastName,
-          name: `${firstName} ${lastName}`,
-          password_hash: passwordHash,
-          tempPassword: passwordHash,
+          name: `${firstName} ${lastName}`.trim(),
           designation,
           role_type: roleType,
           status,
@@ -1436,21 +1454,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       return u;
     }));
-
-    if (isApiSessionActive() && isRealId(userId)) {
-      apiEditUser(userId, {
-        firstName,
-        lastName,
-        designation,
-        roleType: roleType === "Manager" ? "MANAGER" : "MEMBER",
-        status,
-        managerId: managerId !== undefined ? (managerId || null) : undefined
-      }).catch((err) => console.warn("Could not persist user edit to the database:", err));
-      // passwordHash here is really a plaintext password typed by the admin —
-      // resetting it goes through the dedicated password endpoint, not the
-      // profile-fields PATCH (see users.routes.ts).
-      apiResetUserPassword(userId, passwordHash).catch((err) => console.warn("Could not persist password reset to the database:", err));
-    }
   };
 
   // Login handler
@@ -2088,42 +2091,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     "FULL TIME": "FULL_TIME", FREELANCER: "FREELANCER", INTERN: "INTERN", AGENCY: "AGENCY"
   };
 
-  const addTeamMember = (u: Omit<User, "id" | "created_at" | "updated_at">) => {
-    const newUser: User = {
-      ...u,
-      id: `user-${Date.now()}`,
-      passwordStatus: "ACTIVE",
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
-    setUsers(prev => [...prev, newUser]);
-
-    if (isApiSessionActive() && u.first_name && u.email && u.tempPassword) {
-      apiCreateUser({
-        firstName: u.first_name,
-        lastName: u.last_name,
-        email: u.email,
-        phoneNumber: u.phone_number,
-        designation: u.designation,
-        role: u.role,
-        roleType: u.role_type === "Manager" ? "MANAGER" : u.role_type === "Member" ? "MEMBER" : undefined,
-        employmentType: u.employment_type ? EMPLOYMENT_TYPE_TO_API[u.employment_type] : undefined,
-        department: u.department,
-        managerId: u.managerId,
-        password: u.tempPassword
-      })
-        .then((created) => {
-          setUsers(prev => prev.map(existing => (existing.id === newUser.id ? mapApiUserDirectoryEntryToFrontendUser(created) : existing)));
-        })
-        .catch((err) => console.warn("Could not persist new user to the database:", err));
+  // Added to the roster only once the server has created the account, so a
+  // rejected one (invalid field, email already in use) never looks created.
+  const addTeamMember = async (u: Omit<User, "id" | "created_at" | "updated_at">) => {
+    if (!isApiSessionActive()) {
+      const now = new Date().toISOString();
+      setUsers(prev => [...prev, { ...u, id: `user-${Date.now()}`, passwordStatus: "ACTIVE", created_at: now, updated_at: now }]);
+      return;
     }
+    const created = await apiCreateUser({
+      firstName: u.first_name || u.name,
+      lastName: u.last_name || undefined,
+      email: u.email,
+      phoneNumber: u.phone_number || undefined,
+      designation: u.designation,
+      role: u.role,
+      roleType: u.role_type === "Manager" ? "MANAGER" : u.role_type === "Member" ? "MEMBER" : undefined,
+      employmentType: u.employment_type ? EMPLOYMENT_TYPE_TO_API[u.employment_type] : undefined,
+      department: u.department,
+      managerId: u.managerId,
+      password: u.tempPassword || u.password_hash || ""
+    });
+    setUsers(prev => [...prev, mapApiUserDirectoryEntryToFrontendUser(created)]);
   };
 
-  const deleteTeamMember = (id: string) => {
-    setUsers(prev => prev.filter(u => u.id !== id));
+  // Removed locally only once the server has deleted the user (and handed
+  // their leads over), so a rejected delete never looks like it worked.
+  const deleteTeamMember = async (id: string, handover?: { reassignTo: string[]; note: string }) => {
     if (isApiSessionActive() && isRealId(id)) {
-      apiDeleteUser(id).catch((err) => console.warn("Could not delete user from the database:", err));
+      await apiDeleteUser(id, handover);
     }
+    // Their team members no longer report to anyone (the server cleared it too).
+    setUsers(prev => prev
+      .filter(u => u.id !== id)
+      .map(u => (u.managerId === id ? { ...u, managerId: undefined, managerName: undefined } : u)));
   };
 
   const deleteLead = (id: string) => {

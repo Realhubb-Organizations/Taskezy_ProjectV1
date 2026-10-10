@@ -15,6 +15,14 @@ interface AssignableUser {
   managerId?: string;
 }
 
+/**
+ * Who can hold a lead: active CRM sales agents and managers. Never Finance,
+ * Admin or other departments — same rule the server enforces on reassign.
+ */
+export function isLeadAssignableUser(u: { role: string; status?: string; department?: string }): boolean {
+  return u.role === "AGENT" && u.status !== "INACTIVE" && (!u.department || u.department === "SALES");
+}
+
 // Same signal as Data Calling: status "Unassigned" (ingest fallback), or no
 // real agent name on the lead.
 /** Mirrors the server rule: the lead's owner, the owner's manager, or an admin may change its status. */

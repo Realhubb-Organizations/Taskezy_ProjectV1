@@ -38,7 +38,15 @@ interface Envelope<T> {
   success: boolean;
   data: T;
   meta?: { page: number; pageSize: number; totalCount: number; totalPages: number };
-  error?: { code: string; message: string };
+  error?: { code: string; message: string; details?: { formErrors?: string[]; fieldErrors?: Record<string, string[] | undefined> } };
+}
+
+// A validation refusal's message is just "Invalid request"; show the first
+// field-specific reason instead (e.g. "Password must be at least 8 characters").
+function errorMessageOf(error: Envelope<unknown>["error"] | undefined): string {
+  const details = error?.details;
+  const fieldMessage = details?.fieldErrors && Object.values(details.fieldErrors).find(m => m && m.length)?.[0];
+  return fieldMessage || details?.formErrors?.[0] || error?.message || "Request failed";
 }
 
 async function request<T>(path: string, options: RequestInit = {}, allowRefreshRetry = true): Promise<T> {
@@ -60,7 +68,7 @@ async function request<T>(path: string, options: RequestInit = {}, allowRefreshR
 
   const json = (await res.json().catch(() => null)) as Envelope<T> | null;
   if (!res.ok || !json?.success) {
-    throw new ApiRequestError(res.status, json?.error?.message || "Request failed", json?.error?.code);
+    throw new ApiRequestError(res.status, errorMessageOf(json?.error), json?.error?.code);
   }
   return json.data;
 }
@@ -84,7 +92,7 @@ async function requestWithMeta<T>(path: string, allowRefreshRetry = true): Promi
 
   const json = (await res.json().catch(() => null)) as Envelope<T[]> | null;
   if (!res.ok || !json?.success) {
-    throw new ApiRequestError(res.status, json?.error?.message || "Request failed", json?.error?.code);
+    throw new ApiRequestError(res.status, errorMessageOf(json?.error), json?.error?.code);
   }
   return { data: json.data, meta: json.meta };
 }
@@ -420,6 +428,8 @@ export function apiListUsers(): Promise<ApiUserDirectoryEntry[]> {
 // load) keeps calling the bare apiListUsers() above and is untouched.
 export interface UserListFilters {
   search?: string;
+  /** CRM Manage Users stat card filter. */
+  group?: "crm" | "admin" | "sales-managers" | "sales-agents";
 }
 
 export interface UsersPageResult {
@@ -439,6 +449,7 @@ export async function apiListUsersPage(
   params.set("page", String(page));
   params.set("pageSize", String(pageSize));
   if (filters.search) params.set("search", filters.search);
+  if (filters.group) params.set("group", filters.group);
   const { data, meta } = await requestWithMeta<ApiUserDirectoryEntry>(`/api/v1/users?${params.toString()}`);
   return {
     rows: data,
@@ -495,8 +506,20 @@ export function apiResetUserPassword(userId: string, newPassword: string): Promi
   });
 }
 
-export function apiDeleteUser(userId: string): Promise<{ deleted: boolean }> {
-  return request<{ deleted: boolean }>(`/api/v1/users/${userId}`, { method: "DELETE" });
+/** Leads a user still holds (the delete dialog asks who gets them when > 0) and who reports to them. */
+export function apiGetUserDeleteImpact(userId: string): Promise<{ leadCount: number; reportNames: string[] }> {
+  return request<{ leadCount: number; reportNames: string[] }>(`/api/v1/users/${userId}/delete-impact`);
+}
+
+/** Deletes a user; one who still holds leads needs `handover` (members round-robin + required note). */
+export function apiDeleteUser(
+  userId: string,
+  handover?: { reassignTo: string[]; note: string }
+): Promise<{ deleted: boolean; reassignedLeads?: number }> {
+  return request<{ deleted: boolean; reassignedLeads?: number }>(`/api/v1/users/${userId}`, {
+    method: "DELETE",
+    ...(handover ? { body: JSON.stringify(handover) } : {})
+  });
 }
 
 // --- Properties ---

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { optionalIndianMobile } from "../../utils/validation";
 
 export const propertyIdParamSchema = z.object({ id: z.string().uuid() });
 
@@ -46,7 +47,8 @@ const basePropertyFields = {
   towers: z.string().max(200).optional(),
   structure: z.string().max(200).optional(),
   amenities: z.array(z.string().max(200)).max(50).optional(),
-  contactNumber: z.string().max(30).optional(),
+  // Empty clears it; anything else must be a 10-digit mobile (stored bare).
+  contactNumber: optionalIndianMobile,
   mapUrl: z.string().url().max(1000).optional().or(z.literal("")),
   websiteUrl: z.string().url().max(1000).optional().or(z.literal("")),
   brochureUrl: z.string().url().max(1000).optional().or(z.literal("")),

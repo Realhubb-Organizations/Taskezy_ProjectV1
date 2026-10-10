@@ -1,3 +1,4 @@
+import type { PoolClient } from "pg";
 import { pool, query } from "../../db/pool";
 
 export interface UserDirectoryRow {
@@ -31,6 +32,8 @@ export interface UserListFilter {
   pageSize: number;
   /** ILIKE across first/last name, email, and phone — matches the Settings "Manage Users" search box. */
   search?: string;
+  /** CRM Manage Users stat cards: admins, sales managers, or sales agents. */
+  group?: "crm" | "admin" | "sales-managers" | "sales-agents";
 }
 
 // Paginated counterpart to findAllActive() for the admin Settings "Manage
@@ -41,6 +44,16 @@ export interface UserListFilter {
 export async function findManyActive(filter: UserListFilter): Promise<{ rows: UserDirectoryRow[]; totalCount: number }> {
   const conditions: string[] = [`u.status = 'ACTIVE'`];
   const params: unknown[] = [];
+
+  if (filter.group === "crm") {
+    conditions.push(`(u.role = 'ADMIN' OR (u.department = 'SALES' AND u.role <> 'FINANCE'))`);
+  } else if (filter.group === "admin") {
+    conditions.push(`u.role = 'ADMIN'`);
+  } else if (filter.group === "sales-managers") {
+    conditions.push(`u.department = 'SALES' AND u.role_type = 'MANAGER'`);
+  } else if (filter.group === "sales-agents") {
+    conditions.push(`u.department = 'SALES' AND u.role_type IS DISTINCT FROM 'MANAGER' AND u.role <> 'ADMIN'`);
+  }
 
   if (filter.search) {
     params.push(`%${filter.search}%`);
@@ -145,7 +158,7 @@ export async function create(input: CreateUserInput): Promise<string> {
      VALUES ($1,$2,$3,$3,$4,$5,$6,$7,$8,$9,$10,$11)
      RETURNING id`,
     [
-      input.firstName, input.lastName ?? null, email, input.phoneNumber ?? null, input.designation ?? null,
+      input.firstName, input.lastName || null, email, input.phoneNumber || null, input.designation ?? null,
       input.role, input.roleType ?? null, input.employmentType ?? null, input.department ?? null,
       input.managerId ?? null, input.passwordHash
     ]
@@ -189,6 +202,42 @@ export async function updatePasswordHash(id: string, passwordHash: string): Prom
 export async function remove(id: string): Promise<boolean> {
   const { rowCount } = await pool.query(`DELETE FROM users WHERE id = $1`, [id]);
   return (rowCount ?? 0) > 0;
+}
+
+/**
+ * Clears "Reports to" for everyone who reported to `managerId` (inside the
+ * delete transaction), so deleting a manager never leaves members pointing
+ * at a user who no longer exists. Returns how many were cleared.
+ */
+export async function clearReportsTo(client: PoolClient, managerId: string): Promise<number> {
+  const { rowCount } = await client.query(`UPDATE users SET manager_id = NULL WHERE manager_id = $1`, [managerId]);
+  return rowCount ?? 0;
+}
+
+/** Names of active users who report to `managerId`. */
+export async function findDirectReportNames(managerId: string): Promise<string[]> {
+  const { rows } = await query<{ name: string }>(
+    `SELECT first_name || COALESCE(' ' || last_name, '') AS name FROM users WHERE manager_id = $1 AND status = 'ACTIVE' ORDER BY first_name`,
+    [managerId]
+  );
+  return rows.map(r => r.name);
+}
+
+/** Deletes the user inside an open transaction (see the DELETE /users/:id handover). */
+export async function removeWithClient(client: PoolClient, id: string): Promise<boolean> {
+  const { rowCount } = await client.query(`DELETE FROM users WHERE id = $1`, [id]);
+  return (rowCount ?? 0) > 0;
+}
+
+/** The given users that can receive leads: active CRM sales agents and managers. */
+export async function findActiveSalesUsersByIds(client: PoolClient, ids: string[]): Promise<{ id: string; name: string }[]> {
+  const { rows } = await client.query<{ id: string; name: string }>(
+    `SELECT id, first_name || COALESCE(' ' || last_name, '') AS name
+     FROM users
+     WHERE id = ANY($1::uuid[]) AND role = 'AGENT' AND status = 'ACTIVE' AND (department IS NULL OR department = 'SALES')`,
+    [ids]
+  );
+  return rows;
 }
 
 export function isUniqueViolation(err: unknown): boolean {

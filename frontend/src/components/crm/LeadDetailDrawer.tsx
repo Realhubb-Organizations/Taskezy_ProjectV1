@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { X, Phone, MessageSquare, Mail, Share2, Calendar, ArrowRight, Bell, Repeat, Copy, Check, User, Pencil } from "lucide-react";
 import { useApp, Lead, LeadStatus } from "@/context/AppContext";
@@ -6,7 +6,7 @@ import { useDialog } from "@/components/ui/DialogProvider";
 import { SearchableSelect } from "@/components/ui/SearchableDropdown";
 import { DatePicker } from "@/components/ui/DateRangePicker";
 import { deriveActivityTimeline, STATUS_OPTIONS, statusBadgeClasses } from "@/lib/leadStatusMapping";
-import { canChangeLeadStatus, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
+import { canChangeLeadStatus, isLeadAssignableUser, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
 
 interface LeadDetailDrawerProps {
   lead: Lead | null;
@@ -67,14 +67,29 @@ export default function LeadDetailDrawer({
   // choices that would come back a 403).
   const reassignTargets = useMemo(() => {
     if (!currentUser) return [];
-    const others = users.filter(u => u.name !== lead?.assignedAgent);
+    const others = users.filter(u => u.name !== lead?.assignedAgent && isLeadAssignableUser(u));
     if (activeRole === "ADMIN") return others;
     if (currentUser.role_type === "Manager") {
       return others.filter(u => u.managerId === currentUser.id);
     }
-    if (!currentUser.managerId) return [];
-    return others.filter(u => u.id === currentUser.managerId || u.managerId === currentUser.managerId);
+    // The signed-in user (from /auth/me) carries no reporting line, so read
+    // it from the full roster; without this a Member never saw any teammate.
+    const myManagerId = currentUser.managerId ?? users.find(u => u.id === currentUser.id)?.managerId;
+    if (!myManagerId) return [];
+    return others.filter(u => u.id !== currentUser.id && (u.id === myManagerId || u.managerId === myManagerId));
   }, [users, currentUser, activeRole, lead?.assignedAgent]);
+
+  // Admins and managers pick the new agent first; the required note box only
+  // opens once someone is picked. Sales agents keep the note box always shown.
+  const noteAfterPick = activeRole === "ADMIN" || currentUser?.role_type === "Manager";
+  const showReassignNote = reassignTargets.length > 0 && (!noteAfterPick || !!reassignTarget);
+  const reassignNoteRef = useRef<HTMLTextAreaElement>(null);
+  const pickReassignTarget = (name: string) => {
+    const firstPick = !reassignTarget && !!name;
+    setReassignTarget(name);
+    setReassignError("");
+    if (noteAfterPick && firstPick) setTimeout(() => reassignNoteRef.current?.focus(), 320);
+  };
 
   useEffect(() => {
     if (lead) {
@@ -416,7 +431,7 @@ export default function LeadDetailDrawer({
               <div className="flex-1 min-w-0">
                 <SearchableSelect
                   value={reassignTarget}
-                  onChange={setReassignTarget}
+                  onChange={pickReassignTarget}
                   options={reassignTargets.map(u => ({ value: u.name, label: u.name }))}
                   placeholder="Select a team member…"
                   searchPlaceholder="Search team members..."
@@ -433,15 +448,27 @@ export default function LeadDetailDrawer({
             </div>
           )}
           {reassignTargets.length > 0 && (
-            <textarea
-              aria-label="Reassign note"
-              value={reassignNote}
-              onChange={(e) => setReassignNote(e.target.value)}
-              rows={2}
-              maxLength={2000}
-              placeholder="Note for the new agent (required) — e.g. Prefers WhatsApp, site visit pending"
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 resize-y focus:outline-none focus:border-brand-500"
-            />
+            // Slides open (grid row 0fr → 1fr) once an agent is picked.
+            <div
+              className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out ${showReassignNote ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"}`}
+              aria-hidden={!showReassignNote}
+            >
+              <div className="overflow-hidden">
+                <textarea
+                  ref={reassignNoteRef}
+                  aria-label="Reassign note"
+                  value={reassignNote}
+                  onChange={(e) => setReassignNote(e.target.value)}
+                  rows={2}
+                  maxLength={2000}
+                  tabIndex={showReassignNote ? 0 : -1}
+                  placeholder={reassignTarget
+                    ? `Note for ${reassignTarget} (required) — e.g. Prefers WhatsApp, site visit pending`
+                    : "Note for the new agent (required) — e.g. Prefers WhatsApp, site visit pending"}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 resize-y focus:outline-none focus:border-brand-500"
+                />
+              </div>
+            </div>
           )}
           {reassignError && (
             <p className="text-[11px] text-red-600 font-semibold">{reassignError}</p>

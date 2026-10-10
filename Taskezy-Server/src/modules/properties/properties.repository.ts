@@ -150,7 +150,7 @@ export async function create(input: PropertyInput): Promise<string> {
       input.name, input.developer, input.location, input.locality ?? null, input.zone ?? null,
       input.priceValue ?? null, input.priceType ?? null, input.propertyType, input.propertyStatus ?? null,
       input.description ?? null, input.possessionDate ?? null, input.landParcel ?? null, input.towers ?? null,
-      input.structure ?? null, input.amenities ?? null, input.contactNumber ?? null, input.mapUrl || null,
+      input.structure ?? null, input.amenities ?? null, input.contactNumber || null, input.mapUrl || null,
       input.websiteUrl || null, input.brochureUrl || null, input.leadRegistrationUrl || null,
       input.tags ?? null, input.mediaFileNames ?? null, input.teamAssignmentMode ?? null, input.leadAssignmentMode ?? null
     ]

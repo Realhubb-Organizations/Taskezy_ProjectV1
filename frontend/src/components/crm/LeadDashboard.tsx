@@ -880,7 +880,13 @@ export default function LeadDashboard() {
   // on) — left as a no-op rather than torn out, since the JSX below still
   // wires onScroll={handleAdminTableScroll} and removing that wiring isn't
   // worth the extra diff for what's already a large change.
-  const handleAdminTableScroll = () => {};
+  // True once the table is scrolled sideways, so the sticky Lead Name column
+  // shows an edge shadow over the columns passing under it.
+  const [adminScrolledX, setAdminScrolledX] = useState(false);
+  const handleAdminTableScroll = () => {
+    const scrolled = (adminScrollRef.current?.scrollLeft ?? 0) > 0;
+    setAdminScrolledX(prev => (prev === scrolled ? prev : scrolled));
+  };
 
   const goToAdminPage = (page: number) => {
     const clamped = Math.max(1, Math.min(adminTotalPages, page));
@@ -1255,10 +1261,12 @@ export default function LeadDashboard() {
                         : <col key={c.key} />
                     ))}
                   </colgroup>
-                  <thead className="sticky top-0 z-10 bg-white">
+                  {/* z-30: above the sticky first-column body cells (z-10), so
+                      rows scrolling up pass under the header, never over it. */}
+                  <thead className="sticky top-0 z-30 bg-white">
                     <tr className="border-b border-slate-200 text-xs font-bold text-slate-800">
                       {canBulkAssign && (
-                        <th className="pl-4 pr-1 py-3 whitespace-nowrap">
+                        <th className="pl-4 pr-1 py-3 whitespace-nowrap sticky left-0 z-20 bg-white">
                           <input
                             type="checkbox"
                             checked={allOnPageSelected}
@@ -1268,7 +1276,7 @@ export default function LeadDashboard() {
                           />
                         </th>
                       )}
-                      <th className="px-4 py-3 whitespace-nowrap sticky left-0 z-20 bg-white">
+                      <th className={`px-4 py-3 whitespace-nowrap sticky z-20 bg-white transition-shadow ${canBulkAssign ? "left-[44px]" : "left-0"} ${adminScrolledX ? "shadow-[6px_0_8px_-6px_rgba(15,23,42,0.18)]" : ""}`}>
                         {adminSearchOpen ? (
                           <div className="flex items-center gap-1">
                             <input
@@ -1354,9 +1362,9 @@ export default function LeadDashboard() {
                           key={l.id}
                           ref={idx % adminRowsPerPage === 0 ? (el) => { adminPageRowRefs.current[Math.floor(idx / adminRowsPerPage)] = el; } : undefined}
                           onClick={(e) => handleLeadRowClick(e, l)}
-                          className={`cursor-pointer transition-colors ${selectedLeads.has(l.id) ? "bg-blue-50/50" : "hover:bg-slate-50/60"}`}>
+                          className={`group cursor-pointer transition-colors ${selectedLeads.has(l.id) ? "bg-blue-50" : "hover:bg-slate-50"}`}>
                           {canBulkAssign && (
-                            <td className="pl-4 pr-1 py-3 align-top">
+                            <td className={`pl-4 pr-1 py-3 align-top sticky left-0 z-10 transition-colors ${selectedLeads.has(l.id) ? "bg-blue-50" : "bg-white group-hover:bg-slate-50"}`}>
                               <input
                                 type="checkbox"
                                 checked={selectedLeads.has(l.id)}
@@ -1366,7 +1374,7 @@ export default function LeadDashboard() {
                               />
                             </td>
                           )}
-                          <td className="px-4 py-3 align-top overflow-hidden sticky left-0 z-10 bg-white">
+                          <td className={`px-4 py-3 align-top overflow-hidden sticky z-10 transition-[background-color,box-shadow] ${selectedLeads.has(l.id) ? "bg-blue-50" : "bg-white group-hover:bg-slate-50"} ${canBulkAssign ? "left-[44px]" : "left-0"} ${adminScrolledX ? "shadow-[6px_0_8px_-6px_rgba(15,23,42,0.18)]" : ""}`}>
                             <button
                               onClick={() => setSelectedLead(l)}
                               className="font-bold text-[#0B1E6E] hover:underline text-left [overflow-wrap:anywhere] block max-w-full"
@@ -1487,11 +1495,15 @@ export default function LeadDashboard() {
           <div className="space-y-4">
             <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden">
               <div className="flex flex-wrap items-center justify-end gap-2.5 p-4 border-b border-slate-100">
+                {/* CSV export is switched off for now (shown, not clickable);
+                    drop `disabled` to bring it back — handleExportAnalytics is intact. */}
                 <button
                   type="button"
                   onClick={handleExportAnalytics}
-                  title="Export as CSV"
-                  className="h-9 w-9 shrink-0 flex items-center justify-center bg-white border border-slate-200 rounded-xl text-[#0B1E6E] hover:bg-slate-50 shadow-sm transition-colors"
+                  disabled
+                  aria-disabled="true"
+                  title="Export as CSV — coming soon"
+                  className="h-9 w-9 shrink-0 flex items-center justify-center bg-white border border-slate-200 rounded-xl text-[#0B1E6E] hover:bg-slate-50 shadow-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white"
                 >
                   <Download className="h-4 w-4" />
                 </button>

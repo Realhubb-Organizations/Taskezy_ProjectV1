@@ -8,6 +8,24 @@ import { CardListSkeleton } from "@/components/ui/Skeletons";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
 import { DatePicker } from "@/components/ui/DateRangePicker";
 import { useDialog } from "@/components/ui/DialogProvider";
+import FieldError, { fieldErrorClass } from "@/components/ui/FieldError";
+import { collectErrors, normalizeIndianMobile, phoneInputProps, sanitizePhoneInput, validatePhone, validatePrice, validateText, validateUrl } from "@/lib/validation";
+
+type DetailsField = "developer" | "name" | "propertyType" | "price" | "leadRegistrationUrl" | "contactNumber" | "location" | "mapUrl";
+
+/** Details-tab rules, shared by Add Property and the properties page's Edit drawer. */
+export function validatePropertyDetails(v: Record<DetailsField, string>) {
+  return collectErrors<DetailsField>({
+    developer: validateText(v.developer, { label: "Builder name" }),
+    name: validateText(v.name, { label: "Property name" }),
+    propertyType: v.propertyType.trim() ? null : "Select at least one property type.",
+    price: validatePrice(v.price, { label: "Quoted price" }),
+    leadRegistrationUrl: validateUrl(v.leadRegistrationUrl, { label: "Lead registration URL" }),
+    contactNumber: validatePhone(v.contactNumber, { label: "Contact number" }),
+    location: validateText(v.location, { label: "Location", max: 300 }),
+    mapUrl: validateUrl(v.mapUrl, { label: "Map URL" })
+  });
+}
 
 interface AddPropertyModalProps {
   isOpen: boolean;
@@ -43,22 +61,21 @@ export const propertyTypeOptions = (value: string): string[] =>
 function Field({
   label,
   span = 1,
+  error,
   ...props
-}: { label: string; span?: 1 | 2 } & React.InputHTMLAttributes<HTMLInputElement>) {
+}: { label: string; span?: 1 | 2; error?: string } & React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <div className={span === 2 ? "sm:col-span-2" : undefined}>
       <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">{label}</label>
       <input
         {...props}
-        className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-brand-500"
+        aria-invalid={!!error}
+        className={`w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-brand-500 ${fieldErrorClass(!!error)}`}
       />
+      <FieldError message={error} />
     </div>
   );
 }
-
-// Only what the database actually requires (see Taskezy-Server/src/modules/properties/properties.schema.ts) —
-// name, developer, propertyType, and location. Everything else here is optional server-side.
-const REQUIRED_FIELDS = ["name", "developer", "propertyType", "location"] as const;
 
 export default function AddPropertyModal({ isOpen, onClose, onSuccess, duplicateFrom }: AddPropertyModalProps) {
   const { toast, confirm: confirmDialog } = useDialog();
@@ -89,7 +106,12 @@ export default function AddPropertyModal({ isOpen, onClose, onSuccess, duplicate
   const salesTeam = users.filter(u => u.department === "SALES" && u.role !== "ADMIN");
   const visibleTeam = salesTeam.filter(m => m.name.toLowerCase().includes(memberSearch.toLowerCase()));
 
+  const [detailErrors, setDetailErrors] = useState<Partial<Record<DetailsField, string>>>({});
+  const clearDetailError = (field: DetailsField) =>
+    setDetailErrors(prev => (prev[field] ? { ...prev, [field]: undefined } : prev));
+
   const resetForm = () => {
+    setDetailErrors({});
     setActiveTab("details");
     setDeveloper("");
     setName("");
@@ -141,12 +163,11 @@ export default function AddPropertyModal({ isOpen, onClose, onSuccess, duplicate
 
   const selectedPercentageTotal = selectedMemberIds.reduce((sum, id) => sum + (memberPercentages[id] || 0), 0);
 
-  const fieldValues: Record<(typeof REQUIRED_FIELDS)[number], string> = { name, developer, propertyType, location };
-
   const validateDetailsTab = (): boolean => {
-    const missing = REQUIRED_FIELDS.filter(f => !fieldValues[f].trim());
-    if (missing.length > 0) {
-      toast("Please fill in Builder Name, Property Name, Property Type, and Location before continuing.", "warning");
+    const errors = validatePropertyDetails({ developer, name, propertyType, price, leadRegistrationUrl, contactNumber, location, mapUrl });
+    setDetailErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      toast("Please fix the highlighted fields.", "warning");
       return false;
     }
     return true;
@@ -186,18 +207,18 @@ export default function AddPropertyModal({ isOpen, onClose, onSuccess, duplicate
         : undefined;
 
     const propertyData: Omit<Property, "id" | "membersCount"> = {
-      name,
-      developer,
-      location,
-      price: price || undefined,
+      name: name.trim(),
+      developer: developer.trim(),
+      location: location.trim(),
+      price: price.trim() || undefined,
       priceType: "Absolute",
       type: propertyType,
       propertyStatus: propertyStatus || undefined,
       description: description || undefined,
       possessionDate: possessionDate || undefined,
-      contactNumber: contactNumber || undefined,
-      mapUrl: mapUrl || undefined,
-      leadRegistrationUrl: leadRegistrationUrl || undefined,
+      contactNumber: contactNumber.trim() ? normalizeIndianMobile(contactNumber) ?? undefined : undefined,
+      mapUrl: mapUrl.trim() || undefined,
+      leadRegistrationUrl: leadRegistrationUrl.trim() || undefined,
       teamAssignmentMode,
       leadAssignmentMode: teamAssignmentMode === "CUSTOM_MEMBERS" ? leadAssignmentMode : undefined,
       assignedTeam
@@ -248,18 +269,19 @@ export default function AddPropertyModal({ isOpen, onClose, onSuccess, duplicate
           <div className="flex-1 overflow-y-auto px-6 py-5">
             {activeTab === "details" && (
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 animate-fade-in">
-                <Field label="Builder Name" type="text" value={developer} onChange={(e) => setDeveloper(e.target.value)} placeholder="e.g. developer name" />
-                <Field label="Property Name" type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. property name" />
+                <Field label="Builder Name" type="text" maxLength={200} value={developer} onChange={(e) => { setDeveloper(e.target.value); clearDetailError("developer"); }} placeholder="e.g. developer name" error={detailErrors.developer} />
+                <Field label="Property Name" type="text" maxLength={200} value={name} onChange={(e) => { setName(e.target.value); clearDetailError("name"); }} placeholder="e.g. property name" error={detailErrors.name} />
                 <div>
                   <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Property Type</label>
                   <SearchableMultiSelect
                     variant="field"
                     options={propertyTypeOptions(propertyType)}
                     selected={splitPropertyTypes(propertyType)}
-                    onChange={(next) => setPropertyType(joinPropertyTypes(next))}
+                    onChange={(next) => { setPropertyType(joinPropertyTypes(next)); clearDetailError("propertyType"); }}
                     placeholder="Select property type(s)"
                     searchPlaceholder="Search property types..."
                   />
+                  <FieldError message={detailErrors.propertyType} />
                 </div>
 
                 <div>
@@ -277,13 +299,14 @@ export default function AddPropertyModal({ isOpen, onClose, onSuccess, duplicate
                   <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Possession Date</label>
                   <DatePicker value={possessionDate} onChange={setPossessionDate} />
                 </div>
-                <Field label="Quoted Price" type="text" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="e.g. 1.91 Cr" />
+                <Field label="Quoted Price" type="text" maxLength={40} value={price} onChange={(e) => { setPrice(e.target.value); clearDetailError("price"); }} placeholder="e.g. 1.91 Cr or 85 Lakh" error={detailErrors.price} />
 
-                <Field label="Lead Registration URL" type="text" value={leadRegistrationUrl} onChange={(e) => setLeadRegistrationUrl(e.target.value)} placeholder="e.g. landing page lead form link" />
+                <Field label="Lead Registration URL" type="url" inputMode="url" maxLength={1000} value={leadRegistrationUrl} onChange={(e) => { setLeadRegistrationUrl(e.target.value); clearDetailError("leadRegistrationUrl"); }} placeholder="e.g. https://landing-page.com/form" error={detailErrors.leadRegistrationUrl} />
                 <div className="sm:col-span-2">
                   <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Description</label>
                   <textarea
                     value={description}
+                    maxLength={5000}
                     onChange={(e) => setDescription(e.target.value)}
                     placeholder="e.g. project description"
                     rows={3}
@@ -291,10 +314,10 @@ export default function AddPropertyModal({ isOpen, onClose, onSuccess, duplicate
                   />
                 </div>
 
-                <Field label="Contact Number" type="tel" value={contactNumber} onChange={(e) => setContactNumber(e.target.value)} placeholder="e.g. contact number" />
+                <Field label="Contact Number" {...phoneInputProps} value={contactNumber} onChange={(e) => { setContactNumber(sanitizePhoneInput(e.target.value)); clearDetailError("contactNumber"); }} placeholder="e.g. 9845012345" error={detailErrors.contactNumber} />
 
-                <Field label="Location" type="text" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="e.g. enter location" />
-                <Field label="Map URL" type="text" value={mapUrl} onChange={(e) => setMapUrl(e.target.value)} placeholder="e.g. paste map url" />
+                <Field label="Location" type="text" maxLength={300} value={location} onChange={(e) => { setLocation(e.target.value); clearDetailError("location"); }} placeholder="e.g. enter location" error={detailErrors.location} />
+                <Field label="Map URL" type="url" inputMode="url" maxLength={1000} value={mapUrl} onChange={(e) => { setMapUrl(e.target.value); clearDetailError("mapUrl"); }} placeholder="e.g. https://maps.google.com/..." error={detailErrors.mapUrl} />
               </div>
             )}
 

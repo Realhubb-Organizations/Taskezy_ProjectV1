@@ -721,16 +721,17 @@ export default function AdminCampaignsPage() {
 
   const deepDiveSourceOptions = useMemo(() => Array.from(new Set(campaignsList.map(c => c.platform))), [campaignsList]);
 
-  // Property/Status breakdown's campaign filter options — one per distinct
-  // campaign name, grouped under its platform (Meta, Google, then Other).
+  // Campaign filter options (both "All Campaigns" dropdowns) — every
+  // campaign ever seen, any status and regardless of the Date Range, one per
+  // distinct name, grouped under its platform (Meta, Google, then Other).
   const breakdownCampaignOptions = useMemo(() => {
     const order: CampaignItem["platform"][] = ["Meta", "Google", "Other"];
     const seen = new Set<string>();
-    return [...campaignsList]
+    return [...campaignsListAllTime]
       .sort((a, b) => order.indexOf(a.platform) - order.indexOf(b.platform))
       .filter(c => !seen.has(c.name) && !!seen.add(c.name))
       .map(c => ({ value: c.name, label: c.name, group: c.platform }));
-  }, [campaignsList]);
+  }, [campaignsListAllTime]);
 
   const deepDiveCampaigns = useMemo(() => {
     const q = deepDiveSearchQuery.trim().toLowerCase();
@@ -953,15 +954,20 @@ export default function AdminCampaignsPage() {
     JSON.stringify([analyticsDrillView?.campaign.id, qualifiedLeadsSearchQuery])
   );
 
-  // Filtered table rows
+  // Filtered table rows. By default only Active campaigns (by their overall
+  // status, not just this range's); campaigns picked in the dropdown show
+  // whatever their status, and the Campaign Status column filter wins.
   const filteredCampaigns = useMemo(() => {
     return campaignsList.filter(c => {
+      const status = campaignByName[c.name.toLowerCase()]?.status ?? c.status;
       const matchesSearch = !searchQuery || c.name.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesStatus = selectedStatuses.length === 0 || selectedStatuses.includes(c.status);
+      const matchesStatus = selectedStatuses.length > 0
+        ? selectedStatuses.includes(status)
+        : campaignFilterActive || status === "Active";
       return matchesSearch && matchesStatus && inSelectedCampaigns(c.name);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [campaignsList, searchQuery, selectedStatuses, campaignFilterActive, selectedCampaignNames]);
+  }, [campaignsList, campaignByName, searchQuery, selectedStatuses, campaignFilterActive, selectedCampaignNames]);
 
   const currentPageClamped = Math.min(currentPage, Math.max(1, Math.ceil(filteredCampaigns.length / rowsPerPage)));
   const paginatedCampaigns = filteredCampaigns.slice((currentPageClamped - 1) * rowsPerPage, currentPageClamped * rowsPerPage);

@@ -1,3 +1,4 @@
+import type { PoolClient } from "pg";
 import { withTransaction } from "../../db/pool";
 import { AccessTokenPayload } from "../../utils/tokens";
 import { ApiError } from "../../utils/ApiError";
@@ -8,6 +9,7 @@ import { createNotification, deleteLeadActivityNotifications } from "../notifica
 import { findPropertyIdBySheetSource } from "../properties/properties.repository";
 import { pickAgentForProperty, createPropertyAgentPicker } from "../properties/properties.assignment";
 import { broadcastLeadChanged } from "./leads.realtime";
+import { normalizeTypedIndianMobile } from "../../utils/validation";
 
 /**
  * Mirrors the frontend's isSalesMember scoping rule (AppContext.tsx /
@@ -273,14 +275,16 @@ export async function bulkImportLeads(_caller: AccessTokenPayload, input: BulkIm
   for (let i = 0; i < input.leads.length; i++) {
     const row = i + 2; // header is row 1
     const name = input.leads[i].name?.trim();
-    const phone = repo.normalizeIndianMobile(input.leads[i].phone ?? "");
+    // Typed/uploaded numbers use the strict rule: an 11-digit typo is reported
+    // as skipped instead of being cut down to a different, valid-looking number.
+    const phone = normalizeTypedIndianMobile(input.leads[i].phone ?? "");
 
     if (!name) {
       skipped.push({ row, reason: "Name is required" });
       continue;
     }
     if (!phone) {
-      skipped.push({ row, reason: "Phone did not normalize to a valid 10-digit Indian mobile" });
+      skipped.push({ row, reason: "Phone is not a valid 10-digit mobile number" });
       continue;
     }
     if (seenPhones.has(phone)) {
@@ -513,7 +517,13 @@ export async function reassignLead(caller: AccessTokenPayload, leadId: string, n
   await assertReassignAllowed(caller, newAgentId);
 
   const newAgent = await usersRepo.findById(newAgentId);
-  const newAgentName = newAgent ? `${newAgent.first_name}${newAgent.last_name ? " " + newAgent.last_name : ""}` : "a different agent";
+  if (!newAgent) throw ApiError.badRequest("New agent not found.");
+  // Leads only ever go to active CRM sales agents/managers — never Finance,
+  // Admin or other departments, who can't work them from the CRM.
+  if (newAgent.role !== "AGENT" || newAgent.status !== "ACTIVE" || (newAgent.department && newAgent.department !== "SALES")) {
+    throw ApiError.badRequest("Leads can only be reassigned to active sales agents or managers.");
+  }
+  const newAgentName = `${newAgent.first_name}${newAgent.last_name ? " " + newAgent.last_name : ""}`;
 
   try {
     await withTransaction(async (client) => {
@@ -544,6 +554,32 @@ export async function reassignLead(caller: AccessTokenPayload, leadId: string, n
   }
   broadcastLeadChanged(leadId);
   return updated;
+}
+
+/**
+ * Hands a departing user's leads (`leadIds`, oldest first) to `targets`
+ * round-robin, so each gets an equal share (±1), inside the caller's
+ * transaction. Every lead gets the admin's note and an Activity History entry.
+ * Follow-ups are moved separately (repo.moveFollowupsToLeadOwners) once all
+ * leads have their new owner.
+ */
+export async function handOverLeadsInTransaction(
+  client: PoolClient,
+  caller: AccessTokenPayload,
+  fromUser: { id: string; name: string },
+  leadIds: string[],
+  targets: { id: string; name: string }[],
+  note: string
+): Promise<Map<string, number>> {
+  const received = new Map<string, number>();
+  for (let i = 0; i < leadIds.length; i++) {
+    const target = targets[i % targets.length];
+    await repo.reassign(client, leadIds[i], fromUser.id, target.id);
+    await repo.setNote(client, leadIds[i], note, caller.sub);
+    await repo.insertLeadLog(client, leadIds[i], caller.sub, caller.name, `Reassigned to ${target.name} (${fromUser.name} was removed). Note: ${note}`);
+    received.set(target.id, (received.get(target.id) ?? 0) + 1);
+  }
+  return received;
 }
 
 /**

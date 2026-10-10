@@ -5,8 +5,13 @@ import { asyncHandler } from "../../utils/asyncHandler";
 import { sendOk, sendPaginated } from "../../utils/apiResponse";
 import { ApiError } from "../../utils/ApiError";
 import { hashPassword } from "../../utils/password";
-import { createUserSchema, editUserSchema, listUsersQuerySchema, resetPasswordSchema, userIdParamSchema } from "./users.schema";
+import { createUserSchema, deleteUserSchema, editUserSchema, listUsersQuerySchema, resetPasswordSchema, userIdParamSchema } from "./users.schema";
 import * as repo from "./users.repository";
+import { withTransaction } from "../../db/pool";
+import * as leadsRepo from "../leads/leads.repository";
+import * as leadsService from "../leads/leads.service";
+import { broadcastLeadChanged } from "../leads/leads.realtime";
+import { createNotification } from "../notifications/notifications.service";
 
 export const usersRouter = Router();
 
@@ -16,7 +21,7 @@ usersRouter.get(
   "/",
   validate({ query: listUsersQuerySchema }),
   asyncHandler(async (req, res) => {
-    const { page, pageSize, search } = req.query as unknown as { page?: number; pageSize?: number; search?: string };
+    const { page, pageSize, search, group } = req.query as unknown as { page?: number; pageSize?: number; search?: string; group?: repo.UserListFilter["group"] };
 
     // Bare `GET /users` (no page/pageSize) stays the original full-directory
     // fetch — every dropdown/name-resolution consumer across the app
@@ -32,7 +37,7 @@ usersRouter.get(
 
     const effectivePage = page ?? 1;
     const effectivePageSize = pageSize ?? 20;
-    const { rows, totalCount } = await repo.findManyActive({ page: effectivePage, pageSize: effectivePageSize, search });
+    const { rows, totalCount } = await repo.findManyActive({ page: effectivePage, pageSize: effectivePageSize, search, group });
     sendPaginated(res, rows, {
       page: effectivePage,
       pageSize: effectivePageSize,
@@ -109,10 +114,27 @@ usersRouter.patch(
   })
 );
 
+// How much a delete would hand over, so the admin's delete dialog knows
+// whether to ask who should get the user's leads.
+usersRouter.get(
+  "/:id/delete-impact",
+  requireRole("ADMIN"),
+  validate({ params: userIdParamSchema }),
+  asyncHandler(async (req, res) => {
+    const existing = await repo.findById(req.params.id);
+    if (!existing) throw ApiError.notFound("User not found");
+    sendOk(res, {
+      leadCount: await leadsRepo.countLeadsForAgent(req.params.id),
+      // Team members whose "Reports to" will be cleared (admin re-assigns it after).
+      reportNames: await repo.findDirectReportNames(req.params.id)
+    });
+  })
+);
+
 usersRouter.delete(
   "/:id",
   requireRole("ADMIN"),
-  validate({ params: userIdParamSchema }),
+  validate({ params: userIdParamSchema, body: deleteUserSchema }),
   asyncHandler(async (req, res) => {
     const existing = await repo.findById(req.params.id);
     if (!existing) throw ApiError.notFound("User not found");
@@ -127,18 +149,60 @@ usersRouter.delete(
       }
     }
 
+    const { reassignTo, note } = req.body as { reassignTo?: string[]; note?: string };
+    const fromUser = { id: existing.id, name: `${existing.first_name}${existing.last_name ? " " + existing.last_name : ""}` };
+
+    // One transaction: the user's leads (and their follow-ups) are handed
+    // over and the user is deleted together, or nothing changes at all.
+    let received = new Map<string, number>();
+    let movedLeadIds: string[] = [];
+    let clearedReports = 0;
     try {
-      await repo.remove(req.params.id);
-      sendOk(res, { deleted: true });
+      await withTransaction(async (client) => {
+        const leadIds = await leadsRepo.lockLeadIdsForAgent(client, existing.id);
+        if (leadIds.length > 0) {
+          if (!reassignTo?.length || !note) {
+            throw ApiError.conflict(`${fromUser.name} has ${leadIds.length} lead${leadIds.length === 1 ? "" : "s"}. Choose who should get them before deleting.`);
+          }
+          const ids = Array.from(new Set(reassignTo));
+          if (ids.includes(existing.id)) throw ApiError.badRequest("Leads can't be reassigned to the user being deleted.");
+          const found = await repo.findActiveSalesUsersByIds(client, ids);
+          if (found.length !== ids.length) throw ApiError.badRequest("Leads can only go to active sales agents or managers.");
+          // Keep the admin's order so the round-robin is predictable.
+          const targets = ids.map(id => found.find(u => u.id === id)!);
+          received = await leadsService.handOverLeadsInTransaction(client, req.user!, fromUser, leadIds, targets, note);
+          movedLeadIds = leadIds;
+        }
+        const leftover = await leadsRepo.moveFollowupsToLeadOwners(client, existing.id);
+        if (leftover > 0) {
+          throw ApiError.conflict(`${fromUser.name} still has ${leftover} follow-up${leftover === 1 ? "" : "s"} not linked to a lead and cannot be deleted.`);
+        }
+        // Their team members' "Reports to" is cleared; the admin sets a new
+        // manager for them from Manage Users afterwards.
+        clearedReports = await repo.clearReportsTo(client, existing.id);
+        await repo.removeWithClient(client, existing.id);
+      });
     } catch (err) {
-      // leads.assigned_agent_id / invoices / reimbursement_claims / followup_calls
-      // all reference users with ON DELETE RESTRICT for the ones that matter for
-      // audit/financial history — a real, expected failure mode, not a bug.
+      // invoices / reimbursement_claims reference users with ON DELETE
+      // RESTRICT for audit/financial history — a real, expected failure mode.
       if (isForeignKeyViolation(err)) {
-        throw ApiError.conflict("This user has assigned leads, invoices, or claims and cannot be deleted. Reassign or remove those first.");
+        throw ApiError.conflict("This user has invoices or claims linked to them and cannot be deleted. Reassign or remove those first.");
       }
       throw err;
     }
+
+    for (const [userId, count] of received) {
+      await createNotification({
+        system: "CRM",
+        category: "REASSIGNMENT",
+        title: "Leads Reassigned To You",
+        message: `${count} lead${count === 1 ? "" : "s"} from ${fromUser.name} ${count === 1 ? "was" : "were"} reassigned to you by ${req.user!.name}.`,
+        recipientUserId: userId,
+        link: "/dashboard/crm"
+      });
+    }
+    movedLeadIds.forEach(broadcastLeadChanged);
+    sendOk(res, { deleted: true, reassignedLeads: movedLeadIds.length, clearedReports });
   })
 );
 
