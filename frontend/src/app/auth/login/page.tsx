@@ -59,8 +59,24 @@ export default function LoginPage() {
   // isResetRequired only ever becomes true mid-login-attempt on this same
   // page, never from a restored session, but it's checked anyway so a
   // forced password reset in progress is never interrupted.
+  //
+  // Goes to the last real route the (app) layout recorded (see its own
+  // lastRoute effect) rather than always /home — the native app's process
+  // gets killed under memory pressure far more often than a typical app
+  // (confirmed on-device, 2026-10-10), and every cold restart reloads this
+  // exact login page first (it's the Capacitor server.url), so without
+  // this a user who was on the Leads page would land back on Home every
+  // single time the OS reclaimed the app in the background.
   useEffect(() => {
-    if (currentUser && !isResetRequired) router.replace("/home");
+    if (!currentUser || isResetRequired) return;
+    let dest = "/home";
+    try {
+      const saved = window.localStorage.getItem("lastRoute");
+      if (saved && saved.startsWith("/") && !saved.startsWith("/auth")) dest = saved;
+    } catch {
+      // Private browsing / storage disabled — falls back to /home, same as before this existed.
+    }
+    router.replace(dest);
   }, [currentUser, isResetRequired, router]);
 
   const handleLogin = async (e: React.FormEvent) => {
