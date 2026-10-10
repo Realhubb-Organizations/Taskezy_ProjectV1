@@ -32,9 +32,18 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- CallStatePlugin: only call STATE (idle/offhook), never call history
-         (no READ_CALL_LOG) — enough to know when an agent's call to a lead
-         ends, since the lead/number is already known app-side before the
-         call is placed. -->
-    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <!-- No READ_PHONE_STATE: this app used to watch real device call state
+         via a native TelephonyManager plugin (CallStatePlugin), but Android
+         kills this app's backgrounded process within seconds of placing a
+         call (confirmed on-device, 2026-10-10), destroying that listener
+         before it could ever fire — structurally unworkable without a
+         foreground service. Dropped in favor of the same "ask when you
+         return to the app" pattern already used for WhatsApp (see
+         frontend/src/lib/callTrigger.ts), which needs no telephony
+         permission at all.
+
+         READ_CALL_LOG is kept: CallLogPlugin only does a one-shot query
+         against the CallLog ContentProvider (no listener, nothing for
+         Android to kill mid-operation), for the Call Log CRM feature. -->
+    <uses-permission android:name="android.permission.READ_CALL_LOG" />
 </manifest>
