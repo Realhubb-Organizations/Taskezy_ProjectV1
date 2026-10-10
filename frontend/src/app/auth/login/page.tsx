@@ -51,6 +51,18 @@ export default function LoginPage() {
     return () => clearInterval(timer);
   }, []);
 
+  // A still-valid session (restored from the refresh-token cookie on app
+  // launch — see AppContext.tsx's mount effect) means there's nothing to
+  // log in for; without this, a user who never actually got signed out
+  // still lands on and has to look at the login form every time they open
+  // the app, even though they're already authenticated underneath it.
+  // isResetRequired only ever becomes true mid-login-attempt on this same
+  // page, never from a restored session, but it's checked anyway so a
+  // forced password reset in progress is never interrupted.
+  useEffect(() => {
+    if (currentUser && !isResetRequired) router.replace("/home");
+  }, [currentUser, isResetRequired, router]);
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");

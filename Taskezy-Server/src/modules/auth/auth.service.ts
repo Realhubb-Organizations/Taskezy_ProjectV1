@@ -89,6 +89,30 @@ export async function login(email: string, password: string): Promise<AuthResult
   return { accessToken, refreshToken, user: stripPasswordHash(user) };
 }
 
+// How long after a token's rotation a reuse of that same (now-revoked)
+// token is still treated as a benign race rather than theft — see the
+// grace-window branch in refresh() below. Long enough to absorb two
+// near-simultaneous legitimate requests sharing one refresh token (two
+// open tabs, or a burst of parallel API calls — e.g. loadAllRealData's
+// ~14 concurrent fetches — that all hit a 401 together and race to
+// refresh before the frontend's own in-tab de-dupe can apply); short
+// enough that an attacker replaying a genuinely stolen token any
+// meaningful time later still trips full family revocation below.
+const REUSE_GRACE_MS = 10_000;
+
+async function userForRefresh(userId: string): Promise<UserRow> {
+  const { rows } = await query<UserRow>(
+    `SELECT id, first_name, last_name, email, role, department, role_type, designation, status, password_hash
+     FROM users WHERE id = $1`,
+    [userId]
+  );
+  const user = rows[0];
+  if (!user || user.status !== "ACTIVE") {
+    throw ApiError.unauthorized("Account is no longer active");
+  }
+  return user;
+}
+
 export async function refresh(refreshToken: string): Promise<AuthResult> {
   const tokenHash = hashRefreshToken(refreshToken);
 
@@ -112,41 +136,47 @@ export async function refresh(refreshToken: string): Promise<AuthResult> {
   if (!claim) {
     // Didn't claim it. Could be a forged/garbage token, an expired one, or —
     // the interesting case — a token that WAS valid but has already been
-    // rotated past. That last case is a replay: the strongest signal
+    // rotated past. That last case is a replay, but replay alone doesn't
+    // prove theft: the atomic claim above means losing that race is the
+    // *expected* outcome for the second of two near-simultaneous
+    // legitimate requests sharing one refresh token, not just a stolen-
+    // token scenario. Telling them apart: a genuine thief's replay happens
+    // whenever they get around to using the token they captured — no
+    // reason it'd land within milliseconds of the legitimate rotation. A
+    // same-client race always does. So a reuse spotted within
+    // REUSE_GRACE_MS of the token's own revocation is treated as that
+    // benign race — the loser just gets its own fresh pair on the same
+    // family, same as if it had won — while a reuse any later than that
+    // still gets the full family revocation: the strongest signal
     // available that this token was stolen and used by someone other than
-    // whoever is holding it now. Reuse of an already-used token should
-    // never be treated as "just reject this one request" — if it's really
-    // theft, the thief already has a valid rotated session from whenever
-    // they first used it, rejecting only the replay leaves them in control.
-    // Revoking the whole family forces both the thief and the legitimate
-    // client to re-authenticate.
-    const { rows: existing } = await query<{ family_id: string }>(
-      `SELECT family_id FROM refresh_tokens WHERE token_hash = $1 AND revoked_at IS NOT NULL`,
+    // whoever is holding it now. Revoking the whole family forces both the
+    // thief and the legitimate client to re-authenticate, since rejecting
+    // only the replay would leave a real thief in control of their own
+    // already-rotated session.
+    const { rows: existing } = await query<{ user_id: string; family_id: string; revoked_at: string }>(
+      `SELECT user_id, family_id, revoked_at FROM refresh_tokens WHERE token_hash = $1 AND revoked_at IS NOT NULL`,
       [tokenHash]
     );
-    if (existing[0]) {
+    const prior = existing[0];
+    if (prior && Date.now() - new Date(prior.revoked_at).getTime() <= REUSE_GRACE_MS) {
+      const user = await userForRefresh(prior.user_id);
+      const { accessToken, refreshToken: newRefreshToken } = await issueTokenPair(user, prior.family_id);
+      return { accessToken, refreshToken: newRefreshToken, user: stripPasswordHash(user) };
+    }
+    if (prior) {
       await query(
         `UPDATE refresh_tokens SET revoked_at = now() WHERE family_id = $1 AND revoked_at IS NULL`,
-        [existing[0].family_id]
+        [prior.family_id]
       );
       logger.warn(
-        { familyId: existing[0].family_id },
+        { familyId: prior.family_id },
         "Refresh token reuse detected — revoked every active token in the session family"
       );
     }
     throw ApiError.unauthorized("Invalid or expired refresh token");
   }
 
-  const { rows: userRows } = await query<UserRow>(
-    `SELECT id, first_name, last_name, email, role, department, role_type, designation, status, password_hash
-     FROM users WHERE id = $1`,
-    [claim.user_id]
-  );
-  const user = userRows[0];
-  if (!user || user.status !== "ACTIVE") {
-    throw ApiError.unauthorized("Account is no longer active");
-  }
-
+  const user = await userForRefresh(claim.user_id);
   const { accessToken, refreshToken: newRefreshToken } = await issueTokenPair(user, claim.family_id);
   return { accessToken, refreshToken: newRefreshToken, user: stripPasswordHash(user) };
 }

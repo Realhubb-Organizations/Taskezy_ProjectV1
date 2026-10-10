@@ -61,7 +61,19 @@ async function request<T>(path: string, options: RequestInit = {}, allowRefreshR
     }
   });
 
-  if (res.status === 401 && allowRefreshRetry && !path.startsWith("/api/v1/auth/")) {
+  // Only /login and /refresh itself should skip the retry (a 401 from
+  // /login means a wrong password, not an expired token, and retrying
+  // /refresh on its own 401 would loop) — every other /auth/* path,
+  // especially /auth/me (the session-restore check on every app launch),
+  // needs the same refresh-and-retry as any other endpoint. Excluding the
+  // whole /api/v1/auth/ prefix used to mean a merely-expired 15-minute
+  // access token made /auth/me fail outright instead of transparently
+  // refreshing off the still-valid 7-day refresh cookie — which wiped the
+  // session and forced a real re-login far more often than the token
+  // lifetimes should ever require. See project_crm_role_based_lead_scoping
+  // memory (2026-10-10).
+  const skipRefreshRetry = path.startsWith("/api/v1/auth/login") || path.startsWith("/api/v1/auth/refresh");
+  if (res.status === 401 && allowRefreshRetry && !skipRefreshRetry) {
     const refreshed = await refreshAccessToken();
     if (refreshed) return request<T>(path, options, false);
   }
