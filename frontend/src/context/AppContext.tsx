@@ -90,6 +90,7 @@ import {
 import { dbCodeToFrontendStatus, frontendStatusToDbCode, isRealLeadId, isRealId } from "@/lib/leadStatusMapping";
 import { initNotificationSoundUnlock, playNotificationSound } from "@/lib/notificationSound";
 import { todayIso, toIsoDate } from "@/components/ui/DateRangePicker";
+import { consumePendingCallDial } from "@/lib/callTrigger";
 import { Capacitor } from "@capacitor/core";
 
 // --- Types ---
@@ -529,10 +530,11 @@ interface AppState {
 
 interface AppActions {
   refreshMetaConnectionStatus: () => Promise<void>;
-  // Called by the CallState plugin's "callEnded" listener (native app only)
-  // right as the call ends, before the feedback modal even renders — this
-  // is what makes the gate durable across a force-quit (see
-  // pendingCallAttempt above).
+  // Called once the agent returns to the app after triggerLeadCall opens
+  // the dialer (web + app) — before the feedback modal even renders. Used
+  // to watch real device call state via a native plugin; dropped
+  // 2026-10-10 since Android kills this app's backgrounded process during
+  // a real call before the listener could ever fire (see callTrigger.ts).
   recordCallEnded: (leadId: string, startedAt: string | undefined, durationSeconds: number) => Promise<void>;
   // Called by the WhatsApp trigger (web + app) once the agent returns to
   // Taskezy after wa.me opened — see recordCallEnded above for the call
@@ -1122,9 +1124,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return apiTriggerAdSpendSync();
   };
 
-  // Fired by CallState's "callEnded" listener (lib/callTrigger.ts). Creates
-  // the PENDING_FEEDBACK row immediately — before CallFeedbackGate even
-  // renders — so the block survives a force-quit right after the call.
+  // Fired from two places — callTrigger.ts's in-memory return-watcher (the
+  // common case: process survived the call) and this file's own
+  // session-restore mount effect below (the process got killed mid-call
+  // and this is a cold restart — see callTrigger.ts's PENDING_CALL_KEY for
+  // how that case is still caught). Either way, creates the
+  // PENDING_FEEDBACK row immediately — before CallFeedbackGate even
+  // renders — so the block survives a further force-quit right after.
   const recordCallEnded = async (leadId: string, startedAt: string | undefined, durationSeconds: number) => {
     const attempt = await apiCreateCallAttempt({ leadId, channel: "CALL", startedAt, durationSeconds });
     setPendingCallAttempt(attempt);
@@ -1170,9 +1176,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         // Re-shows CallFeedbackGate after a force-quit/relaunch mid-feedback
         // — not just within the same in-memory session. Native app only
         // (web never creates one of these rows in the first place).
+        //
+        // Backend-authoritative check first: if there's already an
+        // unresolved PENDING_FEEDBACK row, show that — never overwrite it
+        // with a newer call's marker. Only once that comes back empty do we
+        // fall back to callTrigger.ts's local pending-dial marker, which
+        // catches the case the backend could never know about on its own:
+        // the app process got killed mid-call before recordCallEnded ever
+        // ran, so no row was created in the first place. See callTrigger.ts
+        // for the full reasoning.
         if (Capacitor.isNativePlatform()) {
           apiGetPendingCallAttempt()
-            .then(setPendingCallAttempt)
+            .then(async (existing) => {
+              if (existing) {
+                setPendingCallAttempt(existing);
+                consumePendingCallDial(); // superseded — don't also process it below
+                return;
+              }
+              const pendingDial = consumePendingCallDial();
+              if (pendingDial) {
+                const durationSeconds = Math.max(0, Math.round((Date.now() - new Date(pendingDial.startedAt).getTime()) / 1000));
+                await recordCallEnded(pendingDial.leadId, pendingDial.startedAt, durationSeconds);
+              }
+            })
             .catch((err) => console.warn("Could not check for a pending call-feedback gate:", err));
         }
       })

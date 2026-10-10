@@ -1574,3 +1574,63 @@ export function apiApproveRegularization(timesheetId: string): Promise<ApiTimesh
 export function apiRejectRegularization(timesheetId: string): Promise<ApiTimesheetRow> {
   return request<ApiTimesheetRow>(`/api/v1/timesheets/${timesheetId}/regularize/reject`, { method: "PATCH" });
 }
+
+// Call Log — device call history synced from each sales agent's native
+// Android call log (see lib/callLogSync.ts, the only caller of the sync
+// endpoint). Role-scoped server-side already (Admin: everyone; Manager:
+// self+team; Member: self only), so the frontend just displays what comes
+// back — see call-log/page.tsx.
+export interface ApiCallLogEntry {
+  phoneNumber: string;
+  callType: string;
+  callDate: string;
+  durationSeconds: number;
+}
+
+export function apiSyncCallLog(entries: ApiCallLogEntry[]): Promise<{ received: number; inserted: number }> {
+  return request<{ received: number; inserted: number }>("/api/v1/call-log/sync", {
+    method: "POST",
+    body: JSON.stringify({ entries })
+  });
+}
+
+export interface ApiCallLogRow {
+  id: string;
+  userId: string;
+  userName: string;
+  phoneNumber: string;
+  leadId: string | null;
+  leadName: string | null;
+  callType: string;
+  callDate: string;
+  durationSeconds: number;
+}
+
+// Mirrors apiListLeadsPage/apiListTimesheetsPage's shape.
+export interface CallLogPageResult {
+  rows: ApiCallLogRow[];
+  page: number;
+  pageSize: number;
+  totalCount: number;
+  totalPages: number;
+}
+
+export async function apiListCallLogPage(
+  page: number,
+  pageSize: number,
+  filters: { dateFrom?: string; dateTo?: string } = {}
+): Promise<CallLogPageResult> {
+  const params = new URLSearchParams();
+  params.set("page", String(page));
+  params.set("pageSize", String(pageSize));
+  if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
+  if (filters.dateTo) params.set("dateTo", filters.dateTo);
+  const { data, meta } = await requestWithMeta<ApiCallLogRow>(`/api/v1/call-log?${params.toString()}`);
+  return {
+    rows: data,
+    page: meta?.page ?? page,
+    pageSize: meta?.pageSize ?? pageSize,
+    totalCount: meta?.totalCount ?? data.length,
+    totalPages: meta?.totalPages ?? 1
+  };
+}

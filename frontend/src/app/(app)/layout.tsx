@@ -114,6 +114,23 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   const searchParams = useSearchParams();
   const activeTabParam = searchParams.get("tab");
 
+  // Android kills this app's whole process under memory pressure far more
+  // aggressively than a typical app (confirmed on-device via logcat,
+  // 2026-10-10 — the process was killed ~7s after backgrounding for a
+  // phone call, alongside a mass kill of dozens of other cached apps). The
+  // next foreground is a full cold restart, which reloads the Capacitor
+  // server.url from scratch with no memory of which page was open — so
+  // the last real route is persisted here on every navigation and
+  // restored after a cold restart (see auth/login/page.tsx's redirect)
+  // instead of always landing back on /home.
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("lastRoute", activeTabParam ? `${pathname}?tab=${activeTabParam}` : pathname);
+    } catch {
+      // Private browsing / storage disabled — losing "remember last page" is harmless, just skip it.
+    }
+  }, [pathname, activeTabParam]);
+
   const {
     currentUser,
     authLoading,
@@ -246,6 +263,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     { name: "Leads", href: "/dashboard/crm", activeCheck: (p: string, t?: string | null) => p === "/dashboard/crm", icon: Users },
     { name: "Campaigns", href: "/dashboard/crm/campaigns", activeCheck: (p: string) => p.startsWith("/dashboard/crm/campaigns"), icon: Megaphone },
     { name: "Data Calling", href: "/dashboard/crm/data-calling", activeCheck: (p: string) => p.startsWith("/dashboard/crm/data-calling"), icon: Phone },
+    { name: "Call Log", href: "/dashboard/crm/call-log", activeCheck: (p: string) => p.startsWith("/dashboard/crm/call-log"), icon: Clock },
     { name: "Calendar", href: "/dashboard/crm/calendar", activeCheck: (p: string, t?: string | null) => p === "/dashboard/crm/calendar", icon: Calendar },
     { name: "Settings", href: "/dashboard/settings", activeCheck: (p: string, t?: string | null) => p === "/dashboard/settings", icon: Settings },
     { name: "Reports", href: "/dashboard/reports", activeCheck: (p: string, t?: string | null) => p === "/dashboard/reports", icon: BarChart }
