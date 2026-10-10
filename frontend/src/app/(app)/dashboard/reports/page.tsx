@@ -34,12 +34,11 @@ function ReportsPageContent() {
   const isAdmin = activeRole === "ADMIN";
 
   // Marketing spend/CPL/campaign data and other managers' team performance
-  // aren't a sales agent's concern — hide both tabs entirely for a Member,
-  // and don't let a direct ?tab=marketing/?tab=manager URL bypass that
-  // (defense in depth, not just hidden buttons — ManagerReports.tsx also
-  // independently scopes its own data server-role-side).
-  const isSalesMember = currentUser?.role === "AGENT" && currentUser?.role_type === "Member";
-  const visibleTabs = isSalesMember ? MAIN_TABS.filter(t => t.key === "agent") : MAIN_TABS;
+  // aren't a Manager's or Member's concern — hide both tabs entirely for
+  // non-admins, and don't let a direct ?tab=marketing/?tab=manager URL
+  // bypass that (defense in depth, not just hidden buttons —
+  // ManagerReports.tsx also independently scopes its own data server-role-side).
+  const visibleTabs = isAdmin ? MAIN_TABS : MAIN_TABS.filter(t => t.key === "agent");
 
   const requestedTab = (searchParams.get("tab") as (typeof MAIN_TABS)[number]["key"]) || "marketing";
   const activeTab = visibleTabs.some(t => t.key === requestedTab) ? requestedTab : visibleTabs[0].key;
@@ -87,13 +86,17 @@ function ReportsPageContent() {
             </button>
           ))}
         </div>
-        <button
-          onClick={handleExportCSV}
-          className="inline-flex items-center justify-center gap-2 h-9 px-3.5 bg-[#0B1E6E] hover:bg-[#081650] text-white rounded-xl text-xs font-bold transition-all shadow-md shrink-0"
-        >
-          <Download className="h-4 w-4" />
-          Export Leads CSV
-        </button>
+        {/* Bulk lead export (incl. phone/email) is an Admin-only capability —
+            Manager/Member never get a raw CSV of leads beyond their own scope. */}
+        {isAdmin && (
+          <button
+            onClick={handleExportCSV}
+            className="inline-flex items-center justify-center gap-2 h-9 px-3.5 bg-[#0B1E6E] hover:bg-[#081650] text-white rounded-xl text-xs font-bold transition-all shadow-md shrink-0"
+          >
+            <Download className="h-4 w-4" />
+            Export Leads CSV
+          </button>
+        )}
       </div>
 
       {/* Shared date-range filter — every report is generated for this selected window */}

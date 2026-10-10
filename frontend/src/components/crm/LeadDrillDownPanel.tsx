@@ -394,7 +394,13 @@ export default function LeadDrillDownPanel({ title, leads, onClose }: {
   // Drill-down table's per-row Status cell — the shared searchable dropdown,
   // in place of a plain native <select> (whose OS-default popup, e.g. dark
   // on macOS/Chrome, clashed with the rest of the app).
-  const renderRowStatusCell = (l: Lead) => !canChangeLeadStatus(l, currentUser, users) ? (
+  // Manager can see but never change a lead's status directly — only an
+  // Admin can; this was already true for the Data Calling drawer and is
+  // now extended here too (this panel backs both the CRM Dashboard's and
+  // the Leads page's stat-card drilldowns, so leaving it open would be a
+  // loophole around the lock already applied to the main table row).
+  // See project_crm_role_based_lead_scoping memory (2026-10-10).
+  const renderRowStatusCell = (l: Lead) => !canChangeLeadStatus(l, currentUser, users) || currentUser?.role_type === "Manager" ? (
     <span className="inline-block max-w-[110px] text-[11px] text-slate-700" title={STATUS_LOCKED_HINT}>{l.status}</span>
   ) : (
     <SearchableSelect

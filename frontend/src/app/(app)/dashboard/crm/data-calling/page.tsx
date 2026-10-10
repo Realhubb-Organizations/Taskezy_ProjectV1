@@ -19,6 +19,8 @@ import { useDialog } from "@/components/ui/DialogProvider";
 import LeadNoteCell from "@/components/crm/LeadNoteCell";
 import { apiBulkDeleteLeads, apiDeleteLead } from "@/lib/apiClient";
 import { maskPhone, maskEmail } from "@/lib/maskPII";
+import { WhatsAppIcon, CallIcon } from "@/components/icons/ContactIcons";
+import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/callTrigger";
 
 // Data Calling's whole status model is deliberately just these three — a
 // cold-outreach triage pipeline, not the full CRM pipeline: a fresh
@@ -59,7 +61,7 @@ function isUnassignedLead(l: Lead): boolean {
 // cells honestly render "—" rather than a fabricated number when shown.
 type DataCallingColumnKey =
   | "property" | "date" | "qualifiedLeads" | "dataCallSource" | "unqualifiedLeads"
-  | "cpl" | "assignedTo" | "usageCount" | "notes" | "qualifiedPercent";
+  | "cpl" | "assignedTo" | "usageCount" | "notes" | "qualifiedPercent" | "actions" | "subStatus";
 
 const DATA_CALLING_COLUMNS: { key: DataCallingColumnKey; label: string }[] = [
   { key: "property", label: "Property" },
@@ -71,12 +73,15 @@ const DATA_CALLING_COLUMNS: { key: DataCallingColumnKey; label: string }[] = [
   { key: "assignedTo", label: "Assigned To" },
   { key: "usageCount", label: "Usage Count" },
   { key: "notes", label: "Notes" },
-  { key: "qualifiedPercent", label: "Qualified %age" }
+  { key: "qualifiedPercent", label: "Qualified %age" },
+  { key: "actions", label: "Actions" },
+  { key: "subStatus", label: "Sub-status" }
 ];
 
 const DATA_CALLING_DEFAULT_VISIBLE_COLUMNS: Record<DataCallingColumnKey, boolean> = {
   property: true, date: true, qualifiedLeads: false, dataCallSource: false, unqualifiedLeads: false,
-  cpl: false, assignedTo: true, usageCount: false, notes: true, qualifiedPercent: false
+  cpl: false, assignedTo: true, usageCount: false, notes: true, qualifiedPercent: false, actions: false,
+  subStatus: true
 };
 
 // The Analytics tab's Source Performance table's extra togglable columns —
@@ -166,12 +171,46 @@ export default function DataCallingPage() {
   // the ONLY-bulk-upload view AppContext derives for exactly this page (see
   // AppContext.tsx), aliased to `leads` here so the rest of this large file
   // needs no other changes.
-  const { dataCallingLeads: leads, followupCalls, properties, users, currentUser, activeRole, updateLeadStatus, reassignLead, bulkImportLeads, addFollowupCall, removeLeadsLocally, isDataLoading } = useApp();
+  const {
+    dataCallingLeads: leads, followupCalls, properties, users, currentUser, activeRole, updateLeadStatus, reassignLead,
+    bulkImportLeads, addFollowupCall, removeLeadsLocally, isDataLoading, recordCallEnded, recordWhatsAppOpened
+  } = useApp();
   const { toast, prompt: promptDialog } = useDialog();
   // Bulk select + Assign/Reshuffle are an admin-only workflow — a sales
   // agent has no one to hand leads off to in that sense, so the checkbox
   // column and both toolbar buttons stay admin-only.
   const isAdmin = activeRole === "ADMIN";
+  // Member-only column-default narrowing (Task A, 2026-10-10) — a sales
+  // agent doesn't need Property/Sub-status cluttering the row by default;
+  // Admin/Manager keep today's behavior untouched.
+  const isMember = currentUser?.role_type === "Member";
+  // Manager can see but never change a lead's status directly — only an
+  // Admin can; this was already true for this page's LeadDetailDrawer (the
+  // managerStatusReadOnly prop below), now extended to the row Status/
+  // Sub-status dropdowns too, so there's no remaining spot on this page
+  // where a Manager could edit status outside the drawer's existing lock.
+  // See project_crm_role_based_lead_scoping memory (2026-10-10).
+  const canEditLeadStatus = (l: Lead) => canChangeLeadStatus(l, currentUser, users) && currentUser?.role_type !== "Manager";
+  const callAllowed = canTriggerLeadCall(isAdmin);
+  const handleCall = (lead: Lead) => {
+    triggerLeadCall(lead, {
+      isAdmin,
+      toast,
+      onCallEnded: (leadId, startedAt, durationSeconds) => {
+        recordCallEnded(leadId, startedAt, durationSeconds).catch((err) =>
+          console.warn("Could not record call feedback gate:", err)
+        );
+      }
+    });
+  };
+  const handleWhatsApp = (lead: Lead) => {
+    triggerLeadWhatsApp(lead, {
+      isAdmin,
+      onReturn: (leadId) => {
+        recordWhatsAppOpened(leadId).catch((err) => console.warn("Could not record WhatsApp feedback gate:", err));
+      }
+    });
+  };
   // Data Calling Analytics tab — same tier as the main Leads page's Leads
   // Analytics (Admin or Manager); a sales Member doesn't get it (2026-10-09).
   // The tab switcher button below is the only way to reach "Analytics" (no
@@ -403,10 +442,22 @@ export default function DataCallingPage() {
     "Not Qualified": subSourceScopedLeads.filter(l => l.subStatus === "Not Qualified")
   }), [subSourceScopedLeads]);
 
-  const salespersonRows = useMemo(
-    () => computeAnalyticsPerformanceRows(subSourceScopedLeads, l => l.assignedAgent),
-    [subSourceScopedLeads]
+  // Manager sees only their own direct reports' rows here — never other
+  // managers' teams, and never a row for themself (this table is about
+  // "my team's performance", not "my own"). Admin's rows are exactly what
+  // they've always been, untouched. The underlying leads are already
+  // server-scoped to the Manager's own+team (see scopeForCaller in
+  // leads.service.ts), so this is a belt-and-braces narrowing to just
+  // direct reports, not the primary access control. See
+  // project_crm_role_based_lead_scoping memory (2026-10-10).
+  const myTeamMemberNames = useMemo(
+    () => new Set(users.filter(u => u.managerId === currentUser?.id).map(u => u.name)),
+    [users, currentUser]
   );
+  const salespersonRows = useMemo(() => {
+    const rows = computeAnalyticsPerformanceRows(subSourceScopedLeads, l => l.assignedAgent);
+    return isAdmin ? rows : rows.filter(r => myTeamMemberNames.has(r.name));
+  }, [subSourceScopedLeads, isAdmin, myTeamMemberNames]);
   const filteredSalespersonRows = useMemo(() => {
     const q = salespersonSearch.trim().toLowerCase();
     return q ? salespersonRows.filter(r => r.name.toLowerCase().includes(q)) : salespersonRows;
@@ -547,7 +598,18 @@ export default function DataCallingPage() {
   );
 
   const [isFilterOpen, setIsFilterOpen] = useState(false);
-  const [visibleColumns, setVisibleColumns] = useState<Record<DataCallingColumnKey, boolean>>(DATA_CALLING_DEFAULT_VISIBLE_COLUMNS);
+  // Manager/Member actually work this table by calling/WhatsApping leads
+  // straight from the row, so the Actions column (added 2026-10-10) starts
+  // visible for them instead of buried behind the Filter panel. Admin's
+  // default is untouched — same as every other column here. See
+  // project_crm_role_based_lead_scoping memory.
+  const [visibleColumns, setVisibleColumns] = useState<Record<DataCallingColumnKey, boolean>>(
+    isAdmin
+      ? DATA_CALLING_DEFAULT_VISIBLE_COLUMNS
+      : isMember
+        ? { ...DATA_CALLING_DEFAULT_VISIBLE_COLUMNS, actions: true, property: false, subStatus: false }
+        : { ...DATA_CALLING_DEFAULT_VISIBLE_COLUMNS, actions: true }
+  );
   const toggleColumn = (key: DataCallingColumnKey) => setVisibleColumns(prev => ({ ...prev, [key]: !prev[key] }));
   const toggleSelectAllColumns = () => {
     const allOn = DATA_CALLING_COLUMNS.every(c => visibleColumns[c.key]);
@@ -814,8 +876,11 @@ export default function DataCallingPage() {
     return next;
   });
 
-  // +1 for admins' checkbox and +1 for their trash-icon column.
-  const visibleColCount = (isAdmin ? 6 : 4) + DATA_CALLING_COLUMNS.filter(c => visibleColumns[c.key]).length;
+  // +1 for admins' checkbox and +1 for their trash-icon column. Sub-status
+  // moved from an always-rendered fixed column to a toggleable one (Task A,
+  // 2026-10-10), so the fixed base dropped by 1 — it's now counted via the
+  // DATA_CALLING_COLUMNS filter below instead.
+  const visibleColCount = (isAdmin ? 5 : 3) + DATA_CALLING_COLUMNS.filter(c => visibleColumns[c.key]).length;
 
   return (
     <div className="space-y-4 pb-8 animate-fade-in text-slate-800">
@@ -1452,7 +1517,7 @@ export default function DataCallingPage() {
                   <col />
                   <col />
                   <col />
-                  <col />
+                  {visibleColumns.subStatus && <col />}
                   {visibleColumns.assignedTo && <col />}
                   {visibleColumns.date && <col />}
                   {visibleColumns.notes && <col />}
@@ -1464,6 +1529,7 @@ export default function DataCallingPage() {
                   {visibleColumns.unqualifiedLeads && <col />}
                   {visibleColumns.cpl && <col />}
                   {visibleColumns.qualifiedPercent && <col />}
+                  {visibleColumns.actions && <col />}
                   {isAdmin && <col className="w-[64px]" />}
                 </colgroup>
                 <thead className="sticky top-0 z-10 bg-white">
@@ -1513,17 +1579,19 @@ export default function DataCallingPage() {
                         panelWidth={180}
                       />
                     </th>
-                    <th className="px-4 py-3 whitespace-nowrap">
-                      <SearchableMultiSelect
-                        variant="inline"
-                        label="Sub-status"
-                        selected={subStatusFilters}
-                        onChange={(next) => { setSubStatusFilters(next); setCurrentPage(1); }}
-                        options={subStatusOptions}
-                        searchPlaceholder="Search sub-status..."
-                        panelWidth={180}
-                      />
-                    </th>
+                    {visibleColumns.subStatus && (
+                      <th className="px-4 py-3 whitespace-nowrap">
+                        <SearchableMultiSelect
+                          variant="inline"
+                          label="Sub-status"
+                          selected={subStatusFilters}
+                          onChange={(next) => { setSubStatusFilters(next); setCurrentPage(1); }}
+                          options={subStatusOptions}
+                          searchPlaceholder="Search sub-status..."
+                          panelWidth={180}
+                        />
+                      </th>
+                    )}
                     {visibleColumns.assignedTo && (
                       <th className="px-4 py-3 whitespace-nowrap">
                         <SearchableMultiSelect
@@ -1559,6 +1627,7 @@ export default function DataCallingPage() {
                     {visibleColumns.unqualifiedLeads && <th className="px-4 py-3 whitespace-nowrap">Unqualified Leads</th>}
                     {visibleColumns.cpl && <th className="px-4 py-3 whitespace-nowrap">CPL</th>}
                     {visibleColumns.qualifiedPercent && <th className="px-4 py-3 whitespace-nowrap">Qualified %age</th>}
+                    {visibleColumns.actions && <th className="px-4 py-3 text-right whitespace-nowrap">Actions</th>}
                     {isAdmin && <th className="px-3 py-3 whitespace-nowrap"><span className="sr-only">Actions</span></th>}
                   </tr>
                 </thead>
@@ -1614,7 +1683,10 @@ export default function DataCallingPage() {
                           ) : "—"}
                         </td>
                         <td className="px-4 py-3.5 whitespace-nowrap">
-                          {canChangeLeadStatus(l, currentUser, users) ? (
+                          {/* Manager can see but never change status directly — only an
+                              Admin can; see canEditLeadStatus above.
+                              See project_crm_role_based_lead_scoping memory (2026-10-10). */}
+                          {canEditLeadStatus(l) ? (
                             <SearchableSelect
                               variant="inline"
                               value={l.status}
@@ -1628,8 +1700,17 @@ export default function DataCallingPage() {
                             <span className="text-slate-900" title={STATUS_LOCKED_HINT}>{l.status}</span>
                           )}
                         </td>
+                        {visibleColumns.subStatus && (
                         <td className="px-4 py-3.5 whitespace-nowrap">
-                          {l.status === "Connected" && canChangeLeadStatus(l, currentUser, users) ? (
+                          {/* A Member can set Qualified/Not Qualified on a lead from any
+                              status, not just once it's already Connected — picking a
+                              value promotes the lead to Connected via the existing
+                              updateLeadStatus call below, same as it already did for an
+                              already-Connected lead. Admin/Manager keep the original
+                              Connected-gated behavior; canEditLeadStatus above still
+                              handles ownership/role gating.
+                              See project_crm_role_based_lead_scoping memory (2026-10-10). */}
+                          {(isMember || l.status === "Connected") && canEditLeadStatus(l) ? (
                             // Sub-status can also be changed on an already-Connected
                             // lead without re-picking the status itself (e.g. flipping
                             // Not Qualified -> Qualified once a second call confirms interest).
@@ -1655,6 +1736,7 @@ export default function DataCallingPage() {
                             <span className="text-slate-300">—</span>
                           )}
                         </td>
+                        )}
                         {visibleColumns.assignedTo && (
                           <td className="px-4 py-3.5">
                             <SearchableSelect
@@ -1679,6 +1761,27 @@ export default function DataCallingPage() {
                         {visibleColumns.unqualifiedLeads && <td className="px-4 py-3.5 text-slate-300" title="Not applicable — this is a per-lead row, not an aggregate">—</td>}
                         {visibleColumns.cpl && <td className="px-4 py-3.5 text-slate-300" title="Not applicable — this is a per-lead row, not an aggregate">—</td>}
                         {visibleColumns.qualifiedPercent && <td className="px-4 py-3.5 text-slate-300" title="Not applicable — this is a per-lead row, not an aggregate">—</td>}
+                        {visibleColumns.actions && (
+                          <td className="px-4 py-3.5 text-right">
+                            <button
+                              type="button"
+                              onClick={() => handleWhatsApp(l)}
+                              className="inline-flex items-center justify-center h-10 w-10 sm:h-7 sm:w-7 rounded-lg bg-slate-100 text-slate-700 hover:bg-emerald-50 hover:text-emerald-600 transition-colors"
+                              title="WhatsApp"
+                            >
+                              <WhatsAppIcon className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => callAllowed && handleCall(l)}
+                              disabled={!callAllowed}
+                              className="inline-flex items-center justify-center h-10 w-10 sm:h-7 sm:w-7 rounded-lg bg-slate-100 text-slate-700 hover:bg-brand-50 hover:text-brand-700 transition-colors ml-1.5 disabled:opacity-30 disabled:hover:bg-slate-100 disabled:hover:text-slate-700"
+                              title={callAllowed ? "Call" : "Calling is only available on the mobile app for your role"}
+                            >
+                              <CallIcon className="h-3.5 w-3.5" />
+                            </button>
+                          </td>
+                        )}
                         {isAdmin && (
                           <td className="px-3 py-3.5">
                             <button
@@ -1911,6 +2014,7 @@ export default function DataCallingPage() {
         onUpdateStatus={updateLeadStatus}
         statusOptions={ROW_STATUS_OPTIONS}
         restrictedStatuses={["RNR", "Connected"]}
+        managerStatusReadOnly
         onRestrictedStatus={(leadId, leadName, status) => {
           setPendingActionError(null);
           setRnrDate("");

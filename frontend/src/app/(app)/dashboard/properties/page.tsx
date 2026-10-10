@@ -115,6 +115,23 @@ export default function PropertiesPage() {
   // headcount or teammates' names. See project_crm_role_based_lead_scoping
   // memory for the matching convention this follows (scope by viewer role,
   // Admin path never touched).
+  // A Manager's own direct reports who are on this property's team — the
+  // names behind the "N Members" count. Only meaningful for the Manager
+  // role (empty for Admin/sales agent, who use teamLabelForProperty's other
+  // branches instead).
+  const myTeamMembersOnProperty = (p: Property): { userId: string; name: string }[] => {
+    if (currentUser?.role_type !== "Manager") return [];
+    // ALL_MEMBERS mode has no explicit assignedTeam list — it means every
+    // sales-team member implicitly has the property, so expand it to the
+    // real roster before scoping rather than treating it as a separate case.
+    const assigned: { userId: string; name: string }[] =
+      p.teamAssignmentMode === "CUSTOM_MEMBERS" && p.assignedTeam && p.assignedTeam.length > 0
+        ? p.assignedTeam
+        : salesTeam.map(u => ({ userId: u.id, name: u.name }));
+    const myTeamIds = new Set(users.filter(u => u.managerId === currentUser.id).map(u => u.id));
+    return assigned.filter(m => myTeamIds.has(m.userId));
+  };
+
   const teamLabelForProperty = (p: Property): string => {
     if (isAdmin) {
       if (p.teamAssignmentMode === "CUSTOM_MEMBERS" && p.assignedTeam && p.assignedTeam.length > 0) {
@@ -123,23 +140,28 @@ export default function PropertiesPage() {
       return "All Members";
     }
 
-    // ALL_MEMBERS mode has no explicit assignedTeam list — it means every
-    // sales-team member implicitly has the property, so expand it to the
-    // real roster before scoping rather than treating it as a separate case.
-    const assigned: { userId: string; name: string }[] =
-      p.teamAssignmentMode === "CUSTOM_MEMBERS" && p.assignedTeam && p.assignedTeam.length > 0
-        ? p.assignedTeam
-        : salesTeam.map(u => ({ userId: u.id, name: u.name }));
-
     if (currentUser?.role_type === "Manager") {
-      const myTeamIds = new Set(users.filter(u => u.managerId === currentUser.id).map(u => u.id));
-      const mine = assigned.filter(m => myTeamIds.has(m.userId));
+      const mine = myTeamMembersOnProperty(p);
       if (mine.length === 0) return "";
       return mine.length === 1 ? mine[0].name : `${mine.length} Members`;
     }
 
+    const assigned: { userId: string; name: string }[] =
+      p.teamAssignmentMode === "CUSTOM_MEMBERS" && p.assignedTeam && p.assignedTeam.length > 0
+        ? p.assignedTeam
+        : salesTeam.map(u => ({ userId: u.id, name: u.name }));
     return currentUser && assigned.some(m => m.userId === currentUser.id) ? "Assigned" : "";
   };
+
+  // Manager clicks their own "N Members" count to expand it, in place,
+  // into the names it's counting — never a popup, just a small list right
+  // under the count itself. Admin and sales-agent views never read this
+  // (sales agent's label is never a count — just "Assigned" or blank — so
+  // there's nothing to expand). Only ever the manager's OWN direct reports,
+  // never the full property team. See project_crm_role_based_lead_scoping
+  // memory (2026-10-10).
+  const [expandedTeamPropertyId, setExpandedTeamPropertyId] = useState<string | null>(null);
+  const toggleMyTeamOnProperty = (p: Property) => setExpandedTeamPropertyId(id => (id === p.id ? null : p.id));
 
   // Which ad platform(s) are actually generating leads for this property —
   // read straight from the real leads tied to it (matched by property name,
@@ -490,7 +512,26 @@ export default function PropertiesPage() {
                     <td className="px-4 py-3 align-top text-slate-600"><div className="[overflow-wrap:anywhere]">{p.type}</div></td>
                     <td className="px-4 py-3 align-top font-semibold text-slate-800 whitespace-nowrap">{p.price ? `${p.price}*` : "—"}</td>
                     <td className="px-4 py-3 align-top text-slate-500"><DateTimeLines {...dateTimeParts(p.createdAt)} /></td>
-                    <td className="px-4 py-3 align-top text-slate-600"><div className="[overflow-wrap:anywhere]">{teamLabelForProperty(p)}</div></td>
+                    <td className="px-4 py-3 align-top text-slate-600">
+                      <div className="[overflow-wrap:anywhere]">
+                        {currentUser?.role_type === "Manager" && myTeamMembersOnProperty(p).length > 1 ? (
+                          <>
+                            <button type="button" onClick={() => toggleMyTeamOnProperty(p)} className="font-semibold text-brand-700 hover:underline">
+                              {teamLabelForProperty(p)}
+                            </button>
+                            {expandedTeamPropertyId === p.id && (
+                              <div className="mt-1.5 flex flex-col gap-1 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 max-w-[140px]">
+                                {myTeamMembersOnProperty(p).map(m => (
+                                  <span key={m.userId} className="text-[11px] font-semibold text-slate-700 truncate" title={m.name}>
+                                    {m.name}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </>
+                        ) : teamLabelForProperty(p)}
+                      </div>
+                    </td>
                     {isAdmin && (
                       <td className="px-4 py-3 align-top">
                         {(() => {
@@ -758,9 +799,28 @@ export default function PropertiesPage() {
                       <span className="text-slate-450 block mb-0.5">Assigned Team</span>
                       <span className="font-bold text-slate-800 flex items-center gap-1">
                         {teamLabelForProperty(selectedProperty) && <Users className="h-3 w-3 text-slate-400" />}
-                        {teamLabelForProperty(selectedProperty)}
+                        {currentUser?.role_type === "Manager" && myTeamMembersOnProperty(selectedProperty).length > 1 ? (
+                          <button type="button" onClick={() => toggleMyTeamOnProperty(selectedProperty)} className="text-brand-700 hover:underline">
+                            {teamLabelForProperty(selectedProperty)}
+                          </button>
+                        ) : teamLabelForProperty(selectedProperty)}
                       </span>
                     </div>
+                    {/* Own grid row, full width — nesting this inside the "Assigned
+                        Team" cell would grow that cell's height and, since it shares
+                        a grid row with "Added On", leave that cell's half of the row
+                        as blank space instead of just this one growing. */}
+                    {currentUser?.role_type === "Manager" && expandedTeamPropertyId === selectedProperty.id && (
+                      <div className="col-span-2 -mt-1.5">
+                        <div className="flex flex-col gap-1 bg-white border border-slate-200 rounded-lg px-2 py-1.5 max-w-[180px]">
+                          {myTeamMembersOnProperty(selectedProperty).map(m => (
+                            <span key={m.userId} className="text-[11px] font-semibold text-slate-700 truncate" title={m.name}>
+                              {m.name}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     {selectedProperty.teamAssignmentMode === "CUSTOM_MEMBERS" && selectedProperty.leadAssignmentMode && (
                       <div className="col-span-2">
                         <span className="text-slate-450 block mb-0.5">Lead Assignment Mode</span>
