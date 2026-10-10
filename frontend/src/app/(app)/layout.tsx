@@ -306,7 +306,6 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   const mobileLeftItems = (mobileSlots?.left ?? []).map(findMobileItem).filter((i): i is NonNullable<typeof i> => !!i);
   const mobileRightItems = (mobileSlots?.right ?? []).map(findMobileItem).filter((i): i is NonNullable<typeof i> => !!i);
   const mobileDashboardItem = activeGroupForMobile?.items.find(i => i.name.endsWith("Dashboard"));
-  const mobileNavColumns = mobileLeftItems.length + mobileRightItems.length + 1;
 
   const cancelPress = () => {
     if (pressTimer.current !== null) window.clearTimeout(pressTimer.current);
@@ -769,27 +768,26 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
           className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-slate-200 shadow-[0_-2px_8px_rgba(0,0,0,0.04)] select-none"
           style={{ paddingBottom: "env(safe-area-inset-bottom)", WebkitTouchCallout: "none" }}
         >
-          <div
-            className="grid items-end"
-            style={{ gridTemplateColumns: `repeat(${mobileNavColumns}, minmax(0, 1fr))` }}
-          >
-            {mobileLeftItems.map((item) => {
-              const isActive = item.activeCheck(pathname, activeTabParam);
-              return (
-                <Link
-                  key={item.name}
-                  href={item.href}
-                  aria-label={item.name}
-                  title={item.name}
-                  {...pressHandlers(item.name)}
-                  className={`flex flex-col items-center justify-center gap-0.5 py-2.5 min-w-0 ${
-                    isActive ? "text-brand-700" : "text-slate-400"
-                  }`}
-                >
-                  <item.icon className={`h-5 w-5 ${isActive ? "text-brand-700" : "text-slate-400"}`} />
-                </Link>
-              );
-            })}
+          <div className="flex items-end">
+            <div className="flex-1 flex items-end justify-evenly min-w-0">
+              {mobileLeftItems.map((item) => {
+                const isActive = item.activeCheck(pathname, activeTabParam);
+                return (
+                  <Link
+                    key={item.name}
+                    href={item.href}
+                    aria-label={item.name}
+                    title={item.name}
+                    {...pressHandlers(item.name)}
+                    className={`flex flex-col items-center justify-center gap-0.5 py-2.5 min-w-0 ${
+                      isActive ? "text-brand-700" : "text-slate-400"
+                    }`}
+                  >
+                    <item.icon className={`h-5 w-5 ${isActive ? "text-brand-700" : "text-slate-400"}`} />
+                  </Link>
+                );
+              })}
+            </div>
             {mobileDashboardItem && (() => {
               const isActive = mobileDashboardItem.activeCheck(pathname, activeTabParam);
               return (
@@ -811,23 +809,25 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                 </Link>
               );
             })()}
-            {mobileRightItems.map((item) => {
-              const isActive = item.activeCheck(pathname, activeTabParam);
-              return (
-                <Link
-                  key={item.name}
-                  href={item.href}
-                  aria-label={item.name}
-                  title={item.name}
-                  {...pressHandlers(item.name)}
-                  className={`flex flex-col items-center justify-center gap-0.5 py-2.5 min-w-0 ${
-                    isActive ? "text-brand-700" : "text-slate-400"
-                  }`}
-                >
-                  <item.icon className={`h-5 w-5 ${isActive ? "text-brand-700" : "text-slate-400"}`} />
-                </Link>
-              );
-            })}
+            <div className="flex-1 flex items-end justify-evenly min-w-0">
+              {mobileRightItems.map((item) => {
+                const isActive = item.activeCheck(pathname, activeTabParam);
+                return (
+                  <Link
+                    key={item.name}
+                    href={item.href}
+                    aria-label={item.name}
+                    title={item.name}
+                    {...pressHandlers(item.name)}
+                    className={`flex flex-col items-center justify-center gap-0.5 py-2.5 min-w-0 ${
+                      isActive ? "text-brand-700" : "text-slate-400"
+                    }`}
+                  >
+                    <item.icon className={`h-5 w-5 ${isActive ? "text-brand-700" : "text-slate-400"}`} />
+                  </Link>
+                );
+              })}
+            </div>
           </div>
           {pressTip && (
             <div
@@ -840,7 +840,15 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
         </nav>
 
         {/* Core Container — bottom padding on mobile clears the fixed tab bar */}
-        <main className="flex-1 p-3 sm:p-6 lg:p-8 pb-24 md:pb-8 bg-slate-50/50 overflow-y-auto overflow-x-hidden">
+        {/* overscroll-y-contain: without it, pulling down past scrollTop 0
+            lets the native WebView's own bounce/overscroll-glow gesture win
+            the touch sequence (it runs on the compositor thread ahead of
+            JS), so PullToRefresh.tsx's pointer handlers never see enough
+            movement to cross REFRESH_THRESHOLD — the pull silently does
+            nothing on a real Android device even though the code looks
+            correct. See project_crm_role_based_lead_scoping memory
+            (2026-10-10). */}
+        <main className="flex-1 p-3 sm:p-6 lg:p-8 pb-24 md:pb-8 bg-slate-50/50 overflow-y-auto overflow-x-hidden overscroll-y-contain">
           <PullToRefresh>
             {hasPageAccess ? children : (
               <div className="min-h-[60vh] flex flex-col items-center justify-center p-6 text-center space-y-6 bg-white border border-slate-200 rounded-3xl shadow-sm max-w-2xl mx-auto my-8 animate-fade-in">
