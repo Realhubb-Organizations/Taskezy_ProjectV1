@@ -70,9 +70,12 @@ export default function DeleteUserModal({
     }));
   }, [leadCount, memberIds, members]);
 
-  const needsHandover = (leadCount ?? 0) > 0;
+  // If the lead check failed we don't know, so ask who gets the leads anyway
+  // (never a dead end); the server hands over whatever they actually hold.
+  const leadsUnknown = loadError;
+  const needsHandover = leadsUnknown || (leadCount ?? 0) > 0;
   const trimmedNote = note.trim();
-  const canSubmit = leadCount !== null && !submitting && (!needsHandover || (memberIds.length > 0 && trimmedNote.length > 0));
+  const canSubmit = (leadCount !== null || leadsUnknown) && !submitting && (!needsHandover || (memberIds.length > 0 && trimmedNote.length > 0));
 
   const close = () => { if (!submitting) onClose(); };
 
@@ -85,10 +88,11 @@ export default function DeleteUserModal({
     setSubmitting(true);
     setError("");
     try {
-      await deleteTeamMember(user.id, needsHandover ? { reassignTo: memberIds, note: trimmedNote } : undefined);
+      const { reassignedLeads } = await deleteTeamMember(user.id, needsHandover ? { reassignTo: memberIds, note: trimmedNote } : undefined);
+      const names = memberIds.map(id => members.find(m => m.id === id)?.name ?? "Member").join(", ");
       onDeleted(
-        needsHandover
-          ? `Removed ${user.name}. ${leadCount} lead${leadCount === 1 ? "" : "s"} reassigned to ${split.map(s => s.name).join(", ")}.`
+        reassignedLeads > 0
+          ? `Removed ${user.name}. ${reassignedLeads} lead${reassignedLeads === 1 ? "" : "s"} reassigned to ${names}.`
           : `Removed ${user.name} from the roster.`
       );
     } catch (err) {
@@ -111,18 +115,7 @@ export default function DeleteUserModal({
         </div>
 
         <div className="px-6 py-5 space-y-4 overflow-y-auto">
-          {loadError ? (
-            <div className="flex flex-col items-center gap-3 py-2 text-center">
-              <p className="text-sm text-slate-600">Couldn&apos;t check {user.name}&apos;s leads.</p>
-              <button
-                type="button"
-                onClick={() => setLoadNonce(n => n + 1)}
-                className="px-4 py-1.5 rounded-lg bg-[#0B1E6E] hover:bg-[#081650] text-white text-xs font-bold transition-colors"
-              >
-                Retry
-              </button>
-            </div>
-          ) : leadCount === null ? (
+          {leadCount === null && !leadsUnknown ? (
             <div className="space-y-2">
               <LineSkeleton width={260} height={14} />
               <LineSkeleton width={180} height={14} />
@@ -133,11 +126,21 @@ export default function DeleteUserModal({
             </p>
           ) : (
             <>
-              <p className="text-sm text-slate-700">
-                <span className="font-bold">{user.name}</span> has{" "}
-                <span className="font-bold">{leadCount} lead{leadCount === 1 ? "" : "s"}</span>. Choose who should get them.
-                They&apos;ll be split evenly, and {user.name} is deleted only after the leads are reassigned.
-              </p>
+              {leadsUnknown ? (
+                <p className="text-sm text-slate-700">
+                  Choose who should get <span className="font-bold">{user.name}</span>&apos;s leads (if they have any).
+                  They&apos;ll be split evenly, and {user.name} is deleted only after the leads are reassigned.{" "}
+                  <button type="button" onClick={() => setLoadNonce(n => n + 1)} className="font-bold text-[#0B1E6E] hover:underline">
+                    Check lead count again
+                  </button>
+                </p>
+              ) : (
+                <p className="text-sm text-slate-700">
+                  <span className="font-bold">{user.name}</span> has{" "}
+                  <span className="font-bold">{leadCount} lead{leadCount === 1 ? "" : "s"}</span>. Choose who should get them.
+                  They&apos;ll be split evenly, and {user.name} is deleted only after the leads are reassigned.
+                </p>
+              )}
 
               <div className="space-y-1.5">
                 <label className="block text-[11px] font-bold text-slate-500">Reassign leads to</label>
