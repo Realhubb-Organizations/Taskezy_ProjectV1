@@ -40,7 +40,9 @@ import {
   LayoutGrid,
   CreditCard,
   MoreHorizontal,
-  ChevronDown
+  ChevronDown,
+  KeyRound,
+  Copy
 } from "lucide-react";
 import { LineSkeleton, CardListSkeleton } from "@/components/ui/Skeletons";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
@@ -63,6 +65,18 @@ const LICENSE_OPTIONS = [
   { value: "ADMIN", label: "GLOBAL ADMIN" }
 ];
 const USER_STATUS_OPTIONS = ["ACTIVE", "INACTIVE"];
+
+// For Force Reset — a one-off random temp password the admin hands to a
+// locked-out user, who is then required to set their own on next login
+// (must_reset_password flips automatically whenever a password is set via
+// the admin reset endpoint). crypto.getRandomValues, not Math.random — this
+// value is a real credential, however short-lived.
+function generateTempPassword(): string {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%";
+  const bytes = new Uint32Array(12);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, b => chars[b % chars.length]).join("");
+}
 
 const TABS = ["Connected Apps", "Leads", "HRMS", "Finance", "Manage Users", "Preference", "About"] as const;
 type Tab = (typeof TABS)[number];
@@ -104,7 +118,7 @@ function initialsFor(name: string): string {
 export default function SettingsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { users, leads, activeRole, activeSystem, logout, updateUserFields, addTeamMember, refreshMetaConnectionStatus, tenantSettings, updateTenantSettings, isDataLoading } = useApp();
+  const { users, leads, activeRole, activeSystem, logout, updateUserFields, addTeamMember, resetRosterPassword, refreshMetaConnectionStatus, tenantSettings, updateTenantSettings, isDataLoading } = useApp();
   const { toast, confirm: confirmDialog } = useDialog();
 
   const initialTabParam = searchParams.get("tab");
@@ -367,12 +381,23 @@ export default function SettingsPage() {
 
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
+  const [email, setEmail] = useState("");
   const [designation, setDesignation] = useState("");
   const [roleType, setRoleType] = useState<"Manager" | "Member">("Member");
   const [status, setStatus] = useState<"ACTIVE" | "INACTIVE">("ACTIVE");
   const [passwordHash, setPasswordHash] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [managerId, setManagerId] = useState<string>("");
+  const [forceResetLoading, setForceResetLoading] = useState(false);
+  const [forceResetResult, setForceResetResult] = useState<{ password: string } | { error: string } | null>(null);
+
+  // Quick Reset — same Force Reset action as the Edit User modal, but
+  // reachable directly from the directory header without opening a user's
+  // full edit form first.
+  const [isQuickResetOpen, setIsQuickResetOpen] = useState(false);
+  const [quickResetUserId, setQuickResetUserId] = useState("");
+  const [quickResetLoading, setQuickResetLoading] = useState(false);
+  const [quickResetResult, setQuickResetResult] = useState<{ password: string } | { error: string } | null>(null);
 
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [addFirstName, setAddFirstName] = useState("");
@@ -524,6 +549,7 @@ export default function SettingsPage() {
     setSelectedUser(user);
     setFirstName(user.first_name || user.name.split(" ")[0] || "");
     setLastName(user.last_name || user.name.split(" ")[1] || "");
+    setEmail(user.email || "");
     setDesignation(user.designation || "");
     setRoleType(user.role_type || "Member");
     setStatus(user.status || "ACTIVE");
@@ -532,6 +558,7 @@ export default function SettingsPage() {
     setEditErrors({});
     setShowPassword(false);
     setManagerId(user.managerId || "");
+    setForceResetResult(null);
   };
 
   const handleEditorSubmit = async (e: React.FormEvent) => {
@@ -540,6 +567,7 @@ export default function SettingsPage() {
     const errors = collectErrors({
       firstName: validatePersonName(firstName, { label: "First name" }),
       lastName: validatePersonName(lastName, { label: "Last name", required: false, min: 1 }),
+      email: validateEmail(email, { required: true }),
       designation: validateText(designation, { label: "Designation", max: 200 }),
       password: passwordHash ? validatePassword(passwordHash, { label: "New password" }) : null
     });
@@ -547,7 +575,7 @@ export default function SettingsPage() {
     if (Object.keys(errors).length > 0) return;
     setEditSaving(true);
     try {
-      await updateUserFields(selectedUser.id, firstName.trim(), lastName.trim(), passwordHash, designation.trim(), roleType, status, managerId || null);
+      await updateUserFields(selectedUser.id, firstName.trim(), lastName.trim(), passwordHash, designation.trim(), roleType, status, managerId || null, email.trim());
       setSuccessMsg(`Successfully updated ${firstName.trim()} ${lastName.trim()}${passwordHash ? " and set a new password" : ""}.`);
       setSelectedUser(null);
       setTimeout(() => setSuccessMsg(""), 5000);
@@ -557,6 +585,26 @@ export default function SettingsPage() {
     } finally {
       setEditSaving(false);
     }
+  };
+
+  const handleForceReset = async () => {
+    if (!selectedUser || forceResetLoading) return;
+    setForceResetLoading(true);
+    setForceResetResult(null);
+    const generated = generateTempPassword();
+    const result = await resetRosterPassword(selectedUser.id, generated);
+    setForceResetLoading(false);
+    setForceResetResult(result.success ? { password: generated } : { error: result.error || "Could not reset the password. Please try again." });
+  };
+
+  const handleQuickReset = async () => {
+    if (!quickResetUserId || quickResetLoading) return;
+    setQuickResetLoading(true);
+    setQuickResetResult(null);
+    const generated = generateTempPassword();
+    const result = await resetRosterPassword(quickResetUserId, generated);
+    setQuickResetLoading(false);
+    setQuickResetResult(result.success ? { password: generated } : { error: result.error || "Could not reset the password. Please try again." });
   };
 
   const handleAddSubmit = async (e: React.FormEvent) => {
@@ -1299,13 +1347,22 @@ export default function SettingsPage() {
         <div className="space-y-6 animate-fade-in">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <h3 className="text-sm font-bold text-slate-700">Corporate User Directory</h3>
-            <button
-              onClick={() => { setAddErrors({}); setIsAddOpen(true); }}
-              className="inline-flex items-center gap-1.5 bg-[#0B1E6E] hover:bg-[#081650] text-white px-4 py-2 rounded-lg text-xs font-bold transition-all shadow-md shrink-0"
-            >
-              <Plus className="h-4 w-4" />
-              Add User
-            </button>
+            <div className="flex gap-2 shrink-0">
+              <button
+                onClick={() => { setQuickResetUserId(""); setQuickResetResult(null); setIsQuickResetOpen(true); }}
+                className="inline-flex items-center gap-1.5 bg-slate-50 border border-slate-200 hover:bg-slate-100 text-slate-700 px-4 py-2 rounded-lg text-xs font-bold transition-all"
+              >
+                <KeyRound className="h-4 w-4" />
+                Reset Password
+              </button>
+              <button
+                onClick={() => { setAddErrors({}); setIsAddOpen(true); }}
+                className="inline-flex items-center gap-1.5 bg-[#0B1E6E] hover:bg-[#081650] text-white px-4 py-2 rounded-lg text-xs font-bold transition-all shadow-md"
+              >
+                <Plus className="h-4 w-4" />
+                Add User
+              </button>
+            </div>
           </div>
 
           {/* Stat cards — CRM only ever needs to see the sales team, not the whole company.
@@ -1594,6 +1651,73 @@ export default function SettingsPage() {
         </div>
       )}
 
+      {/* Quick Reset Password Modal */}
+      {isQuickResetOpen && (
+        <>
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-30" onClick={() => setIsQuickResetOpen(false)} />
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[calc(100%-2rem)] max-w-sm bg-white border border-slate-200 p-6 rounded-2xl shadow-2xl z-40 space-y-4">
+            <div className="flex justify-between items-center border-b border-slate-200 pb-2">
+              <h3 className="text-sm font-bold text-brand-700 flex items-center gap-1.5">
+                <KeyRound className="h-4.5 w-4.5 text-brand-600" />
+                Reset Password
+              </h3>
+              <button onClick={() => setIsQuickResetOpen(false)} className="text-slate-400 hover:text-slate-655">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold text-slate-500 mb-1.5 uppercase">User</label>
+              <SearchableSelect
+                options={users.map(u => ({ value: u.id, label: `${u.name} (${u.email})` }))}
+                value={quickResetUserId}
+                onChange={(v) => { setQuickResetUserId(v); setQuickResetResult(null); }}
+                placeholder="Search for a user..."
+                searchPlaceholder="Search by name or email..."
+              />
+            </div>
+
+            <button
+              type="button"
+              disabled={!quickResetUserId || quickResetLoading}
+              onClick={handleQuickReset}
+              className="w-full flex items-center justify-center gap-1.5 bg-[#0B1E6E] hover:bg-[#081650] disabled:opacity-60 text-white text-xs font-bold py-2.5 rounded-lg"
+            >
+              <KeyRound className="h-3.5 w-3.5" />
+              {quickResetLoading ? "Generating..." : "Force Reset Password"}
+            </button>
+            <p className="text-[9px] text-slate-400 -mt-2">
+              Generates a one-time temporary password and requires the user to set their own on next login.
+            </p>
+
+            {quickResetResult && "password" in quickResetResult && (
+              <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 space-y-1.5">
+                <p className="text-[10px] font-bold text-emerald-800">Share this securely — it won&apos;t be shown again.</p>
+                <div className="flex gap-1.5">
+                  <input
+                    readOnly
+                    value={quickResetResult.password}
+                    className="flex-1 bg-white border border-emerald-300 rounded px-2 py-1.5 text-xs font-mono text-emerald-900"
+                    onFocus={(e) => e.target.select()}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => navigator.clipboard?.writeText(quickResetResult.password)}
+                    className="px-2.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white"
+                    title="Copy"
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
+            {quickResetResult && "error" in quickResetResult && (
+              <p className="text-[10px] text-red-600 font-semibold">{quickResetResult.error}</p>
+            )}
+          </div>
+        </>
+      )}
+
       {/* Add User Modal */}
       {isAddOpen && (
         <>
@@ -1787,6 +1911,21 @@ export default function SettingsPage() {
             </p>
 
             <form onSubmit={handleEditorSubmit} noValidate className="space-y-4">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 mb-1.5 uppercase">Email (login)</label>
+                <input
+                  type="email"
+                  maxLength={254}
+                  autoComplete="off"
+                  value={email}
+                  onChange={(e) => { setEmail(e.target.value); clearEditError("email"); }}
+                  placeholder="name@realhubb.in"
+                  aria-invalid={!!editErrors.email}
+                  className={`w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-805 focus:outline-none focus:border-brand-500 ${fieldErrorClass(!!editErrors.email)}`}
+                />
+                <FieldError message={editErrors.email} />
+                <p className="text-[9px] text-slate-400 mt-1">Changing this changes what {selectedUser.name.split(" ")[0]} signs in with.</p>
+              </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[10px] font-bold text-slate-500 mb-1.5 uppercase">First Name</label>
@@ -1882,6 +2021,45 @@ export default function SettingsPage() {
                   </button>
                 </div>
                 <FieldError message={editErrors.password} />
+              </div>
+
+              <div>
+                <button
+                  type="button"
+                  disabled={forceResetLoading}
+                  onClick={handleForceReset}
+                  className="w-full flex items-center justify-center gap-1.5 bg-slate-50 border border-slate-200 hover:bg-slate-100 disabled:opacity-60 text-slate-700 text-[11px] font-bold py-2 rounded-lg"
+                >
+                  <KeyRound className="h-3.5 w-3.5" />
+                  {forceResetLoading ? "Generating..." : "Force Reset Password"}
+                </button>
+                <p className="text-[9px] text-slate-400 mt-1">
+                  Generates a one-time temporary password and requires {selectedUser.name.split(" ")[0]} to set their own on next login.
+                </p>
+                {forceResetResult && "password" in forceResetResult && (
+                  <div className="mt-2 p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 space-y-1.5">
+                    <p className="text-[10px] font-bold text-emerald-800">Share this with {selectedUser.name.split(" ")[0]} securely — it won&apos;t be shown again.</p>
+                    <div className="flex gap-1.5">
+                      <input
+                        readOnly
+                        value={forceResetResult.password}
+                        className="flex-1 bg-white border border-emerald-300 rounded px-2 py-1.5 text-xs font-mono text-emerald-900"
+                        onFocus={(e) => e.target.select()}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => navigator.clipboard?.writeText(forceResetResult.password)}
+                        className="px-2.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white"
+                        title="Copy"
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {forceResetResult && "error" in forceResetResult && (
+                  <p className="text-[10px] text-red-600 font-semibold mt-1">{forceResetResult.error}</p>
+                )}
               </div>
 
               {selectedUser.role !== "ADMIN" && (

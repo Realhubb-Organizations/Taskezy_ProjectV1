@@ -46,6 +46,9 @@ export const createUserSchema = z.object({
 export const editUserSchema = z.object({
   firstName: personName(100).optional(),
   lastName: personName(100, 1).optional().or(z.literal("")),
+  // The login identifier (auth.service.ts matches on this column) — Admin
+  // can change it, e.g. correcting a typo'd or decommissioned mailbox.
+  email: z.string().trim().email("Enter a valid email address").max(254).optional(),
   designation: z.string().max(200).optional(),
   roleType: z.enum(["MANAGER", "MEMBER"]).optional(),
   department: z.enum(["SALES", "TECH", "MARKETING", "FINANCE"]).optional(),

@@ -179,6 +179,7 @@ export async function create(input: CreateUserInput): Promise<string> {
 export interface EditUserInput {
   firstName?: string;
   lastName?: string;
+  email?: string;
   designation?: string;
   roleType?: string;
   department?: string;
@@ -190,13 +191,16 @@ export async function update(id: string, input: EditUserInput): Promise<void> {
   const sets: string[] = [];
   const params: unknown[] = [];
   const columnMap: Record<string, string> = {
-    firstName: "first_name", lastName: "last_name", designation: "designation",
+    firstName: "first_name", lastName: "last_name", email: "email", designation: "designation",
     roleType: "role_type", department: "department", status: "status", managerId: "manager_id"
   };
 
   for (const [field, value] of Object.entries(input)) {
     if (value === undefined) continue;
-    params.push(value);
+    // Normalized the same way create() stores it — login matches
+    // case-insensitively, but storing consistently avoids ever having two
+    // rows that only differ by case fight over the UNIQUE constraint.
+    params.push(field === "email" && typeof value === "string" ? value.trim().toLowerCase() : value);
     sets.push(`${columnMap[field]} = $${params.length}`);
   }
 
