@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState, useRef } from "react";
+import React, { useEffect, useMemo, useState, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useApp, Lead, LeadStatus } from "@/context/AppContext";
 import { useDialog } from "@/components/ui/DialogProvider";
@@ -354,33 +354,41 @@ export default function LeadDrillDownPanel({ title, leads, onClose }: {
   // sliced per page — a scroll-spy below tracks each page-boundary row's
   // real DOM position to keep the page number and pagination controls in
   // sync with wherever the user has scrolled to.
+  // Scrolls with the shared page <main> now (one scroll plane per screen —
+  // see APP_UIUX_AUDIT.md), not this table's own boxed container. See
+  // PendingLeadsTable.tsx's identical conversion for the full rationale.
   const drillScrollRef = useRef<HTMLDivElement>(null);
   const drillPageRowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
   const drillProgrammaticScroll = useRef(false);
 
-  const handleDrillTableScroll = () => {
-    if (drillProgrammaticScroll.current) return;
-    const container = drillScrollRef.current;
-    if (!container) return;
-    const scrollTop = container.scrollTop;
-    let current = 1;
-    for (let i = 0; i < drillPageRowRefs.current.length; i++) {
-      const row = drillPageRowRefs.current[i];
-      if (row && row.offsetTop - container.offsetTop <= scrollTop + 4) {
-        current = i + 1;
+  useEffect(() => {
+    const main = drillScrollRef.current?.closest("main");
+    if (!main) return;
+    const handleScroll = () => {
+      if (drillProgrammaticScroll.current) return;
+      const mainTop = main.getBoundingClientRect().top;
+      let current = 1;
+      for (let i = 0; i < drillPageRowRefs.current.length; i++) {
+        const row = drillPageRowRefs.current[i];
+        if (row && row.getBoundingClientRect().top - mainTop <= 4) {
+          current = i + 1;
+        }
       }
-    }
-    setDrillPage(prev => (prev !== current ? current : prev));
-  };
+      setDrillPage(prev => (prev !== current ? current : prev));
+    };
+    main.addEventListener("scroll", handleScroll, { passive: true });
+    return () => main.removeEventListener("scroll", handleScroll);
+  }, []);
 
   const goToDrillPage = (page: number) => {
     const clamped = Math.max(1, Math.min(drillTotalPages, page));
     setDrillPage(clamped);
     const row = drillPageRowRefs.current[clamped - 1];
-    const container = drillScrollRef.current;
-    if (!row || !container) return;
+    const main = drillScrollRef.current?.closest("main");
+    if (!row || !main) return;
     drillProgrammaticScroll.current = true;
-    container.scrollTop = clamped === 1 ? 0 : row.offsetTop - container.offsetTop;
+    const top = clamped === 1 ? 0 : main.scrollTop + row.getBoundingClientRect().top - main.getBoundingClientRect().top;
+    main.scrollTo({ top });
     requestAnimationFrame(() => {
       requestAnimationFrame(() => { drillProgrammaticScroll.current = false; });
     });
@@ -426,7 +434,7 @@ export default function LeadDrillDownPanel({ title, leads, onClose }: {
             </button>
           </div>
 
-          <div ref={drillScrollRef} onScroll={handleDrillTableScroll} className="overflow-auto max-h-[70vh]">
+          <div ref={drillScrollRef} className="overflow-x-auto">
             <table className="w-full text-left border-collapse table-fixed min-w-[1310px]">
               <colgroup>
                 <col />
@@ -577,7 +585,11 @@ export default function LeadDrillDownPanel({ title, leads, onClose }: {
             onRowsPerPageChange={(n) => {
               drillProgrammaticScroll.current = true;
               setDrillRowsPerPage(n);
-              drillScrollRef.current?.scrollTo(0, 0);
+              const main = drillScrollRef.current?.closest("main");
+              const el = drillScrollRef.current;
+              if (main && el) {
+                main.scrollTo({ top: main.scrollTop + el.getBoundingClientRect().top - main.getBoundingClientRect().top });
+              }
               requestAnimationFrame(() => {
                 requestAnimationFrame(() => { drillProgrammaticScroll.current = false; });
               });

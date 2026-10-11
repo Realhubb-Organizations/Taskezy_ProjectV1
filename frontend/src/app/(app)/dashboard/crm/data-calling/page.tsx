@@ -322,29 +322,37 @@ export default function DataCallingPage() {
   const analyticsDrillPageRowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
   const analyticsDrillProgrammaticScroll = useRef(false);
 
-  const handleAnalyticsDrillScroll = () => {
-    if (analyticsDrillProgrammaticScroll.current) return;
-    const container = analyticsDrillScrollRef.current;
-    if (!container) return;
-    const scrollTop = container.scrollTop;
-    let current = 1;
-    for (let i = 0; i < analyticsDrillPageRowRefs.current.length; i++) {
-      const row = analyticsDrillPageRowRefs.current[i];
-      if (row && row.offsetTop - container.offsetTop <= scrollTop + 4) {
-        current = i + 1;
+  // Scrolls with the shared page <main> now (one scroll plane per screen —
+  // see APP_UIUX_AUDIT.md), not this table's own boxed container. See
+  // PendingLeadsTable.tsx's identical conversion for the full rationale.
+  useEffect(() => {
+    const main = analyticsDrillScrollRef.current?.closest("main");
+    if (!main) return;
+    const handleScroll = () => {
+      if (analyticsDrillProgrammaticScroll.current) return;
+      const mainTop = main.getBoundingClientRect().top;
+      let current = 1;
+      for (let i = 0; i < analyticsDrillPageRowRefs.current.length; i++) {
+        const row = analyticsDrillPageRowRefs.current[i];
+        if (row && row.getBoundingClientRect().top - mainTop <= 4) {
+          current = i + 1;
+        }
       }
-    }
-    setAnalyticsDrillPage(prev => (prev !== current ? current : prev));
-  };
+      setAnalyticsDrillPage(prev => (prev !== current ? current : prev));
+    };
+    main.addEventListener("scroll", handleScroll, { passive: true });
+    return () => main.removeEventListener("scroll", handleScroll);
+  }, []);
 
   const goToAnalyticsDrillPage = (page: number, totalPages: number) => {
     const clamped = Math.max(1, Math.min(totalPages, page));
     setAnalyticsDrillPage(clamped);
     const row = analyticsDrillPageRowRefs.current[clamped - 1];
-    const container = analyticsDrillScrollRef.current;
-    if (!row || !container) return;
+    const main = analyticsDrillScrollRef.current?.closest("main");
+    if (!row || !main) return;
     analyticsDrillProgrammaticScroll.current = true;
-    container.scrollTop = clamped === 1 ? 0 : row.offsetTop - container.offsetTop;
+    const top = clamped === 1 ? 0 : main.scrollTop + row.getBoundingClientRect().top - main.getBoundingClientRect().top;
+    main.scrollTo({ top });
     requestAnimationFrame(() => {
       requestAnimationFrame(() => { analyticsDrillProgrammaticScroll.current = false; });
     });
@@ -532,29 +540,37 @@ export default function DataCallingPage() {
   const drillPageRowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
   const drillProgrammaticScroll = useRef(false);
 
-  const handleDrillScroll = () => {
-    if (drillProgrammaticScroll.current) return;
-    const container = drillScrollRef.current;
-    if (!container) return;
-    const scrollTop = container.scrollTop;
-    let current = 1;
-    for (let i = 0; i < drillPageRowRefs.current.length; i++) {
-      const row = drillPageRowRefs.current[i];
-      if (row && row.offsetTop - container.offsetTop <= scrollTop + 4) {
-        current = i + 1;
+  // Scrolls with the shared page <main> now (one scroll plane per screen —
+  // see APP_UIUX_AUDIT.md), not this table's own boxed container. See
+  // PendingLeadsTable.tsx's identical conversion for the full rationale.
+  useEffect(() => {
+    const main = drillScrollRef.current?.closest("main");
+    if (!main) return;
+    const handleScroll = () => {
+      if (drillProgrammaticScroll.current) return;
+      const mainTop = main.getBoundingClientRect().top;
+      let current = 1;
+      for (let i = 0; i < drillPageRowRefs.current.length; i++) {
+        const row = drillPageRowRefs.current[i];
+        if (row && row.getBoundingClientRect().top - mainTop <= 4) {
+          current = i + 1;
+        }
       }
-    }
-    setDrillPage(prev => (prev !== current ? current : prev));
-  };
+      setDrillPage(prev => (prev !== current ? current : prev));
+    };
+    main.addEventListener("scroll", handleScroll, { passive: true });
+    return () => main.removeEventListener("scroll", handleScroll);
+  }, []);
 
   const goToDrillPage = (page: number, totalPages: number) => {
     const clamped = Math.max(1, Math.min(totalPages, page));
     setDrillPage(clamped);
     const row = drillPageRowRefs.current[clamped - 1];
-    const container = drillScrollRef.current;
-    if (!row || !container) return;
+    const main = drillScrollRef.current?.closest("main");
+    if (!row || !main) return;
     drillProgrammaticScroll.current = true;
-    container.scrollTop = clamped === 1 ? 0 : row.offsetTop - container.offsetTop;
+    const top = clamped === 1 ? 0 : main.scrollTop + row.getBoundingClientRect().top - main.getBoundingClientRect().top;
+    main.scrollTo({ top });
     requestAnimationFrame(() => {
       requestAnimationFrame(() => { drillProgrammaticScroll.current = false; });
     });
@@ -1060,7 +1076,7 @@ export default function DataCallingPage() {
                 </button>
               </div>
             </div>
-            <div ref={analyticsDrillScrollRef} onScroll={handleAnalyticsDrillScroll} className="max-h-80 overflow-y-auto">
+            <div ref={analyticsDrillScrollRef} className="overflow-x-auto">
               <table className="table-fixed w-full text-left border-collapse min-w-[600px]">
                 <colgroup>
                   <col />
@@ -1111,7 +1127,11 @@ export default function DataCallingPage() {
                 analyticsDrillProgrammaticScroll.current = true;
                 setAnalyticsDrillRowsPerPage(n);
                 setAnalyticsDrillPage(1);
-                analyticsDrillScrollRef.current?.scrollTo(0, 0);
+                const main = analyticsDrillScrollRef.current?.closest("main");
+                const el = analyticsDrillScrollRef.current;
+                if (main && el) {
+                  main.scrollTo({ top: main.scrollTop + el.getBoundingClientRect().top - main.getBoundingClientRect().top });
+                }
                 requestAnimationFrame(() => {
                   requestAnimationFrame(() => { analyticsDrillProgrammaticScroll.current = false; });
                 });
@@ -1156,7 +1176,7 @@ export default function DataCallingPage() {
                 </button>
               </div>
             </div>
-            <div ref={drillScrollRef} onScroll={handleDrillScroll} className="max-h-80 overflow-y-auto">
+            <div ref={drillScrollRef} className="overflow-x-auto">
               <table className="table-fixed w-full text-left border-collapse min-w-[600px]">
                 <colgroup>
                   <col />
@@ -1207,7 +1227,11 @@ export default function DataCallingPage() {
                 drillProgrammaticScroll.current = true;
                 setDrillRowsPerPage(n);
                 setDrillPage(1);
-                drillScrollRef.current?.scrollTo(0, 0);
+                const main = drillScrollRef.current?.closest("main");
+                const el = drillScrollRef.current;
+                if (main && el) {
+                  main.scrollTo({ top: main.scrollTop + el.getBoundingClientRect().top - main.getBoundingClientRect().top });
+                }
                 requestAnimationFrame(() => {
                   requestAnimationFrame(() => { drillProgrammaticScroll.current = false; });
                 });
