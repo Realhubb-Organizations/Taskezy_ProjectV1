@@ -51,7 +51,7 @@ function formatDateTime(iso?: string): string {
 
 export default function PropertiesPage() {
   const { toast, confirm: confirmDialog } = useDialog();
-  const { properties, users, leads, deleteProperty, editProperty, activeRole, currentUser, addLead } = useApp();
+  const { properties, users, leads, deleteProperty, editProperty, activeRole, currentUser, addLead, manualRefreshSignal } = useApp();
   const isAdmin = activeRole === "ADMIN";
 
   // Drawer (view/edit) state
@@ -289,7 +289,7 @@ export default function PropertiesPage() {
     // this effect re-fires exactly when a real filter value changes, without
     // needing every individual filter piece listed separately.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, rowsPerPage, propertyFiltersKey, propertiesRefreshNonce]);
+  }, [currentPage, rowsPerPage, propertyFiltersKey, propertiesRefreshNonce, manualRefreshSignal]);
 
   const totalRows = serverTotalCount;
   const totalPages = Math.max(1, Math.ceil(totalRows / rowsPerPage));

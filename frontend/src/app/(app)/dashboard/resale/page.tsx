@@ -11,7 +11,7 @@ import { maskPhone, maskEmail } from "@/lib/maskPII";
 
 export default function ResalePage() {
   const { toast } = useDialog();
-  const { resaleUnits, addResaleUnit, leads, activeRole } = useApp();
+  const { resaleUnits, addResaleUnit, leads, activeRole, manualRefreshSignal } = useApp();
 
   // Filters state
   const [searchQuery, setSearchQuery] = useState("");
@@ -98,7 +98,7 @@ export default function ResalePage() {
     // resaleUnitFiltersKey captures every filter input in one stable string
     // so this effect re-fires exactly when a real filter value changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, rowsPerPage, resaleUnitFiltersKey, unitsRefreshNonce]);
+  }, [currentPage, rowsPerPage, resaleUnitFiltersKey, unitsRefreshNonce, manualRefreshSignal]);
 
   // serverUnits already *is* the current page — no client-side slicing/filtering needed.
   const filteredUnits = serverUnits;

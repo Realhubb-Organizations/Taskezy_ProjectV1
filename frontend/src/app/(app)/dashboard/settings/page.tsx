@@ -118,7 +118,7 @@ function initialsFor(name: string): string {
 export default function SettingsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { users, leads, activeRole, activeSystem, logout, updateUserFields, addTeamMember, resetRosterPassword, refreshMetaConnectionStatus, tenantSettings, updateTenantSettings, isDataLoading } = useApp();
+  const { users, leads, activeRole, activeSystem, logout, updateUserFields, addTeamMember, resetRosterPassword, refreshMetaConnectionStatus, tenantSettings, updateTenantSettings, isDataLoading, manualRefreshSignal } = useApp();
   const { toast, confirm: confirmDialog } = useDialog();
 
   const initialTabParam = searchParams.get("tab");
@@ -543,7 +543,7 @@ export default function SettingsPage() {
       cancelled = true;
       if (retryTimer) clearTimeout(retryTimer);
     };
-  }, [activeTab, usersPage, usersRowsPerPage, debouncedSearchQuery, usersRefreshKey, effectiveUserGroup]);
+  }, [activeTab, usersPage, usersRowsPerPage, debouncedSearchQuery, usersRefreshKey, effectiveUserGroup, manualRefreshSignal]);
 
   const handleEditClick = (user: User) => {
     setSelectedUser(user);

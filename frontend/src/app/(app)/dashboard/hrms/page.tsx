@@ -43,7 +43,8 @@ export default function HRMSPage() {
     rejectRegularization,
     calendarEvents,
     addCalendarEvent,
-    isDataLoading
+    isDataLoading,
+    manualRefreshSignal
   } = useApp();
 
   const searchParams = useSearchParams();
@@ -135,7 +136,7 @@ export default function HRMSPage() {
         if (!cancelled) setMyTimesheetsLoading(false);
       });
     return () => { cancelled = true; };
-  }, [isAdmin, currentUser?.id, myTimesheetsPage, myTimesheetsRowsPerPage, myTimesheetsRefreshKey]);
+  }, [isAdmin, currentUser?.id, myTimesheetsPage, myTimesheetsRowsPerPage, myTimesheetsRefreshKey, manualRefreshSignal]);
 
   // 2. Admin "everyone's timesheets" regularization audit queue — a real
   // page of every employee's timesheets (same ADMIN/FINANCE-sees-all
@@ -166,7 +167,7 @@ export default function HRMSPage() {
         if (!cancelled) setAdminTimesheetsLoading(false);
       });
     return () => { cancelled = true; };
-  }, [isAdmin, adminTimesheetsPage, adminTimesheetsRowsPerPage]);
+  }, [isAdmin, adminTimesheetsPage, adminTimesheetsRowsPerPage, manualRefreshSignal]);
   const adminPendingTimesheets = adminTimesheetsRows.filter(ts => ts.status === "Regularization Pending");
 
   // 3. Admin "Departmental Roster Attendance Records" report table.
@@ -193,7 +194,7 @@ export default function HRMSPage() {
         if (!cancelled) setAttendanceLoading(false);
       });
     return () => { cancelled = true; };
-  }, [isAdmin, attendancePage, attendanceRowsPerPage]);
+  }, [isAdmin, attendancePage, attendanceRowsPerPage, manualRefreshSignal]);
 
   // Check if currently punched in today
   const todayStr = todayIso();

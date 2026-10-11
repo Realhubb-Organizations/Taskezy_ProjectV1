@@ -36,7 +36,7 @@ function formatDuration(seconds: number, callType: string): string {
 }
 
 export default function CallLogPage() {
-  const { currentUser, activeRole } = useApp();
+  const { currentUser, activeRole, manualRefreshSignal } = useApp();
   const isAdmin = activeRole === "ADMIN";
   // Member only ever sees their own rows anyway (server-scoped) — an Agent
   // column that's always just their own name is noise, so it's Admin/
@@ -76,7 +76,7 @@ export default function CallLogPage() {
       }
     })();
     return () => { active = false; };
-  }, [page, dateRange]);
+  }, [page, dateRange, manualRefreshSignal]);
 
   const colCount = 5 + (showAgentColumn ? 1 : 0);
 

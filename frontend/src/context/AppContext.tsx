@@ -496,6 +496,9 @@ interface AppState {
   // reassignment, edit, delete, new lead) — list a page's own fetch effect's
   // deps on this to have it refetch live. See the "leads-changed" SSE listener.
   leadsChangedSignal: number;
+  // Bumped only by triggerManualRefresh (pull-to-refresh) — see its own
+  // declaration for which pages should depend on this.
+  manualRefreshSignal: number;
   // Pull-to-refresh (mobile) calls this — same refresh path the live signal
   // uses, plus a full reload of every bulk-loaded domain, so there's one
   // refresh mechanism in the app, not two.
@@ -1275,8 +1278,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [leadsChangedSignal, setLeadsChangedSignal] = useState(0);
   const leadsChangedQueueRef = useRef<Set<string>>(new Set());
   const leadsChangedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Bumped only by triggerManualRefresh (pull-to-refresh) — distinct from
+  // leadsChangedSignal, which is specifically about live lead-changed SSE
+  // events. Any page with its own server-paginated fetch (Call Log,
+  // Properties, Resale, HRMS, Finance, Manage Users, either Calendar) should
+  // list this in its fetch effect's deps so pull-to-refresh actually
+  // refetches what's on screen there too, not just the global context state
+  // loadAllRealData covers.
+  const [manualRefreshSignal, setManualRefreshSignal] = useState(0);
   const triggerManualRefresh = () => {
     setLeadsChangedSignal((s) => s + 1);
+    setManualRefreshSignal((s) => s + 1);
     loadAllRealData(currentUser?.role);
   };
 
@@ -2382,6 +2394,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         authLoading,
         isDataLoading,
         leadsChangedSignal,
+        manualRefreshSignal,
         triggerManualRefresh,
         activeRole,
         activeSystem,

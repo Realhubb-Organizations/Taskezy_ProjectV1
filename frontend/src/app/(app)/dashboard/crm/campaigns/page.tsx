@@ -1344,7 +1344,7 @@ export default function AdminCampaignsPage() {
                     </button>
                   </div>
                 </div>
-                <div className="overflow-auto max-h-[55vh]">
+                <div className="overflow-x-auto md:overflow-y-auto md:max-h-[55vh]">
                   <table className="table-fixed w-full text-left border-collapse min-w-[1200px]">
                     <colgroup>
                       <col />
@@ -1594,7 +1594,7 @@ export default function AdminCampaignsPage() {
               </div>
             </div>
 
-            <div className="overflow-auto max-h-[40vh]">
+            <div className="overflow-x-auto md:overflow-y-auto md:max-h-[40vh]">
               <table className="table-fixed w-full text-left border-collapse" style={{ minWidth: (breakdownTab === "Property" ? BREAKDOWN_COLUMNS.filter(c => breakdownVisibleColumns[c.key]).length : STATUS_COLUMNS.filter(c => statusVisibleColumns[c.key]).length) * 150 }}>
                 <colgroup>
                   {breakdownTab === "Property" ? (
@@ -1882,7 +1882,7 @@ export default function AdminCampaignsPage() {
                 </button>
               </div>
             </div>
-            <div className="overflow-auto max-h-[45vh]">
+            <div className="overflow-x-auto md:overflow-y-auto md:max-h-[45vh]">
               <table className="table-fixed w-full text-left border-collapse min-w-[1050px]">
                 <colgroup>
                   <col />
@@ -2030,7 +2030,7 @@ export default function AdminCampaignsPage() {
               list doesn't stretch the whole page; header stays pinned and
               the pagination footer below stays out of the scroll area. */}
           <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden">
-            <div className="overflow-auto max-h-[45vh]">
+            <div className="overflow-x-auto md:overflow-y-auto md:max-h-[45vh]">
               <table className="table-fixed w-full text-left border-collapse" style={{ minWidth: (2 + CAMPAIGN_COLUMNS.filter(c => campaignVisibleColumns[c.key]).length) * 150 }}>
                 <colgroup>
                   <col />
