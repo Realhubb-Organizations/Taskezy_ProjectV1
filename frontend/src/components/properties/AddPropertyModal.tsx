@@ -82,6 +82,7 @@ export default function AddPropertyModal({ isOpen, onClose, onSuccess, duplicate
   const { users, addProperty, isDataLoading } = useApp();
 
   const [activeTab, setActiveTab] = useState<"details" | "team">("details");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Property Details — field set and order match the provided design exactly.
   const [developer, setDeveloper] = useState("");
@@ -224,7 +225,13 @@ export default function AddPropertyModal({ isOpen, onClose, onSuccess, duplicate
       assignedTeam
     };
 
-    addProperty(propertyData);
+    setIsSubmitting(true);
+    const result = await addProperty(propertyData);
+    setIsSubmitting(false);
+    if (!result.success) {
+      toast(result.error || "Could not create the property. Please try again.", "error");
+      return;
+    }
     onSuccess(name);
     handleClose();
   };
@@ -452,9 +459,10 @@ export default function AddPropertyModal({ isOpen, onClose, onSuccess, duplicate
             ) : (
               <button
                 onClick={handleCreateProperty}
-                className="px-5 py-2 rounded-xl text-sm font-bold bg-[#0B1E6E] hover:bg-[#081650] text-white transition-all shadow-sm"
+                disabled={isSubmitting}
+                className="px-5 py-2 rounded-xl text-sm font-bold bg-[#0B1E6E] hover:bg-[#081650] text-white transition-all shadow-sm disabled:opacity-60"
               >
-                Create Property
+                {isSubmitting ? "Creating..." : "Create Property"}
               </button>
             )}
           </div>

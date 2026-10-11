@@ -181,7 +181,15 @@ export default function LeadDetailDrawer({
       title: `${localStatus} — ${lead.name}`,
       date: reminderDate,
       time: reminderTime,
-      description: `${lead.property || "Property"} • ${lead.phone}`,
+      // No phone number here — calendar event descriptions render as plain
+      // text on the Calendar pages with no masking/role check, so embedding
+      // lead.phone leaked it to anyone viewing that day (a Manager on their
+      // team's calendar, anyone on the Global Operations Calendar),
+      // bypassing the maskPhone-everywhere-but-Admin convention enforced
+      // everywhere else. The lead's name is already in the title above, and
+      // leadId links back to the real record where masking already applies
+      // correctly — nothing is lost by not duplicating the number here.
+      description: lead.property || "Property",
       leadId: lead.id
     });
     addFollowupCall({

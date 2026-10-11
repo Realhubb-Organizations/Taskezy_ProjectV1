@@ -11,6 +11,11 @@ import { triggerGoogleAdsSpendSyncNow } from "../../jobs/googleAdsSpendSync";
 export const adSpendRouter = Router();
 
 adSpendRouter.use(requireAuth);
+// Campaigns is admin-only (see frontend/src/app/(app)/layout.tsx's
+// checkUserAccess — Sales Member/Manager are deliberately excluded there).
+// That was UI-only gating; this enforces the same boundary server-side so
+// the data can't be reached by calling the API directly.
+adSpendRouter.use(requireRole("ADMIN"));
 
 adSpendRouter.get(
   "/",
@@ -56,7 +61,6 @@ adSpendRouter.get(
  */
 adSpendRouter.post(
   "/sync",
-  requireRole("ADMIN"),
   asyncHandler(async (_req, res) => {
     const meta = triggerMetaAdSpendSyncNow();
     const google = triggerGoogleAdsSpendSyncNow();

@@ -1,7 +1,7 @@
 import { query } from "../../db/pool";
 import { ApiError } from "../../utils/ApiError";
 import { logger } from "../../utils/logger";
-import { verifyPassword } from "../../utils/password";
+import { hashPassword, verifyPassword } from "../../utils/password";
 import {
   generateRefreshToken,
   hashRefreshToken,
@@ -20,6 +20,7 @@ interface UserRow {
   designation: string | null;
   status: string;
   password_hash: string;
+  must_reset_password: boolean;
 }
 
 export interface AuthResult {
@@ -68,7 +69,7 @@ export async function login(email: string, password: string): Promise<AuthResult
   // and an admin typing "Neha@..." at user-creation time while Neha logs in
   // with "neha@..." shouldn't produce a login failure.
   const { rows } = await query<UserRow>(
-    `SELECT id, first_name, last_name, email, role, department, role_type, designation, status, password_hash
+    `SELECT id, first_name, last_name, email, role, department, role_type, designation, status, password_hash, must_reset_password
      FROM users WHERE LOWER(email) = LOWER($1)`,
     [email]
   );
@@ -102,7 +103,7 @@ const REUSE_GRACE_MS = 10_000;
 
 async function userForRefresh(userId: string): Promise<UserRow> {
   const { rows } = await query<UserRow>(
-    `SELECT id, first_name, last_name, email, role, department, role_type, designation, status, password_hash
+    `SELECT id, first_name, last_name, email, role, department, role_type, designation, status, password_hash, must_reset_password
      FROM users WHERE id = $1`,
     [userId]
   );
@@ -187,9 +188,37 @@ export async function logout(refreshToken: string): Promise<void> {
   ]);
 }
 
+// Self-service completion of the forced-password-reset flow: the user is
+// already authenticated (they just logged in with their current/temp
+// password), so this re-verifies that current password rather than trusting
+// the access token alone — the same "prove you know the old one" requirement
+// any password-change form has. Clears must_reset_password so the gate
+// doesn't reappear on next login.
+export async function changePassword(
+  userId: string,
+  currentPassword: string,
+  newPassword: string
+): Promise<void> {
+  const { rows } = await query<{ password_hash: string }>(
+    `SELECT password_hash FROM users WHERE id = $1`,
+    [userId]
+  );
+  const user = rows[0];
+  if (!user) throw ApiError.notFound("User not found");
+
+  const isValid = await verifyPassword(currentPassword, user.password_hash);
+  if (!isValid) throw ApiError.unauthorized("Current password is incorrect");
+
+  const passwordHash = await hashPassword(newPassword);
+  await query(`UPDATE users SET password_hash = $1, must_reset_password = false WHERE id = $2`, [
+    passwordHash,
+    userId
+  ]);
+}
+
 export async function getProfile(userId: string): Promise<Omit<UserRow, "password_hash">> {
   const { rows } = await query<UserRow>(
-    `SELECT id, first_name, last_name, email, role, department, role_type, designation, status, password_hash
+    `SELECT id, first_name, last_name, email, role, department, role_type, designation, status, password_hash, must_reset_password
      FROM users WHERE id = $1`,
     [userId]
   );

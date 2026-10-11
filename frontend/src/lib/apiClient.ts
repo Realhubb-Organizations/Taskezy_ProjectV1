@@ -156,6 +156,7 @@ export interface ApiUser {
   role_type: string | null;
   designation: string | null;
   status: string;
+  must_reset_password: boolean;
 }
 
 export async function apiLogin(email: string, password: string): Promise<ApiUser> {
@@ -518,6 +519,16 @@ export function apiResetUserPassword(userId: string, newPassword: string): Promi
   });
 }
 
+// Self-service password change for the currently logged-in user (e.g. the
+// forced-reset screen) — distinct from apiResetUserPassword above, which is
+// admin-acting-on-another-user and doesn't require the current password.
+export function apiChangePassword(currentPassword: string, newPassword: string): Promise<{ passwordChanged: boolean }> {
+  return request<{ passwordChanged: boolean }>("/api/v1/auth/password", {
+    method: "PATCH",
+    body: JSON.stringify({ currentPassword, newPassword })
+  });
+}
+
 /** Leads a user still holds (the delete dialog asks who gets them when > 0) and who reports to them. */
 export function apiGetUserDeleteImpact(userId: string): Promise<{ leadCount: number; reportNames: string[] }> {
   return request<{ leadCount: number; reportNames: string[] }>(`/api/v1/users/${userId}/delete-impact`);
@@ -745,6 +756,7 @@ export interface ApiResaleUnitRow {
   price: string | null;
   description: string | null;
   listed_by: string | null;
+  contact_number: string | null;
 }
 // Server caps pageSize at 500 (see resale-units.routes.ts) — a real safety
 // limit, not something to raise just to fetch everything in one request.
@@ -815,6 +827,7 @@ export interface CreateResaleUnitApiInput {
   price?: string;
   description?: string;
   listedBy?: string;
+  contactNumber?: string;
 }
 
 export function apiCreateResaleUnit(input: CreateResaleUnitApiInput): Promise<ApiResaleUnitRow> {

@@ -49,3 +49,9 @@ export async function meHandler(req: Request, res: Response): Promise<void> {
   const profile = await authService.getProfile(req.user!.sub);
   sendOk(res, profile);
 }
+
+export async function changePasswordHandler(req: Request, res: Response): Promise<void> {
+  const { currentPassword, newPassword } = req.body;
+  await authService.changePassword(req.user!.sub, currentPassword, newPassword);
+  sendOk(res, { passwordChanged: true });
+}

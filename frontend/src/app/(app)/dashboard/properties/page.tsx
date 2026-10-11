@@ -51,7 +51,7 @@ function formatDateTime(iso?: string): string {
 
 export default function PropertiesPage() {
   const { toast, confirm: confirmDialog } = useDialog();
-  const { properties, users, leads, deleteProperty, editProperty, activeRole, currentUser } = useApp();
+  const { properties, users, leads, deleteProperty, editProperty, activeRole, currentUser, addLead } = useApp();
   const isAdmin = activeRole === "ADMIN";
 
   // Drawer (view/edit) state
@@ -306,6 +306,27 @@ export default function PropertiesPage() {
     });
     setInterestErrors(errors);
     if (Object.keys(errors).length > 0) return;
+
+    // Used to just show a success message with nothing saved anywhere —
+    // this form's own copy ("initiate lead follow-up logs") always meant
+    // to create a real lead. assignedAgent is the person registering the
+    // interest (whoever's at this property with the client right now),
+    // same as how Manual Ingestion Entry assigns a freshly-captured lead.
+    const res = addLead({
+      name: interestName.trim(),
+      phone: interestPhone,
+      email: interestEmail.trim(),
+      assignedAgent: currentUser?.name || "",
+      source: "Property Interest",
+      property: selectedProperty?.name,
+      leadScore: 85,
+      createdAtStr: new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+    });
+    if (!res.success) {
+      setInterestErrors({ phone: res.error });
+      return;
+    }
+
     setInterestSuccess("Thank you! Your interest has been successfully registered. An agent will contact you shortly.");
     setInterestName("");
     setInterestPhone("");

@@ -7,8 +7,23 @@ import { sendOk, sendPaginated } from "../../utils/apiResponse";
 import { ApiError } from "../../utils/ApiError";
 import { pool, query } from "../../db/pool";
 import { deleteLeadActivityNotifications } from "../notifications/notifications.service";
+import { findDirectReportIds } from "../users/users.repository";
+import { AccessTokenPayload } from "../../utils/tokens";
 
 export const followupsRouter = Router();
+
+// Same three-way split as leads.service.ts's scopeForCaller — duplicated
+// rather than imported since that function isn't exported (see call-log's
+// and call-attempts' own copies of this same pattern for precedent).
+async function scopedAssigneeIdsForCaller(caller: AccessTokenPayload): Promise<string[] | undefined> {
+  if (caller.role !== "AGENT") return undefined;
+  if (caller.roleType === "MEMBER") return [caller.sub];
+  if (caller.roleType === "MANAGER") {
+    const reportIds = await findDirectReportIds(caller.sub);
+    return [caller.sub, ...reportIds];
+  }
+  return undefined;
+}
 
 followupsRouter.use(requireAuth);
 
@@ -45,11 +60,12 @@ const listFollowupsQuerySchema = z.object({
     .transform(v => v === undefined ? undefined : (Array.isArray(v) ? v : [v]))
 });
 
-// Mirrors leads.service.ts's scopeForCaller rule: a SALES department
-// "Member" only ever sees their own follow-ups (lead names/phone numbers
-// included); everyone else (Managers, Finance, Admin) sees all of them.
-// Previously completely unscoped — any authenticated role, including a
-// Member, could list every follow-up call for every agent in the company.
+// Mirrors leads.service.ts's scopeForCaller rule: a Member only ever sees
+// their own follow-ups; a Manager sees self + their direct reports';
+// Finance/Admin see all. Previously only the Member case was handled — a
+// Manager fell through the gap and saw every follow-up call for every
+// agent in the company, same bug class as the unscoped Member case this
+// was originally written to fix.
 followupsRouter.get(
   "/",
   validate({ query: listFollowupsQuerySchema }),
@@ -57,13 +73,13 @@ followupsRouter.get(
     const { page, pageSize, status } = req.query as unknown as {
       page: number; pageSize: number; status?: ("MISSED" | "UPCOMING" | "COMPLETED")[];
     };
-    const isSalesMember = req.user!.role === "AGENT" && req.user!.roleType === "MEMBER";
+    const scopedAssigneeIds = await scopedAssigneeIdsForCaller(req.user!);
 
     const conditions: string[] = [];
     const params: unknown[] = [];
-    if (isSalesMember) {
-      params.push(req.user!.sub);
-      conditions.push(`fc.assigned_to_id = $${params.length}`);
+    if (scopedAssigneeIds) {
+      params.push(scopedAssigneeIds);
+      conditions.push(`fc.assigned_to_id = ANY($${params.length}::uuid[])`);
     }
     if (status && status.length > 0) {
       if (status.length === 1) {
