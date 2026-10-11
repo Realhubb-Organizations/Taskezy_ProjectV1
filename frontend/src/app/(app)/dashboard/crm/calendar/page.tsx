@@ -2,7 +2,7 @@
 
 import React, { Suspense, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarEvent, CalendarEventType, mapApiCalendarEventToFrontend } from "@/context/AppContext";
+import { CalendarEvent, CalendarEventType, mapApiCalendarEventToFrontend, useApp } from "@/context/AppContext";
 import { apiListCalendarEventsPage } from "@/lib/apiClient";
 import MonthCalendar from "@/components/calendar/MonthCalendar";
 import { CalendarDays, MapPin, PhoneCall, Handshake, FileSignature, LucideIcon } from "lucide-react";
@@ -29,6 +29,7 @@ const TYPE_META: Record<string, { label: string; color: string; icon: LucideIcon
 
 function CRMCalendarContent() {
   const router = useRouter();
+  const { manualRefreshSignal } = useApp();
 
   const todayKey = todayIso();
   const [selectedDate, setSelectedDate] = useState<string>(todayKey);
@@ -58,7 +59,7 @@ function CRMCalendarContent() {
         if (!cancelled) setEventsLoading(false);
       });
     return () => { cancelled = true; };
-  }, [cursor]);
+  }, [cursor, manualRefreshSignal]);
 
   const dayEvents = crmEvents
     .filter(e => e.date === selectedDate)

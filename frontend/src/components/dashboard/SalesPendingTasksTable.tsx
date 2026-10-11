@@ -154,7 +154,7 @@ export default function SalesPendingTasksTable({
         </div>
       </div>
 
-      <div className="overflow-auto max-h-[70vh] px-3 pb-3">
+      <div className="overflow-x-auto md:overflow-y-auto md:max-h-[70vh] px-3 pb-3">
         <table className="w-full text-left table-fixed min-w-[750px] border-separate border-spacing-y-1.5">
           <colgroup>
             <col />

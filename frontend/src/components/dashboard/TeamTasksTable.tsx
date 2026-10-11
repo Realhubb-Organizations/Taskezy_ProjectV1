@@ -200,7 +200,7 @@ export default function TeamTasksTable({
         )}
       </div>
 
-      <div className="overflow-auto max-h-[60vh] px-5">
+      <div className="overflow-x-auto md:overflow-y-auto md:max-h-[60vh] px-5">
         <table className="w-full text-left table-fixed border-collapse" style={{ minWidth: shownColumns.length * 150 }}>
           {/* Visible columns share the full table width equally */}
           <colgroup>

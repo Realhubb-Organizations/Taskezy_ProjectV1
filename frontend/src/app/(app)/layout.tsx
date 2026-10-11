@@ -553,7 +553,10 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
       {/* Main content wrapper */}
       <div className={`flex flex-col flex-1 w-full min-h-screen transition-all duration-200 ${isSidebarCollapsed ? "md:pl-20" : "md:pl-64"}`}>
         {/* Top Header Bar */}
-        <header className="app-header sticky top-0 z-10 flex-shrink-0 h-14 md:h-16 border-b border-slate-200 bg-white/70 backdrop-blur-md flex items-center justify-between px-3 sm:px-6 lg:px-8 gap-2">
+        <header
+          className="app-header sticky top-0 z-10 flex-shrink-0 h-14 md:h-16 border-b border-slate-200 bg-white/70 backdrop-blur-md flex items-center justify-between px-3 sm:px-6 lg:px-8 gap-2"
+          style={{ paddingTop: "env(safe-area-inset-top)" }}
+        >
           <div className="flex items-center gap-2 min-w-0">
             <button
               type="button"
@@ -872,15 +875,17 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
         </nav>
 
         {/* Core Container — bottom padding on mobile clears the fixed tab bar */}
-        {/* overscroll-y-contain: without it, pulling down past scrollTop 0
-            lets the native WebView's own bounce/overscroll-glow gesture win
-            the touch sequence (it runs on the compositor thread ahead of
-            JS), so PullToRefresh.tsx's pointer handlers never see enough
-            movement to cross REFRESH_THRESHOLD — the pull silently does
-            nothing on a real Android device even though the code looks
-            correct. See project_crm_role_based_lead_scoping memory
-            (2026-10-10). */}
-        <main className="flex-1 p-3 sm:p-6 lg:p-8 pb-24 md:pb-8 bg-slate-50/50 overflow-y-auto overflow-x-hidden overscroll-y-contain">
+        {/* overscroll-y-none, not overscroll-y-contain: `contain` only stops
+            scroll-chaining to the parent, it does not suppress this
+            element's OWN native overscroll bounce/glow — so pulling down
+            past scrollTop 0 could still let that glow win the touch
+            sequence (it runs on the compositor thread ahead of JS), leaving
+            PullToRefresh.tsx's pointer handlers without enough movement to
+            cross REFRESH_THRESHOLD — the pull silently does nothing (or
+            works inconsistently) on a real Android device even though the
+            code looks correct. `none` suppresses the glow itself. See
+            project_crm_role_based_lead_scoping memory (2026-10-10). */}
+        <main className="flex-1 p-3 sm:p-6 lg:p-8 pb-24 md:pb-8 bg-slate-50/50 overflow-y-auto overflow-x-hidden overscroll-y-none">
           <PullToRefresh>
             {hasPageAccess ? children : (
               <div className="min-h-[60vh] flex flex-col items-center justify-center p-6 text-center space-y-6 bg-white border border-slate-200 rounded-3xl shadow-sm max-w-2xl mx-auto my-8 animate-fade-in">

@@ -2,7 +2,7 @@
 
 import React, { Suspense, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarEvent, SystemType, mapApiCalendarEventToFrontend } from "@/context/AppContext";
+import { CalendarEvent, SystemType, mapApiCalendarEventToFrontend, useApp } from "@/context/AppContext";
 import { apiListCalendarEventsPage } from "@/lib/apiClient";
 import MonthCalendar from "@/components/calendar/MonthCalendar";
 import { CalendarDays } from "lucide-react";
@@ -30,6 +30,7 @@ function monthBounds(cursor: Date): { dateFrom: string; dateTo: string } {
 
 function AdminCalendarContent() {
   const router = useRouter();
+  const { manualRefreshSignal } = useApp();
 
   const todayKey = todayIso();
   const [selectedDate, setSelectedDate] = useState<string>(todayKey);
@@ -58,7 +59,7 @@ function AdminCalendarContent() {
         if (!cancelled) setEventsLoading(false);
       });
     return () => { cancelled = true; };
-  }, [cursor]);
+  }, [cursor, manualRefreshSignal]);
 
   const dayEvents = calendarEvents
     .filter(e => e.date === selectedDate)

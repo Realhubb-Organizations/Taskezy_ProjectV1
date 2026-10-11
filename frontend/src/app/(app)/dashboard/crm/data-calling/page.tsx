@@ -1282,7 +1282,7 @@ export default function DataCallingPage() {
               <div className="px-5 py-3.5 border-b border-slate-200/80">
                 <h3 className="text-sm font-bold text-slate-900">Salesperson Performance</h3>
               </div>
-              <div className="overflow-auto max-h-[55vh]">
+              <div className="overflow-x-auto md:overflow-y-auto md:max-h-[55vh]">
                 <table className="table-fixed w-full text-left border-collapse min-w-[1050px]">
                   <colgroup>
                     <col />
@@ -1401,7 +1401,7 @@ export default function DataCallingPage() {
                 above rather than standing out oversized. */}
             <div className="bg-white rounded-2xl p-5">
               <h3 className="text-sm font-bold text-slate-900 mb-4">Source Performance</h3>
-              <div className="overflow-auto max-h-[55vh]">
+              <div className="overflow-x-auto md:overflow-y-auto md:max-h-[55vh]">
                 <table className="table-fixed w-full text-left border-collapse" style={{ minWidth: (7 + ANALYTICS_COLUMNS.filter(c => c.key !== "qualifiedLeads" && analyticsVisibleColumns[c.key]).length) * 150 }}>
                   <colgroup>
                     <col />
@@ -1510,7 +1510,7 @@ export default function DataCallingPage() {
           <>
           {/* Main Data Calling Table */}
           <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden">
-            <div ref={tableScrollRef} className="overflow-auto max-h-[55vh]">
+            <div ref={tableScrollRef} className="overflow-x-auto md:overflow-y-auto md:max-h-[55vh]">
               <table className="table-fixed w-full text-left border-collapse" style={{ minWidth: (isAdmin ? 44 + 64 : 0) + (visibleColCount - (isAdmin ? 2 : 0)) * 150 }}>
                 <colgroup>
                   {isAdmin && <col className="w-[44px]" />}

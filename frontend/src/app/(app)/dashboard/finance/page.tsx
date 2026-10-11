@@ -45,7 +45,8 @@ export default function FinancePage() {
     activeRole,
     calendarEvents,
     addCalendarEvent,
-    isDataLoading
+    isDataLoading,
+    manualRefreshSignal
   } = useApp();
 
   const searchParams = useSearchParams();
@@ -87,7 +88,7 @@ export default function FinancePage() {
     if (activeTabParam !== "billing") return;
     fetchInvoicesPage(invoicesPage, invoicesRowsPerPage);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTabParam, invoicesPage, invoicesRowsPerPage]);
+  }, [activeTabParam, invoicesPage, invoicesRowsPerPage, manualRefreshSignal]);
 
   // Row-level mutations (generate/mark-paid/delete) update AppContext's
   // `invoices` optimistically — overlay those onto the server-fetched page
@@ -128,7 +129,7 @@ export default function FinancePage() {
       });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTabParam, reimbPage, reimbRowsPerPage, reimbFilter]);
+  }, [activeTabParam, reimbPage, reimbRowsPerPage, reimbFilter, manualRefreshSignal]);
 
   // Same overlay as displayedInvoices — approve/reject/delete update
   // AppContext's `reimbursements` optimistically, reflected immediately.
