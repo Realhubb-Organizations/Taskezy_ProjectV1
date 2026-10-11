@@ -29,12 +29,19 @@ export default function PullToRefresh({ children }: { children: React.ReactNode 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (refreshing) return;
     // Only start tracking when the scrollable <main> ancestor is already at
-    // the top — otherwise this is just a normal scroll gesture.
+    // the top — otherwise this is just a normal scroll gesture. Deliberately
+    // does NOT call setPointerCapture here, even though we already know this
+    // is a candidate gesture — capturing a touch-originated pointer before
+    // its direction is known suppresses the browser's native scroll handling
+    // for the WHOLE gesture in Chromium/WebView, regardless of whether this
+    // handler ever calls preventDefault. Since every fresh page load starts
+    // at scrollTop 0, that silently broke ordinary upward scrolling (not
+    // just the pull gesture) on every page's very first touch. Capture is
+    // deferred to onPointerMove, once a real downward pull is confirmed.
     const scroller = containerRef.current?.closest("main");
     if (!scroller || scroller.scrollTop > 0) return;
     startY.current = e.clientY;
     pulling.current = true;
-    e.currentTarget.setPointerCapture(e.pointerId);
   };
 
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -43,6 +50,9 @@ export default function PullToRefresh({ children }: { children: React.ReactNode 
     if (delta <= 0) {
       setPull(0);
       return;
+    }
+    if (!e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.setPointerCapture(e.pointerId);
     }
     e.preventDefault();
     setPull(Math.min(delta, MAX_PULL));
