@@ -556,7 +556,7 @@ interface AppActions {
   setSeats: (role: Role, count: number) => void;
   processPayment: () => Promise<boolean>;
   provisionTenant: () => Promise<void>;
-  resetRosterPassword: (userId: string, newPass: string) => void;
+  resetRosterPassword: (userId: string, newPass: string) => Promise<{ success: boolean; error?: string }>;
   /**
    * Waits for the server; throws its message on failure. `newPassword` empty
    * keeps the user's current password — it's only reset when one is typed.
@@ -569,7 +569,8 @@ interface AppActions {
     designation: string,
     roleType: "Manager" | "Member",
     status: "ACTIVE" | "INACTIVE",
-    managerId?: string | null
+    managerId?: string | null,
+    email?: string
   ) => Promise<void>;
   setCurrentUserPasswordActive: () => void;
   /** Completes the forced-password-reset flow: verifies currentPassword server-side, then sets newPassword. */
@@ -1492,17 +1493,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
-  // Roster Password manager (Force Reset)
-  const resetRosterPassword = (userId: string, newPass: string) => {
-    setUsers(prev => prev.map(u => {
-      if (u.id === userId) {
-        return { ...u, tempPassword: newPass, password_hash: newPass, passwordStatus: "TEMPORARY" };
-      }
-      return u;
-    }));
+  // Roster Password manager (Force Reset) — sets newPass server-side, which
+  // (per updatePasswordHash) also flips must_reset_password so the user is
+  // required to set their own password on next login.
+  const resetRosterPassword = async (userId: string, newPass: string): Promise<{ success: boolean; error?: string }> => {
     if (isApiSessionActive() && isRealId(userId)) {
-      apiResetUserPassword(userId, newPass).catch((err) => console.warn("Could not persist password reset to the database:", err));
+      try {
+        await apiResetUserPassword(userId, newPass);
+      } catch (err) {
+        return { success: false, error: err instanceof ApiRequestError ? err.message : "Could not reset the password. Please try again." };
+      }
     }
+    setUsers(prev => prev.map(u => (u.id === userId ? { ...u, tempPassword: newPass, passwordStatus: "TEMPORARY" } : u)));
+    return { success: true };
   };
 
   // Admin Direct Member Editor
@@ -1514,12 +1517,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     designation: string,
     roleType: "Manager" | "Member",
     status: "ACTIVE" | "INACTIVE",
-    managerId?: string | null
+    managerId?: string | null,
+    email?: string
   ) => {
     if (isApiSessionActive() && isRealId(userId)) {
       await apiEditUser(userId, {
         firstName,
         lastName,
+        email: email || undefined,
         designation,
         roleType: roleType === "Manager" ? "MANAGER" : "MEMBER",
         status,
@@ -1536,6 +1541,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           ...u,
           first_name: firstName,
           last_name: lastName,
+          ...(email ? { email, company_email: email } : {}),
           name: `${firstName} ${lastName}`.trim(),
           designation,
           role_type: roleType,

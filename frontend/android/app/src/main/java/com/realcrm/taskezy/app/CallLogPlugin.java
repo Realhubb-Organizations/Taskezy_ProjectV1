@@ -79,6 +79,7 @@ public class CallLogPlugin extends Plugin {
             .getContentResolver()
             .query(CallLog.Calls.CONTENT_URI, projection, selection, selectionArgs, sortOrder)) {
             JSArray entries = new JSArray();
+            boolean truncated = false;
 
             if (cursor != null) {
                 int numberIdx = cursor.getColumnIndex(CallLog.Calls.NUMBER);
@@ -87,7 +88,7 @@ public class CallLogPlugin extends Plugin {
                 int durationIdx = cursor.getColumnIndex(CallLog.Calls.DURATION);
 
                 int rowCount = 0;
-                while (cursor.moveToNext() && rowCount < MAX_ROWS) {
+                while (rowCount < MAX_ROWS && cursor.moveToNext()) {
                     String phoneNumber = numberIdx >= 0 ? cursor.getString(numberIdx) : null;
                     int callType = typeIdx >= 0 ? cursor.getInt(typeIdx) : -1;
                     long dateMillis = dateIdx >= 0 ? cursor.getLong(dateIdx) : 0L;
@@ -102,10 +103,19 @@ public class CallLogPlugin extends Plugin {
 
                     rowCount++;
                 }
+
+                // If the cap was hit, peek one row further to tell the caller
+                // whether older rows still remain beyond this batch (DATE DESC,
+                // so "older" here means anything past what MAX_ROWS let us
+                // reach) — the JS sync layer needs this to know it's not safe
+                // to mark everything as caught up (see its own comment on why
+                // it only ever advances its watermark when !truncated).
+                truncated = rowCount == MAX_ROWS && cursor.moveToNext();
             }
 
             JSObject result = new JSObject();
             result.put("entries", entries);
+            result.put("truncated", truncated);
             call.resolve(result);
         } catch (RuntimeException e) {
             call.reject("Failed to read call log: " + e.getMessage());

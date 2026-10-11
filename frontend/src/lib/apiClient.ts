@@ -501,6 +501,7 @@ export function apiCreateUser(input: CreateUserApiInput): Promise<ApiFullUser> {
 export interface EditUserApiInput {
   firstName?: string;
   lastName?: string;
+  email?: string;
   designation?: string;
   roleType?: "MANAGER" | "MEMBER";
   department?: "SALES" | "TECH" | "MARKETING" | "FINANCE";

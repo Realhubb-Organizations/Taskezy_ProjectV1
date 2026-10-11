@@ -96,7 +96,14 @@ usersRouter.patch(
       throw ApiError.badRequest("managerId must be an active user with roleType MANAGER.");
     }
 
-    await repo.update(req.params.id, req.body);
+    try {
+      await repo.update(req.params.id, req.body);
+    } catch (err) {
+      if (repo.isUniqueViolation(err)) {
+        throw ApiError.conflict(`A user with email ${req.body.email} already exists.`);
+      }
+      throw err;
+    }
     sendOk(res, await repo.findById(req.params.id));
   })
 );
