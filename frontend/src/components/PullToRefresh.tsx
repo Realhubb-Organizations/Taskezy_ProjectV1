@@ -1,116 +1,22 @@
 "use client";
 
-import React, { useRef, useState } from "react";
-import { RefreshCw } from "lucide-react";
-import { Capacitor } from "@capacitor/core";
-import { useApp } from "@/context/AppContext";
-
-const MAX_PULL = 80; // px the indicator can be dragged down before it caps
-const REFRESH_THRESHOLD = 64; // px pull required to trigger a refresh on release
-const SPIN_DURATION_MS = 700; // how long the spinner shows after a triggered refresh
+import React from "react";
 
 /**
- * Native-app-only pull-to-refresh. Plain Pointer Events + CSS, no library.
- * On the website build (Capacitor.isNativePlatform() === false) this renders
- * as a bare passthrough — no wrapper, no listeners — so the site is untouched.
+ * Pull-to-refresh is permanently disabled. A Pointer Events implementation
+ * was built and tried here (see git history — commits 47645fe, c80440a,
+ * 2471e11 on feature/Inder/development), including a fix for pointer
+ * capture being claimed too early. Verified live on-device via adb that
+ * even with that fix, simply having pointer handlers attached to this
+ * wrapper — regardless of whether they ever call preventDefault — breaks
+ * native scrolling for every page in this Capacitor/Android WebView. Once
+ * it was removed entirely, scrolling started working everywhere.
+ *
+ * If this is revisited, it needs a fundamentally different technique that
+ * doesn't attach pointer/touch handlers to an ancestor of the scrollable
+ * content at all — e.g. reading <main>'s own scroll/touch events passively,
+ * or a native Capacitor plugin instead of a JS gesture layer.
  */
-// DIAGNOSTIC round 2: now that <main> is actually height-bound (h-screen +
-// min-h-0 fix), re-isolate whether PullToRefresh's pointer handling is
-// ALSO still blocking scroll, independent of that layout bug. The first
-// passthrough test (commit c80440a) ran BEFORE the layout fix, so its
-// "still broken" result only proved the layout bug was sufficient on its
-// own — it never actually cleared PullToRefresh. Flip back to false once
-// this is resolved either way.
-const DIAGNOSTIC_FORCE_PASSTHROUGH = true;
-
 export default function PullToRefresh({ children }: { children: React.ReactNode }) {
-  const { triggerManualRefresh } = useApp();
-  const containerRef = useRef<HTMLDivElement>(null);
-  const startY = useRef<number | null>(null);
-  const pulling = useRef(false);
-  const [pull, setPull] = useState(0);
-  const [refreshing, setRefreshing] = useState(false);
-
-  if (DIAGNOSTIC_FORCE_PASSTHROUGH || !Capacitor.isNativePlatform()) {
-    return <>{children}</>;
-  }
-
-  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (refreshing) return;
-    // Only start tracking when the scrollable <main> ancestor is already at
-    // the top — otherwise this is just a normal scroll gesture. Deliberately
-    // does NOT call setPointerCapture here, even though we already know this
-    // is a candidate gesture — capturing a touch-originated pointer before
-    // its direction is known suppresses the browser's native scroll handling
-    // for the WHOLE gesture in Chromium/WebView, regardless of whether this
-    // handler ever calls preventDefault. Since every fresh page load starts
-    // at scrollTop 0, that silently broke ordinary upward scrolling (not
-    // just the pull gesture) on every page's very first touch. Capture is
-    // deferred to onPointerMove, once a real downward pull is confirmed.
-    const scroller = containerRef.current?.closest("main");
-    if (!scroller || scroller.scrollTop > 0) return;
-    startY.current = e.clientY;
-    pulling.current = true;
-  };
-
-  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!pulling.current || startY.current === null) return;
-    const delta = e.clientY - startY.current;
-    if (delta <= 0) {
-      setPull(0);
-      return;
-    }
-    if (!e.currentTarget.hasPointerCapture(e.pointerId)) {
-      e.currentTarget.setPointerCapture(e.pointerId);
-    }
-    e.preventDefault();
-    setPull(Math.min(delta, MAX_PULL));
-  };
-
-  const endPull = () => {
-    if (!pulling.current) return;
-    pulling.current = false;
-    startY.current = null;
-    if (pull >= REFRESH_THRESHOLD) {
-      setRefreshing(true);
-      triggerManualRefresh();
-      window.setTimeout(() => {
-        setRefreshing(false);
-        setPull(0);
-      }, SPIN_DURATION_MS);
-    } else {
-      setPull(0);
-    }
-  };
-
-  const indicatorHeight = refreshing ? REFRESH_THRESHOLD : pull;
-  const rotation = (pull / MAX_PULL) * 360;
-  const settling = !pulling.current && !refreshing;
-
-  return (
-    <div ref={containerRef} className="relative" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={endPull} onPointerCancel={endPull}>
-      <div
-        className="absolute inset-x-0 top-0 flex items-center justify-center pointer-events-none"
-        style={{
-          height: MAX_PULL,
-          transform: `translateY(${indicatorHeight - MAX_PULL}px)`,
-          opacity: indicatorHeight > 0 ? 1 : 0,
-          transition: settling ? "transform 200ms ease-out, opacity 200ms ease-out" : undefined
-        }}
-      >
-        <RefreshCw
-          className={`h-5 w-5 text-brand-700 ${refreshing ? "animate-spin" : ""}`}
-          style={refreshing ? undefined : { transform: `rotate(${rotation}deg)` }}
-        />
-      </div>
-      <div
-        style={{
-          transform: `translateY(${indicatorHeight}px)`,
-          transition: settling ? "transform 200ms ease-out" : undefined
-        }}
-      >
-        {children}
-      </div>
-    </div>
-  );
+  return <>{children}</>;
 }
