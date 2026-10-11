@@ -14,6 +14,15 @@ const SPIN_DURATION_MS = 700; // how long the spinner shows after a triggered re
  * On the website build (Capacitor.isNativePlatform() === false) this renders
  * as a bare passthrough — no wrapper, no listeners — so the site is untouched.
  */
+// DIAGNOSTIC round 2: now that <main> is actually height-bound (h-screen +
+// min-h-0 fix), re-isolate whether PullToRefresh's pointer handling is
+// ALSO still blocking scroll, independent of that layout bug. The first
+// passthrough test (commit c80440a) ran BEFORE the layout fix, so its
+// "still broken" result only proved the layout bug was sufficient on its
+// own — it never actually cleared PullToRefresh. Flip back to false once
+// this is resolved either way.
+const DIAGNOSTIC_FORCE_PASSTHROUGH = true;
+
 export default function PullToRefresh({ children }: { children: React.ReactNode }) {
   const { triggerManualRefresh } = useApp();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -22,7 +31,7 @@ export default function PullToRefresh({ children }: { children: React.ReactNode 
   const [pull, setPull] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
 
-  if (!Capacitor.isNativePlatform()) {
+  if (DIAGNOSTIC_FORCE_PASSTHROUGH || !Capacitor.isNativePlatform()) {
     return <>{children}</>;
   }
 
