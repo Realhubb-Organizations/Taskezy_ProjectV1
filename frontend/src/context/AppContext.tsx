@@ -1069,7 +1069,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setIsDataLoading(true);
     setDataLoadError(false);
     try {
-      const [apiLeads, apiUsers, apiProperties, apiResaleUnits, apiFollowups, apiAttendance, apiReimbursements, apiInvoices, apiCalendarEvents, apiAdSpend, apiAdLevelSpend, apiTimesheets, apiTenantSettings] = await Promise.all([
+      const [apiLeads, apiUsers, apiProperties, apiResaleUnits, apiFollowups, apiAttendance, apiReimbursements, apiInvoices, apiCalendarEvents, apiTimesheets, apiTenantSettings] = await Promise.all([
         apiListAllLeads(),
         apiListUsers(),
         apiListProperties(),
@@ -1079,8 +1079,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         apiListReimbursements(),
         apiListInvoices(),
         apiListCalendarEvents(),
-        apiListAdSpend(),
-        apiListAdLevelSpend(),
         apiListTimesheets(),
         apiGetTenantSettings()
       ]);
@@ -1093,14 +1091,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setReimbursements(apiReimbursements.map(mapApiReimbursementToFrontend));
       setInvoices(apiInvoices.map(mapApiInvoiceToFrontend));
       setCalendarEvents(apiCalendarEvents.map(mapApiCalendarEventToFrontend));
-      setAdSpendRecords(apiAdSpend.map(mapApiAdSpendToFrontend));
-      setAdLevelSpendRecords(apiAdLevelSpend.map(mapApiAdLevelSpendToFrontend));
       setTimesheets(apiTimesheets.map(mapApiTimesheetToFrontend));
       setTenantSettings(mapApiTenantSettingsToFrontend(apiTenantSettings));
 
-      // /api/v1/meta/connections is ADMIN-only — only attempt it for admins,
-      // other roles keep the default false rather than eating a guaranteed 403.
+      // /api/v1/ad-spend and /api/v1/meta/connections are both ADMIN-only
+      // (Campaigns is admin-only, see layout.tsx's checkUserAccess) — only
+      // attempt them for admins, other roles keep the empty/false defaults
+      // rather than eating a guaranteed 403. These used to sit inside the
+      // Promise.all above, which meant a single 403 from either one on a
+      // Manager/Member session failed EVERY call in the batch, so nothing
+      // loaded anywhere in the app for non-admin roles.
       if (role === "ADMIN") {
+        try {
+          const [apiAdSpend, apiAdLevelSpend] = await Promise.all([apiListAdSpend(), apiListAdLevelSpend()]);
+          setAdSpendRecords(apiAdSpend.map(mapApiAdSpendToFrontend));
+          setAdLevelSpendRecords(apiAdLevelSpend.map(mapApiAdLevelSpendToFrontend));
+        } catch {
+          // Non-fatal — Campaigns page will still show real state on its own fetch.
+        }
         try {
           const connections = await apiListMetaConnections();
           setMetaConnected(connections.some(c => c.status === "ACTIVE"));
