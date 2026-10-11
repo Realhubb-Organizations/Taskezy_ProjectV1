@@ -5,6 +5,7 @@ import { useApp } from "@/context/AppContext";
 import { apiListCallLogPage, ApiCallLogRow } from "@/lib/apiClient";
 import { syncDeviceCallLog } from "@/lib/callLogSync";
 import { maskPhone } from "@/lib/maskPII";
+import { AlertTriangle } from "lucide-react";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
 import TablePagination from "@/components/ui/TablePagination";
 import DateRangePicker, { DateRangeValue } from "@/components/ui/DateRangePicker";
@@ -48,6 +49,10 @@ export default function CallLogPage() {
   const [totalCount, setTotalCount] = useState(0);
   const [dateRange, setDateRange] = useState<DateRangeValue | null>(null);
   const [loading, setLoading] = useState(true);
+  // Distinct from "0 rows" — a failed fetch must never look like a
+  // genuinely-empty call log. Same pattern as properties page's propertiesLoadError.
+  const [callLogLoadError, setCallLogLoadError] = useState(false);
+  const [callLogRefreshNonce, setCallLogRefreshNonce] = useState(0);
 
   // Sync the device's call log exactly once, before the very first fetch —
   // so freshly-synced entries show up immediately instead of one page-load
@@ -64,6 +69,7 @@ export default function CallLogPage() {
       }
       if (!active) return;
       setLoading(true);
+      setCallLogLoadError(false);
       try {
         const res = await apiListCallLogPage(page, ROWS_PER_PAGE, { dateFrom: dateRange?.start, dateTo: dateRange?.end });
         if (!active) return;
@@ -71,12 +77,17 @@ export default function CallLogPage() {
         setTotalCount(res.totalCount);
       } catch (err) {
         console.warn("Could not load call log:", err);
+        if (active) {
+          setRows([]);
+          setTotalCount(0);
+          setCallLogLoadError(true);
+        }
       } finally {
         if (active) setLoading(false);
       }
     })();
     return () => { active = false; };
-  }, [page, dateRange, manualRefreshSignal]);
+  }, [page, dateRange, manualRefreshSignal, callLogRefreshNonce]);
 
   const colCount = 5 + (showAgentColumn ? 1 : 0);
 
@@ -104,7 +115,23 @@ export default function CallLogPage() {
               </tr>
             </thead>
             <tbody>
-              {loading ? (
+              {callLogLoadError ? (
+                <tr>
+                  <td colSpan={colCount} className="p-8">
+                    <div className="flex flex-col items-center gap-3 text-center">
+                      <AlertTriangle className="h-5 w-5 text-amber-500" />
+                      <p className="text-xs font-semibold text-slate-600">Couldn&apos;t load the call log.</p>
+                      <button
+                        type="button"
+                        onClick={() => setCallLogRefreshNonce(n => n + 1)}
+                        className="px-4 py-1.5 rounded-lg bg-[#0B1E6E] hover:bg-[#081650] text-white text-xs font-bold transition-colors"
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ) : loading ? (
                 <TableRowsSkeleton rows={8} columns={colCount} />
               ) : rows.length === 0 ? (
                 <tr>

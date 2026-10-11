@@ -92,6 +92,11 @@ export default function HRMSPage() {
 
   // Check if current user is admin
   const isAdmin = currentUser?.role === "ADMIN" || activeRole === "ADMIN";
+  // Manager's "My Timesheet History"/"My Attendance Report" now gets
+  // self+direct-reports rows from the backend (see timesheets.routes.ts),
+  // not just their own — so a Manager needs to see whose row is whose,
+  // the same way the Admin-only table below already shows ts.userName.
+  const showTimesheetEmployeeColumn = !isAdmin && currentUser?.role_type === "Manager";
 
   // Filter timesheets for personal view (non-admin) — this stays reading the
   // full `timesheets` array AppContext bulk-loads (unchanged, see
@@ -118,11 +123,15 @@ export default function HRMSPage() {
   const [myTimesheetsTotalCount, setMyTimesheetsTotalCount] = useState(0);
   const [myTimesheetsLoading, setMyTimesheetsLoading] = useState(true);
   const [myTimesheetsRefreshKey, setMyTimesheetsRefreshKey] = useState(0);
+  // Distinct from "0 rows" — a failed fetch must never look like a
+  // genuinely-empty history. Same pattern as properties page's propertiesLoadError.
+  const [myTimesheetsLoadError, setMyTimesheetsLoadError] = useState(false);
 
   useEffect(() => {
     if (isAdmin || !currentUser?.id) return;
     let cancelled = false;
     setMyTimesheetsLoading(true);
+    setMyTimesheetsLoadError(false);
     apiListTimesheetsPage(myTimesheetsPage, myTimesheetsRowsPerPage, currentUser.id)
       .then((result) => {
         if (cancelled) return;
@@ -130,7 +139,11 @@ export default function HRMSPage() {
         setMyTimesheetsTotalCount(result.totalCount);
       })
       .catch((err) => {
-        if (!cancelled) console.error("Could not load your timesheet history:", err);
+        if (cancelled) return;
+        console.error("Could not load your timesheet history:", err);
+        setMyTimesheetsRows([]);
+        setMyTimesheetsTotalCount(0);
+        setMyTimesheetsLoadError(true);
       })
       .finally(() => {
         if (!cancelled) setMyTimesheetsLoading(false);
@@ -149,11 +162,16 @@ export default function HRMSPage() {
   const [adminTimesheetsRows, setAdminTimesheetsRows] = useState<TimesheetLog[]>([]);
   const [adminTimesheetsTotalCount, setAdminTimesheetsTotalCount] = useState(0);
   const [adminTimesheetsLoading, setAdminTimesheetsLoading] = useState(true);
+  // Distinct from "0 rows" — a failed fetch must never look like a
+  // genuinely-empty audit queue. Same pattern as properties page's propertiesLoadError.
+  const [adminTimesheetsLoadError, setAdminTimesheetsLoadError] = useState(false);
+  const [adminTimesheetsRefreshNonce, setAdminTimesheetsRefreshNonce] = useState(0);
 
   useEffect(() => {
     if (!isAdmin) return;
     let cancelled = false;
     setAdminTimesheetsLoading(true);
+    setAdminTimesheetsLoadError(false);
     apiListTimesheetsPage(adminTimesheetsPage, adminTimesheetsRowsPerPage)
       .then((result) => {
         if (cancelled) return;
@@ -161,13 +179,17 @@ export default function HRMSPage() {
         setAdminTimesheetsTotalCount(result.totalCount);
       })
       .catch((err) => {
-        if (!cancelled) console.error("Could not load the timesheets page:", err);
+        if (cancelled) return;
+        console.error("Could not load the timesheets page:", err);
+        setAdminTimesheetsRows([]);
+        setAdminTimesheetsTotalCount(0);
+        setAdminTimesheetsLoadError(true);
       })
       .finally(() => {
         if (!cancelled) setAdminTimesheetsLoading(false);
       });
     return () => { cancelled = true; };
-  }, [isAdmin, adminTimesheetsPage, adminTimesheetsRowsPerPage, manualRefreshSignal]);
+  }, [isAdmin, adminTimesheetsPage, adminTimesheetsRowsPerPage, manualRefreshSignal, adminTimesheetsRefreshNonce]);
   const adminPendingTimesheets = adminTimesheetsRows.filter(ts => ts.status === "Regularization Pending");
 
   // 3. Admin "Departmental Roster Attendance Records" report table.
@@ -176,11 +198,16 @@ export default function HRMSPage() {
   const [attendancePageRows, setAttendancePageRows] = useState<AttendanceRecord[]>([]);
   const [attendanceTotalCount, setAttendanceTotalCount] = useState(0);
   const [attendanceLoading, setAttendanceLoading] = useState(true);
+  // Distinct from "0 rows" — a failed fetch must never look like a
+  // genuinely-empty roster. Same pattern as properties page's propertiesLoadError.
+  const [attendanceLoadError, setAttendanceLoadError] = useState(false);
+  const [attendanceRefreshNonce, setAttendanceRefreshNonce] = useState(0);
 
   useEffect(() => {
     if (!isAdmin) return;
     let cancelled = false;
     setAttendanceLoading(true);
+    setAttendanceLoadError(false);
     apiListAttendancePage(attendancePage, attendanceRowsPerPage)
       .then((result) => {
         if (cancelled) return;
@@ -188,13 +215,17 @@ export default function HRMSPage() {
         setAttendanceTotalCount(result.totalCount);
       })
       .catch((err) => {
-        if (!cancelled) console.error("Could not load the attendance report page:", err);
+        if (cancelled) return;
+        console.error("Could not load the attendance report page:", err);
+        setAttendancePageRows([]);
+        setAttendanceTotalCount(0);
+        setAttendanceLoadError(true);
       })
       .finally(() => {
         if (!cancelled) setAttendanceLoading(false);
       });
     return () => { cancelled = true; };
-  }, [isAdmin, attendancePage, attendanceRowsPerPage, manualRefreshSignal]);
+  }, [isAdmin, attendancePage, attendanceRowsPerPage, manualRefreshSignal, attendanceRefreshNonce]);
 
   // Check if currently punched in today
   const todayStr = todayIso();
@@ -438,12 +469,13 @@ export default function HRMSPage() {
 
               {/* Personal Logs Table */}
               <div className="lg:col-span-8 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-                <h4 className="text-xs font-bold text-slate-705">My Timesheet History (Current Month)</h4>
+                <h4 className="text-xs font-bold text-slate-705">{showTimesheetEmployeeColumn ? "My Team's Timesheet History (Current Month)" : "My Timesheet History (Current Month)"}</h4>
                 <div className="border border-slate-200 rounded-xl overflow-hidden">
                   <div className="overflow-x-auto">
                     <table className="w-full text-left text-xs border-collapse">
                       <thead>
                         <tr className="bg-slate-50 border-b border-slate-200 text-[9px] uppercase font-bold text-slate-405 tracking-wider">
+                          {showTimesheetEmployeeColumn && <th className="p-3">Employee</th>}
                           <th className="p-3">Date</th>
                           <th className="p-3">Punch In</th>
                           <th className="p-3">Punch Out</th>
@@ -453,17 +485,34 @@ export default function HRMSPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                        {myTimesheetsLoading && myTimesheetsRows.length === 0 ? (
-                          <TableRowsSkeleton rows={6} columns={6} />
+                        {myTimesheetsLoadError ? (
+                          <tr>
+                            <td colSpan={showTimesheetEmployeeColumn ? 7 : 6} className="p-6">
+                              <div className="flex flex-col items-center gap-3 text-center">
+                                <AlertTriangle className="h-5 w-5 text-amber-500" />
+                                <p className="text-xs font-semibold text-slate-600">Couldn&apos;t load your timesheet history.</p>
+                                <button
+                                  type="button"
+                                  onClick={() => setMyTimesheetsRefreshKey(k => k + 1)}
+                                  className="px-4 py-1.5 rounded-lg bg-[#0B1E6E] hover:bg-[#081650] text-white text-xs font-bold transition-colors"
+                                >
+                                  Retry
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ) : myTimesheetsLoading && myTimesheetsRows.length === 0 ? (
+                          <TableRowsSkeleton rows={6} columns={showTimesheetEmployeeColumn ? 7 : 6} />
                         ) : myTimesheetsRows.length === 0 ? (
                           <tr>
-                            <td colSpan={6} className="p-6 text-center text-slate-400 font-semibold italic">
+                            <td colSpan={showTimesheetEmployeeColumn ? 7 : 6} className="p-6 text-center text-slate-400 font-semibold italic">
                               No attendance punches recorded yet. Use the punch clock.
                             </td>
                           </tr>
                         ) : (
                           myTimesheetsRows.map((log) => (
                             <tr key={log.id} className="hover:bg-slate-50/50">
+                              {showTimesheetEmployeeColumn && <td className="p-3 font-semibold text-slate-800">{log.userName}</td>}
                               <td className="p-3 font-mono font-semibold">{log.date}</td>
                               <td className="p-3 font-mono text-slate-500">
                                 {log.punchIn ? new Date(log.punchIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "—"}
@@ -530,7 +579,19 @@ export default function HRMSPage() {
                 </div>
 
                 <div className="space-y-3">
-                  {adminTimesheetsLoading && adminTimesheetsRows.length === 0 ? (
+                  {adminTimesheetsLoadError ? (
+                    <div className="flex flex-col items-center gap-3 py-6 text-center border border-dashed border-slate-200 rounded-xl">
+                      <AlertTriangle className="h-5 w-5 text-amber-500" />
+                      <p className="text-xs font-semibold text-slate-600">Couldn&apos;t load the regularization audit queue.</p>
+                      <button
+                        type="button"
+                        onClick={() => setAdminTimesheetsRefreshNonce(n => n + 1)}
+                        className="px-4 py-1.5 rounded-lg bg-[#0B1E6E] hover:bg-[#081650] text-white text-xs font-bold transition-colors"
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  ) : adminTimesheetsLoading && adminTimesheetsRows.length === 0 ? (
                     <CardListSkeleton count={4} />
                   ) : adminPendingTimesheets.length === 0 ? (
                     <div className="text-center py-6 text-xs text-slate-400 border border-dashed border-slate-200 rounded-xl">
@@ -616,7 +677,23 @@ export default function HRMSPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
-                      {attendanceLoading && attendancePageRows.length === 0 ? (
+                      {attendanceLoadError ? (
+                        <tr>
+                          <td colSpan={5} className="p-6">
+                            <div className="flex flex-col items-center gap-3 text-center">
+                              <AlertTriangle className="h-5 w-5 text-amber-500" />
+                              <p className="text-xs font-semibold text-slate-600">Couldn&apos;t load the attendance report.</p>
+                              <button
+                                type="button"
+                                onClick={() => setAttendanceRefreshNonce(n => n + 1)}
+                                className="px-4 py-1.5 rounded-lg bg-[#0B1E6E] hover:bg-[#081650] text-white text-xs font-bold transition-colors"
+                              >
+                                Retry
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ) : attendanceLoading && attendancePageRows.length === 0 ? (
                         <TableRowsSkeleton rows={6} columns={5} />
                       ) : attendancePageRows.length === 0 ? (
                         <tr>
@@ -675,12 +752,13 @@ export default function HRMSPage() {
                   </div>
 
                   <div className="glass-card p-6 rounded-2xl space-y-4">
-                    <h3 className="text-xs font-bold text-slate-700 border-b border-slate-100 pb-3">My Attendance Report</h3>
+                    <h3 className="text-xs font-bold text-slate-700 border-b border-slate-100 pb-3">{showTimesheetEmployeeColumn ? "My Team's Attendance Report" : "My Attendance Report"}</h3>
                     <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm">
                       <div className="overflow-x-auto">
                         <table className="w-full text-left text-xs border-collapse">
                           <thead>
                             <tr className="bg-slate-50 border-b border-slate-200 text-[9px] uppercase font-bold text-slate-405 tracking-wider">
+                              {showTimesheetEmployeeColumn && <th className="p-3">Employee</th>}
                               <th className="p-3">Date</th>
                               <th className="p-3">Punch In</th>
                               <th className="p-3">Punch Out</th>
@@ -689,17 +767,34 @@ export default function HRMSPage() {
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                            {myTimesheetsLoading && myTimesheetsRows.length === 0 ? (
-                              <TableRowsSkeleton rows={6} columns={5} />
+                            {myTimesheetsLoadError ? (
+                              <tr>
+                                <td colSpan={showTimesheetEmployeeColumn ? 6 : 5} className="p-6">
+                                  <div className="flex flex-col items-center gap-3 text-center">
+                                    <AlertTriangle className="h-5 w-5 text-amber-500" />
+                                    <p className="text-xs font-semibold text-slate-600">Couldn&apos;t load your timesheet history.</p>
+                                    <button
+                                      type="button"
+                                      onClick={() => setMyTimesheetsRefreshKey(k => k + 1)}
+                                      className="px-4 py-1.5 rounded-lg bg-[#0B1E6E] hover:bg-[#081650] text-white text-xs font-bold transition-colors"
+                                    >
+                                      Retry
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ) : myTimesheetsLoading && myTimesheetsRows.length === 0 ? (
+                              <TableRowsSkeleton rows={6} columns={showTimesheetEmployeeColumn ? 6 : 5} />
                             ) : myTimesheetsRows.length === 0 ? (
                               <tr>
-                                <td colSpan={5} className="p-6 text-center text-slate-400 font-semibold italic">
+                                <td colSpan={showTimesheetEmployeeColumn ? 6 : 5} className="p-6 text-center text-slate-400 font-semibold italic">
                                   No attendance punches recorded yet.
                                 </td>
                               </tr>
                             ) : (
                               myTimesheetsRows.map((log) => (
                                 <tr key={log.id} className="hover:bg-slate-50/50">
+                                  {showTimesheetEmployeeColumn && <td className="p-3 font-semibold text-slate-800">{log.userName}</td>}
                                   <td className="p-3 font-mono font-semibold">{log.date}</td>
                                   <td className="p-3 font-mono text-slate-500">
                                     {log.punchIn ? new Date(log.punchIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "—"}

@@ -185,6 +185,12 @@ export default function SettingsPage() {
   // a false "Not connected yet" while the request is still in flight (that
   // false-negative flash is exactly what looked like a broken connection).
   const [metaConnectionsLoaded, setMetaConnectionsLoaded] = useState(false);
+  // True only when the status check itself failed (network/5xx) — distinct
+  // from a check that succeeded and found zero active connections. Without
+  // this, a transient failure fell through to the same "Not connected yet"
+  // branch as a genuinely disconnected integration, wrongly alarming an
+  // Admin that a working integration had broken.
+  const [metaCheckError, setMetaCheckError] = useState(false);
   const [metaLoading, setMetaLoading] = useState(false);
   const [metaBanner, setMetaBanner] = useState<{ kind: "success" | "error"; text: string } | null>(null);
 
@@ -195,7 +201,9 @@ export default function SettingsPage() {
     }
     try {
       setMetaConnections(await apiListMetaConnections());
+      setMetaCheckError(false);
     } catch (err) {
+      setMetaCheckError(true);
       console.warn("Could not load Meta connections:", err);
     } finally {
       setMetaConnectionsLoaded(true);
@@ -262,16 +270,29 @@ export default function SettingsPage() {
   // --- Google Ads: read-only status, auto-discovered by the sync job under one MCC credential ---
   const [googleAccounts, setGoogleAccounts] = useState<ApiGoogleAdsAccount[]>([]);
   const [googleAccountsLoaded, setGoogleAccountsLoaded] = useState(false);
+  // Same checkError distinction as Meta above — a failed status check must
+  // not read the same as "confirmed zero linked accounts".
+  const [googleCheckError, setGoogleCheckError] = useState(false);
 
-  useEffect(() => {
+  const loadGoogleAccounts = async () => {
     if (activeRole !== "ADMIN") {
       setGoogleAccountsLoaded(true);
       return;
     }
-    apiListGoogleAdsAccounts()
-      .then(setGoogleAccounts)
-      .catch(err => console.warn("Could not load Google Ads accounts:", err))
-      .finally(() => setGoogleAccountsLoaded(true));
+    try {
+      setGoogleAccounts(await apiListGoogleAdsAccounts());
+      setGoogleCheckError(false);
+    } catch (err) {
+      setGoogleCheckError(true);
+      console.warn("Could not load Google Ads accounts:", err);
+    } finally {
+      setGoogleAccountsLoaded(true);
+    }
+  };
+
+  useEffect(() => {
+    loadGoogleAccounts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeRole]);
 
   const activeGoogleAccounts = googleAccounts.filter(a => a.status === "ACTIVE");
@@ -863,6 +884,28 @@ export default function SettingsPage() {
           </div>
         );
 
+        // Distinct from both the "Active"/"Inactive" pill above and the
+        // loading pill — the status check itself failed (network/timeout),
+        // so we genuinely don't know whether the integration is connected.
+        // Showing "Inactive" here would wrongly tell an Admin their working
+        // integration broke.
+        const errorPill = () => (
+          <span className="inline-flex items-center gap-1 text-[9px] font-bold border px-2 py-0.5 rounded-full shrink-0 bg-amber-50 text-amber-700 border-amber-150">
+            <AlertTriangle className="h-2.5 w-2.5" />
+            Couldn&apos;t verify
+          </span>
+        );
+        const errorInfoBox = (onRetry: () => void) => (
+          <div className="bg-amber-50 border border-amber-150 rounded-xl px-3 py-2 flex items-start gap-2">
+            <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <p className="text-[10px] font-extrabold text-amber-700">Couldn&apos;t verify connection status</p>
+              <p className="text-[10px] text-amber-600">This may be a temporary network issue, not a broken integration.</p>
+            </div>
+            <button onClick={onRetry} className="text-[10px] font-bold text-amber-700 hover:underline shrink-0">Retry</button>
+          </div>
+        );
+
         const renderMetaCard = () => (
           <div key="meta" className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col gap-3 shadow-sm hover:shadow-md transition-shadow">
             <div className="flex items-start justify-between gap-2">
@@ -871,7 +914,7 @@ export default function SettingsPage() {
                   <img src="https://img.icons8.com/?size=100&id=wA5rN96FVDtq&format=png&color=000000" alt="Meta" className="h-full w-full object-contain" />
                 </div>
                 <h4 className="text-sm font-extrabold text-slate-900 truncate">Meta Ads</h4>
-                {metaConnectionsLoaded ? statusPill(activeMetaConnections.length > 0) : loadingPill()}
+                {!metaConnectionsLoaded ? loadingPill() : metaCheckError ? errorPill() : statusPill(activeMetaConnections.length > 0)}
               </div>
               {cardMenu(
                 "meta",
@@ -886,6 +929,8 @@ export default function SettingsPage() {
             </p>
             {!metaConnectionsLoaded ? (
               loadingInfoBox()
+            ) : metaCheckError ? (
+              errorInfoBox(loadMetaConnections)
             ) : activeMetaConnections.length > 0 ? (
               <div className="bg-slate-50 border border-slate-150 rounded-xl px-3 py-2 space-y-1.5">
                 <p className="text-[10px] font-extrabold text-slate-700">
@@ -936,7 +981,7 @@ export default function SettingsPage() {
                   <img src="https://img.icons8.com/?size=100&id=4hR4Ih04Je2t&format=png&color=000000" alt="Google Ads" className="h-full w-full object-contain" />
                 </div>
                 <h4 className="text-sm font-extrabold text-slate-900 truncate">Google Ads</h4>
-                {googleAccountsLoaded ? statusPill(activeGoogleAccounts.length > 0) : loadingPill()}
+                {!googleAccountsLoaded ? loadingPill() : googleCheckError ? errorPill() : statusPill(activeGoogleAccounts.length > 0)}
               </div>
               {cardMenu("google", "/dashboard/settings/integrations?app=google")}
             </div>
@@ -945,6 +990,8 @@ export default function SettingsPage() {
             </p>
             {!googleAccountsLoaded ? (
               loadingInfoBox()
+            ) : googleCheckError ? (
+              errorInfoBox(loadGoogleAccounts)
             ) : activeGoogleAccounts.length > 0 ? (
               <div className="bg-slate-50 border border-slate-150 rounded-xl px-3 py-2 space-y-1">
                 <p className="text-[10px] font-extrabold text-slate-700">

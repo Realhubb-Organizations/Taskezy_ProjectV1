@@ -492,6 +492,12 @@ interface AppState {
   // loading" apart from "genuinely empty" instead of flashing a false
   // empty state.
   isDataLoading: boolean;
+  // Distinct from "genuinely empty" — set when loadAllRealData's fetch
+  // itself failed (network blip, 5xx, bad session), so a page whose data
+  // comes entirely from this bulk load (e.g. Reports) can show a real error
+  // state instead of silently rendering empty charts/tables. Call
+  // triggerManualRefresh() to retry.
+  dataLoadError: boolean;
   // Increments whenever the server reports a lead changed anywhere (status,
   // reassignment, edit, delete, new lead) — list a page's own fetch effect's
   // deps on this to have it refetch live. See the "leads-changed" SSE listener.
@@ -1054,11 +1060,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // instead of flashing an empty state — real skeleton loading UI is the
   // next piece of work, this flag is what it hooks into.
   const [isDataLoading, setIsDataLoading] = useState(true);
+  // See dataLoadError on AppContextType — distinct from an empty org.
+  const [dataLoadError, setDataLoadError] = useState(false);
 
   // Real backend integration (Taskezy-Server) — every domain below is fetched
   // from the real database. Nothing in this file falls back to mock data.
   const loadAllRealData = async (role?: Role) => {
     setIsDataLoading(true);
+    setDataLoadError(false);
     try {
       const [apiLeads, apiUsers, apiProperties, apiResaleUnits, apiFollowups, apiAttendance, apiReimbursements, apiInvoices, apiCalendarEvents, apiAdSpend, apiAdLevelSpend, apiTimesheets, apiTenantSettings] = await Promise.all([
         apiListAllLeads(),
@@ -1103,6 +1112,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // Server unreachable or session invalid. Nothing to fall back to
       // anymore — surfaced as empty lists in the UI, not fake data.
       console.warn("Could not load real data from the API:", err);
+      setDataLoadError(true);
     } finally {
       setIsDataLoading(false);
     }
@@ -2393,6 +2403,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         currentUser,
         authLoading,
         isDataLoading,
+        dataLoadError,
         leadsChangedSignal,
         manualRefreshSignal,
         triggerManualRefresh,

@@ -5,6 +5,14 @@
  * those raw values would end up in what gets logged. Run via `npm run
  * guard:logs` — wired into `npm run build` so a future change to the logging
  * setup can't silently reintroduce this class of bug.
+ *
+ * Scope: this only covers the HTTP access-log serializer above, not the
+ * ~70 manual `logger.*` calls scattered through the rest of the codebase.
+ * A manual review found all of those safe as of this writing, but this
+ * guard would not catch a future regression in one of them — if that scope
+ * ever needs to be real automated coverage rather than a one-time manual
+ * check, it'd need to scan call sites for logger.*(...) calls that pass a
+ * raw req/user/credential object, not just exercise these two serializers.
  */
 import { httpLoggerSerializers } from "../src/middleware/httpLogger";
 

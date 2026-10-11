@@ -9,6 +9,8 @@ import {
   ApiRequestError
 } from "@/lib/apiClient";
 import { SearchableSelect } from "@/components/ui/SearchableDropdown";
+import FieldError, { fieldErrorClass } from "@/components/ui/FieldError";
+import { validateText } from "@/lib/validation";
 
 interface GoogleCampaignLinkerProps {
   propertyId: string;
@@ -27,6 +29,7 @@ export default function GoogleCampaignLinker({ propertyId, isAdmin }: GoogleCamp
   const [selected, setSelected] = useState("");
   const [customInput, setCustomInput] = useState("");
   const [showCustomInput, setShowCustomInput] = useState(false);
+  const [customNameError, setCustomNameError] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -84,11 +87,18 @@ export default function GoogleCampaignLinker({ propertyId, isAdmin }: GoogleCamp
 
   const handleAddCustom = () => {
     const name = customInput.trim();
-    if (!name || campaigns.includes(name)) {
+    const validationError = validateText(name, { label: "Campaign name" });
+    if (validationError) {
+      setCustomNameError(validationError);
+      return;
+    }
+    if (campaigns.includes(name)) {
       setCustomInput("");
+      setCustomNameError("");
       return;
     }
     setCustomInput("");
+    setCustomNameError("");
     setShowCustomInput(false);
     save([...campaigns, name]);
   };
@@ -159,30 +169,35 @@ export default function GoogleCampaignLinker({ propertyId, isAdmin }: GoogleCamp
 
           {/* Fallback for a campaign the sync job hasn't picked up yet, so it can't be in the dropdown above */}
           {showCustomInput ? (
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={customInput}
-                onChange={(e) => setCustomInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    handleAddCustom();
-                  }
-                }}
-                disabled={saving}
-                autoFocus
-                placeholder="Exact campaign name from Google Ads"
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-brand-500 disabled:opacity-60"
-              />
-              <button
-                type="button"
-                onClick={handleAddCustom}
-                disabled={saving}
-                className="shrink-0 bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold px-5 py-2 rounded-xl text-sm transition-all disabled:opacity-50"
-              >
-                {saving ? "…" : "Add"}
-              </button>
+            <div>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={customInput}
+                  onChange={(e) => { setCustomInput(e.target.value); setCustomNameError(""); }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleAddCustom();
+                    }
+                  }}
+                  disabled={saving}
+                  autoFocus
+                  maxLength={200}
+                  aria-invalid={!!customNameError}
+                  placeholder="Exact campaign name from Google Ads"
+                  className={`w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-brand-500 disabled:opacity-60 ${fieldErrorClass(!!customNameError)}`}
+                />
+                <button
+                  type="button"
+                  onClick={handleAddCustom}
+                  disabled={saving}
+                  className="shrink-0 bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold px-5 py-2 rounded-xl text-sm transition-all disabled:opacity-50"
+                >
+                  {saving ? "…" : "Add"}
+                </button>
+              </div>
+              <FieldError message={customNameError} />
             </div>
           ) : (
             <button

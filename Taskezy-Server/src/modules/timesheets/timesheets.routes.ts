@@ -8,10 +8,11 @@ import { ApiError } from "../../utils/ApiError";
 import { pool, query } from "../../db/pool";
 import { businessToday, toBusinessDate } from "../../utils/businessDate";
 import { createNotification } from "../notifications/notifications.service";
-import { listActiveAdminIds } from "../users/users.repository";
+import { listActiveAdminIds, findDirectReportIds } from "../users/users.repository";
 import { getTenantSettings, distanceMeters } from "../tenant-settings/tenant-settings.repository";
 import { listTimesheetsQuerySchema } from "./timesheets.schema";
 import { TIMESHEET_SELECT, findMany as findManyTimesheets } from "./timesheets.repository";
+import { AccessTokenPayload } from "../../utils/tokens";
 
 export const timesheetsRouter = Router();
 
@@ -19,22 +20,41 @@ timesheetsRouter.use(requireAuth);
 
 const SELECT = TIMESHEET_SELECT;
 
-// Sales/HR staff only ever see their own punch history; ADMIN/FINANCE see
-// everyone's — mirrors the read-scoping already enforced on leads. Now a
-// real server-side page (LIMIT/OFFSET) instead of every punch record —
-// including punch_in_lat/punch_in_lng GPS coordinates — for an employee's
-// (or, for ADMIN/FINANCE, every employee's) entire history in one query.
+// Same three-way split as leads.service.ts's scopeForCaller — duplicated
+// rather than imported since that function isn't exported (see call-log's,
+// followups', invoices', and attendance's own copies of this same pattern
+// for precedent). Previously a Manager (role AGENT, roleType MANAGER) was
+// hard-scoped to only their own punch history, same as a plain Member —
+// under-restrictive relative to every other self/team/all-records endpoint
+// in this codebase — so they now also see their direct reports' rows.
+async function scopedUserIdsForCaller(caller: AccessTokenPayload): Promise<string[] | undefined> {
+  if (caller.role !== "AGENT") return undefined;
+  if (caller.roleType === "MEMBER") return [caller.sub];
+  if (caller.roleType === "MANAGER") {
+    const reportIds = await findDirectReportIds(caller.sub);
+    return [caller.sub, ...reportIds];
+  }
+  return undefined;
+}
+
+// Sales/HR staff only ever see their own (Manager: + their team's) punch
+// history; ADMIN/FINANCE see everyone's — mirrors the read-scoping already
+// enforced on leads. Now a real server-side page (LIMIT/OFFSET) instead of
+// every punch record — including punch_in_lat/punch_in_lng GPS coordinates —
+// for an employee's (or, for ADMIN/FINANCE, every employee's) entire history
+// in one query.
 timesheetsRouter.get(
   "/",
   validate({ query: listTimesheetsQuerySchema }),
   asyncHandler(async (req, res) => {
     const { page, pageSize, userId } = req.query as unknown as { page: number; pageSize: number; userId?: string };
-    const isManager = req.user!.role === "ADMIN" || req.user!.role === "FINANCE";
-    // Security: a non-manager is always hard-scoped to their own rows,
-    // regardless of any userId they pass — only ADMIN/FINANCE can use
-    // userId to drill into a specific employee's history.
-    const scopedToUserId = isManager ? userId : req.user!.sub;
-    const { rows, totalCount } = await findManyTimesheets({ page, pageSize, scopedToUserId });
+    const scopedUserIds = await scopedUserIdsForCaller(req.user!);
+    // Security: a scoped caller (Member/Manager) is always hard-scoped to
+    // their own (+ team) rows, regardless of any userId they pass — only an
+    // unrestricted caller (ADMIN/FINANCE) can use userId to drill into a
+    // specific employee's history.
+    const scopedToUserIds = scopedUserIds ?? (userId ? [userId] : undefined);
+    const { rows, totalCount } = await findManyTimesheets({ page, pageSize, scopedToUserIds });
     sendPaginated(res, rows, { page, pageSize, totalCount, totalPages: Math.max(1, Math.ceil(totalCount / pageSize)) });
   })
 );

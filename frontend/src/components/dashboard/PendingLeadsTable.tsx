@@ -32,8 +32,12 @@ export default function PendingLeadsTable({
   onViewLead?: (leadId: string) => void;
   isLoading?: boolean;
 }) {
-  const { currentUser, recordCallEnded, recordWhatsAppOpened } = useApp();
+  const { currentUser, activeRole, recordCallEnded, recordWhatsAppOpened } = useApp();
   const isAdmin = currentUser?.role === "ADMIN";
+  // Masking decision must follow the Admin's "preview as role" selection,
+  // not their real role — kept separate from isAdmin above, which still
+  // gates real actions (Call/Copy) by the real logged-in role.
+  const isAdminView = activeRole === "ADMIN";
 
   // A pending row without a real leadId isn't an actual CRM lead yet — there's
   // nothing to attach a call-feedback record to, so Manager/Member can't call
@@ -253,7 +257,7 @@ export default function PendingLeadsTable({
                       <p className="font-bold text-slate-900 text-xs [overflow-wrap:anywhere]">{row.name}</p>
                     )}
                     <div className="flex items-center gap-1.5 mt-0.5">
-                      <span className="text-[11px] text-slate-500 font-mono [overflow-wrap:anywhere]">{isAdmin ? row.phone : maskPhone(row.phone)}</span>
+                      <span className="text-[11px] text-slate-500 font-mono [overflow-wrap:anywhere]">{isAdminView ? row.phone : maskPhone(row.phone)}</span>
                       {isAdmin && (
                         <button onClick={() => handleCopy(row)} className="text-slate-350 hover:text-brand-700 shrink-0" title="Copy phone number">
                           {copiedId === row.id ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}

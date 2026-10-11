@@ -188,6 +188,10 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
   const [metaConnectionsLoaded, setMetaConnectionsLoaded] = useState(false);
   const [metaLoading, setMetaLoading] = useState(false);
   const [metaBanner, setMetaBanner] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+  // True only when the status check itself failed (network/5xx) — distinct
+  // from a check that succeeded and found zero active connections, so a
+  // transient blip doesn't read as "the integration is broken".
+  const [metaCheckError, setMetaCheckError] = useState(false);
   const [pageSearch, setPageSearch] = useState("");
   const [pageTablePage, setPageTablePage] = useState(1);
   const [pageTableRowsPerPage, setPageTableRowsPerPage] = useState(PAGE_TABLE_SIZE);
@@ -199,7 +203,9 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
     }
     try {
       setMetaConnections(await apiListMetaConnections());
+      setMetaCheckError(false);
     } catch (err) {
+      setMetaCheckError(true);
       console.warn("Could not load Meta connections:", err);
     } finally {
       setMetaConnectionsLoaded(true);
@@ -308,16 +314,28 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
   // --- Google ---
   const [googleAccounts, setGoogleAccounts] = useState<ApiGoogleAdsAccount[]>([]);
   const [googleAccountsLoaded, setGoogleAccountsLoaded] = useState(false);
+  // Same checkError distinction as Meta above.
+  const [googleCheckError, setGoogleCheckError] = useState(false);
 
-  useEffect(() => {
+  const loadGoogleAccounts = async () => {
     if (key !== "google" || activeRole !== "ADMIN") {
       setGoogleAccountsLoaded(true);
       return;
     }
-    apiListGoogleAdsAccounts()
-      .then(setGoogleAccounts)
-      .catch(err => console.warn("Could not load Google Ads accounts:", err))
-      .finally(() => setGoogleAccountsLoaded(true));
+    try {
+      setGoogleAccounts(await apiListGoogleAdsAccounts());
+      setGoogleCheckError(false);
+    } catch (err) {
+      setGoogleCheckError(true);
+      console.warn("Could not load Google Ads accounts:", err);
+    } finally {
+      setGoogleAccountsLoaded(true);
+    }
+  };
+
+  useEffect(() => {
+    loadGoogleAccounts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, activeRole]);
 
   const dataLoaded = key === "meta" ? metaConnectionsLoaded : googleAccountsLoaded;
@@ -346,6 +364,12 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
   const tab = key === "meta" ? metaTab : googleTab;
 
   const active = key === "meta" ? activeMetaConnections.length > 0 : activeGoogleAccounts.length > 0;
+  // Whether the status check itself failed, as opposed to succeeding and
+  // reporting "not connected" — kept separate from `active` so the UI can
+  // tell an Admin "couldn't verify" instead of implying the integration
+  // broke.
+  const checkError = key === "meta" ? metaCheckError : googleCheckError;
+  const retryCheck = key === "meta" ? loadMetaConnections : loadGoogleAccounts;
   const connectedCount = key === "meta" ? activeMetaConnections.length : activeGoogleAccounts.length;
   // Most recent connection's created_at, across whichever platform is
   // active — the same real timestamp the Connected Apps card labels
@@ -512,7 +536,12 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
             <div className="flex-1 min-w-[240px]">
               <div className="flex items-center gap-2 flex-wrap">
                 <h2 className="text-lg font-extrabold text-slate-900">{info.name}</h2>
-                {statusPill(active)}
+                {checkError ? (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-bold border px-2 py-0.5 rounded-full shrink-0 bg-amber-50 text-amber-700 border-amber-150">
+                    <AlertTriangle className="h-2.5 w-2.5" />
+                    Couldn&apos;t verify
+                  </span>
+                ) : statusPill(active)}
               </div>
               <p className="text-xs text-slate-500 mt-1 max-w-lg">{info.description}</p>
             </div>
@@ -600,17 +629,35 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
                 <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-3">
                   <h3 className="text-sm font-extrabold text-slate-900">Integration Status</h3>
-                  <div className={`rounded-xl px-3.5 py-3 border ${active ? "bg-emerald-50 border-emerald-100" : "bg-slate-50 border-slate-150"}`}>
-                    <p className={`text-xs font-extrabold flex items-center gap-1.5 ${active ? "text-emerald-700" : "text-slate-600"}`}>
-                      <span className={`h-1.5 w-1.5 rounded-full ${active ? "bg-emerald-500" : "bg-slate-400"}`} />
-                      {active ? "Connected" : "Not Connected"}
-                    </p>
-                    <p className="text-[11px] text-slate-500 mt-1">
-                      {active
-                        ? `Your ${info.name} account is connected and ${key === "meta" ? "capturing leads" : "syncing spend"}.`
-                        : `Connect your ${info.name} account to start ${key === "meta" ? "capturing leads" : "syncing spend"}.`}
-                    </p>
-                  </div>
+                  {checkError ? (
+                    <div className="rounded-xl px-3.5 py-3 border bg-amber-50 border-amber-150">
+                      <p className="text-xs font-extrabold flex items-center gap-1.5 text-amber-700">
+                        <AlertTriangle className="h-3.5 w-3.5" />
+                        Couldn&apos;t verify connection status
+                      </p>
+                      <p className="text-[11px] text-amber-600 mt-1">
+                        This may be a temporary network issue, not a broken integration — try again.
+                      </p>
+                      <button
+                        onClick={retryCheck}
+                        className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-bold text-amber-700 hover:underline"
+                      >
+                        <RefreshCw className="h-3 w-3" /> Retry check
+                      </button>
+                    </div>
+                  ) : (
+                    <div className={`rounded-xl px-3.5 py-3 border ${active ? "bg-emerald-50 border-emerald-100" : "bg-slate-50 border-slate-150"}`}>
+                      <p className={`text-xs font-extrabold flex items-center gap-1.5 ${active ? "text-emerald-700" : "text-slate-600"}`}>
+                        <span className={`h-1.5 w-1.5 rounded-full ${active ? "bg-emerald-500" : "bg-slate-400"}`} />
+                        {active ? "Connected" : "Not Connected"}
+                      </p>
+                      <p className="text-[11px] text-slate-500 mt-1">
+                        {active
+                          ? `Your ${info.name} account is connected and ${key === "meta" ? "capturing leads" : "syncing spend"}.`
+                          : `Connect your ${info.name} account to start ${key === "meta" ? "capturing leads" : "syncing spend"}.`}
+                      </p>
+                    </div>
+                  )}
                   {key === "meta" ? (
                     active ? (
                       <>

@@ -19,6 +19,11 @@
 
 CREATE TABLE IF NOT EXISTS device_call_log (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  -- No ON DELETE: deleting a user shouldn't silently erase the call history
+  -- they generated — it stays as a record of what happened, same reasoning
+  -- as call_attempts.caller_user_id. The user-delete transaction
+  -- (users.routes.ts) already catches any FK violation generically and
+  -- returns a clean conflict error rather than a raw DB error.
   user_id UUID NOT NULL REFERENCES users(id),
   phone_number TEXT NOT NULL,
   call_type TEXT NOT NULL CHECK (call_type IN ('INCOMING', 'OUTGOING', 'MISSED', 'REJECTED', 'BLOCKED', 'UNKNOWN')),
