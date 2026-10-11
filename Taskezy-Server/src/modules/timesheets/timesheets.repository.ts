@@ -36,13 +36,13 @@ export interface TimesheetListFilter {
   page: number;
   pageSize: number;
   /**
-   * Hard-restricts the result to one employee's rows. The route always sets
-   * this to the caller's own id for a non-manager (real security scoping,
-   * not optional), and optionally to an ADMIN/FINANCE-requested userId for
-   * a manager's single-employee drill-down. Undefined for a manager's
-   * "everyone" view.
+   * Hard-restricts the result to these employees' rows. The route always
+   * sets this to [caller.sub] for a Member, [caller.sub, ...reportIds] for
+   * a Manager (real security scoping, not optional), and optionally to a
+   * single ADMIN/FINANCE-requested userId for a drill-down. Undefined for
+   * an ADMIN/FINANCE "everyone" view.
    */
-  scopedToUserId?: string;
+  scopedToUserIds?: string[];
 }
 
 /**
@@ -52,8 +52,8 @@ export interface TimesheetListFilter {
  * punch_in_lat/punch_in_lng — in one unbounded query.
  */
 export async function findMany(filter: TimesheetListFilter): Promise<{ rows: TimesheetListRow[]; totalCount: number }> {
-  const whereClause = filter.scopedToUserId ? "WHERE t.user_id = $1" : "";
-  const params: unknown[] = filter.scopedToUserId ? [filter.scopedToUserId] : [];
+  const whereClause = filter.scopedToUserIds ? "WHERE t.user_id = ANY($1::uuid[])" : "";
+  const params: unknown[] = filter.scopedToUserIds ? [filter.scopedToUserIds] : [];
 
   const countResult = await query<{ count: string }>(
     `SELECT count(*) FROM timesheet_logs t ${whereClause}`,

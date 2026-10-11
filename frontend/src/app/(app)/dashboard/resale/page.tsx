@@ -8,10 +8,12 @@ import { Plus, X, Search, Landmark, PhoneCall, Link2, CheckCircle } from "lucide
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
 import TablePagination, { DEFAULT_ROWS_PER_PAGE_OPTIONS } from "@/components/ui/TablePagination";
 import { maskPhone, maskEmail } from "@/lib/maskPII";
+import FieldError, { fieldErrorClass } from "@/components/ui/FieldError";
+import { collectErrors, validatePrice } from "@/lib/validation";
 
 export default function ResalePage() {
   const { toast } = useDialog();
-  const { resaleUnits, addResaleUnit, leads, activeRole, manualRefreshSignal } = useApp();
+  const { resaleUnits, addResaleUnit, leads, activeRole, manualRefreshSignal, currentUser } = useApp();
 
   // Filters state
   const [searchQuery, setSearchQuery] = useState("");
@@ -34,8 +36,8 @@ export default function ResalePage() {
   const [resaleLoc, setResaleLoc] = useState("");
   const [resalePrice, setResalePrice] = useState("");
   const [resaleDesc, setResaleDesc] = useState("");
-  const [resaleOwner, setResaleOwner] = useState("SqftGenius Solutions LLP");
   const [resaleContact, setResaleContact] = useState("");
+  const [resaleErrors, setResaleErrors] = useState<Partial<Record<"price", string>>>({});
 
   // Lead finder modal
   const [matchingLeads, setMatchingLeads] = useState<any[]>([]);
@@ -105,10 +107,15 @@ export default function ResalePage() {
 
   const handlePostResale = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!resaleProp || !resalePrice) {
-      toast("Property name and price are required.", "warning");
+    const errors = collectErrors<"price">({
+      price: validatePrice(resalePrice, { required: true, label: "Price" })
+    });
+    setResaleErrors(errors);
+    if (!resaleProp) {
+      toast("Property name is required.", "warning");
       return;
     }
+    if (Object.keys(errors).length > 0) return;
     if (!resaleContact.trim()) {
       toast("A contact number is required so buyers can reach you.", "warning");
       return;
@@ -119,7 +126,7 @@ export default function ResalePage() {
       location: resaleLoc || "—",
       price: resalePrice.includes("Cr") || resalePrice.includes("Lakh") ? resalePrice : `₹${resalePrice} Cr`,
       description: resaleDesc,
-      listedBy: resaleOwner,
+      listedBy: currentUser?.name || "",
       contactNumber: resaleContact.trim()
     });
     setResaleProp("");
@@ -128,17 +135,26 @@ export default function ResalePage() {
     setResalePrice("");
     setResaleDesc("");
     setResaleContact("");
+    setResaleErrors({});
     setIsPostOpen(false);
     refreshUnitsTable();
   };
 
   const handleFindLeads = (unit: ResaleUnit) => {
     setActiveUnit(unit);
-    // Find crm leads that have matching property names or interest zones
-    const matches = leads.filter(l => 
-      (l.property && l.property.toLowerCase().includes(unit.builder.toLowerCase())) ||
-      (l.property && unit.property.toLowerCase().includes(l.property.toLowerCase()))
-    );
+    // A lead's only field that corresponds to a resale listing is
+    // lead.property (the property it's interested in) vs. the unit's own
+    // property/builder name — case-insensitive, either containing the
+    // other (same convention as the builder-name matching used to build
+    // the unit.builder/unit.property values themselves across this file).
+    const unitProperty = unit.property.toLowerCase();
+    const unitBuilder = unit.builder.toLowerCase();
+    const matches = leads.filter(l => {
+      if (!l.property) return false;
+      const leadProperty = l.property.toLowerCase();
+      return leadProperty.includes(unitProperty) || unitProperty.includes(leadProperty) ||
+        leadProperty.includes(unitBuilder) || unitBuilder.includes(leadProperty);
+    });
     setMatchingLeads(matches);
   };
 
@@ -322,8 +338,10 @@ export default function ResalePage() {
                     value={resalePrice}
                     onChange={(e) => setResalePrice(e.target.value)}
                     placeholder="e.g. 2.40 Cr"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none"
+                    aria-invalid={!!resaleErrors.price}
+                    className={`w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none ${fieldErrorClass(!!resaleErrors.price)}`}
                   />
+                  <FieldError message={resaleErrors.price} />
                 </div>
               </div>
 

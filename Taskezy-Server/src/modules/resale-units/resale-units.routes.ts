@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { requireAuth } from "../../middleware/auth";
+import { requireAuth, requireRole } from "../../middleware/auth";
 import { validate } from "../../middleware/validate";
 import { asyncHandler } from "../../utils/asyncHandler";
 import { sendOk, sendPaginated } from "../../utils/apiResponse";
@@ -78,8 +78,10 @@ const createResaleUnitSchema = z.object({
   contactNumber: z.string().max(30).optional()
 });
 
+// Writes are ADMIN-only, matching the same convention as properties.routes.ts.
 resaleUnitsRouter.post(
   "/",
+  requireRole("ADMIN"),
   validate({ body: createResaleUnitSchema }),
   asyncHandler(async (req, res) => {
     const { propertyName, builder, location, price, description, listedBy, contactNumber } = req.body;

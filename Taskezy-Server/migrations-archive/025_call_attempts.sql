@@ -21,6 +21,11 @@
 CREATE TABLE IF NOT EXISTS call_attempts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   lead_id UUID NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+  -- No ON DELETE here, unlike lead_id above: deleting a user should not
+  -- silently erase the call history they generated — it stays as a record
+  -- of what happened, same reasoning as device_call_log.user_id. Deleting a
+  -- user whose id is still referenced here will fail the FK constraint
+  -- (by design) rather than orphan or cascade-delete this row.
   caller_user_id UUID NOT NULL REFERENCES users(id),
   channel TEXT NOT NULL DEFAULT 'CALL' CHECK (channel IN ('CALL', 'WHATSAPP')),
   started_at TIMESTAMPTZ,

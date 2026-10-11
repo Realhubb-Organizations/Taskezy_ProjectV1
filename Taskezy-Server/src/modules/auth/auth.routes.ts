@@ -10,7 +10,7 @@ export const authRouter = Router();
 
 authRouter.post("/login", authRateLimiter, validate({ body: loginSchema }), asyncHandler(loginHandler));
 authRouter.post("/refresh", refreshRateLimiter, asyncHandler(refreshHandler));
-authRouter.post("/logout", asyncHandler(logoutHandler));
+authRouter.post("/logout", requireAuth, asyncHandler(logoutHandler));
 authRouter.get("/me", requireAuth, asyncHandler(meHandler));
 authRouter.patch(
   "/password",

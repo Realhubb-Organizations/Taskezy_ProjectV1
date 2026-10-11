@@ -9,6 +9,8 @@ import {
   ApiRequestError
 } from "@/lib/apiClient";
 import { SearchableSelect } from "@/components/ui/SearchableDropdown";
+import FieldError, { fieldErrorClass } from "@/components/ui/FieldError";
+import { validateText } from "@/lib/validation";
 
 interface SheetSourceLinkerProps {
   propertyId: string;
@@ -31,6 +33,7 @@ export default function SheetSourceLinker({ propertyId, isAdmin }: SheetSourceLi
   const [selected, setSelected] = useState("");
   const [customInput, setCustomInput] = useState("");
   const [showCustomInput, setShowCustomInput] = useState(false);
+  const [customNameError, setCustomNameError] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -88,11 +91,18 @@ export default function SheetSourceLinker({ propertyId, isAdmin }: SheetSourceLi
 
   const handleAddCustom = () => {
     const name = customInput.trim();
-    if (!name || sources.includes(name)) {
+    const validationError = validateText(name, { label: "Sheet source name" });
+    if (validationError) {
+      setCustomNameError(validationError);
+      return;
+    }
+    if (sources.includes(name)) {
       setCustomInput("");
+      setCustomNameError("");
       return;
     }
     setCustomInput("");
+    setCustomNameError("");
     setShowCustomInput(false);
     save([...sources, name]);
   };
@@ -163,30 +173,35 @@ export default function SheetSourceLinker({ propertyId, isAdmin }: SheetSourceLi
 
           {/* Fallback for a sheet source that hasn't sent a lead yet, so it can't be in the dropdown above */}
           {showCustomInput ? (
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={customInput}
-                onChange={(e) => setCustomInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    handleAddCustom();
-                  }
-                }}
-                disabled={saving}
-                autoFocus
-                placeholder="Exact sheet tab name, e.g. Neopolis"
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-brand-500 disabled:opacity-60"
-              />
-              <button
-                type="button"
-                onClick={handleAddCustom}
-                disabled={saving}
-                className="shrink-0 bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold px-5 py-2 rounded-xl text-sm transition-all disabled:opacity-50"
-              >
-                {saving ? "…" : "Add"}
-              </button>
+            <div>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={customInput}
+                  onChange={(e) => { setCustomInput(e.target.value); setCustomNameError(""); }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleAddCustom();
+                    }
+                  }}
+                  disabled={saving}
+                  autoFocus
+                  maxLength={200}
+                  aria-invalid={!!customNameError}
+                  placeholder="Exact sheet tab name, e.g. Neopolis"
+                  className={`w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-brand-500 disabled:opacity-60 ${fieldErrorClass(!!customNameError)}`}
+                />
+                <button
+                  type="button"
+                  onClick={handleAddCustom}
+                  disabled={saving}
+                  className="shrink-0 bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold px-5 py-2 rounded-xl text-sm transition-all disabled:opacity-50"
+                >
+                  {saving ? "…" : "Add"}
+                </button>
+              </div>
+              <FieldError message={customNameError} />
             </div>
           ) : (
             <button

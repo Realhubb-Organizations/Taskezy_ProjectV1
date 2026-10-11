@@ -204,14 +204,13 @@ export default function AdminPage() {
                   <th className="p-4">Contact Info</th>
                   <th className="p-4">Department / Designation</th>
                   <th className="p-4">Role Type</th>
-                  <th className="p-4">Password Hash</th>
                   <th className="p-4">Status</th>
                   <th className="p-4 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {isDataLoading && users.length === 0 ? (
-                  <TableRowsSkeleton rows={6} columns={8} />
+                  <TableRowsSkeleton rows={6} columns={7} />
                 ) : (
                   users.map((user) => (
                   <tr key={user.id} className="hover:bg-slate-50/50 transition-colors">
@@ -233,10 +232,6 @@ export default function AdminPage() {
                     </td>
                     <td className="p-4 text-slate-500 font-semibold">
                       {user.role_type || (user.role === "ADMIN" ? "Manager" : "Member")}
-                    </td>
-                    {/* Passwords are never readable (only a hash is stored server-side). */}
-                    <td className="p-4 font-mono text-slate-400 font-black" title="Passwords are hidden; set a new one with Edit">
-                      ••••••••
                     </td>
                     <td className="p-4">
                       <span
@@ -360,7 +355,7 @@ export default function AdminPage() {
                   <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Department</label>
                   <select
                     value={addDepartment}
-                    onChange={(e) => setAddDepartment(e.target.value as any)}
+                    onChange={(e) => setAddDepartment(e.target.value as "SALES" | "TECH" | "MARKETING" | "FINANCE")}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none"
                   >
                     <option value="SALES">SALES</option>
@@ -389,7 +384,7 @@ export default function AdminPage() {
                   <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Role Type</label>
                   <select
                     value={addRoleType}
-                    onChange={(e) => setAddRoleType(e.target.value as any)}
+                    onChange={(e) => setAddRoleType(e.target.value as "Manager" | "Member")}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none"
                   >
                     <option value="Member">Member</option>
@@ -400,7 +395,7 @@ export default function AdminPage() {
                   <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">SaaS License Type</label>
                   <select
                     value={addRole}
-                    onChange={(e) => setAddRole(e.target.value as any)}
+                    onChange={(e) => setAddRole(e.target.value as Role)}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none"
                   >
                     <option value="AGENT">AGENT (Sales/IT/Mktg)</option>
@@ -463,7 +458,7 @@ export default function AdminPage() {
             </div>
 
             <p className="text-[10px] text-slate-500 leading-relaxed font-medium">
-              Updating details for <strong>{selectedUser.email}</strong>. Changes commit instantly to the simulated SQL database partition.
+              Updating details for <strong>{selectedUser.email}</strong>. Changes save immediately to the database.
             </p>
 
             <form onSubmit={handleEditorSubmit} noValidate className="space-y-4">

@@ -166,6 +166,11 @@ export default function NotificationBell() {
   const [serverRows, setServerRows] = useState<Notification[]>([]);
   const [serverTotalCount, setServerTotalCount] = useState(0);
   const [serverLoading, setServerLoading] = useState(false);
+  // Distinct from "0 notifications" — a failed fetch must never look like a
+  // genuinely-empty tab. Same pattern as properties page's propertiesLoadError,
+  // simplified to a plain text row (no retry button) since this is a small
+  // transient panel that naturally refetches the next time it's opened.
+  const [notificationsLoadError, setNotificationsLoadError] = useState(false);
 
   const fetchResetKey = `${effectiveScope}|${activeGroup?.key}|${isOpen}`;
   useEffect(() => {
@@ -180,6 +185,7 @@ export default function NotificationBell() {
     if (!isOpen || !activeGroup) return;
     let cancelled = false;
     setServerLoading(true);
+    setNotificationsLoadError(false);
     // Mirrors each group's own client-side filter above (system + category),
     // just evaluated server-side — see notifications.routes.ts's
     // listNotificationsQuerySchema for the matching system/category/
@@ -203,7 +209,9 @@ export default function NotificationBell() {
         setServerTotalCount(result.totalCount);
       })
       .catch((err) => {
-        if (!cancelled) console.warn("Could not load the notifications page:", err);
+        if (cancelled) return;
+        console.warn("Could not load the notifications page:", err);
+        setNotificationsLoadError(true);
       })
       .finally(() => {
         if (!cancelled) setServerLoading(false);
@@ -407,7 +415,12 @@ export default function NotificationBell() {
 
             {/* Active group content */}
             <div ref={listScrollRef} className="flex-1 overflow-y-auto">
-              {(isDataLoading || serverLoading) && pagedItems.length === 0 ? (
+              {notificationsLoadError && pagedItems.length === 0 ? (
+                <p className="px-4 py-6 text-center text-[11px] font-semibold text-amber-600 flex items-center justify-center gap-1.5">
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                  Couldn&apos;t load notifications.
+                </p>
+              ) : (isDataLoading || serverLoading) && pagedItems.length === 0 ? (
                 <div className="px-4 py-3">
                   <CardListSkeleton count={4} />
                 </div>

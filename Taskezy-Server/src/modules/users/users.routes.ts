@@ -4,6 +4,7 @@ import { validate } from "../../middleware/validate";
 import { asyncHandler } from "../../utils/asyncHandler";
 import { sendOk, sendPaginated } from "../../utils/apiResponse";
 import { ApiError } from "../../utils/ApiError";
+import { AccessTokenPayload } from "../../utils/tokens";
 import { hashPassword } from "../../utils/password";
 import { createUserSchema, deleteUserSchema, editUserSchema, listUsersQuerySchema, resetPasswordSchema, userIdParamSchema } from "./users.schema";
 import * as repo from "./users.repository";
@@ -17,6 +18,48 @@ export const usersRouter = Router();
 
 usersRouter.use(requireAuth);
 
+// Same three-way split as leads.service.ts's scopeForCaller — duplicated
+// rather than imported (see call-log's, followups', invoices', attendance's
+// and properties' own copies of this same pattern for precedent), but this
+// one answers a different question than those: it's not which ROWS to
+// return (every active user's id/name/role/department genuinely is needed
+// company-wide — HRMS's headcount/attendance-rate tiles on /dashboard/hrms
+// are open to every department per layout.tsx's checkUserAccess and read
+// users.length across the whole roster, and name-resolution dropdowns
+// routinely need to resolve someone outside the caller's own team, e.g. an
+// unassigned lead's fallback admin), it's which rows the caller is allowed
+// to see the manager_id/manager_name ("reports to") relationship for. A
+// Member genuinely does need that field for people other than themself —
+// LeadDetailDrawer's reassign-target picker and leadAssignment.ts's
+// eligibleAssignees both filter the full roster by other users' manager_id
+// to find the caller's own manager and teammates who share that manager —
+// but there's no legitimate reason for a Member or Manager to see WHO
+// MANAGES WHOM anywhere outside their own reporting line (a different
+// department's org chart, say). Returns the ids whose manager_id/
+// manager_name stay visible, or undefined for "no restriction" (Admin/
+// Finance, the only roles with a real reason to browse the whole company's
+// reporting chain — e.g. Settings "Manage Users").
+async function reportingLineVisibleIds(caller: AccessTokenPayload): Promise<string[] | undefined> {
+  if (caller.role !== "AGENT") return undefined;
+  if (caller.roleType === "MANAGER") {
+    const reportIds = await repo.findDirectReportIds(caller.sub);
+    return [caller.sub, ...reportIds];
+  }
+  // Member: self, their own manager, and that manager's other direct
+  // reports (their teammates) — the token carries no manager_id of its own,
+  // so it's looked up fresh rather than trusted from an old JWT.
+  const self = await repo.findById(caller.sub);
+  if (!self?.manager_id) return [caller.sub];
+  const teammateIds = await repo.findDirectReportIds(self.manager_id);
+  return [caller.sub, self.manager_id, ...teammateIds];
+}
+
+/** Nulls manager_id/manager_name on rows outside the caller's visibility (no-op for Admin/Finance, where visibleIds is undefined). */
+function maskReportingLine(users: repo.UserDirectoryRow[], visibleIds: string[] | undefined): repo.UserDirectoryRow[] {
+  if (!visibleIds) return users;
+  return users.map(u => (visibleIds.includes(u.id) ? u : { ...u, manager_id: null, manager_name: null }));
+}
+
 usersRouter.get(
   "/",
   validate({ query: listUsersQuerySchema }),
@@ -28,12 +71,22 @@ usersRouter.get(
     // (assign-to, reassign, team pickers) and AppContext's own bulk load
     // depend on getting back the complete active-user array, not one page of
     // it. Only a caller that explicitly asks for a page (the admin Settings
-    // "Manage Users" table) gets the paginated shape.
+    // "Manage Users" table) gets the paginated shape. The reporting-chain
+    // (manager_id/manager_name) fields are then masked per-row to the
+    // caller's own scope above — everything else about the row (id/name/
+    // role/department) stays, since those are needed company-wide.
     if (page === undefined && pageSize === undefined) {
-      const users = await repo.findAllActive();
-      sendOk(res, users);
+      const [users, visibleIds] = await Promise.all([repo.findAllActive(), reportingLineVisibleIds(req.user!)]);
+      sendOk(res, maskReportingLine(users, visibleIds));
       return;
     }
+
+    // The paginated shape only ever backs the admin Settings "Manage Users"
+    // table (frontend/src/app/(app)/dashboard/settings/page.tsx) — that
+    // whole route is already gated to ADMIN client-side (layout.tsx's
+    // checkUserAccess), so this is the server-side enforcement of the same
+    // rule for a caller hitting the paginated query params directly.
+    if (req.user!.role !== "ADMIN") throw ApiError.forbidden();
 
     const effectivePage = page ?? 1;
     const effectivePageSize = pageSize ?? 20;

@@ -24,7 +24,8 @@ import {
   Check,
   ShieldAlert,
   Trash2,
-  CalendarDays
+  CalendarDays,
+  AlertTriangle
 } from "lucide-react";
 import { todayIso } from "@/components/ui/DateRangePicker";
 
@@ -72,15 +73,24 @@ export default function FinancePage() {
   const [serverInvoices, setServerInvoices] = useState<Invoice[]>([]);
   const [serverInvoicesTotalCount, setServerInvoicesTotalCount] = useState(0);
   const [serverInvoicesLoading, setServerInvoicesLoading] = useState(true);
+  // Distinct from "0 rows" — a failed fetch must never look like a
+  // genuinely-empty billing list. Same pattern as properties page's propertiesLoadError.
+  const [invoicesLoadError, setInvoicesLoadError] = useState(false);
 
   const fetchInvoicesPage = (page: number, rowsPerPage: number) => {
     setServerInvoicesLoading(true);
+    setInvoicesLoadError(false);
     apiListInvoicesPage(page, rowsPerPage)
       .then((result) => {
         setServerInvoices(result.rows.map(mapApiInvoiceToFrontend));
         setServerInvoicesTotalCount(result.totalCount);
       })
-      .catch((err) => console.error("Could not load the invoices list page:", err))
+      .catch((err) => {
+        console.error("Could not load the invoices list page:", err);
+        setServerInvoices([]);
+        setServerInvoicesTotalCount(0);
+        setInvoicesLoadError(true);
+      })
       .finally(() => setServerInvoicesLoading(false));
   };
 
@@ -108,11 +118,16 @@ export default function FinancePage() {
   const [serverReimbursements, setServerReimbursements] = useState<ReimbursementClaim[]>([]);
   const [serverReimbTotalCount, setServerReimbTotalCount] = useState(0);
   const [serverReimbLoading, setServerReimbLoading] = useState(true);
+  // Distinct from "0 rows" — a failed fetch must never look like a
+  // genuinely-empty claims list. Same pattern as properties page's propertiesLoadError.
+  const [reimbursementsLoadError, setReimbursementsLoadError] = useState(false);
+  const [reimbRefreshNonce, setReimbRefreshNonce] = useState(0);
 
   useEffect(() => {
     if (activeTabParam !== "reimbursements") return;
     let cancelled = false;
     setServerReimbLoading(true);
+    setReimbursementsLoadError(false);
     apiListReimbursementsPage(reimbPage, reimbRowsPerPage, {
       status: reimbFilter === "All" ? undefined : REIMB_STATUS_TO_API[reimbFilter]
     })
@@ -122,14 +137,18 @@ export default function FinancePage() {
         setServerReimbTotalCount(result.totalCount);
       })
       .catch((err) => {
-        if (!cancelled) console.error("Could not load the reimbursements list page:", err);
+        if (cancelled) return;
+        console.error("Could not load the reimbursements list page:", err);
+        setServerReimbursements([]);
+        setServerReimbTotalCount(0);
+        setReimbursementsLoadError(true);
       })
       .finally(() => {
         if (!cancelled) setServerReimbLoading(false);
       });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTabParam, reimbPage, reimbRowsPerPage, reimbFilter, manualRefreshSignal]);
+  }, [activeTabParam, reimbPage, reimbRowsPerPage, reimbFilter, manualRefreshSignal, reimbRefreshNonce]);
 
   // Same overlay as displayedInvoices — approve/reject/delete update
   // AppContext's `reimbursements` optimistically, reflected immediately.
@@ -255,7 +274,23 @@ export default function FinancePage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
-                  {serverInvoicesLoading && serverInvoices.length === 0 ? (
+                  {invoicesLoadError ? (
+                    <tr>
+                      <td colSpan={8} className="p-8">
+                        <div className="flex flex-col items-center gap-3 text-center">
+                          <AlertTriangle className="h-5 w-5 text-amber-500" />
+                          <p className="text-xs font-semibold text-slate-600">Couldn&apos;t load invoices.</p>
+                          <button
+                            type="button"
+                            onClick={() => fetchInvoicesPage(invoicesPage, invoicesRowsPerPage)}
+                            className="px-4 py-1.5 rounded-lg bg-[#0B1E6E] hover:bg-[#081650] text-white text-xs font-bold transition-colors"
+                          >
+                            Retry
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : serverInvoicesLoading && serverInvoices.length === 0 ? (
                     <TableRowsSkeleton rows={6} columns={8} />
                   ) : displayedInvoices.map((inv) => (
                     <tr key={inv.id} className="hover:bg-slate-50/50">
@@ -356,7 +391,23 @@ export default function FinancePage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
-                  {serverReimbLoading && serverReimbursements.length === 0 ? (
+                  {reimbursementsLoadError ? (
+                    <tr>
+                      <td colSpan={7} className="p-8">
+                        <div className="flex flex-col items-center gap-3 text-center">
+                          <AlertTriangle className="h-5 w-5 text-amber-500" />
+                          <p className="text-xs font-semibold text-slate-600">Couldn&apos;t load reimbursement claims.</p>
+                          <button
+                            type="button"
+                            onClick={() => setReimbRefreshNonce(n => n + 1)}
+                            className="px-4 py-1.5 rounded-lg bg-[#0B1E6E] hover:bg-[#081650] text-white text-xs font-bold transition-colors"
+                          >
+                            Retry
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : serverReimbLoading && serverReimbursements.length === 0 ? (
                     <TableRowsSkeleton rows={6} columns={7} />
                   ) : displayedReimbursements.map((c) => (
                     <tr key={c.id} className="hover:bg-slate-50/50">

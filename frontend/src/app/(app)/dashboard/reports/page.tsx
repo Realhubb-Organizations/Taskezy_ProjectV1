@@ -3,7 +3,7 @@
 import React, { Suspense, useState } from "react";
 import { useApp } from "@/context/AppContext";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Download, Megaphone, Users, UserCog } from "lucide-react";
+import { Download, Megaphone, Users, UserCog, AlertTriangle } from "lucide-react";
 import DateRangeFilter, { DateRange } from "@/components/reports/DateRangeFilter";
 import MarketingReports from "@/components/reports/MarketingReports";
 import ManagerReports from "@/components/reports/ManagerReports";
@@ -28,7 +28,7 @@ function daysAgo(n: number): string {
 }
 
 function ReportsPageContent() {
-  const { leads, currentUser, activeRole } = useApp();
+  const { leads, currentUser, activeRole, isDataLoading, dataLoadError, triggerManualRefresh } = useApp();
   const router = useRouter();
   const searchParams = useSearchParams();
   const isAdmin = activeRole === "ADMIN";
@@ -102,9 +102,31 @@ function ReportsPageContent() {
       {/* Shared date-range filter — every report is generated for this selected window */}
       <DateRangeFilter value={dateRange} onChange={setDateRange} />
 
-      {activeTab === "marketing" && <MarketingReports dateRange={dateRange} />}
-      {activeTab === "manager" && <ManagerReports dateRange={dateRange} />}
-      {activeTab === "agent" && <AgentReports dateRange={dateRange} />}
+      {/* Every report below is driven entirely by AppContext's single bulk
+          data load (leads/adSpend/properties) — there's no per-report fetch
+          of its own. A failed load there must not look like a genuinely
+          empty reporting period, so it gets the same distinct error+retry
+          treatment as the other pages' own fetch effects, just sourced from
+          the shared dataLoadError flag instead of a local one. */}
+      {dataLoadError && !isDataLoading ? (
+        <div className="flex flex-col items-center gap-3 py-16 text-center border border-dashed border-slate-200 rounded-2xl bg-white">
+          <AlertTriangle className="h-5 w-5 text-amber-500" />
+          <p className="text-xs font-semibold text-slate-600">Couldn&apos;t load report data.</p>
+          <button
+            type="button"
+            onClick={triggerManualRefresh}
+            className="px-4 py-1.5 rounded-lg bg-[#0B1E6E] hover:bg-[#081650] text-white text-xs font-bold transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      ) : (
+        <>
+          {activeTab === "marketing" && <MarketingReports dateRange={dateRange} />}
+          {activeTab === "manager" && <ManagerReports dateRange={dateRange} />}
+          {activeTab === "agent" && <AgentReports dateRange={dateRange} />}
+        </>
+      )}
     </div>
   );
 }
