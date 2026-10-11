@@ -14,12 +14,6 @@ const SPIN_DURATION_MS = 700; // how long the spinner shows after a triggered re
  * On the website build (Capacitor.isNativePlatform() === false) this renders
  * as a bare passthrough — no wrapper, no listeners — so the site is untouched.
  */
-// DIAGNOSTIC: forces pure passthrough unconditionally, even on native, to
-// isolate whether this component's own pointer-event handling is what's
-// blocking native scroll on-device, independent of the Capacitor.isNativePlatform()
-// gate below. Flip back to false once the root cause is confirmed either way.
-const DIAGNOSTIC_FORCE_PASSTHROUGH = true;
-
 export default function PullToRefresh({ children }: { children: React.ReactNode }) {
   const { triggerManualRefresh } = useApp();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -28,7 +22,7 @@ export default function PullToRefresh({ children }: { children: React.ReactNode 
   const [pull, setPull] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
 
-  if (DIAGNOSTIC_FORCE_PASSTHROUGH || !Capacitor.isNativePlatform()) {
+  if (!Capacitor.isNativePlatform()) {
     return <>{children}</>;
   }
 

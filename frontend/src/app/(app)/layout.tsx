@@ -396,7 +396,20 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   const hasPageAccess = checkUserAccess(currentUser, pathname);
 
   return (
-    <div className="min-h-screen flex bg-slate-50 text-slate-800">
+    // h-screen, not min-h-screen: this must be PINNED to the viewport, not
+    // just "at least" it — <main> below is meant to be the one true
+    // scrollable region (it has overflow-y-auto), but that only ever
+    // activates if something above it actually caps the layout at viewport
+    // height. With min-h-screen, this div (and everything in it) just grows
+    // taller than the viewport to fit all content instead, <main> never
+    // becomes shorter than its own content, and the page's real scroll
+    // silently falls through to the window/document — which is NOT what
+    // PullToRefresh.tsx or any of the scroll-spy table components assume
+    // (they all read <main>'s own scrollTop). Root cause of "scrolling does
+    // nothing" app-wide, confirmed live on-device via adb (swipe gestures
+    // produced zero movement even with PullToRefresh's own pointer handling
+    // fully disabled as a diagnostic).
+    <div className="h-screen flex bg-slate-50 text-slate-800">
       {/* Desktop Sidebar — collapses to an icon rail; mobile uses a separate drawer/bottom-tab pattern below, entirely unaffected by this. */}
       <aside
         className={`hidden md:flex md:flex-col md:fixed md:inset-y-0 border-r border-slate-200 bg-white z-20 transition-all duration-200 ${
@@ -551,7 +564,8 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
       </aside>
 
       {/* Main content wrapper */}
-      <div className={`flex flex-col flex-1 w-full min-h-screen transition-all duration-200 ${isSidebarCollapsed ? "md:pl-20" : "md:pl-64"}`}>
+      {/* h-screen, not min-h-screen — same reasoning as the outer wrapper above. */}
+      <div className={`flex flex-col flex-1 w-full h-screen transition-all duration-200 ${isSidebarCollapsed ? "md:pl-20" : "md:pl-64"}`}>
         {/* Top Header Bar */}
         <header
           className="app-header sticky top-0 z-10 flex-shrink-0 h-14 md:h-16 border-b border-slate-200 bg-white/70 backdrop-blur-md flex items-center justify-between px-3 sm:px-6 lg:px-8 gap-2"
@@ -885,7 +899,12 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
             works inconsistently) on a real Android device even though the
             code looks correct. `none` suppresses the glow itself. See
             project_crm_role_based_lead_scoping memory (2026-10-10). */}
-        <main className="flex-1 p-3 sm:p-6 lg:p-8 pb-24 md:pb-8 bg-slate-50/50 overflow-y-auto overflow-x-hidden overscroll-y-none">
+        {/* min-h-0: a flex child defaults to min-height:auto, which refuses
+            to shrink below its own content size even inside an h-screen
+            parent — the other half of the fix above. Without this, <main>
+            still grows to fit all its content instead of capping at the
+            remaining viewport space and letting overflow-y-auto do its job. */}
+        <main className="flex-1 min-h-0 p-3 sm:p-6 lg:p-8 pb-24 md:pb-8 bg-slate-50/50 overflow-y-auto overflow-x-hidden overscroll-y-none">
           <PullToRefresh>
             {hasPageAccess ? children : (
               <div className="min-h-[60vh] flex flex-col items-center justify-center p-6 text-center space-y-6 bg-white border border-slate-200 rounded-3xl shadow-sm max-w-2xl mx-auto my-8 animate-fade-in">
