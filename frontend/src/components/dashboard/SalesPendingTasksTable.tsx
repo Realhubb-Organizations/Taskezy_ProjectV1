@@ -48,8 +48,12 @@ export default function SalesPendingTasksTable({
   taskFilter?: (t: PendingTask) => boolean;
   visibleBuckets?: TaskBucket[]; // legend entries to show — e.g. a Pending Task view has no Upcoming
 }) {
-  const { currentUser } = useApp();
+  const { currentUser, activeRole } = useApp();
   const isAdmin = currentUser?.role === "ADMIN";
+  // Masking decision must follow the Admin's "preview as role" selection,
+  // not their real role — kept separate from isAdmin above, which still
+  // gates real actions (Copy phone/email) by the real logged-in role.
+  const isAdminView = activeRole === "ADMIN";
 
   // Buckets are time-based (pending → missed after 10 min), so re-evaluate
   // periodically rather than only when data changes.
@@ -248,7 +252,7 @@ export default function SalesPendingTasksTable({
                       )}
                       {t.phone && (
                         <div className="flex items-center gap-1.5 mt-0.5">
-                          <span className="text-[11px] text-slate-600 [overflow-wrap:anywhere]">{isAdmin ? t.phone : maskPhone(t.phone)}</span>
+                          <span className="text-[11px] text-slate-600 [overflow-wrap:anywhere]">{isAdminView ? t.phone : maskPhone(t.phone)}</span>
                           {isAdmin && (
                             <button onClick={() => copy(`${t.id}-phone`, t.phone)} className="text-slate-400 hover:text-brand-700 shrink-0" title="Copy phone number">
                               {copied === `${t.id}-phone` ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
@@ -260,7 +264,7 @@ export default function SalesPendingTasksTable({
                     <td className={`${cell} px-4 overflow-hidden`}>
                       {t.email ? (
                         <div className="flex items-center gap-1.5">
-                          <span className="text-slate-700 [overflow-wrap:anywhere]" title={isAdmin ? t.email : undefined}>{isAdmin ? t.email : maskEmail(t.email)}</span>
+                          <span className="text-slate-700 [overflow-wrap:anywhere]" title={isAdminView ? t.email : undefined}>{isAdminView ? t.email : maskEmail(t.email)}</span>
                           {isAdmin && (
                             <button onClick={() => copy(`${t.id}-email`, t.email)} className="text-slate-400 hover:text-brand-700 shrink-0" title="Copy email">
                               {copied === `${t.id}-email` ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}

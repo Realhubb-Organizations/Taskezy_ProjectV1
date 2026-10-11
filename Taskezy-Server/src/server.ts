@@ -45,6 +45,24 @@ async function main(): Promise<void> {
 
   process.on("SIGTERM", () => shutdown("SIGTERM"));
   process.on("SIGINT", () => shutdown("SIGINT"));
+
+  // Request-triggered errors are already safe (every route goes through
+  // asyncHandler), but the 5 background interval jobs above have no
+  // equivalent safety net — an unhandled error in one of them previously
+  // had nothing catching it, which crashes the whole process with no log
+  // of what happened and no graceful connection drain. Logging the actual
+  // error is the point here (that's the gap this closes); the clean
+  // shutdown-and-let-the-supervisor-restart-us path already exists above,
+  // reused as-is rather than attempting to keep running in a state Node
+  // itself no longer guarantees is safe.
+  process.on("uncaughtException", (err) => {
+    logger.error({ err }, "Uncaught exception — shutting down");
+    shutdown("uncaughtException");
+  });
+  process.on("unhandledRejection", (reason) => {
+    logger.error({ err: reason }, "Unhandled promise rejection — shutting down");
+    shutdown("unhandledRejection");
+  });
 }
 
 main().catch((err) => {

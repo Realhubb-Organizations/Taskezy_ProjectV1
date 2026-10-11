@@ -5,12 +5,41 @@ import { validate } from "../../middleware/validate";
 import { asyncHandler } from "../../utils/asyncHandler";
 import { sendOk, sendPaginated } from "../../utils/apiResponse";
 import { ApiError } from "../../utils/ApiError";
+import { AccessTokenPayload } from "../../utils/tokens";
+import { findDirectReportIds } from "../users/users.repository";
 import { createPropertySchema, editPropertySchema, listPropertiesQuerySchema, propertyIdParamSchema } from "./properties.schema";
 import * as repo from "./properties.repository";
 
 export const propertiesRouter = Router();
 
 propertiesRouter.use(requireAuth);
+
+// Same three-way split as leads.service.ts's scopeForCaller — duplicated
+// rather than imported since that function isn't exported (see call-log's,
+// followups', invoices' and attendance's own copies of this same pattern
+// for precedent). Properties have no caller-owned agent_id of their own —
+// scoped via each property's own assigned-team-member list instead: the
+// Properties page's team label (page.tsx's teamLabelForProperty /
+// myTeamMembersOnProperty) already narrows what a Manager/Member is SHOWN
+// to this same self+reports / self-only rule, client-side only. This is
+// the server-side enforcement of that rule, so neither a direct API call
+// nor the page's "Download" button (which just serializes the row as-is)
+// can read the full property team roster past what that role is meant to see.
+async function scopedTeamAgentIdsForCaller(caller: AccessTokenPayload): Promise<string[] | undefined> {
+  if (caller.role !== "AGENT") return undefined;
+  if (caller.roleType === "MEMBER") return [caller.sub];
+  if (caller.roleType === "MANAGER") {
+    const reportIds = await findDirectReportIds(caller.sub);
+    return [caller.sub, ...reportIds];
+  }
+  return undefined;
+}
+
+/** Narrows a property row's team_members to the caller's scope (no-op for Admin/Finance, where scopedToAgentIds is undefined). */
+function scopeTeamMembers(property: repo.PropertyRow, scopedToAgentIds: string[] | undefined): repo.PropertyRow {
+  if (!scopedToAgentIds) return property;
+  return { ...property, team_members: property.team_members.filter(m => scopedToAgentIds.includes(m.userId)) };
+}
 
 // Registered before "/:id" — otherwise "meta-campaign-suggestions" would be
 // captured as the :id param and rejected by propertyIdParamSchema's uuid check.
@@ -45,8 +74,10 @@ propertiesRouter.get(
     const { page, pageSize, search, propertyType, sortDir } = req.query as unknown as {
       page: number; pageSize: number; search?: string; propertyType?: string[]; sortDir?: "asc" | "desc";
     };
+    const scopedToAgentIds = await scopedTeamAgentIdsForCaller(req.user!);
     const { rows, totalCount } = await repo.findMany({ page, pageSize, search, propertyType, sortDir });
-    sendPaginated(res, rows, { page, pageSize, totalCount, totalPages: Math.max(1, Math.ceil(totalCount / pageSize)) });
+    const scopedRows = rows.map(row => scopeTeamMembers(row, scopedToAgentIds));
+    sendPaginated(res, scopedRows, { page, pageSize, totalCount, totalPages: Math.max(1, Math.ceil(totalCount / pageSize)) });
   })
 );
 
@@ -56,7 +87,8 @@ propertiesRouter.get(
   asyncHandler(async (req, res) => {
     const property = await repo.findById(req.params.id);
     if (!property) throw ApiError.notFound("Property not found");
-    sendOk(res, property);
+    const scopedToAgentIds = await scopedTeamAgentIdsForCaller(req.user!);
+    sendOk(res, scopeTeamMembers(property, scopedToAgentIds));
   })
 );
 

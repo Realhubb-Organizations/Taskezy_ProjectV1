@@ -17,7 +17,8 @@ import {
   X,
   MapPin,
   Users,
-  Info
+  Info,
+  AlertTriangle
 } from "lucide-react";
 import AddPropertyModal, {
   splitPropertyTypes,
@@ -251,6 +252,9 @@ export default function PropertiesPage() {
   const [serverProperties, setServerProperties] = useState<Property[]>([]);
   const [serverTotalCount, setServerTotalCount] = useState(0);
   const [serverPropertiesLoading, setServerPropertiesLoading] = useState(true);
+  // Distinct from "0 rows" — a failed fetch must never look like a
+  // genuinely-empty org. Same pattern as settings page's usersLoadError.
+  const [propertiesLoadError, setPropertiesLoadError] = useState(false);
   const [propertiesRefreshNonce, setPropertiesRefreshNonce] = useState(0);
 
   // Search fires on every keystroke locally but is debounced before it
@@ -272,6 +276,7 @@ export default function PropertiesPage() {
   useEffect(() => {
     let cancelled = false;
     setServerPropertiesLoading(true);
+    setPropertiesLoadError(false);
     apiListPropertiesPage(currentPage, rowsPerPage, propertyListFilters)
       .then((result) => {
         if (cancelled) return;
@@ -279,7 +284,11 @@ export default function PropertiesPage() {
         setServerTotalCount(result.totalCount);
       })
       .catch((err) => {
-        if (!cancelled) console.error("Could not load the properties list page:", err);
+        if (cancelled) return;
+        console.error("Could not load the properties list page:", err);
+        setServerProperties([]);
+        setServerTotalCount(0);
+        setPropertiesLoadError(true);
       })
       .finally(() => {
         if (!cancelled) setServerPropertiesLoading(false);
@@ -512,7 +521,23 @@ export default function PropertiesPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {serverPropertiesLoading && pageRows.length === 0 ? (
+              {propertiesLoadError ? (
+                <tr>
+                  <td colSpan={isAdmin ? 8 : 7} className="p-8">
+                    <div className="flex flex-col items-center gap-3 text-center">
+                      <AlertTriangle className="h-5 w-5 text-amber-500" />
+                      <p className="text-xs font-semibold text-slate-600">Couldn&apos;t load properties.</p>
+                      <button
+                        type="button"
+                        onClick={() => setPropertiesRefreshNonce(n => n + 1)}
+                        className="px-4 py-1.5 rounded-lg bg-[#0B1E6E] hover:bg-[#081650] text-white text-xs font-bold transition-colors"
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ) : serverPropertiesLoading && pageRows.length === 0 ? (
                 <TableRowsSkeleton rows={6} columns={isAdmin ? 8 : 7} />
               ) : pageRows.length === 0 ? (
                 <tr>
