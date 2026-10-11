@@ -579,29 +579,37 @@ export default function LeadDashboard() {
   const drilldownTotalPages = Math.max(1, Math.ceil(analyticsDrilldownFilteredLeads.length / drilldownRowsPerPage));
   const drilldownCurrentPage = Math.min(drilldownPage, drilldownTotalPages);
 
-  const handleDrilldownTableScroll = () => {
-    if (drilldownProgrammaticScroll.current) return;
-    const container = drilldownScrollRef.current;
-    if (!container) return;
-    const scrollTop = container.scrollTop;
-    let current = 1;
-    for (let i = 0; i < drilldownPageRowRefs.current.length; i++) {
-      const row = drilldownPageRowRefs.current[i];
-      if (row && row.offsetTop - container.offsetTop <= scrollTop + 4) {
-        current = i + 1;
+  // Scrolls with the shared page <main> now (one scroll plane per screen —
+  // see APP_UIUX_AUDIT.md), not this table's own boxed container. See
+  // PendingLeadsTable.tsx's identical conversion for the full rationale.
+  useEffect(() => {
+    const main = drilldownScrollRef.current?.closest("main");
+    if (!main) return;
+    const handleScroll = () => {
+      if (drilldownProgrammaticScroll.current) return;
+      const mainTop = main.getBoundingClientRect().top;
+      let current = 1;
+      for (let i = 0; i < drilldownPageRowRefs.current.length; i++) {
+        const row = drilldownPageRowRefs.current[i];
+        if (row && row.getBoundingClientRect().top - mainTop <= 4) {
+          current = i + 1;
+        }
       }
-    }
-    setDrilldownPage(prev => (prev !== current ? current : prev));
-  };
+      setDrilldownPage(prev => (prev !== current ? current : prev));
+    };
+    main.addEventListener("scroll", handleScroll, { passive: true });
+    return () => main.removeEventListener("scroll", handleScroll);
+  }, []);
 
   const goToDrilldownPage = (page: number) => {
     const clamped = Math.max(1, Math.min(drilldownTotalPages, page));
     setDrilldownPage(clamped);
     const row = drilldownPageRowRefs.current[clamped - 1];
-    const container = drilldownScrollRef.current;
-    if (!row || !container) return;
+    const main = drilldownScrollRef.current?.closest("main");
+    if (!row || !main) return;
     drilldownProgrammaticScroll.current = true;
-    container.scrollTop = clamped === 1 ? 0 : row.offsetTop - container.offsetTop;
+    const top = clamped === 1 ? 0 : main.scrollTop + row.getBoundingClientRect().top - main.getBoundingClientRect().top;
+    main.scrollTo({ top });
     requestAnimationFrame(() => {
       requestAnimationFrame(() => { drilldownProgrammaticScroll.current = false; });
     });
@@ -1299,7 +1307,7 @@ export default function LeadDashboard() {
                 "X Rows"/"a-b of c" footer always matches what's actually
                 scrollable. */}
             <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden">
-              <div ref={adminScrollRef} onScroll={handleAdminTableScroll} className="overflow-auto max-h-[70vh]">
+              <div ref={adminScrollRef} onScroll={handleAdminTableScroll} className="overflow-x-auto">
                 <table
                   className="w-full text-left border-collapse table-fixed"
                   style={{ minWidth: (canBulkAssign ? 44 : 0) + (adminVisibleColumns.actions ? (isAdmin ? 140 : 110) : 0) + (3 + adminVisibleColumnList.filter(c => c.key !== "actions").length) * 150 }}
@@ -1980,7 +1988,7 @@ export default function LeadDashboard() {
                     <p className="text-xs text-slate-400 italic p-6">No leads match this view.</p>
                   ) : (
                     <>
-                      <div ref={drilldownScrollRef} onScroll={handleDrilldownTableScroll} className="overflow-auto max-h-[70vh]">
+                      <div ref={drilldownScrollRef} className="overflow-x-auto">
                         <table className="w-full text-left text-xs border-collapse table-fixed min-w-[1200px]">
                           <colgroup>
                             <col />
@@ -2077,7 +2085,11 @@ export default function LeadDashboard() {
                           drilldownProgrammaticScroll.current = true;
                           setDrilldownRowsPerPage(n);
                           setDrilldownPage(1);
-                          drilldownScrollRef.current?.scrollTo(0, 0);
+                          const main = drilldownScrollRef.current?.closest("main");
+                          const el = drilldownScrollRef.current;
+                          if (main && el) {
+                            main.scrollTo({ top: main.scrollTop + el.getBoundingClientRect().top - main.getBoundingClientRect().top });
+                          }
                           requestAnimationFrame(() => {
                             requestAnimationFrame(() => { drilldownProgrammaticScroll.current = false; });
                           });

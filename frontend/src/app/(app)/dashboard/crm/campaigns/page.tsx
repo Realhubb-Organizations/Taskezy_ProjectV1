@@ -208,29 +208,37 @@ export default function AdminCampaignsPage() {
   const drillPageRowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
   const drillProgrammaticScroll = useRef(false);
 
-  const handleDrillScroll = () => {
-    if (drillProgrammaticScroll.current) return;
-    const container = drillScrollRef.current;
-    if (!container) return;
-    const scrollTop = container.scrollTop;
-    let current = 1;
-    for (let i = 0; i < drillPageRowRefs.current.length; i++) {
-      const row = drillPageRowRefs.current[i];
-      if (row && row.offsetTop - container.offsetTop <= scrollTop + 4) {
-        current = i + 1;
+  // Scrolls with the shared page <main> now (one scroll plane per screen —
+  // see APP_UIUX_AUDIT.md), not this table's own boxed container. See
+  // PendingLeadsTable.tsx's identical conversion for the full rationale.
+  useEffect(() => {
+    const main = drillScrollRef.current?.closest("main");
+    if (!main) return;
+    const handleScroll = () => {
+      if (drillProgrammaticScroll.current) return;
+      const mainTop = main.getBoundingClientRect().top;
+      let current = 1;
+      for (let i = 0; i < drillPageRowRefs.current.length; i++) {
+        const row = drillPageRowRefs.current[i];
+        if (row && row.getBoundingClientRect().top - mainTop <= 4) {
+          current = i + 1;
+        }
       }
-    }
-    setDrillPage(prev => (prev !== current ? current : prev));
-  };
+      setDrillPage(prev => (prev !== current ? current : prev));
+    };
+    main.addEventListener("scroll", handleScroll, { passive: true });
+    return () => main.removeEventListener("scroll", handleScroll);
+  }, []);
 
   const goToDrillPage = (page: number, totalPages: number) => {
     const clamped = Math.max(1, Math.min(totalPages, page));
     setDrillPage(clamped);
     const row = drillPageRowRefs.current[clamped - 1];
-    const container = drillScrollRef.current;
-    if (!row || !container) return;
+    const main = drillScrollRef.current?.closest("main");
+    if (!row || !main) return;
     drillProgrammaticScroll.current = true;
-    container.scrollTop = clamped === 1 ? 0 : row.offsetTop - container.offsetTop;
+    const top = clamped === 1 ? 0 : main.scrollTop + row.getBoundingClientRect().top - main.getBoundingClientRect().top;
+    main.scrollTo({ top });
     requestAnimationFrame(() => {
       requestAnimationFrame(() => { drillProgrammaticScroll.current = false; });
     });
@@ -1132,7 +1140,7 @@ export default function AdminCampaignsPage() {
                     </button>
                   </div>
                 </div>
-                <div ref={drillScrollRef} onScroll={handleDrillScroll} className="max-h-80 overflow-y-auto">
+                <div ref={drillScrollRef} className="overflow-x-auto">
                   {isCampaignsTable ? (
                     <table className="table-fixed w-full text-left border-collapse min-w-[600px]">
                       <colgroup>
@@ -1228,7 +1236,11 @@ export default function AdminCampaignsPage() {
                     drillProgrammaticScroll.current = true;
                     setDrillRowsPerPage(n);
                     setDrillPage(1);
-                    drillScrollRef.current?.scrollTo(0, 0);
+                    const main = drillScrollRef.current?.closest("main");
+                    const el = drillScrollRef.current;
+                    if (main && el) {
+                      main.scrollTo({ top: main.scrollTop + el.getBoundingClientRect().top - main.getBoundingClientRect().top });
+                    }
                     requestAnimationFrame(() => {
                       requestAnimationFrame(() => { drillProgrammaticScroll.current = false; });
                     });
@@ -1259,7 +1271,7 @@ export default function AdminCampaignsPage() {
                 <div className="px-5 py-3.5 border-b border-slate-200/80">
                   <h3 className="text-sm font-bold text-slate-900">Campaign Deep Dive</h3>
                 </div>
-                <div className="overflow-auto">
+                <div className="overflow-x-auto">
                   <table className="table-fixed w-full text-left border-collapse min-w-[1050px]">
                     <colgroup>
                       <col />

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Search, Copy, Check, X } from "lucide-react";
 import { WhatsAppIcon, CallIcon } from "@/components/icons/ContactIcons";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
@@ -88,37 +88,47 @@ export default function PendingLeadsTable({
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / rowsPerPage));
   const currentPage = Math.min(page, totalPages);
 
-  // Rows render continuously in one scrollable container instead of being
-  // sliced per page — a scroll-spy tracks each page-boundary row's real DOM
-  // position to keep the page number and pagination controls synced with
-  // wherever the user has scrolled to, in both directions.
+  // Rows render continuously in one list instead of being sliced per page —
+  // a scroll-spy tracks each page-boundary row's real DOM position to keep
+  // the page number and pagination controls synced with wherever the user
+  // has scrolled to, in both directions. Scrolls with the shared page
+  // <main> now (one scroll plane per screen — see APP_UIUX_AUDIT.md), not
+  // this table's own boxed container, so the listener attaches to <main>
+  // directly rather than an onScroll prop here. scrollRef (still on this
+  // div, now horizontal-scroll-only) is just how it locates <main> via
+  // .closest(), same convention PullToRefresh.tsx uses.
   const scrollRef = useRef<HTMLDivElement>(null);
   const pageRowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
   const programmaticScroll = useRef(false);
 
-  const handleTableScroll = () => {
-    if (programmaticScroll.current) return;
-    const container = scrollRef.current;
-    if (!container) return;
-    const scrollTop = container.scrollTop;
-    let current = 1;
-    for (let i = 0; i < pageRowRefs.current.length; i++) {
-      const row = pageRowRefs.current[i];
-      if (row && row.offsetTop - container.offsetTop <= scrollTop + 4) {
-        current = i + 1;
+  useEffect(() => {
+    const main = scrollRef.current?.closest("main");
+    if (!main) return;
+    const handleScroll = () => {
+      if (programmaticScroll.current) return;
+      const mainTop = main.getBoundingClientRect().top;
+      let current = 1;
+      for (let i = 0; i < pageRowRefs.current.length; i++) {
+        const row = pageRowRefs.current[i];
+        if (row && row.getBoundingClientRect().top - mainTop <= 4) {
+          current = i + 1;
+        }
       }
-    }
-    setPage(prev => (prev !== current ? current : prev));
-  };
+      setPage(prev => (prev !== current ? current : prev));
+    };
+    main.addEventListener("scroll", handleScroll, { passive: true });
+    return () => main.removeEventListener("scroll", handleScroll);
+  }, []);
 
   const goToPage = (target: number) => {
     const clamped = Math.max(1, Math.min(totalPages, target));
     setPage(clamped);
     const row = pageRowRefs.current[clamped - 1];
-    const container = scrollRef.current;
-    if (!row || !container) return;
+    const main = scrollRef.current?.closest("main");
+    if (!row || !main) return;
     programmaticScroll.current = true;
-    container.scrollTop = clamped === 1 ? 0 : row.offsetTop - container.offsetTop;
+    const top = clamped === 1 ? 0 : main.scrollTop + row.getBoundingClientRect().top - main.getBoundingClientRect().top;
+    main.scrollTo({ top });
     requestAnimationFrame(() => {
       requestAnimationFrame(() => { programmaticScroll.current = false; });
     });
@@ -146,7 +156,7 @@ export default function PendingLeadsTable({
         <h3 className="text-sm font-extrabold text-slate-900">{title}</h3>
       </div>
 
-      <div ref={scrollRef} onScroll={handleTableScroll} className="overflow-auto max-h-[70vh]">
+      <div ref={scrollRef} className="overflow-x-auto">
         <table className="w-full text-left border-collapse table-fixed min-w-[860px]">
           <colgroup>
             <col />
@@ -295,7 +305,11 @@ export default function PendingLeadsTable({
         onRowsPerPageChange={(n) => {
           programmaticScroll.current = true;
           setRowsPerPage(n);
-          scrollRef.current?.scrollTo(0, 0);
+          const main = scrollRef.current?.closest("main");
+          const el = scrollRef.current;
+          if (main && el) {
+            main.scrollTo({ top: main.scrollTop + el.getBoundingClientRect().top - main.getBoundingClientRect().top });
+          }
           requestAnimationFrame(() => {
             requestAnimationFrame(() => { programmaticScroll.current = false; });
           });
