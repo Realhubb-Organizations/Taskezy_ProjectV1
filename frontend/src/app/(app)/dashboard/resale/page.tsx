@@ -35,6 +35,7 @@ export default function ResalePage() {
   const [resalePrice, setResalePrice] = useState("");
   const [resaleDesc, setResaleDesc] = useState("");
   const [resaleOwner, setResaleOwner] = useState("SqftGenius Solutions LLP");
+  const [resaleContact, setResaleContact] = useState("");
 
   // Lead finder modal
   const [matchingLeads, setMatchingLeads] = useState<any[]>([]);
@@ -108,19 +109,25 @@ export default function ResalePage() {
       toast("Property name and price are required.", "warning");
       return;
     }
+    if (!resaleContact.trim()) {
+      toast("A contact number is required so buyers can reach you.", "warning");
+      return;
+    }
     addResaleUnit({
       property: resaleProp,
       builder: resaleBuilder || "—",
       location: resaleLoc || "—",
       price: resalePrice.includes("Cr") || resalePrice.includes("Lakh") ? resalePrice : `₹${resalePrice} Cr`,
       description: resaleDesc,
-      listedBy: resaleOwner
+      listedBy: resaleOwner,
+      contactNumber: resaleContact.trim()
     });
     setResaleProp("");
     setResaleBuilder("");
     setResaleLoc("");
     setResalePrice("");
     setResaleDesc("");
+    setResaleContact("");
     setIsPostOpen(false);
     refreshUnitsTable();
   };
@@ -225,12 +232,21 @@ export default function ResalePage() {
                         >
                           Find Leads
                         </button>
-                        <a
-                          href={`tel:+919980189914`}
-                          className="px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-[10px] font-bold text-slate-700 inline-flex items-center gap-1"
-                        >
-                          <PhoneCall className="h-3 w-3" /> Contact
-                        </a>
+                        {u.contactNumber ? (
+                          <a
+                            href={`tel:${u.contactNumber}`}
+                            className="px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-[10px] font-bold text-slate-700 inline-flex items-center gap-1"
+                          >
+                            <PhoneCall className="h-3 w-3" /> Contact
+                          </a>
+                        ) : (
+                          <span
+                            title="No contact number was saved for this listing"
+                            className="px-2.5 py-1 rounded bg-slate-50 text-[10px] font-bold text-slate-350 inline-flex items-center gap-1 cursor-not-allowed"
+                          >
+                            <PhoneCall className="h-3 w-3" /> No Contact
+                          </span>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -309,6 +325,18 @@ export default function ResalePage() {
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none"
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Contact Number</label>
+                <input
+                  type="tel"
+                  required
+                  value={resaleContact}
+                  onChange={(e) => setResaleContact(e.target.value)}
+                  placeholder="e.g. 9980189914"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none"
+                />
               </div>
 
               <div>

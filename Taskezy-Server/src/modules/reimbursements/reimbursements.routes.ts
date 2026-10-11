@@ -35,13 +35,32 @@ const listReimbursementsQuerySchema = z.object({
   status: z.enum(["PENDING", "PAID", "REJECTED"]).optional()
 });
 
+// A claim is personal (a user can only ever submit one as themselves — see
+// POST below), and only ADMIN/FINANCE can approve/reject one (never a
+// Manager — see below), so unlike leads/followups this has no natural
+// "Manager sees their team's" tier: ADMIN/FINANCE see every claim, anyone
+// else sees only their own. Previously completely unscoped — any
+// authenticated role, including a plain sales Member, could list every
+// employee's claims, amounts, and private notes company-wide.
 reimbursementsRouter.get(
   "/",
   validate({ query: listReimbursementsQuerySchema }),
   asyncHandler(async (req, res) => {
     const { page, pageSize, status } = req.query as unknown as { page: number; pageSize: number; status?: "PENDING" | "PAID" | "REJECTED" };
-    const whereClause = status ? `WHERE rc.status = $1` : "";
-    const countParams: unknown[] = status ? [status] : [];
+    const isUnrestricted = req.user!.role === "ADMIN" || req.user!.role === "FINANCE";
+
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+    if (!isUnrestricted) {
+      params.push(req.user!.sub);
+      conditions.push(`rc.agent_id = $${params.length}`);
+    }
+    if (status) {
+      params.push(status);
+      conditions.push(`rc.status = $${params.length}`);
+    }
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const countParams = params;
     const countResult = await query<{ count: string }>(`SELECT count(*) FROM reimbursement_claims rc ${whereClause}`, countParams);
     const totalCount = Number(countResult.rows[0]?.count ?? 0);
     const offset = (page - 1) * pageSize;

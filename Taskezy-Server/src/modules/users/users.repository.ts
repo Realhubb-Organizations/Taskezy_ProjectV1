@@ -160,8 +160,12 @@ export async function create(input: CreateUserInput): Promise<string> {
   // being accepted as two different accounts by the UNIQUE constraint.
   const email = input.email.trim().toLowerCase();
   const { rows } = await pool.query(
-    `INSERT INTO users (first_name, last_name, email, company_email, phone_number, designation, role, role_type, employment_type, department, manager_id, password_hash)
-     VALUES ($1,$2,$3,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+    // must_reset_password = true: an admin-assigned initial password is
+    // always a temp one — the new account must set their own on first login
+    // (the login page's "First-time Login Detected" copy already promises
+    // exactly this for new accounts).
+    `INSERT INTO users (first_name, last_name, email, company_email, phone_number, designation, role, role_type, employment_type, department, manager_id, password_hash, must_reset_password)
+     VALUES ($1,$2,$3,$3,$4,$5,$6,$7,$8,$9,$10,$11,true)
      RETURNING id`,
     [
       input.firstName, input.lastName || null, email, input.phoneNumber || null, input.designation ?? null,

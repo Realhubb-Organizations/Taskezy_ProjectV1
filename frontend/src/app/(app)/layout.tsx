@@ -6,7 +6,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Capacitor } from "@capacitor/core";
 import { PushNotifications } from "@capacitor/push-notifications";
-import { useApp, SystemType } from "@/context/AppContext";
+import { useApp, SystemType, CRM_ONLY_MODE } from "@/context/AppContext";
 import { apiRegisterDevice, apiRemoveDevice } from "@/lib/apiClient";
 import NotificationBell from "@/components/dashboard/NotificationBell";
 import LoginAnimationOverlay from "@/components/LoginAnimationOverlay";
@@ -59,6 +59,20 @@ function initialsFor(name?: string): string {
 
 function checkUserAccess(user: { role: string; department?: string; role_type?: string } | null, path: string): boolean {
   if (!user) return false;
+
+  // This test round is CRM-only — see CRM_ONLY_MODE in AppContext.tsx.
+  // Overrides even Admin, so the module disappears from nav and renders
+  // Access Denied on a direct URL hit, for everyone, until flipped back.
+  if (
+    CRM_ONLY_MODE &&
+    (path.startsWith("/dashboard/hrms") ||
+      path.startsWith("/hrms/dashboard") ||
+      path.startsWith("/dashboard/finance") ||
+      path.startsWith("/finance/dashboard"))
+  ) {
+    return false;
+  }
+
   if (user.role === "ADMIN") return true; // GOD ADMIN has absolute monitoring access
 
   // Campaigns: admin-only within CRM — campaign management isn't something

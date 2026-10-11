@@ -55,7 +55,7 @@ resaleUnitsRouter.get(
     const offset = (page - 1) * pageSize;
     params.push(pageSize, offset);
     const { rows } = await query(
-      `SELECT id, property_name, builder, location, price, description, listed_by
+      `SELECT id, property_name, builder, location, price, description, listed_by, contact_number
        FROM resale_units ${whereClause} ORDER BY created_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`,
       params
     );
@@ -71,18 +71,22 @@ const createResaleUnitSchema = z.object({
   location: z.string().max(300).optional(),
   price: z.string().max(100).optional(),
   description: z.string().max(2000).optional(),
-  listedBy: z.string().max(200).optional()
+  listedBy: z.string().max(200).optional(),
+  // Optional at the schema level so existing rows without one still work,
+  // but the Resale page's Post form makes this required — the Contact
+  // button has no other number to dial.
+  contactNumber: z.string().max(30).optional()
 });
 
 resaleUnitsRouter.post(
   "/",
   validate({ body: createResaleUnitSchema }),
   asyncHandler(async (req, res) => {
-    const { propertyName, builder, location, price, description, listedBy } = req.body;
+    const { propertyName, builder, location, price, description, listedBy, contactNumber } = req.body;
     const { rows } = await pool.query(
-      `INSERT INTO resale_units (property_name, builder, location, price, description, listed_by)
-       VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, property_name, builder, location, price, description, listed_by`,
-      [propertyName, builder ?? null, location ?? null, price ?? null, description ?? null, listedBy ?? null]
+      `INSERT INTO resale_units (property_name, builder, location, price, description, listed_by, contact_number)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, property_name, builder, location, price, description, listed_by, contact_number`,
+      [propertyName, builder ?? null, location ?? null, price ?? null, description ?? null, listedBy ?? null, contactNumber ?? null]
     );
     sendOk(res, rows[0], 201);
   })

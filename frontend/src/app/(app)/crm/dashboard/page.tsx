@@ -166,8 +166,14 @@ export default function CrmDashboardPage() {
     }
   };
 
-  const handleUploadBulkLeads = (data: { assignmentMode: "project" | "agent"; target: string; fileName: string }) => {
-    toast(`Bulk import started for ${data.fileName} (${data.assignmentMode}: ${data.target}).`, "info");
+  // AddLeadModal's bulk tab doesn't actually read/parse the uploaded file
+  // (see its handleDrop/handleFileChange — only the filename is captured)
+  // or call any import endpoint. This used to show "Bulk import started..."
+  // as if it had — a fake success with nothing actually created. Matches
+  // LeadDashboard.tsx's handleAddBulkLeads, which already made this exact
+  // call honestly instead of claiming success.
+  const handleUploadBulkLeads = () => {
+    toast("Bulk import isn't wired up to a real backend yet — please use Manual Ingestion Entry for now.", "info");
     setIsUploadOpen(false);
   };
 

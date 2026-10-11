@@ -8,8 +8,9 @@ import { ApiError } from "../../utils/ApiError";
 import { pool, query } from "../../db/pool";
 import { businessDateOffset } from "../../utils/businessDate";
 import { createNotification } from "../notifications/notifications.service";
-import { listActiveAdminAndFinanceIds } from "../users/users.repository";
+import { listActiveAdminAndFinanceIds, findDirectReportIds } from "../users/users.repository";
 import { getTenantSettings } from "../tenant-settings/tenant-settings.repository";
+import { AccessTokenPayload } from "../../utils/tokens";
 
 export const invoicesRouter = Router();
 
@@ -21,6 +22,24 @@ const SELECT = `
          brokerage_rate, collection_status, collected_amount, created_at
   FROM invoices
 `;
+
+// Same three-way split as leads.service.ts's scopeForCaller — duplicated
+// rather than imported since that function isn't exported (see call-log's,
+// followups', and attendance's own copies of this same pattern for
+// precedent). Invoices have no agent_id of their own — scoped via the
+// invoice's lead's assigned_agent_id instead, which is also who the
+// "Invoice Generated"/"Invoice Marked Paid" notifications below already go
+// to, confirming the lead's agent (and by extension their manager) is the
+// intended audience, not just Finance/Admin.
+async function scopedLeadAgentIdsForCaller(caller: AccessTokenPayload): Promise<string[] | undefined> {
+  if (caller.role !== "AGENT") return undefined;
+  if (caller.roleType === "MEMBER") return [caller.sub];
+  if (caller.roleType === "MANAGER") {
+    const reportIds = await findDirectReportIds(caller.sub);
+    return [caller.sub, ...reportIds];
+  }
+  return undefined;
+}
 
 /** The lead's assigned agent — invoice generation/payment is meaningful to them, not just Finance. */
 async function findLeadAgentId(leadId: string): Promise<string | undefined> {
@@ -41,15 +60,29 @@ const listInvoicesQuerySchema = z.object({
   pageSize: z.coerce.number().int().positive().max(500).default(10)
 });
 
+// Previously completely unscoped — any authenticated role, including a
+// plain sales Member with no relationship to a given deal, could list
+// every invoice in the system (client names, amounts, collection status).
 invoicesRouter.get(
   "/",
   validate({ query: listInvoicesQuerySchema }),
   asyncHandler(async (req, res) => {
     const { page, pageSize } = req.query as unknown as { page: number; pageSize: number };
-    const countResult = await query<{ count: string }>(`SELECT count(*) FROM invoices`);
+    const scopedAgentIds = await scopedLeadAgentIdsForCaller(req.user!);
+
+    const whereClause = scopedAgentIds
+      ? `WHERE lead_id IN (SELECT id FROM leads WHERE assigned_agent_id = ANY($1::uuid[]))`
+      : "";
+    const whereParams = scopedAgentIds ? [scopedAgentIds] : [];
+
+    const countResult = await query<{ count: string }>(`SELECT count(*) FROM invoices ${whereClause}`, whereParams);
     const totalCount = Number(countResult.rows[0]?.count ?? 0);
     const offset = (page - 1) * pageSize;
-    const { rows } = await query(`${SELECT} ORDER BY created_at DESC LIMIT $1 OFFSET $2`, [pageSize, offset]);
+    const dataParams = [...whereParams, pageSize, offset];
+    const { rows } = await query(
+      `${SELECT} ${whereClause} ORDER BY created_at DESC LIMIT $${dataParams.length - 1} OFFSET $${dataParams.length}`,
+      dataParams
+    );
     sendPaginated(res, rows, { page, pageSize, totalCount, totalPages: Math.max(1, Math.ceil(totalCount / pageSize)) });
   })
 );

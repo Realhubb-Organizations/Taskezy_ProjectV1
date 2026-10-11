@@ -27,7 +27,7 @@ const slides = [
 
 export default function LoginPage() {
   const router = useRouter();
-  const { loginWithTempPassword, currentUser, setCurrentUserPasswordActive } = useApp();
+  const { loginWithTempPassword, currentUser, changeOwnPassword } = useApp();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -108,7 +108,7 @@ export default function LoginPage() {
     }
   };
 
-  const handlePasswordReset = (e: React.FormEvent) => {
+  const handlePasswordReset = async (e: React.FormEvent) => {
     e.preventDefault();
     setResetError("");
 
@@ -122,8 +122,13 @@ export default function LoginPage() {
       return;
     }
 
-    // Update password status to active in global context
-    setCurrentUserPasswordActive();
+    setIsSubmitting(true);
+    const result = await changeOwnPassword(password, newPassword);
+    setIsSubmitting(false);
+    if (!result.success) {
+      setResetError(result.error || "Could not update your password. Please try again.");
+      return;
+    }
     router.push("/home");
   };
 
@@ -391,10 +396,11 @@ export default function LoginPage() {
 
                 <button
                   type="submit"
-                  className="w-full bg-[#0B1E6E] hover:bg-[#081650] text-white font-semibold py-2.5 rounded-md text-sm transition-all shadow-sm flex items-center justify-center gap-1.5"
+                  disabled={isSubmitting}
+                  className="w-full bg-[#0B1E6E] hover:bg-[#081650] disabled:opacity-60 text-white font-semibold py-2.5 rounded-md text-sm transition-all shadow-sm flex items-center justify-center gap-1.5"
                 >
                   <ShieldCheck className="h-4 w-4" />
-                  Secure and Login
+                  {isSubmitting ? "Saving..." : "Secure and Login"}
                 </button>
               </form>
             </div>

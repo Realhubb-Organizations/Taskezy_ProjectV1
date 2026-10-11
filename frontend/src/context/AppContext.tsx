@@ -22,6 +22,7 @@ import {
   apiCreateUser,
   apiEditUser,
   apiResetUserPassword,
+  apiChangePassword,
   apiDeleteUser,
   apiListProperties,
   apiCreateProperty,
@@ -98,26 +99,32 @@ export type Role = "ADMIN" | "FINANCE" | "AGENT";
 
 export type SystemType = "CRM" | "HRMS" | "FINANCE" | "ADMIN";
 
+// This test round is CRM-only — HRMS and Finance are hidden everywhere
+// (sidebar, direct URL, default system) for every role, Admin included.
+// Flip to false to bring both back; nothing else needs to change (see the
+// matching check in frontend/src/app/(app)/layout.tsx's checkUserAccess).
+export const CRM_ONLY_MODE = true;
+
 export function getAvailableSystems(user: { role: string; department?: string } | null): SystemType[] {
   if (!user) return [];
   const systems: SystemType[] = [];
-  
+
   if (user.role === "ADMIN" || user.department === "SALES") {
     systems.push("CRM");
   }
-  
-  if (user.role === "ADMIN" || (user.department && ["SALES", "TECH", "MARKETING", "FINANCE"].includes(user.department))) {
+
+  if (!CRM_ONLY_MODE && (user.role === "ADMIN" || (user.department && ["SALES", "TECH", "MARKETING", "FINANCE"].includes(user.department)))) {
     systems.push("HRMS");
   }
-  
-  if (user.role === "ADMIN" || user.department === "FINANCE" || user.role === "FINANCE") {
+
+  if (!CRM_ONLY_MODE && (user.role === "ADMIN" || user.department === "FINANCE" || user.role === "FINANCE")) {
     systems.push("FINANCE");
   }
-  
+
   if (user.role === "ADMIN") {
     systems.push("ADMIN");
   }
-  
+
   return systems;
 }
 
@@ -125,6 +132,7 @@ export function getDefaultSystem(user: { role: string; department?: string } | n
   if (!user) return "CRM";
   if (user.role === "ADMIN") return "ADMIN";
   if (user.department === "SALES") return "CRM";
+  if (CRM_ONLY_MODE) return "CRM";
   if (user.department === "FINANCE" || user.role === "FINANCE") return "FINANCE";
   return "HRMS";
 }
@@ -327,6 +335,7 @@ export interface ResaleUnit {
   price: string;
   description: string;
   listedBy: string;
+  contactNumber: string;
 }
 
 export interface FollowupCall {
@@ -563,6 +572,8 @@ interface AppActions {
     managerId?: string | null
   ) => Promise<void>;
   setCurrentUserPasswordActive: () => void;
+  /** Completes the forced-password-reset flow: verifies currentPassword server-side, then sets newPassword. */
+  changeOwnPassword: (currentPassword: string, newPassword: string) => Promise<{ success: boolean; error?: string }>;
   // errorType distinguishes genuinely wrong credentials (401/403) from the
   // login endpoint's own rate limiter (429 — 10 attempts/15min, real and
   // enforced server-side) from the API being unreachable entirely (network
@@ -593,7 +604,7 @@ interface AppActions {
   disconnectMeta: () => void;
 
   // Property actions
-  addProperty: (property: Omit<Property, "id" | "membersCount">) => void;
+  addProperty: (property: Omit<Property, "id" | "membersCount">) => Promise<{ success: boolean; error?: string }>;
   addResaleUnit: (unit: Omit<ResaleUnit, "id">) => void;
 
   // Reimbursement actions
@@ -657,7 +668,7 @@ function mapApiUserToFrontendUser(apiUser: ApiUser): User {
     email: apiUser.email,
     company_email: apiUser.email,
     role: apiUser.role,
-    passwordStatus: "ACTIVE",
+    passwordStatus: apiUser.must_reset_password ? "TEMPORARY" : "ACTIVE",
     first_name: apiUser.first_name,
     last_name: apiUser.last_name || undefined,
     designation: apiUser.designation || undefined,
@@ -789,7 +800,8 @@ export function mapApiResaleUnitToFrontend(row: ApiResaleUnitRow): ResaleUnit {
     location: row.location || "",
     price: row.price || "",
     description: row.description || "",
-    listedBy: row.listed_by || ""
+    listedBy: row.listed_by || "",
+    contactNumber: row.contact_number || ""
   };
 }
 
@@ -1592,6 +1604,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setShowLoginSplash(true);
   };
 
+  const changeOwnPassword = async (currentPassword: string, newPassword: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      await apiChangePassword(currentPassword, newPassword);
+      setCurrentUserPasswordActive();
+      return { success: true };
+    } catch (err) {
+      const message = err instanceof ApiRequestError && err.status === 401
+        ? "Current password is incorrect."
+        : "Could not update your password. Please try again.";
+      return { success: false, error: message };
+    }
+  };
+
   const logout = () => {
     setCurrentUser(null);
     if (isApiSessionActive()) {
@@ -1843,7 +1868,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Add Property
-  const addProperty = (propertyData: Omit<Property, "id" | "membersCount">) => {
+  // Awaited and rolled back on failure, not fire-and-forget: this used to
+  // add the optimistic local row and return immediately, so the caller
+  // (AddPropertyModal) always reported success and closed even when the
+  // API call failed — the fake property then sat in local state forever
+  // with nothing actually saved. Now the caller can tell the difference.
+  const addProperty = async (propertyData: Omit<Property, "id" | "membersCount">): Promise<{ success: boolean; error?: string }> => {
     const newProp: Property = {
       ...propertyData,
       id: `prop-${Date.now()}`,
@@ -1852,8 +1882,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setProperties(prev => [...prev, newProp]);
 
-    if (isApiSessionActive()) {
-      apiCreateProperty({
+    if (!isApiSessionActive()) {
+      return { success: true }; // no session (offline/dev) — local-only, same as before
+    }
+
+    try {
+      let finalRow = await apiCreateProperty({
         name: newProp.name,
         developer: newProp.developer,
         location: newProp.location,
@@ -1878,18 +1912,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         mediaFileNames: newProp.mediaFileNames,
         teamAssignmentMode: newProp.teamAssignmentMode,
         leadAssignmentMode: newProp.leadAssignmentMode
-      })
-        .then(async (created) => {
-          let finalRow = created;
-          if (newProp.teamAssignmentMode === "CUSTOM_MEMBERS" && newProp.assignedTeam && newProp.assignedTeam.length > 0) {
-            finalRow = await apiSetPropertyTeamMembers(
-              created.id,
-              newProp.assignedTeam.map(m => ({ userId: m.userId, percentage: m.percentage }))
-            );
-          }
-          setProperties(prev => prev.map(p => (p.id === newProp.id ? mapApiPropertyToFrontend(finalRow) : p)));
-        })
-        .catch((err) => console.warn("Could not persist new property to the database:", err));
+      });
+      if (newProp.teamAssignmentMode === "CUSTOM_MEMBERS" && newProp.assignedTeam && newProp.assignedTeam.length > 0) {
+        finalRow = await apiSetPropertyTeamMembers(
+          finalRow.id,
+          newProp.assignedTeam.map(m => ({ userId: m.userId, percentage: m.percentage }))
+        );
+      }
+      setProperties(prev => prev.map(p => (p.id === newProp.id ? mapApiPropertyToFrontend(finalRow) : p)));
+      return { success: true };
+    } catch (err) {
+      setProperties(prev => prev.filter(p => p.id !== newProp.id)); // roll back — it was never actually saved
+      return { success: false, error: err instanceof Error ? err.message : "Could not create the property. Please try again." };
     }
   };
 
@@ -1908,7 +1942,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         location: newUnit.location || undefined,
         price: newUnit.price || undefined,
         description: newUnit.description || undefined,
-        listedBy: newUnit.listedBy || undefined
+        listedBy: newUnit.listedBy || undefined,
+        contactNumber: newUnit.contactNumber || undefined
       })
         .then((created) => {
           setResaleUnits(prev => prev.map(u => (u.id === newUnit.id ? mapApiResaleUnitToFrontend(created) : u)));
@@ -2380,6 +2415,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         resetRosterPassword,
         updateUserFields,
         setCurrentUserPasswordActive,
+        changeOwnPassword,
         loginWithTempPassword,
         logout,
         switchUserRole,
