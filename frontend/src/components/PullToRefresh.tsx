@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { RefreshCw } from "lucide-react";
 import { Capacitor } from "@capacitor/core";
 import { useApp } from "@/context/AppContext";
 
@@ -98,7 +97,6 @@ export default function PullToRefresh({ children }: { children: React.ReactNode 
   }
 
   const indicatorHeight = refreshing ? REFRESH_THRESHOLD : pull;
-  const rotation = (pull / MAX_PULL) * 360;
   const settling = !gesture.current.pulling && !refreshing;
 
   return (
@@ -116,10 +114,15 @@ export default function PullToRefresh({ children }: { children: React.ReactNode 
           transition: settling ? "transform 200ms ease-out, opacity 200ms ease-out" : undefined
         }}
       >
-        <RefreshCw
-          className={`h-5 w-5 text-brand-700 drop-shadow ${refreshing ? "animate-spin" : ""}`}
-          style={refreshing ? undefined : { transform: `rotate(${rotation}deg)` }}
-        />
+        {/* Paused mid-pull (nothing to animate toward yet, same as the old
+            icon just rotating with drag distance instead of spinning) —
+            only actually plays once a refresh is confirmed triggered. */}
+        <div className={`dot-spinner drop-shadow ${refreshing ? "" : "is-paused"}`}>
+          <div className="dot-spinner__dot" /><div className="dot-spinner__dot" />
+          <div className="dot-spinner__dot" /><div className="dot-spinner__dot" />
+          <div className="dot-spinner__dot" /><div className="dot-spinner__dot" />
+          <div className="dot-spinner__dot" /><div className="dot-spinner__dot" />
+        </div>
       </div>
       {children}
     </>
