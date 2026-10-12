@@ -5,7 +5,7 @@ import { useApp, Lead, LeadStatus } from "@/context/AppContext";
 import { useDialog } from "@/components/ui/DialogProvider";
 import { SearchableSelect } from "@/components/ui/SearchableDropdown";
 import { DatePicker } from "@/components/ui/DateRangePicker";
-import { deriveActivityTimeline, STATUS_OPTIONS, statusBadgeClasses } from "@/lib/leadStatusMapping";
+import { deriveActivityTimeline, PICKABLE_STATUS_OPTIONS, statusBadgeClasses } from "@/lib/leadStatusMapping";
 import { canChangeLeadStatus, isLeadAssignableUser, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
 import { maskPhone, maskEmail } from "@/lib/maskPII";
 import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/callTrigger";
@@ -151,7 +151,7 @@ export default function LeadDetailDrawer({
     onUpdateStatus(lead.id, nextStatus);
   };
 
-  const baseStatusOptions = statusOptions ?? STATUS_OPTIONS;
+  const baseStatusOptions = statusOptions ?? PICKABLE_STATUS_OPTIONS;
   const statusOptionsList = baseStatusOptions.includes(localStatus) ? baseStatusOptions : [localStatus, ...baseStatusOptions];
 
   const handleSaveReminder = (e: React.FormEvent) => {

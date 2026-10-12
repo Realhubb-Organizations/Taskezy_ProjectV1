@@ -250,6 +250,9 @@ export interface AdSpendRecord {
   date: string; // YYYY-MM-DD
   spend: number;
   leadsGenerated: number;
+  // Meta-reported reach for the day; null when not reported (Google rows, days synced before migration 029).
+  impressions: number | null;
+  clicks: number | null;
   campaignStatus?: "ACTIVE" | "INACTIVE"; // undefined for records with no linked Meta campaign (legacy/manual rows)
 }
 
@@ -984,6 +987,8 @@ function mapApiAdSpendToFrontend(row: ApiAdSpendRow): AdSpendRecord {
     date: row.spend_date.slice(0, 10),
     spend: Number(row.spend),
     leadsGenerated: row.leads_generated,
+    impressions: row.impressions === null || row.impressions === undefined ? null : Number(row.impressions),
+    clicks: row.clicks === null || row.clicks === undefined ? null : Number(row.clicks),
     campaignStatus: row.campaign_status || undefined
   };
 }
@@ -1069,30 +1074,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setIsDataLoading(true);
     setDataLoadError(false);
     try {
-      const [apiLeads, apiUsers, apiProperties, apiResaleUnits, apiFollowups, apiAttendance, apiReimbursements, apiInvoices, apiCalendarEvents, apiTimesheets, apiTenantSettings] = await Promise.all([
+      // Each list loads on its own (allSettled): one failing endpoint — e.g.
+      // a 500 or 429 on resale units — used to throw away EVERY list and
+      // show the whole CRM as empty. Now only that list stays empty.
+      // HRMS/Finance lists are skipped entirely while CRM_ONLY_MODE hides
+      // those modules (3 fewer requests on every load).
+      const skip = <T,>(empty: T) => Promise.resolve(empty);
+      const [leadsR, usersR, propertiesR, resaleR, followupsR, attendanceR, reimbursementsR, invoicesR, calendarR, timesheetsR, tenantR] = await Promise.allSettled([
         apiListAllLeads(),
         apiListUsers(),
         apiListProperties(),
         apiListResaleUnits(),
         apiListFollowups(),
-        apiListAttendance(),
-        apiListReimbursements(),
+        CRM_ONLY_MODE ? skip([] as Awaited<ReturnType<typeof apiListAttendance>>) : apiListAttendance(),
+        CRM_ONLY_MODE ? skip([] as Awaited<ReturnType<typeof apiListReimbursements>>) : apiListReimbursements(),
         apiListInvoices(),
         apiListCalendarEvents(),
-        apiListTimesheets(),
+        CRM_ONLY_MODE ? skip([] as Awaited<ReturnType<typeof apiListTimesheets>>) : apiListTimesheets(),
         apiGetTenantSettings()
       ]);
-      setAllLeads(apiLeads.map(mapApiLeadToFrontendLead));
-      setUsers(apiUsers.map(mapApiUserDirectoryEntryToFrontendUser));
-      setProperties(apiProperties.map(mapApiPropertyToFrontend));
-      setResaleUnits(apiResaleUnits.map(mapApiResaleUnitToFrontend));
-      setFollowupCalls(apiFollowups.map(mapApiFollowupToFrontend));
-      setAttendanceRecords(apiAttendance.map(mapApiAttendanceToFrontend));
-      setReimbursements(apiReimbursements.map(mapApiReimbursementToFrontend));
-      setInvoices(apiInvoices.map(mapApiInvoiceToFrontend));
-      setCalendarEvents(apiCalendarEvents.map(mapApiCalendarEventToFrontend));
-      setTimesheets(apiTimesheets.map(mapApiTimesheetToFrontend));
-      setTenantSettings(mapApiTenantSettingsToFrontend(apiTenantSettings));
+      const failed: string[] = [];
+      const use = <T,>(r: PromiseSettledResult<T>, name: string, apply: (v: T) => void) => {
+        if (r.status === "fulfilled") apply(r.value);
+        else { failed.push(name); console.warn(`Could not load ${name}:`, r.reason); }
+      };
+      use(leadsR, "leads", v => setAllLeads(v.map(mapApiLeadToFrontendLead)));
+      use(usersR, "users", v => setUsers(v.map(mapApiUserDirectoryEntryToFrontendUser)));
+      use(propertiesR, "properties", v => setProperties(v.map(mapApiPropertyToFrontend)));
+      use(resaleR, "resale units", v => setResaleUnits(v.map(mapApiResaleUnitToFrontend)));
+      use(followupsR, "follow-ups", v => setFollowupCalls(v.map(mapApiFollowupToFrontend)));
+      use(attendanceR, "attendance", v => setAttendanceRecords(v.map(mapApiAttendanceToFrontend)));
+      use(reimbursementsR, "reimbursements", v => setReimbursements(v.map(mapApiReimbursementToFrontend)));
+      use(invoicesR, "invoices", v => setInvoices(v.map(mapApiInvoiceToFrontend)));
+      use(calendarR, "calendar events", v => setCalendarEvents(v.map(mapApiCalendarEventToFrontend)));
+      use(timesheetsR, "timesheets", v => setTimesheets(v.map(mapApiTimesheetToFrontend)));
+      use(tenantR, "tenant settings", v => setTenantSettings(mapApiTenantSettingsToFrontend(v)));
+      // The CRM can't work without these two — flag it so pages can say so.
+      if (failed.includes("leads") || failed.includes("users")) setDataLoadError(true);
 
       // /api/v1/ad-spend and /api/v1/meta/connections are both ADMIN-only
       // (Campaigns is admin-only, see layout.tsx's checkUserAccess) — only

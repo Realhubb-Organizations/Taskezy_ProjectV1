@@ -1373,6 +1373,9 @@ export interface ApiAdSpendRow {
   spend_date: string;
   spend: string;
   leads_generated: number;
+  // BIGINT columns come back as strings; null = not reported (Google rows, older days).
+  impressions: string | number | null;
+  clicks: string | number | null;
   campaign_status: "ACTIVE" | "INACTIVE" | null;
 }
 export function apiListAdSpend(): Promise<ApiAdSpendRow[]> {

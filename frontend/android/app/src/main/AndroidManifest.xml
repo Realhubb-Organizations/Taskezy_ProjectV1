@@ -32,6 +32,8 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Android 13+: required for push notifications to be shown at all. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- No READ_PHONE_STATE: this app used to watch real device call state
          via a native TelephonyManager plugin (CallStatePlugin), but Android
          kills this app's backgrounded process within seconds of placing a

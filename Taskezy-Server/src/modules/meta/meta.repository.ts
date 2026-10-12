@@ -146,18 +146,23 @@ export interface UpsertSpendInput {
   spendDate: string;
   spend: number;
   leadsGenerated: number;
+  /** null when Meta didn't report it for that day. */
+  impressions: number | null;
+  clicks: number | null;
 }
 
 export async function upsertSpendRecord(input: UpsertSpendInput): Promise<void> {
   await pool.query(
-    `INSERT INTO ad_spend_records (platform, account_name, property_id, spend_date, spend, leads_generated, meta_campaign_id)
-     VALUES ('META', $1, $2, $3, $4, $5, $6)
+    `INSERT INTO ad_spend_records (platform, account_name, property_id, spend_date, spend, leads_generated, meta_campaign_id, impressions, clicks)
+     VALUES ('META', $1, $2, $3, $4, $5, $6, $7, $8)
      ON CONFLICT (meta_campaign_id, spend_date) WHERE meta_campaign_id IS NOT NULL DO UPDATE SET
        account_name = EXCLUDED.account_name,
        property_id = EXCLUDED.property_id,
        spend = EXCLUDED.spend,
-       leads_generated = EXCLUDED.leads_generated`,
-    [input.accountName, input.propertyId, input.spendDate, input.spend, input.leadsGenerated, input.campaignId]
+       leads_generated = EXCLUDED.leads_generated,
+       impressions = EXCLUDED.impressions,
+       clicks = EXCLUDED.clicks`,
+    [input.accountName, input.propertyId, input.spendDate, input.spend, input.leadsGenerated, input.campaignId, input.impressions, input.clicks]
   );
 }
 

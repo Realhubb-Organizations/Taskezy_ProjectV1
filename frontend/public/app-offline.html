@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Taskezy</title>
+<!--
+  Shown by the Android app (capacitor.config.ts → server.errorPath) when
+  https://taskezy.in can't be loaded — no internet, or a dropped connection
+  such as net::ERR_QUIC_PROTOCOL_ERROR — instead of leaving the app stuck on
+  a blank/error screen. Retry reloads the live site; it also retries on its
+  own as soon as the phone reports it's back online. Bundled into the APK, so
+  changes here need a new app build.
+-->
+<style>
+  :root { --navy: #0B1E6E; --text: #0f172a; --muted: #64748b; --bg: #ffffff; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  main { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 32px 24px calc(32px + env(safe-area-inset-bottom)); text-align: center; gap: 14px; }
+  .icon { width: 64px; height: 64px; border-radius: 50%; background: #EEF1FB; display: grid; place-items: center; }
+  h1 { font-size: 18px; margin: 6px 0 0; }
+  p { font-size: 14px; color: var(--muted); margin: 0; max-width: 300px; line-height: 1.5; }
+  button { margin-top: 10px; border: 0; border-radius: 12px; background: var(--navy); color: #fff; font-size: 15px;
+    font-weight: 700; padding: 12px 36px; min-width: 180px; }
+  button:active { opacity: .8; }
+  .status { font-size: 12px; min-height: 16px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="icon" aria-hidden="true">
+    <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#0B1E6E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 20h.01"/><path d="M8.5 16.4a5 5 0 0 1 7 0"/><path d="M5 12.9a10 10 0 0 1 5.2-2.8"/><path d="M19 12.9a10 10 0 0 0-2.1-1.6"/><path d="M2 8.8a15 15 0 0 1 4.2-2.6"/><path d="M22 8.8a15 15 0 0 0-11.3-3.8"/><path d="m2 2 20 20"/>
+    </svg>
+  </div>
+  <h1>Can't reach Taskezy</h1>
+  <p>Check your internet connection and try again. Your data is safe.</p>
+  <button id="retry" type="button">Retry</button>
+  <div class="status" id="status" aria-live="polite"></div>
+</main>
+<script>
+  var APP_URL = "https://taskezy.in/auth/login";
+  var status = document.getElementById("status");
+  function retry() {
+    status.textContent = "Connecting…";
+    window.location.replace(APP_URL);
+  }
+  document.getElementById("retry").addEventListener("click", retry);
+  window.addEventListener("online", retry);
+</script>
+</body>
+</html>
