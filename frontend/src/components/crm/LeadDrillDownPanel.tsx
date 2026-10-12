@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useState, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useApp, Lead, LeadStatus } from "@/context/AppContext";
 import { useDialog } from "@/components/ui/DialogProvider";
-import { deriveActivityTimeline, STATUS_OPTIONS, statusBadgeClasses } from "@/lib/leadStatusMapping";
+import { deriveActivityTimeline, PICKABLE_STATUS_OPTIONS, statusBadgeClasses } from "@/lib/leadStatusMapping";
 import { WhatsAppIcon, CallIcon } from "@/components/icons/ContactIcons";
 import { Phone, Mail, X, Copy, Check, User, Search, ArrowRight } from "lucide-react";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
@@ -350,48 +350,22 @@ export default function LeadDrillDownPanel({ title, leads, onClose }: {
   });
   const drillTotalPages = Math.max(1, Math.ceil(drillLeads.length / drillRowsPerPage));
   const drillCurrentPage = Math.min(drillPage, drillTotalPages);
-  // Rows render continuously in one scrollable container instead of being
-  // sliced per page — a scroll-spy below tracks each page-boundary row's
-  // real DOM position to keep the page number and pagination controls in
-  // sync with wherever the user has scrolled to.
-  // Scrolls with the shared page <main> now (one scroll plane per screen —
-  // see APP_UIUX_AUDIT.md), not this table's own boxed container. See
-  // PendingLeadsTable.tsx's identical conversion for the full rationale.
+  // One page at a time (10 rows by default), so opening a card never turns
+  // the dashboard into one endless list — the graphs and task tables stay
+  // right below. Changing page keeps the table's header in view.
+  const drillPageLeads = drillLeads.slice((drillCurrentPage - 1) * drillRowsPerPage, drillCurrentPage * drillRowsPerPage);
   const drillScrollRef = useRef<HTMLDivElement>(null);
-  const drillPageRowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
-  const drillProgrammaticScroll = useRef(false);
-
-  useEffect(() => {
-    const main = drillScrollRef.current?.closest("main");
-    if (!main) return;
-    const handleScroll = () => {
-      if (drillProgrammaticScroll.current) return;
-      const mainTop = main.getBoundingClientRect().top;
-      let current = 1;
-      for (let i = 0; i < drillPageRowRefs.current.length; i++) {
-        const row = drillPageRowRefs.current[i];
-        if (row && row.getBoundingClientRect().top - mainTop <= 4) {
-          current = i + 1;
-        }
-      }
-      setDrillPage(prev => (prev !== current ? current : prev));
-    };
-    main.addEventListener("scroll", handleScroll, { passive: true });
-    return () => main.removeEventListener("scroll", handleScroll);
-  }, []);
+  const keepDrillTableInView = () => {
+    const el = drillScrollRef.current;
+    const main = el?.closest("main");
+    if (!el || !main) return;
+    const offset = el.getBoundingClientRect().top - main.getBoundingClientRect().top;
+    if (offset < 0) main.scrollTo({ top: main.scrollTop + offset - 80, behavior: "smooth" });
+  };
 
   const goToDrillPage = (page: number) => {
-    const clamped = Math.max(1, Math.min(drillTotalPages, page));
-    setDrillPage(clamped);
-    const row = drillPageRowRefs.current[clamped - 1];
-    const main = drillScrollRef.current?.closest("main");
-    if (!row || !main) return;
-    drillProgrammaticScroll.current = true;
-    const top = clamped === 1 ? 0 : main.scrollTop + row.getBoundingClientRect().top - main.getBoundingClientRect().top;
-    main.scrollTo({ top });
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => { drillProgrammaticScroll.current = false; });
-    });
+    setDrillPage(Math.max(1, Math.min(drillTotalPages, page)));
+    keepDrillTableInView();
   };
 
   // Real next-scheduled-call date, from the actual followup_calls queue —
@@ -413,7 +387,7 @@ export default function LeadDrillDownPanel({ title, leads, onClose }: {
   ) : (
     <SearchableSelect
       variant="inline"
-      options={STATUS_OPTIONS.includes(l.status) ? STATUS_OPTIONS : [l.status, ...STATUS_OPTIONS]}
+      options={PICKABLE_STATUS_OPTIONS.includes(l.status) ? PICKABLE_STATUS_OPTIONS : [l.status, ...PICKABLE_STATUS_OPTIONS]}
       value={l.status}
       onChange={(v) => handleDrillStatusChange(l.id, v as LeadStatus)}
       searchPlaceholder="Search status..."
@@ -526,10 +500,9 @@ export default function LeadDrillDownPanel({ title, leads, onClose }: {
                     </td>
                   </tr>
                 ) : (
-                  (drillPageRowRefs.current = [], drillLeads.map((l, idx) => (
+                  drillPageLeads.map((l) => (
                     <tr
                       key={l.id}
-                      ref={idx % drillRowsPerPage === 0 ? (el) => { drillPageRowRefs.current[Math.floor(idx / drillRowsPerPage)] = el; } : undefined}
                       className="hover:bg-slate-50/60 transition-colors"
                     >
                       <td className="px-4 py-3 align-top overflow-hidden">
@@ -571,7 +544,7 @@ export default function LeadDrillDownPanel({ title, leads, onClose }: {
                         </button>
                       </td>
                     </tr>
-                  )))
+                  ))
                 )}
               </tbody>
             </table>
@@ -583,16 +556,9 @@ export default function LeadDrillDownPanel({ title, leads, onClose }: {
             rowsPerPage={drillRowsPerPage}
             onPageChange={goToDrillPage}
             onRowsPerPageChange={(n) => {
-              drillProgrammaticScroll.current = true;
               setDrillRowsPerPage(n);
-              const main = drillScrollRef.current?.closest("main");
-              const el = drillScrollRef.current;
-              if (main && el) {
-                main.scrollTo({ top: main.scrollTop + el.getBoundingClientRect().top - main.getBoundingClientRect().top });
-              }
-              requestAnimationFrame(() => {
-                requestAnimationFrame(() => { drillProgrammaticScroll.current = false; });
-              });
+              setDrillPage(1);
+              keepDrillTableInView();
             }}
             rowLabel="Lead"
           />

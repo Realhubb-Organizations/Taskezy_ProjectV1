@@ -235,7 +235,8 @@ export default function DataCallingPage() {
   // Summary card date range — every one of the 5 cards below respects it
   // (see categoryLeadsInRange), same as the CRM Dashboard/Campaigns pages.
   // "Custom" = summaryCustomRange (picked from the dropdown's own calendar).
-  const [dateRange, setDateRange] = useState<"Today" | "Yesterday" | "This Week" | "This Month" | "All Time" | "Custom">("Today");
+  // Metric cards open on All Time (narrow with the picker).
+  const [dateRange, setDateRange] = useState<"Today" | "Yesterday" | "This Week" | "This Month" | "All Time" | "Custom">("All Time");
   const [summaryCustomRange, setSummaryCustomRange] = useState<DateRangeValue | null>(null);
 
   const today = new Date();

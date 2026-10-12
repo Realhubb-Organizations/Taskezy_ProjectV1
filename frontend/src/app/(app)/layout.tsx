@@ -9,6 +9,7 @@ import { PushNotifications } from "@capacitor/push-notifications";
 import { useApp, SystemType, CRM_ONLY_MODE } from "@/context/AppContext";
 import { apiRegisterDevice, apiRemoveDevice } from "@/lib/apiClient";
 import NotificationBell from "@/components/dashboard/NotificationBell";
+import NotificationPopup from "@/components/dashboard/NotificationPopup";
 import LoginAnimationOverlay from "@/components/LoginAnimationOverlay";
 import PullToRefresh from "@/components/PullToRefresh";
 import {
@@ -55,6 +56,29 @@ function initialsFor(name?: string): string {
   if (!name) return "U";
   const parts = name.trim().split(" ").filter(Boolean);
   return ((parts[0]?.[0] || "") + (parts[1]?.[0] || "")).toUpperCase() || "U";
+}
+
+// HRMS / Finance while CRM_ONLY_MODE hides them: shown to admins as a greyed,
+// non-clickable row with a "Soon" tag (matches the home page's Coming Soon
+// cards) instead of disappearing from the sidebar.
+function ComingSoonNavRow({ label, icon: Icon, collapsed = false }: { label: string; icon: React.ElementType; collapsed?: boolean }) {
+  return (
+    <div
+      aria-disabled="true"
+      title={`${label} (coming soon)`}
+      className={`w-full flex items-center text-xs font-extrabold text-slate-400 rounded-lg cursor-not-allowed select-none ${
+        collapsed ? "justify-center py-2.5" : "justify-between px-4 py-2.5"
+      }`}
+    >
+      <span className={`flex items-center ${collapsed ? "" : "gap-2.5"}`}>
+        <Icon className="h-4.5 w-4.5 text-slate-300" />
+        {!collapsed && label}
+      </span>
+      {!collapsed && (
+        <span className="text-[9px] font-bold uppercase tracking-wider text-[#0B1E6E] bg-[#EEF1FB] rounded-full px-2 py-0.5">Soon</span>
+      )}
+    </div>
+  );
 }
 
 function checkUserAccess(user: { role: string; department?: string; role_type?: string } | null, path: string): boolean {
@@ -167,9 +191,6 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   // Desktop-only sidebar collapse (icon rail) — the mobile drawer/bottom tab
   // bar are separate, `md:hidden`-gated UI and are unaffected by this.
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const [pressTip, setPressTip] = useState<{ label: string; x: number; y: number } | null>(null);
-  const pressTimer = useRef<number | null>(null);
-  const pressFired = useRef(false);
   const pushTokenRef = useRef<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<SystemType>>(new Set());
   const toggleGroup = (key: SystemType) => {
@@ -317,6 +338,9 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     .filter(g => checkUserAccess(currentUser, g.baseHref))
     .map(g => ({ ...g, items: g.items.filter(item => checkUserAccess(currentUser, item.href)) }));
 
+  // Admins still see HRMS / Finance (as "Soon" rows) while CRM-only mode hides them.
+  const showComingSoonModules = CRM_ONLY_MODE && currentUser?.role === "ADMIN";
+
   // Static links, always visible below the groups regardless of which is expanded.
   const staticBottomLinks = [
     { name: "Organization", href: "/dashboard/organization", activeCheck: (p: string) => p === "/dashboard/organization", icon: Building }
@@ -339,33 +363,8 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   const mobileRightItems = (mobileSlots?.right ?? []).map(findMobileItem).filter((i): i is NonNullable<typeof i> => !!i);
   const mobileDashboardItem = activeGroupForMobile?.items.find(i => i.name.endsWith("Dashboard"));
 
-  const cancelPress = () => {
-    if (pressTimer.current !== null) window.clearTimeout(pressTimer.current);
-    pressTimer.current = null;
-    setPressTip(null);
-  };
-  const pressHandlers = (label: string) => ({
-    onPointerDown: (e: { currentTarget: EventTarget & HTMLElement }) => {
-      const rect = e.currentTarget.getBoundingClientRect();
-      pressFired.current = false;
-      pressTimer.current = window.setTimeout(() => {
-        pressFired.current = true;
-        const x = Math.max(44, Math.min(rect.left + rect.width / 2, window.innerWidth - 44));
-        setPressTip({ label, x, y: rect.top });
-        navigator.vibrate?.(10);
-      }, 400);
-    },
-    onPointerUp: cancelPress,
-    onPointerLeave: cancelPress,
-    onPointerCancel: cancelPress,
-    onContextMenu: (e: { preventDefault: () => void }) => e.preventDefault(),
-    onClick: (e: { preventDefault: () => void }) => {
-      if (pressFired.current) {
-        e.preventDefault();
-        pressFired.current = false;
-      }
-    }
-  });
+  // Short names under the bottom-bar icons (a phone tab bar has ~50px per tab).
+  const mobileTabLabel = (name: string) => (name === "Data Calling" ? "Calling" : name.endsWith("Dashboard") ? "Dashboard" : name);
 
   const handleLogout = () => {
     if (pushTokenRef.current) apiRemoveDevice(pushTokenRef.current).catch(() => {});
@@ -439,6 +438,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
 
           {/* Navigation Groups — HRMS/CRM/FINANCE always visible, each independently expandable */}
           <nav className={`flex-1 space-y-1 ${isSidebarCollapsed ? "px-2" : "px-4"}`}>
+            {showComingSoonModules && <ComingSoonNavRow label="HRMS" icon={Target} collapsed={isSidebarCollapsed} />}
             {sidebarGroups.map((group) => {
               const isExpanded = !isSidebarCollapsed && expandedGroups.has(group.key);
               return (
@@ -491,6 +491,8 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                 </div>
               );
             })}
+
+            {showComingSoonModules && <ComingSoonNavRow label="FINANCE" icon={FileText} collapsed={isSidebarCollapsed} />}
 
             {/* Settings — right after FINANCE, styled like the group headers.
                 No page behind it yet, so it doesn't navigate anywhere.
@@ -691,6 +693,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
               </div>
 
               <nav className="space-y-1 flex-1 overflow-y-auto">
+                {showComingSoonModules && <ComingSoonNavRow label="HRMS" icon={Target} />}
                 {sidebarGroups.map((group) => {
                   const isExpanded = expandedGroups.has(group.key);
                   return (
@@ -731,6 +734,8 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                     </div>
                   );
                 })}
+
+                {showComingSoonModules && <ComingSoonNavRow label="FINANCE" icon={FileText} />}
 
                 {/* Settings — right after FINANCE, same as the desktop sidebar
                     (no page yet, Admin-only, see the desktop copy's comment) */}
@@ -810,6 +815,9 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
             </div>
         </>
 
+        {/* Banner for each notification that arrives while the app is open */}
+        <NotificationPopup />
+
         {/* Mobile bottom tab bar — the primary navigation surface on phones,
             matching a native app's tab bar. "More" opens the drawer above,
             which holds everything that doesn't fit as a fixed tab. */}
@@ -827,12 +835,12 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                     href={item.href}
                     aria-label={item.name}
                     title={item.name}
-                    {...pressHandlers(item.name)}
-                    className={`flex flex-col items-center justify-center gap-0.5 py-2.5 min-w-0 ${
+                    className={`flex-1 flex flex-col items-center justify-center gap-0.5 pt-2 pb-1.5 min-w-0 active:opacity-60 ${
                       isActive ? "text-brand-700" : "text-slate-400"
                     }`}
                   >
                     <item.icon className={`h-5 w-5 ${isActive ? "text-brand-700" : "text-slate-400"}`} />
+                    <span className={`max-w-full truncate text-[9px] min-[390px]:text-[10px] leading-tight tracking-tight ${isActive ? "font-bold" : "font-semibold"}`}>{mobileTabLabel(item.name)}</span>
                   </Link>
                 );
               })}
@@ -845,7 +853,6 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                   href={mobileDashboardItem.href}
                   aria-label={mobileDashboardItem.name}
                   title={mobileDashboardItem.name}
-                  {...pressHandlers(mobileDashboardItem.name)}
                   className="flex flex-col items-center justify-end min-w-0 -mt-5"
                 >
                   <span
@@ -854,6 +861,9 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                     }`}
                   >
                     <mobileDashboardItem.icon className="h-6 w-6" />
+                  </span>
+                  <span className={`mt-0.5 pb-1.5 text-[10px] leading-tight ${isActive ? "font-bold text-brand-700" : "font-semibold text-slate-400"}`}>
+                    {mobileTabLabel(mobileDashboardItem.name)}
                   </span>
                 </Link>
               );
@@ -867,25 +877,17 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                     href={item.href}
                     aria-label={item.name}
                     title={item.name}
-                    {...pressHandlers(item.name)}
-                    className={`flex flex-col items-center justify-center gap-0.5 py-2.5 min-w-0 ${
+                    className={`flex-1 flex flex-col items-center justify-center gap-0.5 pt-2 pb-1.5 min-w-0 active:opacity-60 ${
                       isActive ? "text-brand-700" : "text-slate-400"
                     }`}
                   >
                     <item.icon className={`h-5 w-5 ${isActive ? "text-brand-700" : "text-slate-400"}`} />
+                    <span className={`max-w-full truncate text-[9px] min-[390px]:text-[10px] leading-tight tracking-tight ${isActive ? "font-bold" : "font-semibold"}`}>{mobileTabLabel(item.name)}</span>
                   </Link>
                 );
               })}
             </div>
           </div>
-          {pressTip && (
-            <div
-              className="fixed z-50 pointer-events-none -translate-x-1/2 -translate-y-full px-2.5 py-1 mb-2 rounded-md bg-slate-900 text-white text-[11px] font-bold whitespace-nowrap shadow-lg"
-              style={{ left: pressTip.x, top: pressTip.y - 8 }}
-            >
-              {pressTip.label}
-            </div>
-          )}
         </nav>
 
         {/* Core Container — bottom padding on mobile clears the fixed tab bar */}

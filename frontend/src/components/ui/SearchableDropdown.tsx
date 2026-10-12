@@ -2,7 +2,7 @@
 
 import React, { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ChevronDown, Search } from "lucide-react";
+import { Check, ChevronDown, Search } from "lucide-react";
 import { useCloseOnScroll } from "@/lib/useCloseOnScroll";
 
 // The one dropdown used across CRM (every role): a trigger + a body-portaled
@@ -351,10 +351,19 @@ export function SearchableSelect({
           options={opts}
           searchPlaceholder={searchPlaceholder}
           renderRow={(o) => (
-            <label key={o.value} className={`${rowClass} ${o.value === value ? "bg-blue-50/60 text-[#0B1E6E]" : ""}`}>
-              <input type="checkbox" className={checkboxClass} checked={o.value === value} onChange={() => pick(o.value)} />
-              <span className="truncate">{render(o.label)}</span>
-            </label>
+            // Single choice: a plain row with a tick on the selected one
+            // (checkboxes here wrongly suggested several could be picked).
+            <button
+              type="button"
+              key={o.value}
+              role="option"
+              aria-selected={o.value === value}
+              onClick={() => pick(o.value)}
+              className={`${rowClass} w-full text-left ${o.value === value ? "bg-blue-50/60 text-[#0B1E6E]" : ""}`}
+            >
+              <span className="truncate flex-1">{render(o.label)}</span>
+              {o.value === value && <Check className="h-3.5 w-3.5 shrink-0 text-[#0B1E6E]" aria-hidden="true" />}
+            </button>
           )}
           footer={
             clearable && value !== "" && (

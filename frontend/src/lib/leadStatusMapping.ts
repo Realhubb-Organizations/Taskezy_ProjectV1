@@ -55,6 +55,12 @@ export const DB_CODE_TO_FRONTEND_STATUS: Record<string, LeadStatus> = {
 // status dropdown in the app so they all list the same options.
 export const STATUS_OPTIONS: LeadStatus[] = Array.from(new Set(Object.values(DB_CODE_TO_FRONTEND_STATUS)));
 
+// Statuses a person can pick or filter by. "Assigned" / "Unassigned" say
+// whether a lead has an owner, not where it is in the pipeline, so they're
+// left out here (assignment is chosen/filtered under "Assigned To"). Leads
+// already in those states still show their badge.
+export const PICKABLE_STATUS_OPTIONS: LeadStatus[] = STATUS_OPTIONS.filter(s => s !== "Assigned" && s !== "Unassigned");
+
 // Badge color classes for a status pill — shared by every status badge/pill
 // in the app so the same status always reads the same color everywhere.
 export function statusBadgeClasses(status: LeadStatus): string {

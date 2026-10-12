@@ -79,7 +79,9 @@ async function runSync(): Promise<void> {
             propertyId,
             spendDate: day.date_start,
             spend: Number(day.spend) || 0,
-            leadsGenerated: extractLeadCount(day)
+            leadsGenerated: extractLeadCount(day),
+            impressions: day.impressions !== undefined && day.impressions !== "" ? Number(day.impressions) || 0 : null,
+            clicks: day.clicks !== undefined && day.clicks !== "" ? Number(day.clicks) || 0 : null
           });
         }
       } catch (err) {

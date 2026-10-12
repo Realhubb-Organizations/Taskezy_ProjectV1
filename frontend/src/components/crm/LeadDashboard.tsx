@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useApp, Lead, LeadStatus, mapApiLeadToFrontendLead } from "@/context/AppContext";
 import { useDialog } from "@/components/ui/DialogProvider";
 import { Sliders, Sparkles, Plus, Check, ChevronDown, Search, X, Minus, Download, RotateCcw, Users, Trash2, AlertTriangle } from "lucide-react";
-import { STATUS_OPTIONS, frontendStatusToDbCode } from "@/lib/leadStatusMapping";
+import { STATUS_OPTIONS, PICKABLE_STATUS_OPTIONS, frontendStatusToDbCode } from "@/lib/leadStatusMapping";
 import { type LeadSummaryStats } from "@/lib/leadSummaryStats";
 import { apiListLeadsPage, apiGetLeadStats, apiDeleteLead, apiBulkDeleteLeads, apiReassignLead, apiUpdateLeadStatus, type LeadListFilters } from "@/lib/apiClient";
 import { WhatsAppIcon, CallIcon, PlatformLabel } from "@/components/icons/ContactIcons";
@@ -277,7 +277,7 @@ export default function LeadDashboard() {
     if (!canChangeLeadStatus(l, currentUser, users) || isManager) {
       return <span className="inline-block max-w-[110px] text-[11px] text-slate-700" title={STATUS_LOCKED_HINT}>{l.status}</span>;
     }
-    const allOptions = STATUS_OPTIONS.includes(l.status) ? STATUS_OPTIONS : [l.status, ...STATUS_OPTIONS];
+    const allOptions = PICKABLE_STATUS_OPTIONS.includes(l.status) ? PICKABLE_STATUS_OPTIONS : [l.status, ...PICKABLE_STATUS_OPTIONS];
     return (
       <SearchableSelect
         variant="inline"
@@ -361,7 +361,8 @@ export default function LeadDashboard() {
     router.replace(`/dashboard/crm${query ? `?${query}` : ""}`, { scroll: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminTab]);
-  const [adminDateRange, setAdminDateRange] = useState<"today" | "yesterday" | "week" | "month" | "all" | "custom">("today");
+  // Opens on All Time so Total Leads shows every lead (narrow with the picker).
+  const [adminDateRange, setAdminDateRange] = useState<"today" | "yesterday" | "week" | "month" | "all" | "custom">("all");
   // Applied range from the calendar badge (DateRangePicker) — an alternative
   // to the preset Today/Yesterday/Week/Month/All buckets; only used while
   // adminDateRange === "custom".
@@ -459,6 +460,7 @@ export default function LeadDashboard() {
     // dropdown's existing options, sourced from the same name strings
     // leads already carry) — resolved to the real id the API needs via the
     // user roster already loaded in context.
+    if (adminAssignedFilter.includes("Unassigned")) statusCodes.add("UNASSIGNED");
     const nameToId = new Map(users.map(u => [u.name, u.id] as const));
     const assignedAgentIds = adminAssignedFilter
       .map(name => nameToId.get(name))
@@ -482,23 +484,31 @@ export default function LeadDashboard() {
     let cancelled = false;
     setServerLeadsLoading(true);
     const filters = buildAdminServerFilters();
-    Promise.all([
-      apiListLeadsPage(adminPage, adminRowsPerPage, filters),
-      apiGetLeadStats(filters)
-    ])
-      .then(([pageResult, stats]) => {
-        if (cancelled) return;
-        setServerLeads(pageResult.rows.map(mapApiLeadToFrontendLead));
-        setServerTotalCount(pageResult.totalCount);
-        setServerStats(stats);
-      })
-      .catch((err) => {
-        if (!cancelled) console.error("Could not load the leads list page:", err);
-      })
-      .finally(() => {
-        if (!cancelled) setServerLeadsLoading(false);
-      });
-    return () => { cancelled = true; };
+    // Wait a moment before loading, so ticking several campaigns/statuses in
+    // a row sends one request pair for the final selection instead of a
+    // burst (which on phones could trip the rate limit / drop the connection).
+    const timer = setTimeout(() => {
+      Promise.all([
+        apiListLeadsPage(adminPage, adminRowsPerPage, filters),
+        apiGetLeadStats(filters)
+      ])
+        .then(([pageResult, stats]) => {
+          if (cancelled) return;
+          setServerLeads(pageResult.rows.map(mapApiLeadToFrontendLead));
+          setServerTotalCount(pageResult.totalCount);
+          setServerStats(stats);
+        })
+        .catch((err) => {
+          if (!cancelled) console.error("Could not load the leads list page:", err);
+        })
+        .finally(() => {
+          if (!cancelled) setServerLeadsLoading(false);
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
     // adminServerFiltersKey captures every filter input in one stable string
     // so this effect re-fires exactly when a real filter value changes,
     // without needing every individual filter piece listed separately.
@@ -757,7 +767,9 @@ export default function LeadDashboard() {
   };
 
   const adminCampaignsList = Array.from(new Set(scopedLeads.map(l => l.campaign).filter(Boolean))) as string[];
-  const adminAssignedOptions = Array.from(new Set(scopedLeads.map(l => l.assignedAgent).filter(Boolean)));
+  // "Unassigned" (leads nobody owns yet) lives here, not under Status.
+  const UNASSIGNED_OPTION = "Unassigned";
+  const adminAssignedOptions = [UNASSIGNED_OPTION, ...Array.from(new Set(scopedLeads.map(l => l.assignedAgent).filter(Boolean)))];
 
   // Same ad-source keyword classification used by the Meta/Google sub-account
   // breakdown above (source="Meta Ads"/"Google Ads") — reused here to split
@@ -1379,7 +1391,13 @@ export default function LeadDashboard() {
                           label="Assigned To"
                           options={adminAssignedOptions}
                           selected={adminAssignedFilter}
-                          onChange={(next) => { setAdminPage(1); setAdminAssignedFilter(next); }}
+                          onChange={(next) => {
+                            setAdminPage(1);
+                            // "Unassigned" can't be combined with agents (an
+                            // unassigned lead has no agent), so the latest pick wins.
+                            const pickedUnassigned = next.includes(UNASSIGNED_OPTION) && !adminAssignedFilter.includes(UNASSIGNED_OPTION);
+                            setAdminAssignedFilter(pickedUnassigned ? [UNASSIGNED_OPTION] : next.filter(n => n !== UNASSIGNED_OPTION || next.length === 1));
+                          }}
                           searchPlaceholder="Search agents..."
                           panelWidth={208}
                         />
@@ -1396,7 +1414,7 @@ export default function LeadDashboard() {
                           <SearchableMultiSelect
                             variant="inline"
                             label="Status"
-                            options={STATUS_OPTIONS}
+                            options={PICKABLE_STATUS_OPTIONS}
                             selected={adminStatusFilter}
                             onChange={(next) => { setAdminPage(1); setAdminStatusFilter(next); }}
                             searchPlaceholder="Search status..."
