@@ -49,7 +49,7 @@ export async function ingestMetaLead(leadData: MetaLeadData, connectingAdminId: 
   const propertyId = leadData.campaign_name ? await findPropertyIdByCampaignName(leadData.campaign_name) : undefined;
   const autoAssignedAgentId = propertyId ? await pickAgentForProperty(propertyId) : undefined;
   const assignedAgentId = autoAssignedAgentId ?? connectingAdminId;
-  const statusCode = autoAssignedAgentId ? "NEW" : "UNASSIGNED";
+  const statusCode = autoAssignedAgentId ? "NEW_LEAD" : "UNASSIGNED";
 
   try {
     const { rows, rowCount } = await pool.query<{ id: string }>(

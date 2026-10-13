@@ -217,10 +217,10 @@ export interface ApiLeadRow {
   // Free-text batch label set at bulk-upload time (e.g. "Kashmiri Data") —
   // null for every other ingestion path. See ApiBulkImportLeadsInput.
   sub_source: string | null;
-  // Data Calling's Connected sub-status ("Qualified" | "Not Qualified") —
-  // null whenever status_code isn't CONNECTED, or for any lead that was
-  // never a Data Calling lead.
-  sub_status: string | null;
+  // Data Calling's own, independent field (migration 029) — Connected/
+  // Called/Not Reachable/Wrong Number. null until the lead has been called
+  // at least once.
+  call_status: string | null;
   logs: { message: string; timestamp: string; user: string }[];
 }
 
@@ -359,12 +359,23 @@ export function apiBulkImportLeads(input: BulkImportLeadsApiInput): Promise<Bulk
 export function apiUpdateLeadStatus(
   leadId: string,
   statusCode: string,
-  dealValue?: number,
-  subStatus?: "Qualified" | "Not Qualified"
+  dealValue?: number
 ): Promise<ApiLeadRow> {
   return request<ApiLeadRow>(`/api/v1/leads/${leadId}/status`, {
     method: "PATCH",
-    body: JSON.stringify({ statusCode, dealValue, subStatus })
+    body: JSON.stringify({ statusCode, dealValue })
+  });
+}
+
+// Data Calling's own, independent field (migration 029) — separate
+// endpoint from status above, no transition rules between them.
+export function apiUpdateCallStatus(
+  leadId: string,
+  callStatus: "Connected" | "Called" | "Not Reachable" | "Wrong Number"
+): Promise<ApiLeadRow> {
+  return request<ApiLeadRow>(`/api/v1/leads/${leadId}/call-status`, {
+    method: "PATCH",
+    body: JSON.stringify({ callStatus })
   });
 }
 

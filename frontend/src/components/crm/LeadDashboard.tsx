@@ -87,8 +87,8 @@ function PaginatedSubList<T>({ items, rowLabel, children }: { items: T[]; rowLab
 // drill-down click handlers (which need to set the Leads tab's status
 // filter to "whichever statuses this number represents") share one
 // definition instead of drifting apart.
-const UNQUALIFIED_STATUSES: LeadStatus[] = ["Unassigned", "RNR", "Switch off", "Not Interested", "Invalid", "Low Budget", "Dead"];
-const SITE_VISIT_STATUSES: LeadStatus[] = ["Site Visit", "Meeting Done", "Visit Schedule"];
+const UNQUALIFIED_STATUSES: LeadStatus[] = ["RNR", "Low Budget", "Dead Lead"];
+const SITE_VISIT_STATUSES: LeadStatus[] = ["Site Visit Scheduled", "Site Visit Done"];
 
 // The Leads Analytics per-agent table's togglable columns — Member Name
 // itself stays pinned (same role as Lead Name in the Leads table), the rest
@@ -224,7 +224,7 @@ export default function LeadDashboard() {
     // Booking a lead auto-generates a real invoice using this deal value as
     // the base amount (see AppContext's updateLeadStatus) — a real value is
     // required here, not a hardcoded ₹5,00,000 regardless of the actual deal.
-    if (status === "Booking Done" || status === "Booking Approved" || status === "Booked") {
+    if (status === "Booked") {
       const input = await promptDialog({
         title: "Enter deal value",
         message: "Enter the real deal value for this booking (INR):",
@@ -439,8 +439,8 @@ export default function LeadDashboard() {
   // server status filter rather than a separate client-side predicate — see
   // adminMetricPredicate below for the equivalent labels.
   const ADMIN_METRIC_TO_STATUS: Record<string, LeadStatus> = {
-    new: "New Lead", rnr: "RNR", callbacks: "Call Back", followups: "Follow-ups",
-    sitevisit_sched: "Visit Schedule", sitevisit_done: "Site Visit"
+    new: "New Lead", rnr: "RNR", callbacks: "Call Back", followups: "Followup",
+    sitevisit_sched: "Site Visit Scheduled", sitevisit_done: "Site Visit Done"
   };
 
   const buildAdminServerFilters = (): LeadListFilters => {
@@ -751,9 +751,9 @@ export default function LeadDashboard() {
     new: (l) => l.status === "New Lead",
     rnr: (l) => l.status === "RNR",
     callbacks: (l) => l.status === "Call Back",
-    followups: (l) => l.status === "Follow-ups",
-    sitevisit_sched: (l) => l.status === "Visit Schedule",
-    sitevisit_done: (l) => l.status === "Site Visit"
+    followups: (l) => l.status === "Followup",
+    sitevisit_sched: (l) => l.status === "Site Visit Scheduled",
+    sitevisit_done: (l) => l.status === "Site Visit Done"
   };
 
   const adminCampaignsList = Array.from(new Set(scopedLeads.map(l => l.campaign).filter(Boolean))) as string[];
@@ -857,7 +857,7 @@ export default function LeadDashboard() {
     setAssignError("");
     const results = await Promise.allSettled(toMove.map(async (l) => {
       await apiReassignLead(l.id, assignee.id, assignNote.trim());
-      if (mode === "assign" && l.status === "Unassigned") await apiUpdateLeadStatus(l.id, "NEW");
+      if (mode === "assign" && l.isUnassignedInSystem) await apiUpdateLeadStatus(l.id, "NEW_LEAD");
     }));
     setAssignSubmitting(false);
 
@@ -1458,7 +1458,17 @@ export default function LeadDashboard() {
                             <td className="px-4 py-3 text-slate-500 align-top"><DateTimeLines {...dateTimeParts(l.createdAtStr)} /></td>
                           )}
                           {adminVisibleColumns.property && (
-                            <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]" title={l.property || "Not set"}>{l.property || "Not set"}</td>
+                            <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]">
+                              <span className="flex items-center gap-1.5 flex-wrap" title={l.property || "Not set"}>
+                                {l.property || "Not set"}
+                                <span
+                                  className={`shrink-0 border rounded-lg px-1.5 py-0.5 text-[10px] font-semibold ${l.property ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-slate-50 text-slate-500 border-slate-200"}`}
+                                  title={l.property ? "This lead has a property linked" : "No property linked yet"}
+                                >
+                                  {l.property ? "Assigned" : "Unassigned"}
+                                </span>
+                              </span>
+                            </td>
                           )}
                           {adminVisibleColumns.reassignedTo && (
                             <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]">

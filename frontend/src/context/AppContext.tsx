@@ -13,6 +13,7 @@ import {
   BulkImportLeadsApiInput,
   BulkImportLeadsApiResult,
   apiUpdateLeadStatus,
+  apiUpdateCallStatus,
   apiEditLead,
   apiReassignLead,
   apiUpdateLeadNote,
@@ -167,40 +168,27 @@ export interface User {
   updated_at?: string;
 }
 
+// The 14-value Lead Status list (main Leads page only) — replaced the old
+// 32-value list (with real duplicates like "New Lead"/"New", "Booked"/
+// "Booking Done") in migration 029. See leadStatusMapping.ts for the
+// DB-code mapping and the transition matrix between these values. Data
+// Calling has its own, completely independent CallStatus (see
+// callStatusMapping.ts) — it is not one of these 14.
 export type LeadStatus =
   | "New Lead"
-  | "New"
-  | "Revived"
-  | "Lead Pool"
-  | "After RERA"
-  | "Interested"
-  | "Follow up"
+  | "RNR"
   | "Call Back"
-  | "Meeting Scheduled"
-  | "Meeting Done"
+  | "Dead Lead"
+  | "Followup"
+  | "EOI"
   | "Site Visit Scheduled"
   | "Site Visit Done"
-  | "In Negotiation"
-  | "Booking Done"
-  | "Finance Review"
-  | "Booking Approved"
-  | "Finance Rejected"
-  | "Dead"
-  | "Unassigned"
-  | "RNR"
-  | "Switch off"
-  | "Booked"
-  | "New Leads"
-  | "Assigned"
-  | "Connected"
-  | "Follow-ups"
-  | "Visit Schedule"
-  | "Not Interested"
-  | "EOI Customers"
-  | "Invalid"
   | "Low Budget"
-  | "Site Visit"
-  | "Completed";
+  | "Other requirement"
+  | "Broker"
+  | "Booked"
+  | "Cancelled"
+  | "Different Location";
 
 export interface LeadLog {
   timestamp: string;
@@ -223,7 +211,18 @@ export interface Lead {
   logs: LeadLog[];
   source?: string;
   subSource?: string; // free-text batch label from bulk upload (e.g. "Kashmiri Data") — lets that batch be filtered/reassigned/reshuffled as a group. undefined for every other ingestion path.
-  subStatus?: "Qualified" | "Not Qualified"; // Data Calling's Connected sub-status — only meaningful while status is "Connected", cleared on any other status change.
+  // Data Calling's own, independent field (migration 029) — Connected/
+  // Called/Not Reachable/Wrong Number, completely separate from `status`
+  // above. undefined until the lead has been called at least once.
+  callStatus?: "Connected" | "Called" | "Not Reachable" | "Wrong Number";
+  // True when this lead's backend status_code is the internal UNASSIGNED
+  // sentinel (no real agent picked it up yet — see leads.service.ts) — it
+  // always carries a fallback admin as assignedAgent/assignedAgentId (the
+  // DB column is NOT NULL), so that pair can't be used to detect this, and
+  // the status itself displays as "New Lead" (UNASSIGNED was deliberately
+  // left out of the new 14-value list, see migration 029) — so this is the
+  // only remaining signal once an agent is actually, meaningfully assigned.
+  isUnassignedInSystem?: boolean;
   createdAtStr?: string;
   campaign?: string;
   metaPageName?: string; // which connected Meta Page this lead came in through
@@ -604,8 +603,12 @@ interface AppActions {
     leadId: string,
     status: LeadStatus,
     dealValue?: number,
-    kycDocName?: string,
-    subStatus?: "Qualified" | "Not Qualified"
+    kycDocName?: string
+  ) => { success: boolean; error?: string };
+  /** Data Calling's own, independent field (migration 029) — see updateLeadStatus for the main Lead Status. */
+  updateCallStatus: (
+    leadId: string,
+    callStatus: "Connected" | "Called" | "Not Reachable" | "Wrong Number"
   ) => { success: boolean; error?: string };
   reassignLead: (leadId: string, newAgent: string, note: string) => Promise<void>;
   /** Saves the lead's current note; resolves with the updated lead (or null for a local-only lead). */
@@ -698,6 +701,7 @@ export function mapApiLeadToFrontendLead(row: ApiLeadRow): Lead {
     phone: row.phone,
     email: row.email || "",
     status: dbCodeToFrontendStatus(row.status_code),
+    isUnassignedInSystem: row.status_code === "UNASSIGNED",
     dealValue: row.deal_value ? Number(row.deal_value) : undefined,
     kycVerified: false, // not included in the leads list endpoint yet
     assignedAgent: row.assigned_agent_name,
@@ -710,7 +714,10 @@ export function mapApiLeadToFrontendLead(row: ApiLeadRow): Lead {
     logs: row.logs.map(l => ({ message: l.message, timestamp: l.timestamp, user: l.user })),
     source: row.source || undefined,
     subSource: row.sub_source || undefined,
-    subStatus: row.sub_status === "Qualified" || row.sub_status === "Not Qualified" ? row.sub_status : undefined,
+    callStatus:
+      row.call_status === "Connected" || row.call_status === "Called" || row.call_status === "Not Reachable" || row.call_status === "Wrong Number"
+        ? row.call_status
+        : undefined,
     campaign: row.campaign || undefined,
     metaPageName: row.meta_page_name || undefined,
     metaFormId: row.meta_form_id || undefined,
@@ -1692,7 +1699,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const newLead: Lead = {
       ...leadData,
       id: `lead-${Date.now()}`,
-      status: "New",
+      status: "New Lead",
       kycVerified: false,
       assignedAt: new Date().toISOString(),
       logs: [{ timestamp: new Date().toISOString(), message: `Lead added manually. Assigned to ${leadData.assignedAgent}`, user: currentUser?.name || "System" }]
@@ -1743,8 +1750,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     leadId: string,
     targetStatus: LeadStatus,
     dealValue?: number,
-    kycDocName?: string,
-    subStatus?: "Qualified" | "Not Qualified"
+    kycDocName?: string
   ) => {
     const lead = allLeads.find(l => l.id === leadId);
     if (!lead) return { success: false, error: "Lead not found." };
@@ -1759,23 +1765,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
 
     lead.status = targetStatus;
-    // Sub-status only means anything while Connected — matches the backend
-    // clearing it on any other status (leads.service.ts).
-    lead.subStatus = targetStatus === "Connected" ? subStatus : undefined;
-    // Data Calling's promotion rule: Connected + Qualified graduates a
-    // bulk-uploaded lead out of the cold-outreach pipeline — updating
-    // source here (not just on the server) makes it move immediately from
-    // dataCallingLeads into leads (see the useMemo split below), instead of
-    // waiting for the next full refetch.
-    if (targetStatus === "Connected" && subStatus === "Qualified" && lead.source === "Bulk Upload") {
-      lead.source = "Data";
-    }
-    if (targetStatus === "Booking Done" || targetStatus === "Booking Approved") {
+    if (targetStatus === "Booked") {
       lead.dealValue = dealValue;
       lead.kycDocName = kycDocName;
 
-      // One invoice per booking — skip if a status flip-flop (e.g. Booking
-      // Done -> Approved -> Done again) already created one for this lead.
+      // One invoice per booking — skip if a status flip-flop already
+      // created one for this lead.
       if (!invoices.some(i => i.leadId === lead.id)) {
         const localInvoiceId = `inv-${Date.now()}`;
         setInvoices(prev => [...prev, {
@@ -1812,7 +1807,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         description: `${lead.property || "Property"} • Deal Value ₹${(dealValue || 0).toLocaleString("en-IN")}`,
         leadId: lead.id
       });
-    } else if (targetStatus === "EOI Customers") {
+    } else if (targetStatus === "EOI") {
       addCalendarEvent({
         system: "CRM",
         type: "EOI",
@@ -1829,12 +1824,44 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (isApiSessionActive() && isRealLeadId(leadId)) {
       const dbCode = frontendStatusToDbCode(targetStatus);
       if (dbCode) {
-        apiUpdateLeadStatus(leadId, dbCode, dealValue, targetStatus === "Connected" ? subStatus : undefined).catch((err) =>
+        apiUpdateLeadStatus(leadId, dbCode, dealValue).catch((err) =>
           console.warn("Could not persist status update to the database:", err)
         );
         // The server deletes this lead's activity alerts on a status update; drop live copies too.
         setNotifications(prev => prev.filter(n => !(n.leadId === leadId && isLeadActivity(n))));
       }
+    }
+
+    return { success: true };
+  };
+
+  // Data Calling's own, independent field (migration 029) — no transition
+  // rules, no dealValue/kycDocName/invoice/calendar side effects like
+  // updateLeadStatus above; a Connected result on a bulk-uploaded lead
+  // graduates it out of Data Calling into the main CRM leads list.
+  const updateCallStatus = (leadId: string, callStatus: "Connected" | "Called" | "Not Reachable" | "Wrong Number") => {
+    const lead = allLeads.find(l => l.id === leadId);
+    if (!lead) return { success: false, error: "Lead not found." };
+
+    lead.logs.push({
+      timestamp: new Date().toISOString(),
+      message: `Call status changed to "${callStatus}"`,
+      user: currentUser?.name || "System"
+    });
+    lead.callStatus = callStatus;
+    // Updating source here (not just on the server) moves it immediately
+    // from dataCallingLeads into leads (see the useMemo split below),
+    // instead of waiting for the next full refetch.
+    if (callStatus === "Connected" && lead.source === "Bulk Upload") {
+      lead.source = "Data";
+      lead.status = "New Lead";
+    }
+    setAllLeads([...allLeads]);
+
+    if (isApiSessionActive() && isRealLeadId(leadId)) {
+      apiUpdateCallStatus(leadId, callStatus).catch((err) =>
+        console.warn("Could not persist call status update to the database:", err)
+      );
     }
 
     return { success: true };
@@ -2459,6 +2486,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         switchUserRole,
         addLead,
         updateLeadStatus,
+        updateCallStatus,
         reassignLead,
         updateLeadNote,
         connectMeta,

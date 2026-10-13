@@ -53,7 +53,7 @@ export function useLeadStatusChange() {
   const { updateLeadStatus } = useApp();
   const { toast, prompt: promptDialog } = useDialog();
   return async (leadId: string, status: LeadStatus) => {
-    if (status === "Booking Done" || status === "Booking Approved" || status === "Booked") {
+    if (status === "Booked") {
       const input = await promptDialog({
         title: "Enter deal value",
         message: "Enter the real deal value for this booking (INR):",
@@ -81,7 +81,8 @@ export function LeadQuickViewDrawer({ lead, onClose }: {
   lead: Lead;
   onClose: () => void;
 }) {
-  const { activeRole, recordCallEnded } = useApp();
+  const { activeRole, recordCallEnded, addFollowupCall } = useApp();
+  const { toast } = useDialog();
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const callAllowed = canTriggerLeadCall(activeRole === "ADMIN");
   const handleCall = () => {
@@ -171,13 +172,14 @@ export function LeadQuickViewDrawer({ lead, onClose }: {
             {/* Read-only here (every role): the dashboard quick view only shows
                 the status; it's changed from the Leads table or lead drawer. */}
             <div className="flex items-center gap-1.5">
-              {lead.status === "Connected" && lead.subStatus && (
+              {(lead.callStatus === "Connected" || lead.callStatus === "Called") && (
                 <span
                   className={`text-[10px] font-extrabold px-2 py-0.5 rounded-lg border ${
-                    lead.subStatus === "Qualified" ? "text-emerald-700 bg-emerald-50 border-emerald-200" : "text-red-600 bg-red-50 border-red-200"
+                    lead.callStatus === "Connected" ? "text-emerald-700 bg-emerald-50 border-emerald-200" : "text-red-600 bg-red-50 border-red-200"
                   }`}
+                  title="Qualification Status — derived from Data Calling's Call Status"
                 >
-                  {lead.subStatus}
+                  {lead.callStatus === "Connected" ? "Qualified" : "Unqualified"}
                 </span>
               )}
               <span className={`border rounded-lg px-2 py-0.5 text-[11px] font-semibold ${statusBadgeClasses(lead.status)}`}>
@@ -192,6 +194,27 @@ export function LeadQuickViewDrawer({ lead, onClose }: {
                 See project_crm_role_based_lead_scoping memory (2026-10-10). */}
             {activeRole === "ADMIN" && <span>Source : {lead.source || lead.campaign || "Direct / Manual Entry"}</span>}
           </div>
+          {/* Same entry point as the shared LeadDetailDrawer — see its own
+              comment for why this matters (RNR -> Dead Lead's 7-day gate). */}
+          {lead.status === "RNR" && (
+            <button
+              type="button"
+              onClick={() => {
+                addFollowupCall({
+                  scheduledAt: new Date().toISOString(),
+                  leadId: lead.id,
+                  leadName: lead.name,
+                  phone: lead.phone,
+                  callType: "CALLBACK",
+                  assignedToName: lead.assignedAgent || ""
+                });
+                toast("Call-back attempt logged.", "success");
+              }}
+              className="w-full text-[11px] font-bold text-[#0B1E6E] border border-[#0B1E6E]/20 bg-[#0B1E6E]/5 hover:bg-[#0B1E6E]/10 rounded-lg px-3 py-1.5 transition-colors"
+            >
+              Log Call-Back Attempt
+            </button>
+          )}
         </div>
 
         {/* Assigned / Property / Reassigned / Captured */}
@@ -204,7 +227,15 @@ export function LeadQuickViewDrawer({ lead, onClose }: {
           </div>
           <div>
             <span className="text-slate-400 font-bold text-[10px] block mb-0.5">Property :</span>
-            <span className="text-slate-800 font-semibold">{lead.property || "Not set"}</span>
+            <span className="flex items-center gap-1.5 flex-wrap text-slate-800 font-semibold">
+              {lead.property || "Not set"}
+              <span
+                className={`shrink-0 border rounded-lg px-1.5 py-0.5 text-[10px] font-semibold ${lead.property ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-slate-50 text-slate-500 border-slate-200"}`}
+                title={lead.property ? "This lead has a property linked" : "No property linked yet"}
+              >
+                {lead.property ? "Assigned" : "Unassigned"}
+              </span>
+            </span>
           </div>
           <div>
             <span className="text-slate-400 font-bold text-[10px] block mb-0.5">Reassign From :</span>
