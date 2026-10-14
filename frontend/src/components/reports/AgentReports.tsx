@@ -1,12 +1,15 @@
 "use client";
 
 import React, { useMemo, useRef, useState } from "react";
-import { useApp } from "@/context/AppContext";
+import { useApp, LeadStatus } from "@/context/AppContext";
 import { isLeadAssignableUser } from "@/lib/leadAssignment";
 import { useDialog } from "@/components/ui/DialogProvider";
 import { maskPhone } from "@/lib/maskPII";
 import { AlertTriangle, ArrowRight, CheckSquare, Clock, DollarSign, Info, MapPin, Phone, TrendingUp, Users, RefreshCw } from "lucide-react";
 import { DateRange } from "./DateRangeFilter";
+import MetricDetailModal, { MetricDetailRow } from "./MetricDetailModal";
+import LeadDetailDrawer from "@/components/crm/LeadDetailDrawer";
+import { statusBadgeClasses } from "@/lib/leadStatusMapping";
 import {
   filterLeadsByRange,
   filterAdSpendByRange,
@@ -16,6 +19,7 @@ import {
   computeROIMultiple,
   computeCampaignAttributedSpend,
   computeAgentFunnel,
+  agentFunnelLeads,
   getMissedInfo,
   formatCurrency,
   formatMinutes,
@@ -25,7 +29,7 @@ import { LineSkeleton, TableRowsSkeleton, CardListSkeleton } from "@/components/
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
 
 export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
-  const { leads, adSpendRecords, followupCalls, users, currentUser, activeRole, reassignLead, isDataLoading } = useApp();
+  const { leads, adSpendRecords, followupCalls, users, currentUser, activeRole, reassignLead, updateLeadStatus, isDataLoading } = useApp();
   const { toast, prompt: promptDialog } = useDialog();
 
   const rangeLeads = useMemo(() => filterLeadsByRange(leads, dateRange.from, dateRange.to), [leads, dateRange]);
@@ -89,24 +93,131 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
   const funnel = computeAgentFunnel(agentLeads);
   const pct = (n: number) => (funnel.assigned === 0 ? 0 : Math.round((n / funnel.assigned) * 100));
   const kpiCards = [
-    { label: "Total Leads Assigned", value: funnel.assigned, sub: "In selected range", icon: Users, iconBg: "bg-blue-50 text-blue-600", alert: false },
-    { label: "Leads Contacted", value: funnel.contacted, sub: `${pct(funnel.contacted)}% of assigned`, icon: Phone, iconBg: "bg-emerald-50 text-emerald-600", alert: false },
-    { label: "Qualified Leads", value: funnel.qualified, sub: `${pct(funnel.qualified)}% of assigned`, icon: CheckSquare, iconBg: "bg-violet-50 text-violet-600", alert: false },
-    { label: "Site Visits", value: funnel.siteVisits, sub: `${pct(funnel.siteVisits)}% of assigned`, icon: MapPin, iconBg: "bg-orange-50 text-orange-500", alert: false },
-    { label: "Missed Leads", value: missedLeads.length, sub: `${SLA_MINUTES} min response window`, icon: AlertTriangle, iconBg: "bg-red-50 text-red-600", alert: missedLeads.length > 0 },
-    { label: "Missed Follow-ups", value: missedFollowups.length, sub: "10 min after reminder", icon: Clock, iconBg: "bg-sky-50 text-sky-600", alert: false }
-  ];
+    { key: "assigned", label: "Total Leads Assigned", value: funnel.assigned, sub: "In selected range", icon: Users, iconBg: "bg-blue-50 text-blue-600", alert: false },
+    { key: "contacted", label: "Leads Contacted", value: funnel.contacted, sub: `${pct(funnel.contacted)}% of assigned`, icon: Phone, iconBg: "bg-emerald-50 text-emerald-600", alert: false },
+    { key: "qualified", label: "Qualified Leads", value: funnel.qualified, sub: `${pct(funnel.qualified)}% of assigned`, icon: CheckSquare, iconBg: "bg-violet-50 text-violet-600", alert: false },
+    { key: "siteVisits", label: "Site Visits", value: funnel.siteVisits, sub: `${pct(funnel.siteVisits)}% of assigned`, icon: MapPin, iconBg: "bg-orange-50 text-orange-500", alert: false },
+    { key: "missedLeads", label: "Missed Leads", value: missedLeads.length, sub: `${SLA_MINUTES} min response window`, icon: AlertTriangle, iconBg: "bg-red-50 text-red-600", alert: missedLeads.length > 0 },
+    { key: "missedFollowups", label: "Missed Follow-ups", value: missedFollowups.length, sub: "10 min after reminder", icon: Clock, iconBg: "bg-sky-50 text-sky-600", alert: false }
+  ] as const;
   const funnelRows = [
     { label: "Assigned", value: funnel.assigned, bar: "bg-[#0B1E6E]" },
     { label: "Contacted", value: funnel.contacted, bar: "bg-blue-500" },
     { label: "Qualified", value: funnel.qualified, bar: "bg-blue-400" },
-    { label: "Site Visits", value: funnel.siteVisits, bar: "bg-blue-300" }
+    { key: "siteVisits", label: "Site Visits", value: funnel.siteVisits, bar: "bg-blue-300" }
   ];
   const [missedTab, setMissedTab] = useState<"leads" | "followups">("leads");
   const missedDetailRef = useRef<HTMLDivElement>(null);
   const openMissedTab = (tab: "leads" | "followups") => {
     setMissedTab(tab);
     missedDetailRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  // KPI card popups — agent login only. Each lists the leads behind that
+  // card's number; clicking a row opens the Lead Detail drawer on top.
+  type KpiKey = (typeof kpiCards)[number]["key"];
+  const [openKpi, setOpenKpi] = useState<KpiKey | null>(null);
+  const [drawerLeadId, setDrawerLeadId] = useState<string | null>(null);
+  const fmtDate = (iso?: string) =>
+    iso ? new Date(iso).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—";
+  const leadCell = (name: string, phone: string) => (
+    <>
+      <p className="font-bold text-slate-800">{name}</p>
+      <p className="text-[10px] text-slate-400 font-mono">{maskPhone(phone)}</p>
+    </>
+  );
+  const statusPill = (status: LeadStatus) => (
+    <span className={`inline-block px-2 py-0.5 rounded-full border text-[10px] font-semibold whitespace-nowrap ${statusBadgeClasses(status)}`}>{status}</span>
+  );
+  const kpiDetail = useMemo((): { columns: string[]; rows: MetricDetailRow[]; empty: string; rowLabel: string } | null => {
+    if (!openKpi) return null;
+    const funnelLists = agentFunnelLeads(agentLeads);
+    if (openKpi === "missedLeads") {
+      return {
+        columns: ["Lead", "Property", "Assigned At", "Wait Time"],
+        rows: missedLeads.map(({ lead, info }) => ({
+          key: lead.id,
+          leadId: lead.id,
+          searchText: `${lead.name} ${lead.phone} ${lead.property || ""} ${lead.status}`.toLowerCase(),
+          cells: [
+            leadCell(lead.name, lead.phone),
+            lead.property || "—",
+            <span key="a" className="font-mono">{fmtDate(lead.assignedAt)}</span>,
+            info.responseMinutes === undefined
+              ? <span key="w" className="font-bold text-red-600">Still waiting</span>
+              : <span key="w" className="font-bold text-red-600">{formatMinutes(info.responseMinutes)}</span>
+          ]
+        })),
+        empty: "No missed leads in this date range.",
+        rowLabel: "Lead"
+      };
+    }
+    if (openKpi === "missedFollowups") {
+      return {
+        columns: ["Lead", "Type", "Scheduled", "Overdue By"],
+        rows: missedFollowups.map(f => {
+          const missedAt = f.dueNotifiedAt ? new Date(f.dueNotifiedAt).getTime() + 10 * 60000 : new Date(`${f.date}T00:00:00`).getTime();
+          const overdue = Math.round((Date.now() - missedAt) / 60000);
+          return {
+            key: f.id,
+            leadId: f.leadId && leads.some(l => l.id === f.leadId) ? f.leadId : undefined,
+            searchText: `${f.leadName} ${f.phone} ${f.type}`.toLowerCase(),
+            cells: [
+              leadCell(f.leadName, f.phone),
+              f.type,
+              <span key="s" className="font-mono">{f.date} • {f.time}</span>,
+              overdue > 0 ? <span key="o" className="font-bold text-amber-700">{formatMinutes(overdue)}</span> : "—"
+            ]
+          };
+        }),
+        empty: "No missed follow-ups in this date range.",
+        rowLabel: "Follow-up"
+      };
+    }
+    const list = funnelLists[openKpi];
+    const lastActivity = openKpi === "contacted";
+    return {
+      columns: ["Lead", "Property", "Status", lastActivity ? "Last Activity" : "Assigned At"],
+      rows: list.map(l => {
+        const latest = l.logs.length > 0 ? l.logs[l.logs.length - 1] : undefined;
+        return {
+          key: l.id,
+          leadId: l.id,
+          searchText: `${l.name} ${l.phone} ${l.property || ""} ${l.status}`.toLowerCase(),
+          cells: [
+            leadCell(l.name, l.phone),
+            l.property || "—",
+            statusPill(l.status),
+            <span key="d" className="font-mono">{fmtDate(lastActivity ? latest?.timestamp : l.assignedAt)}</span>
+          ]
+        };
+      }),
+      empty: "No leads here in this date range.",
+      rowLabel: "Lead"
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openKpi, agentLeads, missedLeads, missedFollowups, leads]);
+  const openKpiCard = kpiCards.find(c => c.key === openKpi);
+  const drawerLead = drawerLeadId ? leads.find(l => l.id === drawerLeadId) || null : null;
+
+  // Same Booking guard as the Leads page: booking needs a real deal value.
+  const handleDrawerStatusChange = async (leadId: string, status: LeadStatus) => {
+    if (status === "Booked") {
+      const input = await promptDialog({
+        title: "Enter deal value",
+        message: "Enter the real deal value for this booking (INR):",
+        label: "Deal value (INR)",
+        confirmLabel: "Mark as Booked"
+      });
+      const dealValue = input ? parseFloat(input.replace(/[^0-9.]/g, "")) : NaN;
+      if (!input || isNaN(dealValue) || dealValue <= 0) {
+        toast("A valid deal value is required to mark a lead as Booked.", "warning");
+        return;
+      }
+      updateLeadStatus(leadId, status, dealValue);
+    } else {
+      updateLeadStatus(leadId, status);
+    }
   };
 
   // Both detail tables jump back to page 1 when the agent or date range changes.
@@ -253,8 +364,16 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
 
               {/* KPI cards */}
               <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
-                {kpiCards.map(c => (
-                  <div key={c.label} className="bg-white border border-slate-100 rounded-2xl shadow-sm p-4 min-w-0">
+                {kpiCards.map(c => {
+                  const Card = isScopedToSelf ? "button" : "div";
+                  return (
+                  <Card
+                    key={c.label}
+                    {...(isScopedToSelf ? { type: "button" as const, onClick: () => setOpenKpi(c.key) } : {})}
+                    className={`bg-white border border-slate-100 rounded-2xl shadow-sm p-4 min-w-0 text-left ${
+                      isScopedToSelf ? "group cursor-pointer transition-colors hover:border-slate-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0B1E6E]/30" : ""
+                    }`}
+                  >
                     <span className={`h-9 w-9 rounded-xl flex items-center justify-center ${c.iconBg}`}>
                       <c.icon className="h-4.5 w-4.5" />
                     </span>
@@ -265,8 +384,12 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                       <p className={`text-2xl font-black mt-0.5 ${c.alert ? "text-red-600" : "text-slate-800"}`}>{c.value}</p>
                     )}
                     <span className="text-[10px] text-slate-400 block mt-0.5">{c.sub}</span>
-                  </div>
-                ))}
+                    {isScopedToSelf && (
+                      <span className="mt-2 inline-block text-[10px] font-semibold text-[#0B1E6E] group-hover:underline">View details</span>
+                    )}
+                  </Card>
+                  );
+                })}
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
@@ -304,8 +427,8 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                 <div className="lg:col-span-5 bg-white border border-slate-100 rounded-2xl shadow-sm p-5 space-y-3 min-w-0">
                   <h3 className="text-sm font-bold text-slate-800">Action Required</h3>
                   {[
-                    { label: "Missed Leads", value: missedLeads.length, sub: `Leads not contacted within ${SLA_MINUTES} min SLA`, icon: AlertTriangle, tone: "bg-red-50 border-red-100", iconTone: "bg-red-100 text-red-600", btn: "bg-red-100/70 text-red-700 hover:bg-red-100", cta: "View Leads", tab: "leads" as const },
-                    { label: "Missed Follow-ups", value: missedFollowups.length, sub: "Follow-ups past reminder due time", icon: Clock, tone: "bg-amber-50 border-amber-100", iconTone: "bg-amber-100 text-amber-600", btn: "bg-amber-100/70 text-amber-800 hover:bg-amber-100", cta: "View Follow-ups", tab: "followups" as const }
+                    { key: "missedLeads", label: "Missed Leads", value: missedLeads.length, sub: `Leads not contacted within ${SLA_MINUTES} min SLA`, icon: AlertTriangle, tone: "bg-red-50 border-red-100", iconTone: "bg-red-100 text-red-600", btn: "bg-red-100/70 text-red-700 hover:bg-red-100", cta: "View Leads", tab: "leads" as const },
+                    { key: "missedFollowups", label: "Missed Follow-ups", value: missedFollowups.length, sub: "Follow-ups past reminder due time", icon: Clock, tone: "bg-amber-50 border-amber-100", iconTone: "bg-amber-100 text-amber-600", btn: "bg-amber-100/70 text-amber-800 hover:bg-amber-100", cta: "View Follow-ups", tab: "followups" as const }
                   ].map(a => (
                     <div key={a.label} className={`flex items-center gap-3 rounded-xl border p-3.5 ${a.tone}`}>
                       <span className={`h-11 w-11 rounded-full flex items-center justify-center shrink-0 ${a.iconTone}`}>
@@ -506,6 +629,28 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
           )}
         </div>
       </div>
+
+      {isScopedToSelf && openKpiCard && kpiDetail && (
+        <MetricDetailModal
+          open
+          onClose={() => setOpenKpi(null)}
+          title={openKpiCard.label}
+          subtitle={`${activeAgent} · ${dateRange.from.split("-").reverse().join("-")} to ${dateRange.to.split("-").reverse().join("-")}`}
+          columns={kpiDetail.columns}
+          rows={kpiDetail.rows}
+          emptyText={kpiDetail.empty}
+          rowLabel={kpiDetail.rowLabel}
+          onRowClick={setDrawerLeadId}
+        />
+      )}
+      {isScopedToSelf && (
+        <LeadDetailDrawer
+          lead={drawerLead}
+          isOpen={drawerLead !== null}
+          onClose={() => setDrawerLeadId(null)}
+          onUpdateStatus={handleDrawerStatusChange}
+        />
+      )}
     </div>
   );
 }

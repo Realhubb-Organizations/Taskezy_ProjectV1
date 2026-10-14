@@ -62,13 +62,19 @@ export function computeVisitConversion(leads: Lead[]): { conversionPercent: numb
  * with the other report tabs: Contacted = moved past "New Lead", Qualified =
  * a buyer status (BUYER_STATUSES), Site Visits = computeVisitConversion's set.
  */
-export function computeAgentFunnel(leads: Lead[]): { assigned: number; contacted: number; qualified: number; siteVisits: number } {
+export function agentFunnelLeads(leads: Lead[]): { assigned: Lead[]; contacted: Lead[]; qualified: Lead[]; siteVisits: Lead[] } {
   return {
-    assigned: leads.length,
-    contacted: leads.filter(l => l.status !== "New Lead").length,
-    qualified: leads.filter(l => BUYER_STATUSES.has(l.status)).length,
-    siteVisits: leads.filter(l => VISIT_OR_MEETING_STATUSES.has(l.status)).length
+    assigned: leads,
+    contacted: leads.filter(l => l.status !== "New Lead"),
+    qualified: leads.filter(l => BUYER_STATUSES.has(l.status)),
+    siteVisits: leads.filter(l => VISIT_OR_MEETING_STATUSES.has(l.status))
   };
+}
+
+/** Counts of agentFunnelLeads — the KPI cards' popups list the leads behind each one. */
+export function computeAgentFunnel(leads: Lead[]): { assigned: number; contacted: number; qualified: number; siteVisits: number } {
+  const f = agentFunnelLeads(leads);
+  return { assigned: f.assigned.length, contacted: f.contacted.length, qualified: f.qualified.length, siteVisits: f.siteVisits.length };
 }
 
 export function computeBookingValue(leads: Lead[]): number {

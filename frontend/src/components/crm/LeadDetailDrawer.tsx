@@ -314,7 +314,7 @@ export default function LeadDetailDrawer({
   // "fixed to the viewport" positioning was actually scoped to that page
   // div's box instead of the real screen. A portal escapes that ancestor.
   return createPortal(
-    <div className="fixed inset-0 z-50">
+    <div className="fixed inset-0 z-50" data-lead-drawer>
       {/* Backdrop */}
       <div className="fixed inset-0 bg-slate-900/60 transition-opacity" onClick={onClose} />
 
