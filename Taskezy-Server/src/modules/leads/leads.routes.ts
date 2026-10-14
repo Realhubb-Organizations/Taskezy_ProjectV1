@@ -67,7 +67,7 @@ leadsRouter.patch(
   validate({ params: leadIdParamSchema, body: updateLeadStatusSchema }),
   asyncHandler(updateLeadStatusHandler)
 );
-// Data Calling's own, independent field (migration 029) — separate from
+// Data Calling's own, independent field (migration 030) — separate from
 // the Lead Status transition matrix above, same ownership rule (owner,
 // their manager, or admin) enforced inside updateCallStatus itself.
 leadsRouter.patch(

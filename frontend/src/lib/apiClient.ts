@@ -217,7 +217,7 @@ export interface ApiLeadRow {
   // Free-text batch label set at bulk-upload time (e.g. "Kashmiri Data") —
   // null for every other ingestion path. See ApiBulkImportLeadsInput.
   sub_source: string | null;
-  // Data Calling's own, independent field (migration 029) — Connected/
+  // Data Calling's own, independent field (migration 030) — Connected/
   // Called/Not Reachable/Wrong Number. null until the lead has been called
   // at least once.
   call_status: string | null;
@@ -367,7 +367,7 @@ export function apiUpdateLeadStatus(
   });
 }
 
-// Data Calling's own, independent field (migration 029) — separate
+// Data Calling's own, independent field (migration 030) — separate
 // endpoint from status above, no transition rules between them.
 export function apiUpdateCallStatus(
   leadId: string,
@@ -1384,6 +1384,9 @@ export interface ApiAdSpendRow {
   spend_date: string;
   spend: string;
   leads_generated: number;
+  // BIGINT columns come back as strings; null = not reported (Google rows, older days).
+  impressions: string | number | null;
+  clicks: string | number | null;
   campaign_status: "ACTIVE" | "INACTIVE" | null;
 }
 export function apiListAdSpend(): Promise<ApiAdSpendRow[]> {

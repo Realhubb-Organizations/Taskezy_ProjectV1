@@ -199,13 +199,17 @@ export interface MetaDailyInsight {
   date_start: string; // YYYY-MM-DD
   spend?: string;
   actions?: { action_type: string; value: string }[];
+  // Campaign-level calls only (see getCampaignDailyInsights).
+  impressions?: string;
+  clicks?: string;
 }
 
 /** Daily spend + lead counts for one campaign over the given date range — one call, not one per day (time_increment=1 returns each day as its own row). */
 export async function getCampaignDailyInsights(campaignId: string, longLivedUserToken: string, since: string, until: string): Promise<MetaDailyInsight[]> {
   const url = new URL(`${GRAPH_BASE}/${campaignId}/insights`);
   url.searchParams.set("access_token", longLivedUserToken);
-  url.searchParams.set("fields", "spend,actions,date_start");
+  // impressions/clicks feed the Campaigns page's Impressions, Clicks and CTR.
+  url.searchParams.set("fields", "spend,actions,date_start,impressions,clicks");
   url.searchParams.set("time_range", JSON.stringify({ since, until }));
   url.searchParams.set("time_increment", "1");
   const res = await fetch(url.toString());

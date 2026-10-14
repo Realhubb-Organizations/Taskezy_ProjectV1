@@ -27,31 +27,6 @@ interface TrendRow { label: string; total: number; [seriesKey: string]: string |
 
 const escapeHtml = (v: string) => v.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 
-// The design's 3D pie is used as-is (public/images/task-pie-3d.png). Its
-// seven slices, measured clockwise from 12 o'clock in that image, with the
-// color sampled from each. Task types are mapped onto them largest count →
-// largest slice, so the picture stays roughly in proportion; the numbers
-// shown are always the real counts.
-const IMAGE_SLICES = [
-  { color: "#FFCF56", start: 354, end: 378 }, // yellow (wraps past 12 o'clock)
-  { color: "#72A0E0", start: 23, end: 51 },   // blue
-  { color: "#3CC8FA", start: 56, end: 113 },  // sky
-  { color: "#E03CB6", start: 118, end: 143 }, // magenta
-  { color: "#F43D6C", start: 147, end: 230 }, // red
-  { color: "#FD69A1", start: 232, end: 292 }, // pink
-  { color: "#FBA56A", start: 295, end: 351 }  // orange
-];
-// SVG wedge over one image slice (angles clockwise from 12 o'clock), a
-// little past the pie's edge so the whole slice incl. its 3D rim is covered.
-const wedgePath = (start: number, end: number, cx = 110, cy = 110, r = 112) => {
-  const point = (a: number) => `${cx + r * Math.sin((a * Math.PI) / 180)} ${cy - r * Math.cos((a * Math.PI) / 180)}`;
-  const s = start - 2;
-  const e = end + 2;
-  return `M ${cx} ${cy} L ${point(s)} A ${r} ${r} 0 ${e - s > 180 ? 1 : 0} 1 ${point(e)} Z`;
-};
-
-const SLICES_BY_SIZE = IMAGE_SLICES.map((s, i) => ({ ...s, index: i })).sort((a, b) => (b.end - b.start) - (a.end - a.start));
-
 interface TaskFilter {
   agents: string[]; // empty means every agent
   statuses: string[]; // task types, the same values the table's Task Type filter lists
@@ -120,7 +95,6 @@ export default function TaskInsightsCharts({
 
   const [lineFilter, setLineFilter] = useState<TaskFilter>({ agents: [], statuses: [] });
   const [pieFilter, setPieFilter] = useState<TaskFilter>({ agents: [], statuses: [] });
-  const [hoverSlice, setHoverSlice] = useState<number | null>(null);
 
   const allTasks = useMemo(() => buildSalesPendingTasks(leads, followupCalls, now), [leads, followupCalls, now]);
   const tasks = useMemo(() => allTasks.filter(t => TAB_BUCKETS[tab].includes(t.bucket)), [allTasks, tab]);
@@ -297,36 +271,47 @@ export default function TaskInsightsCharts({
     return { series, options };
   }, [trend, hiddenSeries]);
 
-  // Task types → image slices. More than seven types: the smallest fold
-  // into "Other" on the last slice. Fewer: the spare slices show "0 Task".
+  // Task Type donut: the same tab's tasks (All / Pending) as the chart
+  // beside it, grouped by task type, biggest first; past the palette the
+  // smallest types fold into "Other". Slices are drawn from the real counts.
   const pie = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const t of filterTasks(tasks, pieFilter)) counts.set(t.taskType, (counts.get(t.taskType) || 0) + 1);
+    for (const t of filterTasks(tasks, pieFilter)) counts.set(t.taskType || "Other", (counts.get(t.taskType || "Other") || 0) + 1);
     const sorted = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
-    const groups: [string, number][] = sorted.length > IMAGE_SLICES.length
-      ? [...sorted.slice(0, IMAGE_SLICES.length - 1), ["Other", sorted.slice(IMAGE_SLICES.length - 1).reduce((s, [, v]) => s + v, 0)]]
+    const groups: [string, number][] = sorted.length > SERIES_COLORS.length
+      ? [...sorted.slice(0, SERIES_COLORS.length - 1), ["Other", sorted.slice(SERIES_COLORS.length - 1).reduce((sum, [, v]) => sum + v, 0)]]
       : sorted;
-    const slices = SLICES_BY_SIZE.map((slice, rank) => ({
-      ...slice,
-      name: groups[rank]?.[0] ?? null,
-      value: groups[rank]?.[1] ?? 0,
-      mid: ((slice.start + slice.end) / 2) % 360
-    })).sort((a, b) => a.index - b.index);
-    return { slices, total: sorted.reduce((s, [, v]) => s + v, 0) };
-  }, [tasks, pieFilter]);
+    const slices = groups.map(([name, value], i) => ({ name, value, color: SERIES_COLORS[i] }));
+    const total = slices.reduce((sum, sl) => sum + sl.value, 0);
+    const options: ApexOptions = {
+      chart: { type: "donut", fontFamily: "inherit", animations: { enabled: true, speed: 450 } },
+      labels: slices.map(sl => sl.name),
+      colors: slices.map(sl => sl.color),
+      legend: { show: false },
+      dataLabels: { enabled: false },
+      stroke: { width: 2, colors: ["#ffffff"] },
+      states: { hover: { filter: { type: "darken" } }, active: { filter: { type: "none" } } },
+      plotOptions: {
+        pie: {
+          expandOnClick: false,
+          donut: {
+            size: "68%",
+            labels: {
+              show: true,
+              name: { show: true, fontSize: "11px", color: "#64748b", offsetY: 18 },
+              value: { show: true, fontSize: "22px", fontWeight: 800, color: "#0f172a", offsetY: -14, formatter: (v: string) => v },
+              total: { show: true, showAlways: true, label: tab === "all" ? "Open tasks" : "Overdue tasks", fontSize: "11px", color: "#64748b", formatter: () => String(total) }
+            }
+          }
+        }
+      },
+      tooltip: {
+        y: { formatter: (v: number) => `${v} task${v === 1 ? "" : "s"} · ${total ? Math.round((v / total) * 100) : 0}%` }
+      }
+    };
+    return { slices, total, series: slices.map(sl => sl.value), options };
+  }, [tasks, pieFilter, tab]);
 
-  // Map the pointer to a slice by its angle from the image center.
-  const handlePieHover = (e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const dx = e.clientX - (rect.left + rect.width / 2);
-    const dy = e.clientY - (rect.top + rect.height / 2);
-    if (Math.hypot(dx, dy) > rect.width * 0.47) { setHoverSlice(null); return; }
-    const angle = (Math.atan2(dx, -dy) * 180 / Math.PI + 360) % 360;
-    const hit = IMAGE_SLICES.findIndex(s => (angle >= s.start && angle <= s.end) || (angle + 360 >= s.start && angle + 360 <= s.end));
-    setHoverSlice(hit >= 0 ? hit : null);
-  };
-
-  const hovered = hoverSlice !== null ? pie.slices.find(s => s.index === hoverSlice) : null;
   const cardClass = "bg-white rounded-2xl shadow-md p-5";
 
   return (
@@ -378,12 +363,14 @@ export default function TaskInsightsCharts({
         )}
       </div>
 
-      {/* Task Type — the design's 3D pie image, labeled with real counts */}
+      {/* Task Type — the active tab's tasks (All / Pending) split by type */}
       <div className={cardClass}>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h3 className="text-base font-extrabold text-slate-900">Task Type</h3>
-            <p className="text-[11px] text-slate-500">{pie.total} task{pie.total === 1 ? "" : "s"}</p>
+            <h3 className="text-base font-extrabold text-slate-900">{tab === "all" ? "All Task" : "Pending Task"} Type</h3>
+            <p className="text-[11px] text-slate-500">
+              {pie.total} {tab === "all" ? "open" : "overdue"} task{pie.total === 1 ? "" : "s"} by type
+            </p>
           </div>
           <CardFilters filter={pieFilter} agents={agents} taskTypes={taskTypeOptions} onChange={setPieFilter} />
         </div>
@@ -393,48 +380,17 @@ export default function TaskInsightsCharts({
           </div>
         ) : (
           <>
-            <div className="relative mx-auto mt-8 mb-8 w-[220px] h-[220px]">
-              <div className="absolute inset-0" onMouseMove={handlePieHover} onMouseLeave={() => setHoverSlice(null)}>
-                {/* eslint-disable-next-line @next/next/no-img-element -- static design asset; next/image adds nothing for a small local PNG */}
-                <img src="/images/task-pie-3d.png" alt="Task type pie chart" className="w-full h-full select-none pointer-events-none" draggable={false} />
-                {/* Fade the slices with no tasks, matching their dimmed "0 Task" labels */}
-                <svg viewBox="0 0 220 220" className="absolute inset-0 w-full h-full pointer-events-none" aria-hidden="true">
-                  {pie.slices.filter(s => !s.name).map(s => (
-                    <path key={s.index} d={wedgePath(s.start, s.end)} fill="#fff" fillOpacity={0.65} />
-                  ))}
-                </svg>
-              </div>
-              {pie.slices.map(s => {
-                const r = 124;
-                const x = 110 + r * Math.sin((s.mid * Math.PI) / 180);
-                const y = 110 - r * Math.cos((s.mid * Math.PI) / 180);
-                const align = x > 118 ? "translate(0,-50%)" : x < 102 ? "translate(-100%,-50%)" : "translate(-50%,-50%)";
-                return (
-                  <span
-                    key={s.index}
-                    className={`absolute whitespace-nowrap text-[10px] font-bold pointer-events-none ${s.name ? "text-slate-800" : "text-slate-300"}`}
-                    style={{ left: x, top: y, transform: align }}
-                  >
-                    {s.value} Task
-                  </span>
-                );
-              })}
-              {hovered && (
-                <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white/95 border border-slate-200 rounded-lg shadow-md px-2.5 py-1.5 text-[11px] pointer-events-none whitespace-nowrap">
-                  <p className="font-bold text-slate-800">{hovered.name ?? "No tasks"}</p>
-                  <p className="text-slate-500">
-                    {hovered.value} task{hovered.value === 1 ? "" : "s"}
-                    {hovered.name && ` · ${Math.round((hovered.value / pie.total) * 100)}%`}
-                  </p>
-                </div>
-              )}
+            <div className="mx-auto mt-4 max-w-[280px]">
+              <ApexChart type="donut" height={250} series={pie.series} options={pie.options} />
             </div>
-            <ul className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px]">
-              {pie.slices.filter(s => s.name).sort((a, b) => b.value - a.value).map(s => (
-                <li key={s.index} className="flex items-center gap-1.5 min-w-0">
-                  <span className="h-2.5 w-2.5 rounded-sm shrink-0" style={{ background: s.color }} />
-                  <span className="text-slate-600 truncate" title={s.name!}>{s.name}</span>
-                  <span className="ml-auto text-slate-800 font-semibold tabular-nums">{s.value}</span>
+            <ul className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px]">
+              {pie.slices.map(sl => (
+                <li key={sl.name} className="flex items-center gap-1.5 min-w-0">
+                  <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: sl.color }} />
+                  <span className="text-slate-600 truncate" title={sl.name}>{sl.name}</span>
+                  <span className="ml-auto text-slate-800 font-semibold tabular-nums">
+                    {sl.value} <span className="text-slate-400 font-normal">({Math.round((sl.value / pie.total) * 100)}%)</span>
+                  </span>
                 </li>
               ))}
             </ul>

@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Search, Copy, Check, X } from "lucide-react";
 import { Lead, FollowupCall, LeadStatus, useApp } from "@/context/AppContext";
-import { STATUS_OPTIONS } from "@/lib/leadStatusMapping";
+import { PICKABLE_STATUS_OPTIONS } from "@/lib/leadStatusMapping";
 import { buildSalesPendingTasks, PendingTask, TaskBucket } from "@/lib/salesPendingTasks";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
@@ -109,7 +109,7 @@ export default function SalesPendingTasksTable({
   // Per-row status editor — only for tasks tied to a real lead.
   const renderStatusCell = (t: PendingTask) => {
     if (!t.leadId) return <span className="font-bold text-slate-900">{t.status}</span>;
-    const options: string[] = STATUS_OPTIONS.includes(t.status as LeadStatus) ? STATUS_OPTIONS : [t.status, ...STATUS_OPTIONS];
+    const options: string[] = PICKABLE_STATUS_OPTIONS.includes(t.status as LeadStatus) ? PICKABLE_STATUS_OPTIONS : [t.status, ...PICKABLE_STATUS_OPTIONS];
     return (
       <SearchableSelect
         variant="inline"

@@ -22,7 +22,7 @@ import { maskPhone, maskEmail } from "@/lib/maskPII";
 import { WhatsAppIcon, CallIcon } from "@/components/icons/ContactIcons";
 import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/callTrigger";
 
-// Data Calling's own, independent Call Status (migration 029) — completely
+// Data Calling's own, independent Call Status (migration 030) — completely
 // separate from the main 14-value Lead Status. "Not Reachable" always
 // requires picking a next-call date before it commits (same callback-
 // scheduling mechanism the rest of the CRM uses via follow-ups); Connected
@@ -237,7 +237,8 @@ export default function DataCallingPage() {
   // Summary card date range — every one of the 5 cards below respects it
   // (see categoryLeadsInRange), same as the CRM Dashboard/Campaigns pages.
   // "Custom" = summaryCustomRange (picked from the dropdown's own calendar).
-  const [dateRange, setDateRange] = useState<"Today" | "Yesterday" | "This Week" | "This Month" | "All Time" | "Custom">("Today");
+  // Metric cards open on All Time (narrow with the picker).
+  const [dateRange, setDateRange] = useState<"Today" | "Yesterday" | "This Week" | "This Month" | "All Time" | "Custom">("All Time");
   const [summaryCustomRange, setSummaryCustomRange] = useState<DateRangeValue | null>(null);
 
   const today = new Date();
@@ -588,7 +589,7 @@ export default function DataCallingPage() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
-  // "Status" here means Call Status (migration 029) — Data Calling's own
+  // "Status" here means Call Status (migration 030) — Data Calling's own
   // independent field, "—" covers a lead that hasn't been called yet.
   const CALL_STATUS_NONE = "—";
   const [statusFilters, setStatusFilters] = useState<string[]>([]);

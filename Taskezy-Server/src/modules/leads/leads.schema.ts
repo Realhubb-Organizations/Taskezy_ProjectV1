@@ -70,7 +70,7 @@ export const updateLeadStatusSchema = z.object({
   dealValue: z.number().nonnegative().optional()
 });
 
-// Data Calling's own, independent field (see migration 029) — separate
+// Data Calling's own, independent field (see migration 030) — separate
 // endpoint from the main Lead Status above, since the two are no longer
 // the same column and have no transition rules between them.
 export const updateCallStatusSchema = z.object({

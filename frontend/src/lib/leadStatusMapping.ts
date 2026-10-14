@@ -3,10 +3,10 @@ import { LeadStatus, LeadLog } from "@/context/AppContext";
 // The 14-value Lead Status list (main Leads page only — Data Calling has
 // its own, independent Call Status, see callStatusMapping.ts). Replaced
 // the old 32-frontend-label/27-DB-code system (which had real duplicates,
-// e.g. "New Lead" vs "New", "Booked" vs "Booking Done") in migration 029 —
+// e.g. "New Lead" vs "New", "Booked" vs "Booking Done") in migration 030 —
 // frontend label and DB code are now a clean 1:1, so this file is far
 // smaller than it used to be. See DATA_DICTIONARY.md in Taskezy_DB and
-// Taskezy-Server/migrations-archive/029_lead_status_segregation.sql for
+// Taskezy-Server/migrations-archive/030_lead_status_segregation.sql for
 // the old->new mapping every existing lead was migrated through.
 export const FRONTEND_STATUS_TO_DB_CODE: Record<LeadStatus, string> = {
   "New Lead": "NEW_LEAD",
@@ -54,6 +54,13 @@ export const STATUS_OPTIONS: LeadStatus[] = [
   "Site Visit Done", "Low Budget", "Other requirement", "Broker", "Booked",
   "Dead Lead", "Cancelled", "Different Location"
 ];
+
+// Kept as an alias (not a separate list) for callers that pre-date
+// migration 030 — "Assigned"/"Unassigned" used to be pickable statuses
+// needing their own filter here; they're not in the new 14-value
+// LeadStatus union at all anymore (see isUnassignedInSystem on Lead
+// instead), so there's nothing left to filter out.
+export const PICKABLE_STATUS_OPTIONS: LeadStatus[] = STATUS_OPTIONS;
 
 // Badge color classes for a status pill — shared by every status badge/pill
 // in the app so the same status always reads the same color everywhere.

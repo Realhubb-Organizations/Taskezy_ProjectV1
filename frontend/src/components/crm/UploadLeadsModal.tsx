@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { X, UploadCloud, Download, ChevronDown, CheckCircle2, AlertTriangle } from "lucide-react";
+import { X, UploadCloud, Download, ChevronDown, Check, CheckCircle2, AlertTriangle } from "lucide-react";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
 
 // exceljs is a ~260KB dependency used only by this modal (template
@@ -107,18 +107,15 @@ function SourceSearchSelect({ value, onChange }: { value: string; onChange: (v: 
             <p className="px-3.5 py-2 text-xs text-slate-400 italic font-normal">No prior sub-sources yet</p>
           ) : (
             history.map(h => (
-              <label
+              <button
+                type="button"
                 key={h}
-                className="flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
+                onClick={() => commitValue(h)}
+                className={`w-full flex items-center gap-2 px-3.5 py-2 text-left text-xs font-semibold hover:bg-slate-50 ${value === h ? "bg-blue-50/60 text-[#0B1E6E]" : "text-slate-700"}`}
               >
-                <input
-                  type="checkbox"
-                  checked={value === h}
-                  onChange={() => commitValue(h)}
-                  className="h-3.5 w-3.5 rounded border-slate-300 text-[#0B1E6E] focus:ring-0"
-                />
-                {h}
-              </label>
+                <span className="flex-1 truncate">{h}</span>
+                {value === h && <Check className="h-3.5 w-3.5 shrink-0 text-[#0B1E6E]" aria-hidden="true" />}
+              </button>
             ))
           )}
         </div>

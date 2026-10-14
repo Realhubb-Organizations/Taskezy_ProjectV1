@@ -47,7 +47,7 @@ export interface LeadListRow {
   // reassigned, and reshuffled as a group later. null for every other
   // ingestion path (Meta, sheet import, manual Add Lead).
   sub_source: string | null;
-  // Data Calling's own, independent field (migration 029) — Connected /
+  // Data Calling's own, independent field (migration 030) — Connected /
   // Called / Not Reachable / Wrong Number, completely separate from
   // status_code. null until the lead has been called at least once.
   call_status: string | null;
@@ -306,7 +306,7 @@ export async function updateStatus(
 }
 
 /**
- * Data Calling's own field (migration 029) — independent of status_code.
+ * Data Calling's own field (migration 030) — independent of status_code.
  * Must run inside the same transaction as insertLeadLog (see
  * leads.service.ts's updateCallStatus).
  */

@@ -170,7 +170,7 @@ export interface User {
 
 // The 14-value Lead Status list (main Leads page only) — replaced the old
 // 32-value list (with real duplicates like "New Lead"/"New", "Booked"/
-// "Booking Done") in migration 029. See leadStatusMapping.ts for the
+// "Booking Done") in migration 030. See leadStatusMapping.ts for the
 // DB-code mapping and the transition matrix between these values. Data
 // Calling has its own, completely independent CallStatus (see
 // callStatusMapping.ts) — it is not one of these 14.
@@ -211,7 +211,7 @@ export interface Lead {
   logs: LeadLog[];
   source?: string;
   subSource?: string; // free-text batch label from bulk upload (e.g. "Kashmiri Data") — lets that batch be filtered/reassigned/reshuffled as a group. undefined for every other ingestion path.
-  // Data Calling's own, independent field (migration 029) — Connected/
+  // Data Calling's own, independent field (migration 030) — Connected/
   // Called/Not Reachable/Wrong Number, completely separate from `status`
   // above. undefined until the lead has been called at least once.
   callStatus?: "Connected" | "Called" | "Not Reachable" | "Wrong Number";
@@ -220,7 +220,7 @@ export interface Lead {
   // always carries a fallback admin as assignedAgent/assignedAgentId (the
   // DB column is NOT NULL), so that pair can't be used to detect this, and
   // the status itself displays as "New Lead" (UNASSIGNED was deliberately
-  // left out of the new 14-value list, see migration 029) — so this is the
+  // left out of the new 14-value list, see migration 030) — so this is the
   // only remaining signal once an agent is actually, meaningfully assigned.
   isUnassignedInSystem?: boolean;
   createdAtStr?: string;
@@ -249,6 +249,9 @@ export interface AdSpendRecord {
   date: string; // YYYY-MM-DD
   spend: number;
   leadsGenerated: number;
+  // Meta-reported reach for the day; null when not reported (Google rows, days synced before migration 029).
+  impressions: number | null;
+  clicks: number | null;
   campaignStatus?: "ACTIVE" | "INACTIVE"; // undefined for records with no linked Meta campaign (legacy/manual rows)
 }
 
@@ -605,7 +608,7 @@ interface AppActions {
     dealValue?: number,
     kycDocName?: string
   ) => { success: boolean; error?: string };
-  /** Data Calling's own, independent field (migration 029) — see updateLeadStatus for the main Lead Status. */
+  /** Data Calling's own, independent field (migration 030) — see updateLeadStatus for the main Lead Status. */
   updateCallStatus: (
     leadId: string,
     callStatus: "Connected" | "Called" | "Not Reachable" | "Wrong Number"
@@ -991,6 +994,8 @@ function mapApiAdSpendToFrontend(row: ApiAdSpendRow): AdSpendRecord {
     date: row.spend_date.slice(0, 10),
     spend: Number(row.spend),
     leadsGenerated: row.leads_generated,
+    impressions: row.impressions === null || row.impressions === undefined ? null : Number(row.impressions),
+    clicks: row.clicks === null || row.clicks === undefined ? null : Number(row.clicks),
     campaignStatus: row.campaign_status || undefined
   };
 }
@@ -1076,30 +1081,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setIsDataLoading(true);
     setDataLoadError(false);
     try {
-      const [apiLeads, apiUsers, apiProperties, apiResaleUnits, apiFollowups, apiAttendance, apiReimbursements, apiInvoices, apiCalendarEvents, apiTimesheets, apiTenantSettings] = await Promise.all([
+      // Each list loads on its own (allSettled): one failing endpoint — e.g.
+      // a 500 or 429 on resale units — used to throw away EVERY list and
+      // show the whole CRM as empty. Now only that list stays empty.
+      // HRMS/Finance lists are skipped entirely while CRM_ONLY_MODE hides
+      // those modules (3 fewer requests on every load).
+      const skip = <T,>(empty: T) => Promise.resolve(empty);
+      const [leadsR, usersR, propertiesR, resaleR, followupsR, attendanceR, reimbursementsR, invoicesR, calendarR, timesheetsR, tenantR] = await Promise.allSettled([
         apiListAllLeads(),
         apiListUsers(),
         apiListProperties(),
         apiListResaleUnits(),
         apiListFollowups(),
-        apiListAttendance(),
-        apiListReimbursements(),
+        CRM_ONLY_MODE ? skip([] as Awaited<ReturnType<typeof apiListAttendance>>) : apiListAttendance(),
+        CRM_ONLY_MODE ? skip([] as Awaited<ReturnType<typeof apiListReimbursements>>) : apiListReimbursements(),
         apiListInvoices(),
         apiListCalendarEvents(),
-        apiListTimesheets(),
+        CRM_ONLY_MODE ? skip([] as Awaited<ReturnType<typeof apiListTimesheets>>) : apiListTimesheets(),
         apiGetTenantSettings()
       ]);
-      setAllLeads(apiLeads.map(mapApiLeadToFrontendLead));
-      setUsers(apiUsers.map(mapApiUserDirectoryEntryToFrontendUser));
-      setProperties(apiProperties.map(mapApiPropertyToFrontend));
-      setResaleUnits(apiResaleUnits.map(mapApiResaleUnitToFrontend));
-      setFollowupCalls(apiFollowups.map(mapApiFollowupToFrontend));
-      setAttendanceRecords(apiAttendance.map(mapApiAttendanceToFrontend));
-      setReimbursements(apiReimbursements.map(mapApiReimbursementToFrontend));
-      setInvoices(apiInvoices.map(mapApiInvoiceToFrontend));
-      setCalendarEvents(apiCalendarEvents.map(mapApiCalendarEventToFrontend));
-      setTimesheets(apiTimesheets.map(mapApiTimesheetToFrontend));
-      setTenantSettings(mapApiTenantSettingsToFrontend(apiTenantSettings));
+      const failed: string[] = [];
+      const use = <T,>(r: PromiseSettledResult<T>, name: string, apply: (v: T) => void) => {
+        if (r.status === "fulfilled") apply(r.value);
+        else { failed.push(name); console.warn(`Could not load ${name}:`, r.reason); }
+      };
+      use(leadsR, "leads", v => setAllLeads(v.map(mapApiLeadToFrontendLead)));
+      use(usersR, "users", v => setUsers(v.map(mapApiUserDirectoryEntryToFrontendUser)));
+      use(propertiesR, "properties", v => setProperties(v.map(mapApiPropertyToFrontend)));
+      use(resaleR, "resale units", v => setResaleUnits(v.map(mapApiResaleUnitToFrontend)));
+      use(followupsR, "follow-ups", v => setFollowupCalls(v.map(mapApiFollowupToFrontend)));
+      use(attendanceR, "attendance", v => setAttendanceRecords(v.map(mapApiAttendanceToFrontend)));
+      use(reimbursementsR, "reimbursements", v => setReimbursements(v.map(mapApiReimbursementToFrontend)));
+      use(invoicesR, "invoices", v => setInvoices(v.map(mapApiInvoiceToFrontend)));
+      use(calendarR, "calendar events", v => setCalendarEvents(v.map(mapApiCalendarEventToFrontend)));
+      use(timesheetsR, "timesheets", v => setTimesheets(v.map(mapApiTimesheetToFrontend)));
+      use(tenantR, "tenant settings", v => setTenantSettings(mapApiTenantSettingsToFrontend(v)));
+      // The CRM can't work without these two — flag it so pages can say so.
+      if (failed.includes("leads") || failed.includes("users")) setDataLoadError(true);
 
       // /api/v1/ad-spend and /api/v1/meta/connections are both ADMIN-only
       // (Campaigns is admin-only, see layout.tsx's checkUserAccess) — only
@@ -1835,7 +1853,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return { success: true };
   };
 
-  // Data Calling's own, independent field (migration 029) — no transition
+  // Data Calling's own, independent field (migration 030) — no transition
   // rules, no dealValue/kycDocName/invoice/calendar side effects like
   // updateLeadStatus above; a Connected result on a bulk-uploaded lead
   // graduates it out of Data Calling into the main CRM leads list.

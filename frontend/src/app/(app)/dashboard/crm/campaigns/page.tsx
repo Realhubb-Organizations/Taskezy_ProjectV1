@@ -66,12 +66,11 @@ function PlatformIcons({ platforms }: { platforms: CampaignItem["platform"][] })
 
 // The campaigns table's togglable columns (beyond the always-shown Campaign
 // Name + Total Leads) — driven by the Filter button's panel, mirroring the
-// same drawer pattern on the admin leads page. "Date", "CTR", "Clicks",
-// "Impressions", "Ad set name", "Source" and "QCPL" have no real backing
-// field yet (no ad-set/click/impression-level ingestion in AdSpendRecord),
-// so their cells honestly render "—" for every row rather than inventing
-// numbers — same convention the leads page uses for its own untracked
-// columns.
+// same drawer pattern on the admin leads page. CTR / Clicks / Impressions
+// come from Meta's daily campaign insights (migration 029; "—" when not
+// reported, e.g. Google), Ad set name from the synced per-ad records,
+// Source is the platform and QCPL is spend ÷ qualified leads. "Date" still
+// has no per-campaign field and renders "—".
 type CampaignColumnKey =
   | "cpl" | "date" | "status" | "ctr" | "siteVisit" | "clicks"
   | "adSetName" | "impressions" | "source" | "qcpl" | "unqualifiedLeads" | "qualifiedLeads";
@@ -1895,8 +1894,9 @@ export default function AdminCampaignsPage() {
               </div>
             </div>
             <div className="overflow-x-auto md:overflow-y-auto md:max-h-[45vh]">
-              <table className="table-fixed w-full text-left border-collapse min-w-[1050px]">
+              <table className="table-fixed w-full text-left border-collapse min-w-[1180px]">
                 <colgroup>
+                  <col />
                   <col />
                   <col />
                   <col />
@@ -1943,6 +1943,7 @@ export default function AdminCampaignsPage() {
                     </th>
                     <th className="px-4 py-3 whitespace-nowrap">Ad Set Name</th>
                     <th className="px-4 py-3 whitespace-nowrap">Ad creative Name</th>
+                    <th className="px-4 py-3 whitespace-nowrap">Total Leads</th>
                     <th className="px-4 py-3 whitespace-nowrap">Qualified Leads</th>
                     <th className="px-4 py-3 whitespace-nowrap">CPL</th>
                     <th className="px-4 py-3 whitespace-nowrap">Spend</th>
@@ -1950,10 +1951,10 @@ export default function AdminCampaignsPage() {
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-[12px] font-medium text-slate-700">
                   {isDataLoading && deepDiveCampaigns.length === 0 ? (
-                    <TableRowsSkeleton rows={6} columns={7} />
+                    <TableRowsSkeleton rows={6} columns={8} />
                   ) : deepDiveCampaigns.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-4 py-8 text-center text-slate-400 italic">No campaigns found matching filter.</td>
+                      <td colSpan={8} className="px-4 py-8 text-center text-slate-400 italic">No campaigns found matching filter.</td>
                     </tr>
                   ) : (
                     deepDivePagination.pageRows.map(c => {
@@ -1980,6 +1981,8 @@ export default function AdminCampaignsPage() {
                         <td className="px-4 py-3 [overflow-wrap:anywhere]" title={topAd ? (topAd.creativeName || topAd.adType || topAd.adName || undefined) : undefined}>
                           {topAd ? (topAd.creativeName || topAd.adType || topAd.adName || "—") : <span className="text-slate-300" title="No ad-creative data synced for this campaign yet">—</span>}
                         </td>
+                        {/* Leads the spend actually produced — CPL is spend ÷ this. */}
+                        <td className="px-4 py-3 font-semibold text-slate-800">{c.totalLeads}</td>
                         <td className="px-4 py-3">
                           <button
                             type="button"
@@ -1989,7 +1992,9 @@ export default function AdminCampaignsPage() {
                             {c.qualifiedLeads}
                           </button>
                         </td>
-                        <td className="px-4 py-3">{c.cpl.toFixed(2)}</td>
+                        <td className="px-4 py-3" title={c.totalLeads > 0 ? "Spend ÷ total leads" : "No leads yet, so no cost per lead"}>
+                          {c.totalLeads > 0 ? c.cpl.toFixed(2) : <span className="text-slate-300">—</span>}
+                        </td>
                         <td className="px-4 py-3 font-semibold text-slate-800">{formatCurrency(c.spend)}</td>
                       </tr>
                       );
@@ -2131,12 +2136,37 @@ export default function AdminCampaignsPage() {
                         {campaignVisibleColumns.siteVisit && <td className="px-4 py-3.5">{row.siteVisit}</td>}
                         {campaignVisibleColumns.cpl && <td className="px-4 py-3.5 font-semibold text-slate-800">{row.cpl.toFixed(2)}</td>}
                         {campaignVisibleColumns.date && <td className="px-4 py-3.5 text-slate-300" title="Not tracked yet — no per-campaign date field ingested">—</td>}
-                        {campaignVisibleColumns.ctr && <td className="px-4 py-3.5 text-slate-300" title="Not tracked yet — no click/impression-level data ingested">—</td>}
-                        {campaignVisibleColumns.clicks && <td className="px-4 py-3.5 text-slate-300" title="Not tracked yet — no click-level data ingested">—</td>}
-                        {campaignVisibleColumns.adSetName && <td className="px-4 py-3.5 text-slate-300" title="Not tracked yet — no ad-set-level data ingested">—</td>}
-                        {campaignVisibleColumns.impressions && <td className="px-4 py-3.5 text-slate-300" title="Not tracked yet — no impression-level data ingested">—</td>}
-                        {campaignVisibleColumns.source && <td className="px-4 py-3.5 text-slate-300" title="Not tracked yet — no ad-source field ingested">—</td>}
-                        {campaignVisibleColumns.qcpl && <td className="px-4 py-3.5 text-slate-300" title="Not tracked yet — no qualified-lead cost field ingested">—</td>}
+                        {campaignVisibleColumns.ctr && (
+                          <td className="px-4 py-3.5" title="Clicks ÷ impressions, as reported by the ad platform">
+                            {row.clicks !== null && row.impressions ? `${((row.clicks / row.impressions) * 100).toFixed(2)}%` : <span className="text-slate-300">—</span>}
+                          </td>
+                        )}
+                        {campaignVisibleColumns.clicks && (
+                          <td className="px-4 py-3.5">{row.clicks !== null ? row.clicks.toLocaleString("en-IN") : <span className="text-slate-300">—</span>}</td>
+                        )}
+                        {campaignVisibleColumns.adSetName && (() => {
+                          // Ad sets under this campaign, biggest spender first.
+                          const adSets = Array.from(new Set((adRowsByCampaign[row.name.toLowerCase()] || []).map(a => a.adSetName).filter(Boolean)));
+                          return (
+                            <td className="px-4 py-3.5 [overflow-wrap:anywhere]" title={adSets.join(", ")}>
+                              {adSets.length === 0 ? <span className="text-slate-300">—</span> : (
+                                <>
+                                  {adSets[0]}
+                                  {adSets.length > 1 && <span className="ml-1 text-[10px] font-bold text-slate-400">+{adSets.length - 1} more</span>}
+                                </>
+                              )}
+                            </td>
+                          );
+                        })()}
+                        {campaignVisibleColumns.impressions && (
+                          <td className="px-4 py-3.5">{row.impressions !== null ? row.impressions.toLocaleString("en-IN") : <span className="text-slate-300">—</span>}</td>
+                        )}
+                        {campaignVisibleColumns.source && <td className="px-4 py-3.5">{row.platform}</td>}
+                        {campaignVisibleColumns.qcpl && (
+                          <td className="px-4 py-3.5" title="Spend ÷ qualified leads">
+                            {row.qualifiedLeads > 0 ? computeCPL(row.spend, row.qualifiedLeads).toFixed(2) : <span className="text-slate-300">—</span>}
+                          </td>
+                        )}
                       </tr>
                     ))
                   )}

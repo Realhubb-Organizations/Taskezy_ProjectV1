@@ -442,7 +442,7 @@ export async function updateLeadStatus(
 const VALID_CALL_STATUSES = new Set(["Connected", "Called", "Not Reachable", "Wrong Number"]);
 
 /**
- * Data Calling's own field (migration 029) — fully independent of
+ * Data Calling's own field (migration 030) — fully independent of
  * updateLeadStatus above, no transition matrix between its 4 values. A
  * Connected result promotes a bulk-uploaded lead out of the cold-outreach
  * pipeline into the main CRM leads list (see leads.repository.ts's

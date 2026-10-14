@@ -22,6 +22,10 @@ export interface CampaignItem {
   // number too, since spend was actually incurred to generate this
   // (usually larger) count, not the smaller real-synced totalLeads.
   platformReportedLeads: number;
+  // Sums of the platform-reported daily figures; null when the platform
+  // never reported them for this campaign in the range (shown as "—").
+  impressions: number | null;
+  clicks: number | null;
 }
 
 export const CAMPAIGN_STATUSES: CampaignItem["status"][] = ["Active", "Pause", "Stopped"];
@@ -48,7 +52,7 @@ export function buildCampaignsList(
   leads: Lead[],
   leadDateFilter: (l: Lead) => boolean
 ): { items: CampaignItem[]; leadsByDateByCampaign: Record<string, Record<string, number>>; platformReportedTotal: number } {
-  const spendCampaignMap: Record<string, { spend: number; platformLeadsByDate: Record<string, number>; status: "Active" | "Pause" | "Stopped"; platform: "Meta" | "Google" | "Other"; property?: string }> = {};
+  const spendCampaignMap: Record<string, { spend: number; platformLeadsByDate: Record<string, number>; status: "Active" | "Pause" | "Stopped"; platform: "Meta" | "Google" | "Other"; property?: string; impressions: number | null; clicks: number | null }> = {};
 
   records.forEach(rec => {
     const name = rec.accountName;
@@ -66,9 +70,13 @@ export function buildCampaignsList(
         platformLeadsByDate: {},
         status: st,
         platform: plat,
-        property: rec.property
+        property: rec.property,
+        impressions: null,
+        clicks: null
       };
     }
+    if (rec.impressions !== null && rec.impressions !== undefined) spendCampaignMap[name].impressions = (spendCampaignMap[name].impressions ?? 0) + rec.impressions;
+    if (rec.clicks !== null && rec.clicks !== undefined) spendCampaignMap[name].clicks = (spendCampaignMap[name].clicks ?? 0) + rec.clicks;
     if (!spendCampaignMap[name].property && rec.property) spendCampaignMap[name].property = rec.property;
     spendCampaignMap[name].spend += rec.spend;
     spendCampaignMap[name].platformLeadsByDate[rec.date] = (spendCampaignMap[name].platformLeadsByDate[rec.date] || 0) + rec.leadsGenerated;
@@ -122,7 +130,9 @@ export function buildCampaignsList(
         spend: item.spend,
         platform: item.platform,
         property: item.property || "Unspecified",
-        platformReportedLeads: campaignPlatformReportedLeads
+        platformReportedLeads: campaignPlatformReportedLeads,
+        impressions: item.impressions,
+        clicks: item.clicks
       });
     }
   });

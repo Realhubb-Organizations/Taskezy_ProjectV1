@@ -3,7 +3,7 @@ import { ApiError } from "../../utils/ApiError";
 
 // The 14-value Lead Status list (main Leads page only — Data Calling has
 // its own, separate call_status, see leads.schema.ts). Matches
-// lead_statuses' codes after migration 029.
+// lead_statuses' codes after migration 030.
 export const LEAD_STATUS_CODES = [
   "NEW_LEAD", "RNR", "CALL_BACK", "DEAD_LEAD", "FOLLOWUP", "EOI",
   "SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE", "LOW_BUDGET",
@@ -132,7 +132,7 @@ export async function assertTransitionAllowed(fromCode: string, toCode: LeadStat
   if (fromCode === toCode) return; // not a transition — e.g. editing dealValue without changing status
 
   const rule = TRANSITIONS[fromCode as LeadStatusCode];
-  if (!rule) return; // fromCode predates migration 029 or is otherwise unrecognized — don't block on a status this matrix doesn't know, the FK/enum elsewhere already guards valid codes going forward
+  if (!rule) return; // fromCode predates migration 030 or is otherwise unrecognized — don't block on a status this matrix doesn't know, the FK/enum elsewhere already guards valid codes going forward
 
   if (rule.allowed.includes(toCode) || rule.optional.includes(toCode)) {
     if (fromCode === "RNR" && toCode === "DEAD_LEAD") {
