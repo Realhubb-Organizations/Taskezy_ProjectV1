@@ -101,7 +101,7 @@ export default function HomePage() {
   // reimbursement claims.
   const invoicesLast7Days = invoices.filter(i => isWithinLast7Days(i.createdAt));
   const propertiesInvoicedLast7Days = new Set(invoicesLast7Days.map(i => i.projectName).filter(Boolean)).size;
-  const bookingsCount = leads.filter(l => ["Booked", "Booking Done", "Booking Approved"].includes(l.status)).length;
+  const bookingsCount = leads.filter(l => l.status === "Booked").length;
 
   return (
     <div className="space-y-5 pb-8 animate-fade-in">

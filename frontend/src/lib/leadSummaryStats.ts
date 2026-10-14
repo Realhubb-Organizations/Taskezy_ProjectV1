@@ -30,8 +30,8 @@ export function computeLeadSummaryStats(scopedLeads: Lead[], isInDateRange: (l: 
     newLeads: rangeLeads.filter(l => l.status === "New Lead").length,
     rnr: rangeLeads.filter(l => l.status === "RNR").length,
     callBacks: rangeLeads.filter(l => l.status === "Call Back").length,
-    followUps: rangeLeads.filter(l => l.status === "Follow-ups").length,
-    siteVisitScheduled: rangeLeads.filter(l => l.status === "Visit Schedule").length,
-    siteVisitDone: rangeLeads.filter(l => l.status === "Site Visit").length
+    followUps: rangeLeads.filter(l => l.status === "Followup").length,
+    siteVisitScheduled: rangeLeads.filter(l => l.status === "Site Visit Scheduled").length,
+    siteVisitDone: rangeLeads.filter(l => l.status === "Site Visit Done").length
   };
 }

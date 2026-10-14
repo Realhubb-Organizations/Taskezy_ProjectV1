@@ -14,7 +14,11 @@ export default function FinanceDashboardPage() {
 
   const totalInvoiced = invoices.reduce((sum, inv) => sum + inv.totalAmount, 0);
   const pendingClaimsCount = reimbursements.filter(r => r.status === "Pending").length;
-  const pendingFinanceReview = leads.filter(l => l.status === "Finance Review" || l.status === "Booking Done").length;
+  // Migration 029 collapsed the Booking Done/Finance Review distinction
+  // into one "Booked" Lead Status — Finance's own pending-review signal
+  // now lives on the auto-generated invoice itself (starts "Draft" the
+  // moment a lead is marked Booked), same as dashboard/finance/page.tsx.
+  const pendingFinanceReview = leads.filter(l => l.status === "Booked" && invoices.some(inv => inv.leadId === l.id && inv.status === "Draft")).length;
 
   return (
     <div className="space-y-4 pb-8 animate-fade-in">

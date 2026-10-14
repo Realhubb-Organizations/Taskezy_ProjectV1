@@ -22,16 +22,16 @@ import { maskPhone, maskEmail } from "@/lib/maskPII";
 import { WhatsAppIcon, CallIcon } from "@/components/icons/ContactIcons";
 import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/callTrigger";
 
-// Data Calling's whole status model is deliberately just these three — a
-// cold-outreach triage pipeline, not the full CRM pipeline: a fresh
-// bulk-uploaded row is New Lead; RNR (no answer) always requires picking a
-// next-call date before it commits, same as Follow-up/Call Back does
-// elsewhere via the follow-up scheduling mechanism; Connected always
-// requires a Qualified/Not Qualified sub-status before it commits. Once
-// Connected + Qualified, the lead is promoted out of Data Calling entirely
-// (see updateLeadStatus's source flip), so there's nothing further to pick
-// here — the rest of its journey happens in the main CRM pipeline.
-const ROW_STATUS_OPTIONS: Lead["status"][] = ["New Lead", "RNR", "Connected"];
+// Data Calling's own, independent Call Status (migration 030) — completely
+// separate from the main 14-value Lead Status. "Not Reachable" always
+// requires picking a next-call date before it commits (same callback-
+// scheduling mechanism the rest of the CRM uses via follow-ups); Connected
+// and Called commit immediately, Qualification Status is auto-derived from
+// which one was picked (see callStatusMapping.ts), never asked separately.
+// Connected promotes the lead out of Data Calling entirely (see
+// updateCallStatus's source flip), so there's nothing further to pick here
+// — the rest of its journey happens in the main CRM pipeline.
+const ROW_CALL_STATUS_OPTIONS: NonNullable<Lead["callStatus"]>[] = ["Connected", "Called", "Not Reachable", "Wrong Number"];
 
 function formatDateTime(iso?: string): string {
   if (!iso) return "—";
@@ -44,11 +44,13 @@ function formatDateTime(iso?: string): string {
 // leads.assigned_agent_id is NOT NULL at the DB level (leads.repository.ts
 // inner-joins users on it), so assignedAgent is always some real agent's
 // name even for a lead nobody has actually started working yet — that
-// pipeline state lives in the separate `status` field as "Unassigned"
-// instead. That's the real signal the bulk Assign button keys off; a
-// missing/placeholder assignedAgent is kept as a defensive fallback only.
+// pipeline state is tracked via isUnassignedInSystem instead (see
+// AppContext.tsx — the backend's internal UNASSIGNED sentinel, not one of
+// the 14 user-facing Lead Status values). That's the real signal the bulk
+// Assign button keys off; a missing/placeholder assignedAgent is kept as a
+// defensive fallback only.
 function isUnassignedLead(l: Lead): boolean {
-  return l.status === "Unassigned" || !l.assignedAgent || l.assignedAgent === "Not Assigned";
+  return !!l.isUnassignedInSystem || !l.assignedAgent || l.assignedAgent === "Not Assigned";
 }
 
 // Togglable columns for the Data Calling table, driven by its own Filter
@@ -61,7 +63,7 @@ function isUnassignedLead(l: Lead): boolean {
 // cells honestly render "—" rather than a fabricated number when shown.
 type DataCallingColumnKey =
   | "property" | "date" | "qualifiedLeads" | "dataCallSource" | "unqualifiedLeads"
-  | "cpl" | "assignedTo" | "usageCount" | "notes" | "qualifiedPercent" | "actions" | "subStatus";
+  | "cpl" | "assignedTo" | "usageCount" | "notes" | "qualifiedPercent" | "actions" | "qualificationStatus";
 
 const DATA_CALLING_COLUMNS: { key: DataCallingColumnKey; label: string }[] = [
   { key: "property", label: "Property" },
@@ -75,13 +77,13 @@ const DATA_CALLING_COLUMNS: { key: DataCallingColumnKey; label: string }[] = [
   { key: "notes", label: "Notes" },
   { key: "qualifiedPercent", label: "Qualified %age" },
   { key: "actions", label: "Actions" },
-  { key: "subStatus", label: "Sub-status" }
+  { key: "qualificationStatus", label: "Qualification Status" }
 ];
 
 const DATA_CALLING_DEFAULT_VISIBLE_COLUMNS: Record<DataCallingColumnKey, boolean> = {
   property: true, date: true, qualifiedLeads: false, dataCallSource: false, unqualifiedLeads: false,
   cpl: false, assignedTo: true, usageCount: false, notes: true, qualifiedPercent: false, actions: false,
-  subStatus: true
+  qualificationStatus: true
 };
 
 // The Analytics tab's Source Performance table's extra togglable columns —
@@ -140,16 +142,16 @@ function computeAnalyticsPerformanceRows(list: Lead[], groupBy: (l: Lead) => str
     groups.get(key)!.push(l);
   });
   return Array.from(groups.entries()).map(([name, group]) => {
-    const qualifiedLeads = group.filter(l => l.subStatus === "Qualified").length;
+    const qualifiedLeads = group.filter(l => l.callStatus === "Connected").length;
     return {
       name,
       totalLeads: group.length,
       callsMade: group.filter(l => l.logs && l.logs.length > 0).length,
-      connected: group.filter(l => l.status === "Connected").length,
+      connected: group.filter(l => l.callStatus === "Connected").length,
       qualifiedLeads,
       unqualifiedLeads: group.length - qualifiedLeads,
-      rnr: group.filter(l => l.status === "RNR").length,
-      siteVisits: group.filter(l => l.status === "Visit Schedule" || l.status === "Site Visit").length,
+      rnr: group.filter(l => l.callStatus === "Not Reachable").length,
+      siteVisits: group.filter(l => l.status === "Site Visit Scheduled" || l.status === "Site Visit Done").length,
       qualificationRate: group.length > 0 ? `${((qualifiedLeads / group.length) * 100).toFixed(1)}%` : "0.0%"
     };
   }).sort((a, b) => b.totalLeads - a.totalLeads);
@@ -157,11 +159,11 @@ function computeAnalyticsPerformanceRows(list: Lead[], groupBy: (l: Lead) => str
 
 function analyticsLeadMatchesMetric(l: Lead, metric: AnalyticsChartMetric): boolean {
   switch (metric) {
-    case "Qualified": return l.subStatus === "Qualified";
-    case "RNR": return l.status === "RNR";
+    case "Qualified": return l.callStatus === "Connected";
+    case "RNR": return l.callStatus === "Not Reachable";
     case "Calls Made": return !!(l.logs && l.logs.length > 0);
     case "Total Leads": return true;
-    case "Not Qualified": return l.subStatus === "Not Qualified";
+    case "Not Qualified": return l.callStatus === "Called";
   }
 }
 
@@ -172,7 +174,7 @@ export default function DataCallingPage() {
   // AppContext.tsx), aliased to `leads` here so the rest of this large file
   // needs no other changes.
   const {
-    dataCallingLeads: leads, followupCalls, properties, users, currentUser, activeRole, updateLeadStatus, reassignLead,
+    dataCallingLeads: leads, followupCalls, properties, users, currentUser, activeRole, updateLeadStatus, updateCallStatus, reassignLead,
     bulkImportLeads, addFollowupCall, removeLeadsLocally, isDataLoading, recordCallEnded, recordWhatsAppOpened
   } = useApp();
   const { toast, prompt: promptDialog } = useDialog();
@@ -378,9 +380,9 @@ export default function DataCallingPage() {
     // Qualified/Not Qualified is Data Calling's own Connected sub-status
     // (see updateLeadStatus), not a CRM-wide status list — a
     // Connected+Not-Qualified lead must not also count as "qualified".
-    "Qualified Leads": leads.filter(l => l.subStatus === "Qualified"),
-    "RNR": leads.filter(l => l.status === "RNR"),
-    "Not Qualified": leads.filter(l => l.subStatus === "Not Qualified")
+    "Qualified Leads": leads.filter(l => l.callStatus === "Connected"),
+    "RNR": leads.filter(l => l.callStatus === "Not Reachable"),
+    "Not Qualified": leads.filter(l => l.callStatus === "Called")
   }), [leads]);
 
   const categoryLeadsInRange = useMemo(() => {
@@ -435,9 +437,9 @@ export default function DataCallingPage() {
   const analyticsSummaryMetrics = useMemo(() => ({
     totalAssigned: subSourceScopedLeads.filter(l => !!l.assignedAgent).length,
     callsMade: subSourceScopedLeads.filter(l => l.logs && l.logs.length > 0).length,
-    qualifiedLeads: subSourceScopedLeads.filter(l => l.subStatus === "Qualified").length,
-    rnr: subSourceScopedLeads.filter(l => l.status === "RNR").length,
-    notQualified: subSourceScopedLeads.filter(l => l.subStatus === "Not Qualified").length
+    qualifiedLeads: subSourceScopedLeads.filter(l => l.callStatus === "Connected").length,
+    rnr: subSourceScopedLeads.filter(l => l.callStatus === "Not Reachable").length,
+    notQualified: subSourceScopedLeads.filter(l => l.callStatus === "Called").length
   }), [subSourceScopedLeads]);
 
   // Real underlying lead list behind each Analytics stat card, keyed the
@@ -446,9 +448,9 @@ export default function DataCallingPage() {
   const analyticsCategoryLeads: Record<string, Lead[]> = useMemo(() => ({
     "Total Leads Assigned": subSourceScopedLeads.filter(l => !!l.assignedAgent),
     "Calls Made": subSourceScopedLeads.filter(l => l.logs && l.logs.length > 0),
-    "Qualified Leads": subSourceScopedLeads.filter(l => l.subStatus === "Qualified"),
-    "RNR": subSourceScopedLeads.filter(l => l.status === "RNR"),
-    "Not Qualified": subSourceScopedLeads.filter(l => l.subStatus === "Not Qualified")
+    "Qualified Leads": subSourceScopedLeads.filter(l => l.callStatus === "Connected"),
+    "RNR": subSourceScopedLeads.filter(l => l.callStatus === "Not Reachable"),
+    "Not Qualified": subSourceScopedLeads.filter(l => l.callStatus === "Called")
   }), [subSourceScopedLeads]);
 
   // Manager sees only their own direct reports' rows here — never other
@@ -587,17 +589,21 @@ export default function DataCallingPage() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
+  // "Status" here means Call Status (migration 030) — Data Calling's own
+  // independent field, "—" covers a lead that hasn't been called yet.
+  const CALL_STATUS_NONE = "—";
   const [statusFilters, setStatusFilters] = useState<string[]>([]);
-  const statusOptions = useMemo(() => Array.from(new Set(leads.map(l => l.status))).sort(), [leads]);
+  const statusOptions = useMemo(() => Array.from(new Set(leads.map(l => l.callStatus || CALL_STATUS_NONE))).sort(), [leads]);
 
-  // Sub-status filter — Qualified/Not Qualified, only ever set while a
-  // lead's status is Connected (see updateLeadStatus/backend). "—" covers
-  // every lead that either isn't Connected or hasn't been given a
-  // sub-status yet.
+  // Qualification Status filter — fully derived from Call Status (see
+  // callStatusMapping.ts), not an independently stored field. "—" covers
+  // every lead whose call status doesn't resolve to Qualified/Unqualified.
   const [subStatusFilters, setSubStatusFilters] = useState<string[]>([]);
   const SUB_STATUS_NONE = "—";
+  const qualificationStatusOf = (l: Lead): string =>
+    l.callStatus === "Connected" ? "Qualified" : l.callStatus === "Called" ? "Unqualified" : SUB_STATUS_NONE;
   const subStatusOptions = useMemo(
-    () => Array.from(new Set(leads.map(l => l.subStatus || SUB_STATUS_NONE))).sort(),
+    () => Array.from(new Set(leads.map(qualificationStatusOf))).sort(),
     [leads]
   );
 
@@ -624,7 +630,7 @@ export default function DataCallingPage() {
     isAdmin
       ? DATA_CALLING_DEFAULT_VISIBLE_COLUMNS
       : isMember
-        ? { ...DATA_CALLING_DEFAULT_VISIBLE_COLUMNS, actions: true, property: false, subStatus: false }
+        ? { ...DATA_CALLING_DEFAULT_VISIBLE_COLUMNS, actions: true, property: false, qualificationStatus: false }
         : { ...DATA_CALLING_DEFAULT_VISIBLE_COLUMNS, actions: true }
   );
   const toggleColumn = (key: DataCallingColumnKey) => setVisibleColumns(prev => ({ ...prev, [key]: !prev[key] }));
@@ -759,12 +765,11 @@ export default function DataCallingPage() {
       reassignLead(id, agentName, note).catch((err) =>
         toast(`Could not reassign ${lead?.name ?? "a lead"}: ${err instanceof Error ? err.message : "please try again."}`, "error")
       );
-      // Move it off the "Unassigned" pipeline state now that it actually has
-      // someone on it — otherwise it'd stay eligible for the Assign button.
-      // "New Lead" (not "Assigned") since Data Calling's status model is
-      // deliberately just New Lead/RNR/Connected. Not relevant to Reshuffle:
-      // those leads already have a real status.
-      if (assignFlowMode === "assign" && lead?.status === "Unassigned") updateLeadStatus(id, "New Lead");
+      // Move it off the internal UNASSIGNED sentinel now that it actually
+      // has someone on it — otherwise it'd stay eligible for the Assign
+      // button. Not relevant to Reshuffle: those leads already have a real
+      // owner, isUnassignedInSystem is already false for them.
+      if (assignFlowMode === "assign" && lead?.isUnassignedInSystem) updateLeadStatus(id, "New Lead");
     });
     setSelectedIds(prev => {
       const next = new Set(prev);
@@ -776,54 +781,49 @@ export default function DataCallingPage() {
 
   // Individual lead view — same LeadDetailDrawer the main admin dashboard
   // uses, opened by clicking a lead's name, but scoped to Data Calling's
-  // own restricted status model (see statusOptions/restrictedStatuses below).
+  // own Call Status model (see callStatusOptions/restrictedCallStatuses below).
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
 
-  // RNR and Connected can't commit as a bare status change — RNR always
-  // needs a next-call date (scheduled the same way Follow-up/Call Back
-  // does elsewhere, via addFollowupCall) and Connected always needs a
-  // Qualified/Not Qualified sub-status (see updateLeadStatus). Picking
-  // either from the row Status dropdown opens this modal instead of
-  // committing immediately; New Lead still commits straight away.
-  const [pendingStatusAction, setPendingStatusAction] = useState<{ leadId: string; leadName: string; status: "RNR" | "Connected" } | null>(null);
+  // "Not Reachable" can't commit as a bare call-status change — it always
+  // needs a next-call date (scheduled the same way Follow-up/Call Back does
+  // elsewhere, via addFollowupCall). Connected/Called/Wrong Number commit
+  // immediately — Qualification Status is auto-derived from the pick, never
+  // asked separately (see callStatusMapping.ts). Picking "Not Reachable"
+  // from the row Call Status dropdown opens this modal instead of
+  // committing immediately.
+  const [pendingCallStatusAction, setPendingCallStatusAction] = useState<{ leadId: string; leadName: string } | null>(null);
   const [rnrDate, setRnrDate] = useState("");
   const [rnrTime, setRnrTime] = useState("10:00");
   const [pendingActionError, setPendingActionError] = useState<string | null>(null);
 
-  const openStatusChange = (lead: Lead, status: Lead["status"]) => {
-    if (status === "RNR" || status === "Connected") {
+  const openCallStatusChange = (lead: Lead, callStatus: NonNullable<Lead["callStatus"]>) => {
+    if (callStatus === "Not Reachable") {
       setPendingActionError(null);
       setRnrDate("");
       setRnrTime("10:00");
-      setPendingStatusAction({ leadId: lead.id, leadName: lead.name, status });
+      setPendingCallStatusAction({ leadId: lead.id, leadName: lead.name });
       return;
     }
-    updateLeadStatus(lead.id, status);
+    updateCallStatus(lead.id, callStatus);
   };
 
-  const confirmRnr = () => {
-    if (!pendingStatusAction) return;
+  const confirmNotReachable = () => {
+    if (!pendingCallStatusAction) return;
     if (!rnrDate) {
       setPendingActionError("Please select the next calling date.");
       return;
     }
-    const lead = leads.find(l => l.id === pendingStatusAction.leadId);
-    updateLeadStatus(pendingStatusAction.leadId, "RNR");
+    const lead = leads.find(l => l.id === pendingCallStatusAction.leadId);
+    updateCallStatus(pendingCallStatusAction.leadId, "Not Reachable");
     addFollowupCall({
       scheduledAt: new Date(`${rnrDate}T${rnrTime}`).toISOString(),
-      leadId: pendingStatusAction.leadId,
-      leadName: pendingStatusAction.leadName,
+      leadId: pendingCallStatusAction.leadId,
+      leadName: pendingCallStatusAction.leadName,
       phone: lead?.phone,
       callType: "CALLBACK",
       assignedToName: lead?.assignedAgent || ""
     });
-    setPendingStatusAction(null);
-  };
-
-  const confirmConnected = (subStatus: "Qualified" | "Not Qualified") => {
-    if (!pendingStatusAction) return;
-    updateLeadStatus(pendingStatusAction.leadId, "Connected", undefined, undefined, subStatus);
-    setPendingStatusAction(null);
+    setPendingCallStatusAction(null);
   };
 
   const copyToClipboard = (text: string) => {
@@ -856,10 +856,10 @@ export default function DataCallingPage() {
     const q = searchQuery.trim().toLowerCase();
     return leads.filter(l => {
       const matchesSearch = !q || l.name.toLowerCase().includes(q);
-      const matchesStatus = statusFilters.length === 0 || statusFilters.includes(l.status);
+      const matchesStatus = statusFilters.length === 0 || statusFilters.includes(l.callStatus || CALL_STATUS_NONE);
       const matchesAssigned = assignedFilters.length === 0 || assignedFilters.includes(l.assignedAgent);
       const matchesDataCallSource = dataCallSourceFilters.length === 0 || dataCallSourceFilters.includes(l.subSource || l.source || "");
-      const matchesSubStatus = subStatusFilters.length === 0 || subStatusFilters.includes(l.subStatus || SUB_STATUS_NONE);
+      const matchesSubStatus = subStatusFilters.length === 0 || subStatusFilters.includes(qualificationStatusOf(l));
       const matchesDate = appliedCustomRange
         ? (() => {
             if (!l.createdAtStr) return false;
@@ -1542,7 +1542,7 @@ export default function DataCallingPage() {
                   <col />
                   <col />
                   <col />
-                  {visibleColumns.subStatus && <col />}
+                  {visibleColumns.qualificationStatus && <col />}
                   {visibleColumns.assignedTo && <col />}
                   {visibleColumns.date && <col />}
                   {visibleColumns.notes && <col />}
@@ -1604,7 +1604,7 @@ export default function DataCallingPage() {
                         panelWidth={180}
                       />
                     </th>
-                    {visibleColumns.subStatus && (
+                    {visibleColumns.qualificationStatus && (
                       <th className="px-4 py-3 whitespace-nowrap">
                         <SearchableMultiSelect
                           variant="inline"
@@ -1708,55 +1708,33 @@ export default function DataCallingPage() {
                           ) : "—"}
                         </td>
                         <td className="px-4 py-3.5 whitespace-nowrap">
-                          {/* Manager can see but never change status directly — only an
-                              Admin can; see canEditLeadStatus above.
+                          {/* Manager can see but never change call status directly — only
+                              an Admin can; see canEditLeadStatus above.
                               See project_crm_role_based_lead_scoping memory (2026-10-10). */}
                           {canEditLeadStatus(l) ? (
                             <SearchableSelect
                               variant="inline"
-                              value={l.status}
-                              onChange={(v) => openStatusChange(l, v as Lead["status"])}
-                              options={ROW_STATUS_OPTIONS}
-                              searchPlaceholder="Search status..."
+                              value={l.callStatus || ""}
+                              onChange={(v) => openCallStatusChange(l, v as NonNullable<Lead["callStatus"]>)}
+                              options={ROW_CALL_STATUS_OPTIONS}
+                              placeholder="Not called yet"
+                              searchPlaceholder="Search call status..."
                               panelWidth={176}
                               className="text-slate-900"
                             />
                           ) : (
-                            <span className="text-slate-900" title={STATUS_LOCKED_HINT}>{l.status}</span>
+                            <span className="text-slate-900" title={STATUS_LOCKED_HINT}>{l.callStatus || "Not called yet"}</span>
                           )}
                         </td>
-                        {visibleColumns.subStatus && (
+                        {visibleColumns.qualificationStatus && (
                         <td className="px-4 py-3.5 whitespace-nowrap">
-                          {/* A Member can set Qualified/Not Qualified on a lead from any
-                              status, not just once it's already Connected — picking a
-                              value promotes the lead to Connected via the existing
-                              updateLeadStatus call below, same as it already did for an
-                              already-Connected lead. Admin/Manager keep the original
-                              Connected-gated behavior; canEditLeadStatus above still
-                              handles ownership/role gating.
-                              See project_crm_role_based_lead_scoping memory (2026-10-10). */}
-                          {(isMember || l.status === "Connected") && canEditLeadStatus(l) ? (
-                            // Sub-status can also be changed on an already-Connected
-                            // lead without re-picking the status itself (e.g. flipping
-                            // Not Qualified -> Qualified once a second call confirms interest).
-                            <SearchableSelect
-                              variant="inline"
-                              value={l.subStatus || ""}
-                              onChange={(v) => updateLeadStatus(l.id, "Connected", undefined, undefined, v as "Qualified" | "Not Qualified")}
-                              options={["Qualified", "Not Qualified"]}
-                              placeholder="Set sub-status"
-                              searchPlaceholder="Search sub-status..."
-                              panelWidth={160}
-                              className={
-                                l.subStatus === "Qualified"
-                                  ? "text-emerald-600"
-                                  : l.subStatus === "Not Qualified"
-                                    ? "text-red-500"
-                                    : "text-slate-400"
-                              }
-                            />
-                          ) : l.status === "Connected" && l.subStatus ? (
-                            <span className="text-slate-700" title={STATUS_LOCKED_HINT}>{l.subStatus}</span>
+                          {/* Qualification Status is fully derived from Call Status (see
+                              callStatusMapping.ts) — never independently editable, so this
+                              is a read-only badge, not a dropdown. */}
+                          {l.callStatus === "Connected" ? (
+                            <span className="text-emerald-600" title="Derived from Call Status">Qualified</span>
+                          ) : l.callStatus === "Called" ? (
+                            <span className="text-red-500" title="Derived from Call Status">Unqualified</span>
                           ) : (
                             <span className="text-slate-300">—</span>
                           )}
@@ -2028,24 +2006,18 @@ export default function DataCallingPage() {
       )}
 
       {/* Individual lead view — same drawer the main admin dashboard uses,
-          restricted to Data Calling's own status model. Picking RNR/Connected
-          from the drawer's own status dropdown hands off to the exact same
-          pending-action modal below (onRestrictedStatus), rather than
-          duplicating the date/sub-status UI inside the drawer. */}
+          with the real, full 14-value Lead Status (Data Calling leads are
+          ordinary leads once promoted, and even pre-promotion there's no
+          reason to restrict their main status). Call Status itself (this
+          page's real primary action) is edited via the row dropdown above,
+          not inside this shared drawer — it knows nothing about
+          Data Calling's independent field. */}
       <LeadDetailDrawer
         lead={selectedLead}
         isOpen={selectedLead !== null}
         onClose={() => setSelectedLead(null)}
         onUpdateStatus={updateLeadStatus}
-        statusOptions={ROW_STATUS_OPTIONS}
-        restrictedStatuses={["RNR", "Connected"]}
         managerStatusReadOnly
-        onRestrictedStatus={(leadId, leadName, status) => {
-          setPendingActionError(null);
-          setRnrDate("");
-          setRnrTime("10:00");
-          setPendingStatusAction({ leadId, leadName, status: status as "RNR" | "Connected" });
-        }}
       />
 
       {/* RNR needs a next-call date (scheduled via the same follow-up
@@ -2100,88 +2072,53 @@ export default function DataCallingPage() {
         document.body
       )}
 
-      {pendingStatusAction && createPortal(
+      {pendingCallStatusAction && createPortal(
         <>
-          <div className="fixed inset-0 bg-slate-900/40 z-[80]" onClick={() => setPendingStatusAction(null)} />
+          <div className="fixed inset-0 bg-slate-900/40 z-[80]" onClick={() => setPendingCallStatusAction(null)} />
           <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
             <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-slate-200 p-6">
-              <h3 className="text-sm font-extrabold text-slate-900">
-                {pendingStatusAction.status === "RNR" ? "Schedule Next Call" : "Mark as Connected"}
-              </h3>
-              <p className="text-xs text-slate-500 mt-1">{pendingStatusAction.leadName}</p>
+              <h3 className="text-sm font-extrabold text-slate-900">Schedule Next Call</h3>
+              <p className="text-xs text-slate-500 mt-1">{pendingCallStatusAction.leadName}</p>
 
-              {pendingStatusAction.status === "RNR" ? (
-                <div className="mt-4 space-y-3">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <label className="block text-[11px] font-bold text-slate-700">Next Call Date</label>
-                      <DatePicker
-                        value={rnrDate}
-                        minDate={todayIso()}
-                        onChange={(v) => { setRnrDate(v); setPendingActionError(null); }}
-                        className="w-full flex items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:bg-white focus:border-[#0B1E6E]"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="block text-[11px] font-bold text-slate-700">Time</label>
-                      <input
-                        type="time"
-                        value={rnrTime}
-                        onChange={(e) => setRnrTime(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:bg-white focus:border-[#0B1E6E]"
-                      />
-                    </div>
+              <div className="mt-4 space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="block text-[11px] font-bold text-slate-700">Next Call Date</label>
+                    <DatePicker
+                      value={rnrDate}
+                      minDate={todayIso()}
+                      onChange={(v) => { setRnrDate(v); setPendingActionError(null); }}
+                      className="w-full flex items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:bg-white focus:border-[#0B1E6E]"
+                    />
                   </div>
-                  {pendingActionError && <p className="text-[11px] text-red-600 font-semibold">{pendingActionError}</p>}
-                  <div className="flex justify-end gap-2 pt-1">
-                    <button
-                      type="button"
-                      onClick={() => setPendingStatusAction(null)}
-                      className="bg-slate-100 border border-slate-200 text-slate-700 font-bold px-5 py-2 rounded-xl text-sm hover:bg-slate-200 transition-colors"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      onClick={confirmRnr}
-                      className="bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold px-5 py-2 rounded-xl text-sm transition-colors"
-                    >
-                      Schedule
-                    </button>
+                  <div className="space-y-1">
+                    <label className="block text-[11px] font-bold text-slate-700">Time</label>
+                    <input
+                      type="time"
+                      value={rnrTime}
+                      onChange={(e) => setRnrTime(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:bg-white focus:border-[#0B1E6E]"
+                    />
                   </div>
                 </div>
-              ) : (
-                <div className="mt-4 space-y-2">
-                  <p className="text-[11px] text-slate-500">
-                    A qualified lead moves into the main CRM pipeline; not qualified stays here on Data Calling.
-                  </p>
-                  <div className="grid grid-cols-2 gap-3 pt-1">
-                    <button
-                      type="button"
-                      onClick={() => confirmConnected("Qualified")}
-                      className="border-2 border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-extrabold text-xs py-3 rounded-xl transition-colors"
-                    >
-                      Qualified
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => confirmConnected("Not Qualified")}
-                      className="border-2 border-red-200 bg-red-50 hover:bg-red-100 text-red-700 font-extrabold text-xs py-3 rounded-xl transition-colors"
-                    >
-                      Not Qualified
-                    </button>
-                  </div>
-                  <div className="flex justify-end pt-2">
-                    <button
-                      type="button"
-                      onClick={() => setPendingStatusAction(null)}
-                      className="bg-slate-100 border border-slate-200 text-slate-700 font-bold px-5 py-2 rounded-xl text-sm hover:bg-slate-200 transition-colors"
-                    >
-                      Cancel
-                    </button>
-                  </div>
+                {pendingActionError && <p className="text-[11px] text-red-600 font-semibold">{pendingActionError}</p>}
+                <div className="flex justify-end gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setPendingCallStatusAction(null)}
+                    className="bg-slate-100 border border-slate-200 text-slate-700 font-bold px-5 py-2 rounded-xl text-sm hover:bg-slate-200 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={confirmNotReachable}
+                    className="bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold px-5 py-2 rounded-xl text-sm transition-colors"
+                  >
+                    Schedule
+                  </button>
                 </div>
-              )}
+              </div>
             </div>
           </div>
         </>,

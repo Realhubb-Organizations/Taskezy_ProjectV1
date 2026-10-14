@@ -11,6 +11,7 @@ import {
   leadStatsQuerySchema,
   listLeadsQuerySchema,
   reassignLeadSchema,
+  updateCallStatusSchema,
   updateLeadNoteSchema,
   updateLeadStatusSchema
 } from "./leads.schema";
@@ -25,6 +26,7 @@ import {
   getLeadStatsHandler,
   listLeadsHandler,
   reassignLeadHandler,
+  updateCallStatusHandler,
   updateLeadNoteHandler,
   reassignUnassignedSheetLeadsHandler,
   updateLeadStatusHandler,
@@ -64,6 +66,14 @@ leadsRouter.patch(
   "/:id/status",
   validate({ params: leadIdParamSchema, body: updateLeadStatusSchema }),
   asyncHandler(updateLeadStatusHandler)
+);
+// Data Calling's own, independent field (migration 030) — separate from
+// the Lead Status transition matrix above, same ownership rule (owner,
+// their manager, or admin) enforced inside updateCallStatus itself.
+leadsRouter.patch(
+  "/:id/call-status",
+  validate({ params: leadIdParamSchema, body: updateCallStatusSchema }),
+  asyncHandler(updateCallStatusHandler)
 );
 leadsRouter.patch(
   "/:id",

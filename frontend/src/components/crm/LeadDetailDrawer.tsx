@@ -5,7 +5,7 @@ import { useApp, Lead, LeadStatus } from "@/context/AppContext";
 import { useDialog } from "@/components/ui/DialogProvider";
 import { SearchableSelect } from "@/components/ui/SearchableDropdown";
 import { DatePicker } from "@/components/ui/DateRangePicker";
-import { deriveActivityTimeline, PICKABLE_STATUS_OPTIONS, statusBadgeClasses } from "@/lib/leadStatusMapping";
+import { deriveActivityTimeline, nextStatusOptions, statusBadgeClasses } from "@/lib/leadStatusMapping";
 import { canChangeLeadStatus, isLeadAssignableUser, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
 import { maskPhone, maskEmail } from "@/lib/maskPII";
 import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/callTrigger";
@@ -15,20 +15,7 @@ interface LeadDetailDrawerProps {
   lead: Lead | null;
   isOpen: boolean;
   onClose: () => void;
-  onUpdateStatus: (leadId: string, status: LeadStatus, dealValue?: number, kycDocName?: string, subStatus?: "Qualified" | "Not Qualified") => void;
-  // Data Calling opens this same drawer for its own leads but with a
-  // deliberately narrower status model (New Lead/RNR/Connected) — when set,
-  // this replaces the full STATUS_OPTIONS list. Defaults to the full list
-  // for every other caller (main Leads dashboard).
-  statusOptions?: LeadStatus[];
-  // Statuses in `statusOptions` that need something more than a bare status
-  // change before they can commit (Data Calling's RNR needs a next-call
-  // date, Connected needs a Qualified/Not Qualified sub-status) — picking
-  // one of these calls onRestrictedStatus instead of onUpdateStatus,
-  // handing off to whatever flow the caller already has for it rather than
-  // duplicating that UI inside this shared drawer.
-  restrictedStatuses?: LeadStatus[];
-  onRestrictedStatus?: (leadId: string, leadName: string, status: LeadStatus) => void;
+  onUpdateStatus: (leadId: string, status: LeadStatus, dealValue?: number, kycDocName?: string) => void;
   /** Called after a reassignment has been saved, so the caller can refresh its list. */
   onReassigned?: (leadId: string) => void;
   /** Called after the lead's note is saved, so the caller can update its list. */
@@ -48,15 +35,12 @@ export default function LeadDetailDrawer({
   isOpen,
   onClose,
   onUpdateStatus,
-  statusOptions,
-  restrictedStatuses,
-  onRestrictedStatus,
   onReassigned,
   onNoteSaved,
   managerStatusReadOnly
 }: LeadDetailDrawerProps) {
   const { addNotification, addCalendarEvent, addFollowupCall, users, currentUser, activeRole, reassignLead, updateLeadNote, recordCallEnded, recordWhatsAppOpened } = useApp();
-  const { toast } = useDialog();
+  const { toast, confirm } = useDialog();
   const callAllowed = canTriggerLeadCall(activeRole === "ADMIN");
   const [localStatus, setLocalStatus] = useState<LeadStatus>("New Lead");
   const [reminderDate, setReminderDate] = useState("");
@@ -142,17 +126,28 @@ export default function LeadDetailDrawer({
     });
   };
 
-  const handleSelectStatus = (nextStatus: LeadStatus) => {
-    if (restrictedStatuses?.includes(nextStatus) && onRestrictedStatus) {
-      onRestrictedStatus(lead.id, lead.name, nextStatus);
-      return;
+  // Only statuses the transition matrix allows from the lead's current one
+  // are offered — "Optional" ones need a one-tap confirm first (see
+  // leadStatusMapping.ts). The backend re-enforces this independently
+  // (leadStatusTransitions.ts), so a stale option here can't actually
+  // commit anything it shouldn't — this is purely about not showing a
+  // choice that would just come back as a 400.
+  const statusChoices = nextStatusOptions(localStatus);
+  const statusOptionsList = [localStatus, ...statusChoices.map(c => c.status)];
+
+  const handleSelectStatus = async (nextStatus: LeadStatus) => {
+    const choice = statusChoices.find(c => c.status === nextStatus);
+    if (choice?.needsConfirm) {
+      const ok = await confirm({
+        title: `Move to "${nextStatus}"?`,
+        message: `This isn't a typical next step from "${localStatus}" — confirm you want to do this anyway.`,
+        confirmLabel: "Yes, move it"
+      });
+      if (!ok) return;
     }
     setLocalStatus(nextStatus);
     onUpdateStatus(lead.id, nextStatus);
   };
-
-  const baseStatusOptions = statusOptions ?? PICKABLE_STATUS_OPTIONS;
-  const statusOptionsList = baseStatusOptions.includes(localStatus) ? baseStatusOptions : [localStatus, ...baseStatusOptions];
 
   const handleSaveReminder = (e: React.FormEvent) => {
     e.preventDefault();
@@ -162,11 +157,7 @@ export default function LeadDetailDrawer({
     }
     // API Integration Point: Save calendar task/reminder event details
     setReminderSet(true);
-    const isSiteVisit =
-      localStatus === "Visit Schedule" ||
-      localStatus === "Site Visit" ||
-      localStatus === "Site Visit Scheduled" ||
-      localStatus === "Meeting Scheduled";
+    const isSiteVisit = localStatus === "Site Visit Scheduled" || localStatus === "Site Visit Done";
 
     addNotification({
       system: "CRM",
@@ -269,11 +260,7 @@ export default function LeadDetailDrawer({
 
   // Status check to see if we render the Date & Time picker
   const needsReminderPicker =
-    localStatus === "Follow up" ||
-    localStatus === "Follow-ups" ||
-    localStatus === "Visit Schedule" ||
-    localStatus === "Site Visit" ||
-    localStatus === "Meeting Scheduled" ||
+    localStatus === "Followup" ||
     localStatus === "Site Visit Scheduled" ||
     localStatus === "Call Back";
 
@@ -289,7 +276,20 @@ export default function LeadDetailDrawer({
         </span>
       )
     },
-    { label: "Property", value: lead.property || "Not set" },
+    {
+      label: "Property",
+      value: (
+        <span className="flex items-center gap-1.5 flex-wrap">
+          {lead.property || "Not set"}
+          <span
+            className={`shrink-0 border rounded-lg px-1.5 py-0.5 text-[10px] font-semibold ${lead.property ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-slate-50 text-slate-500 border-slate-200"}`}
+            title={lead.property ? "This lead has a property linked" : "No property linked yet"}
+          >
+            {lead.property ? "Assigned" : "Unassigned"}
+          </span>
+        </span>
+      )
+    },
     {
       label: "Reassign From",
       value: lead.previousAgent ? (
@@ -401,15 +401,16 @@ export default function LeadDetailDrawer({
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold text-slate-500">Current Status :</span>
             <div className="flex items-center gap-1.5">
-              {lead.status === "Connected" && lead.subStatus && (
+              {(lead.callStatus === "Connected" || lead.callStatus === "Called") && (
                 <span
                   className={`text-[10px] font-extrabold px-2 py-0.5 rounded-lg border ${
-                    lead.subStatus === "Qualified"
+                    lead.callStatus === "Connected"
                       ? "text-emerald-700 bg-emerald-50 border-emerald-200"
                       : "text-red-600 bg-red-50 border-red-200"
                   }`}
+                  title="Qualification Status — derived from Data Calling's Call Status"
                 >
-                  {lead.subStatus}
+                  {lead.callStatus === "Connected" ? "Qualified" : "Unqualified"}
                 </span>
               )}
               {canChangeLeadStatus(lead, currentUser, users) && !(managerStatusReadOnly && currentUser?.role_type === "Manager") ? (
@@ -437,6 +438,31 @@ export default function LeadDetailDrawer({
                 memory (2026-10-10). */}
             {activeRole === "ADMIN" && <span>Source : {lead.source || lead.campaign || "Direct / Manual Entry"}</span>}
           </div>
+          {/* RNR -> Dead Lead is gated server-side on ≥7 days of logged
+              call-back attempts (leadStatusTransitions.ts), reusing this
+              same follow-up record. This is the one UI entry point that
+              populates that history for every role — including Admin on
+              web, who never generates a call_attempts row from a native
+              call (see callTrigger.ts). Logs "now", not a future date. */}
+          {localStatus === "RNR" && (
+            <button
+              type="button"
+              onClick={() => {
+                addFollowupCall({
+                  scheduledAt: new Date().toISOString(),
+                  leadId: lead.id,
+                  leadName: lead.name,
+                  phone: lead.phone,
+                  callType: "CALLBACK",
+                  assignedToName: lead.assignedAgent || ""
+                });
+                toast("Call-back attempt logged.", "success");
+              }}
+              className="w-full text-[11px] font-bold text-[#0B1E6E] border border-[#0B1E6E]/20 bg-[#0B1E6E]/5 hover:bg-[#0B1E6E]/10 rounded-lg px-3 py-1.5 transition-colors"
+            >
+              Log Call-Back Attempt
+            </button>
+          )}
         </div>
 
         {/* Assigned / Property / Reassigned / Captured (+ ad footprint, when

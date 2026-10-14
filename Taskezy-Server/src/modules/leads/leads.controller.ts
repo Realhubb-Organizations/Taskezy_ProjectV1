@@ -31,8 +31,14 @@ export async function createLeadHandler(req: Request, res: Response): Promise<vo
 }
 
 export async function updateLeadStatusHandler(req: Request, res: Response): Promise<void> {
-  const { statusCode, dealValue, subStatus } = req.body;
-  const lead = await leadsService.updateLeadStatus(req.user!, req.params.id, statusCode, dealValue, subStatus);
+  const { statusCode, dealValue } = req.body;
+  const lead = await leadsService.updateLeadStatus(req.user!, req.params.id, statusCode, dealValue);
+  sendOk(res, lead);
+}
+
+export async function updateCallStatusHandler(req: Request, res: Response): Promise<void> {
+  const { callStatus } = req.body;
+  const lead = await leadsService.updateCallStatus(req.user!, req.params.id, callStatus);
   sendOk(res, lead);
 }
 

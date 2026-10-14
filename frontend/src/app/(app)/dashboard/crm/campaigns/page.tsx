@@ -440,7 +440,7 @@ export default function AdminCampaignsPage() {
       // those show Follow Ups and Call Backs separately (Follow-ups vs
       // Call Back are different real statuses), so this page did too until
       // it combined them into one number that couldn't match either card.
-      "Follow Ups": leads.filter(l => l.status === "Follow-ups"),
+      "Follow Ups": leads.filter(l => l.status === "Followup"),
       "Call Backs": leads.filter(l => l.status === "Call Back")
     };
   }, [leads, campaignByName]);
@@ -911,13 +911,13 @@ export default function AdminCampaignsPage() {
         campaign: rec.accountName,
         platform: rec.platform,
         totalLeads: rec.leadsGenerated,
-        newLead: countStatus(["New Lead", "New", "New Leads"]),
+        newLead: countStatus(["New Lead"]),
         callBack: countStatus(["Call Back"]),
-        followUps: countStatus(["Follow-ups"]),
+        followUps: countStatus(["Followup"]),
         siteVisits: countStatus(SITE_VISIT_LEAD_STATUSES),
-        eoi: countStatus(["EOI Customers"]),
+        eoi: countStatus(["EOI"]),
         booked: countStatus(BOOKING_LEAD_STATUSES),
-        dead: countStatus(["Dead"]),
+        dead: countStatus(["Dead Lead"]),
         rnr: countStatus(["RNR"]),
         lowBudget: countStatus(["Low Budget"])
       };

@@ -110,9 +110,9 @@ export default function CrmDashboardPage() {
     "New Leads": rangeLeads.filter(l => l.status === "New Lead"),
     "RNR": rangeLeads.filter(l => l.status === "RNR"),
     "Call Backs": rangeLeads.filter(l => l.status === "Call Back"),
-    "Follow Ups": rangeLeads.filter(l => l.status === "Follow-ups"),
-    "Site Visit Scheduled": rangeLeads.filter(l => l.status === "Visit Schedule"),
-    "Site Visit Done": rangeLeads.filter(l => l.status === "Site Visit")
+    "Follow Ups": rangeLeads.filter(l => l.status === "Followup"),
+    "Site Visit Scheduled": rangeLeads.filter(l => l.status === "Site Visit Scheduled"),
+    "Site Visit Done": rangeLeads.filter(l => l.status === "Site Visit Done")
   };
 
   const statCards: { label: string; value: number; color: string }[] = [
