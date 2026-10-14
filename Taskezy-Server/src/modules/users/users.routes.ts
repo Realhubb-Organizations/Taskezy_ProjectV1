@@ -240,6 +240,8 @@ usersRouter.delete(
         // Their team members' "Reports to" is cleared; the admin sets a new
         // manager for them from Manage Users afterwards.
         clearedReports = await repo.clearReportsTo(client, existing.id);
+        // Leads keep this user's name as "Reassigned From" after they're gone.
+        await leadsRepo.detachPreviousAgent(client, existing.id, fromUser.name);
         await repo.removeWithClient(client, existing.id);
       });
     } catch (err) {

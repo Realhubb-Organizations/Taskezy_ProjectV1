@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { sendOk, sendPaginated } from "../../utils/apiResponse";
+import { leadForCaller } from "./leads.handover";
 import * as leadsService from "./leads.service";
 
 export async function listLeadsHandler(req: Request, res: Response): Promise<void> {
@@ -8,7 +9,7 @@ export async function listLeadsHandler(req: Request, res: Response): Promise<voi
     dateFrom?: string; dateTo?: string; search?: string; excludeBulkUpload?: boolean;
   };
   const { rows, meta } = await leadsService.listLeads(req.user!, { page, pageSize, status, assignedAgentId, campaign, dateFrom, dateTo, search, excludeBulkUpload });
-  sendPaginated(res, rows, meta);
+  sendPaginated(res, rows.map(r => leadForCaller(req.user!, r)), meta);
 }
 
 export async function getLeadStatsHandler(req: Request, res: Response): Promise<void> {
@@ -22,29 +23,29 @@ export async function getLeadStatsHandler(req: Request, res: Response): Promise<
 
 export async function getLeadHandler(req: Request, res: Response): Promise<void> {
   const lead = await leadsService.getLead(req.user!, req.params.id);
-  sendOk(res, lead);
+  sendOk(res, leadForCaller(req.user!, lead));
 }
 
 export async function createLeadHandler(req: Request, res: Response): Promise<void> {
   const lead = await leadsService.createLead(req.user!, req.body);
-  sendOk(res, lead, 201);
+  sendOk(res, leadForCaller(req.user!, lead), 201);
 }
 
 export async function updateLeadStatusHandler(req: Request, res: Response): Promise<void> {
   const { statusCode, dealValue } = req.body;
   const lead = await leadsService.updateLeadStatus(req.user!, req.params.id, statusCode, dealValue);
-  sendOk(res, lead);
+  sendOk(res, leadForCaller(req.user!, lead));
 }
 
 export async function updateCallStatusHandler(req: Request, res: Response): Promise<void> {
   const { callStatus } = req.body;
   const lead = await leadsService.updateCallStatus(req.user!, req.params.id, callStatus);
-  sendOk(res, lead);
+  sendOk(res, leadForCaller(req.user!, lead));
 }
 
 export async function editLeadHandler(req: Request, res: Response): Promise<void> {
   const lead = await leadsService.editLead(req.user!, req.params.id, req.body);
-  sendOk(res, lead);
+  sendOk(res, leadForCaller(req.user!, lead));
 }
 
 export async function bulkImportLeadsHandler(req: Request, res: Response): Promise<void> {
@@ -54,12 +55,12 @@ export async function bulkImportLeadsHandler(req: Request, res: Response): Promi
 
 export async function reassignLeadHandler(req: Request, res: Response): Promise<void> {
   const lead = await leadsService.reassignLead(req.user!, req.params.id, req.body.newAgentId, req.body.note);
-  sendOk(res, lead);
+  sendOk(res, leadForCaller(req.user!, lead));
 }
 
 export async function updateLeadNoteHandler(req: Request, res: Response): Promise<void> {
   const lead = await leadsService.updateLeadNote(req.user!, req.params.id, req.body.note);
-  sendOk(res, lead);
+  sendOk(res, leadForCaller(req.user!, lead));
 }
 
 export async function reassignUnassignedSheetLeadsHandler(req: Request, res: Response): Promise<void> {
@@ -84,5 +85,5 @@ export async function bulkDeleteLeadsHandler(req: Request, res: Response): Promi
 
 export async function verifyLeadKycHandler(req: Request, res: Response): Promise<void> {
   const lead = await leadsService.verifyLeadKyc(req.params.id);
-  sendOk(res, lead);
+  sendOk(res, leadForCaller(req.user!, lead));
 }

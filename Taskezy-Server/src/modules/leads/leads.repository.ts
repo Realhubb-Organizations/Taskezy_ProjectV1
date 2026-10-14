@@ -141,7 +141,7 @@ const LIST_SELECT = `
     l.id, l.name, l.phone, l.email, l.status_code, ls.label AS status_label,
     l.deal_value, l.lead_score, l.assigned_agent_id,
     u.first_name || COALESCE(' ' || u.last_name, '') AS assigned_agent_name,
-    pu.first_name || COALESCE(' ' || pu.last_name, '') AS previous_agent_name, l.reassigned_at,
+    COALESCE(pu.first_name || COALESCE(' ' || pu.last_name, ''), l.previous_agent_name) AS previous_agent_name, l.reassigned_at,
     l.notes, l.notes_updated_at,
     nu.first_name || COALESCE(' ' || nu.last_name, '') AS notes_updated_by_name,
     l.property_id, p.name AS property_name,
@@ -481,10 +481,26 @@ export async function getAssignedAgentId(id: string): Promise<string | undefined
 /** Must run inside the same transaction as insertLeadLog. Restarts the SLA clock, matching the frontend's reassignLead. */
 export async function reassign(client: PoolClient, leadId: string, previousAgentId: string, newAgentId: string): Promise<void> {
   await client.query(
+    // previous_agent_name keeps the previous owner's name on the lead, so
+    // "Reassigned From" survives that user being deleted (migration 031).
     `UPDATE leads
-     SET previous_agent_id = $1, assigned_agent_id = $2, reassigned_at = now(), assigned_at = now(), first_response_at = NULL
+     SET previous_agent_id = $1,
+         previous_agent_name = (SELECT first_name || COALESCE(' ' || last_name, '') FROM users WHERE id = $1),
+         assigned_agent_id = $2, reassigned_at = now(), assigned_at = now(), first_response_at = NULL
      WHERE id = $3`,
     [previousAgentId, newAgentId, leadId]
+  );
+}
+
+/**
+ * Before a user is deleted: leads that list them as "Reassigned From" keep
+ * their name (previous_agent_name) and drop the link to the soon-deleted
+ * user row, so the delete can't fail on it and the history stays readable.
+ */
+export async function detachPreviousAgent(client: PoolClient, userId: string, userName: string): Promise<void> {
+  await client.query(
+    `UPDATE leads SET previous_agent_name = COALESCE(previous_agent_name, $2), previous_agent_id = NULL WHERE previous_agent_id = $1`,
+    [userId, userName]
   );
 }
 

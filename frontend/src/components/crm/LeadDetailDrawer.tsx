@@ -6,7 +6,7 @@ import { useDialog } from "@/components/ui/DialogProvider";
 import { SearchableSelect } from "@/components/ui/SearchableDropdown";
 import { DatePicker } from "@/components/ui/DateRangePicker";
 import { deriveActivityTimeline, nextStatusOptions, statusBadgeClasses } from "@/lib/leadStatusMapping";
-import { canChangeLeadStatus, isLeadAssignableUser, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
+import { canChangeLeadStatus, canReassignThisLead, isLeadAssignableUser, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
 import { maskPhone, maskEmail } from "@/lib/maskPII";
 import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/callTrigger";
 import { WhatsAppIcon } from "@/components/icons/ContactIcons";
@@ -56,24 +56,21 @@ export default function LeadDetailDrawer({
   const [savingNote, setSavingNote] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
-  // Who this lead can be handed to: ADMIN can reassign to anyone; a Manager
-  // can only reassign within their own direct reports; a Member can only
-  // reassign to a teammate under their own manager (or to that manager) —
-  // mirrors the server-side check in leads.service.ts, which is what
-  // actually enforces this (this list is just so the picker doesn't offer
-  // choices that would come back a 403).
+  // Who this lead can be handed to: an ADMIN — any active sales user; a
+  // Manager — herself or her direct reports; agents can't reassign at all.
+  // Mirrors leads.service.ts (which is what actually enforces it — this list
+  // just keeps the picker from offering choices that would come back 403).
   const reassignTargets = useMemo(() => {
     if (!currentUser) return [];
     const others = users.filter(u => u.name !== lead?.assignedAgent && isLeadAssignableUser(u));
     if (activeRole === "ADMIN") return others;
     if (currentUser.role_type === "Manager") {
-      return others.filter(u => u.managerId === currentUser.id);
+      // Herself plus her direct reports (same as the server), minus the
+      // lead's current owner — so a one-person team still offers the manager.
+      return others.filter(u => u.id === currentUser.id || u.managerId === currentUser.id);
     }
-    // The signed-in user (from /auth/me) carries no reporting line, so read
-    // it from the full roster; without this a Member never saw any teammate.
-    const myManagerId = currentUser.managerId ?? users.find(u => u.id === currentUser.id)?.managerId;
-    if (!myManagerId) return [];
-    return others.filter(u => u.id !== currentUser.id && (u.id === myManagerId || u.managerId === myManagerId));
+    // Agents can't reassign leads (admins and managers only).
+    return [];
   }, [users, currentUser, activeRole, lead?.assignedAgent]);
 
   // Admins and managers pick the new agent first; the required note box only
@@ -515,7 +512,9 @@ export default function LeadDetailDrawer({
           </div>
         )}
 
-        {/* Reassign — scoped to who this caller is actually allowed to hand the lead to */}
+        {/* Reassign — admins and managers only (agents never see it), scoped
+            to who this caller is actually allowed to hand the lead to */}
+        {canReassignThisLead(lead, currentUser, users) && (
         <div className="px-5 py-3 border-b border-slate-100 space-y-2">
           <span className="text-[11px] font-bold text-slate-500 flex items-center gap-1.5">
             <Repeat className="h-3.5 w-3.5 text-slate-400" />
@@ -571,6 +570,7 @@ export default function LeadDetailDrawer({
             <p className="text-[11px] text-red-600 font-semibold">{reassignError}</p>
           )}
         </div>
+        )}
 
         {/* Notes — the lead's current note (people only, not system events) */}
         <div className="px-5 py-3 border-b border-slate-100 space-y-2">

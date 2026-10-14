@@ -14,7 +14,7 @@ import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/
 import { LineSkeleton, TableRowsSkeleton } from "@/components/ui/Skeletons";
 import Tooltip from "@/components/ui/Tooltip";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
-import { canChangeLeadStatus, eligibleAssignees, isUnassignedLead, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
+import { canChangeLeadStatus, canUploadLeads, eligibleAssignees, isUnassignedLead, uploadAssignableUsers, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
 import DateRangePicker, { type DateRangeValue, todayIso } from "@/components/ui/DateRangePicker";
 import DateRangeSelect from "@/components/ui/DateRangeSelect";
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
@@ -1142,13 +1142,16 @@ export default function LeadDashboard() {
                   panelWidth={260}
                 />
               )}
-              <button
-                onClick={() => setIsAddOpen(true)}
-                className="inline-flex items-center justify-center gap-2 h-9 px-3.5 bg-[#0B1E6E] hover:bg-[#081650] text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer"
-              >
-                <Plus className="h-4 w-4" />
-                Upload Leads
-              </button>
+              {/* Upload Leads: admins and managers only, not agents. */}
+              {canUploadLeads(currentUser) && (
+                <button
+                  onClick={() => setIsAddOpen(true)}
+                  className="inline-flex items-center justify-center gap-2 h-9 px-3.5 bg-[#0B1E6E] hover:bg-[#081650] text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer"
+                >
+                  <Plus className="h-4 w-4" />
+                  Upload Leads
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -2184,7 +2187,7 @@ export default function LeadDashboard() {
           onClose={() => setIsAddOpen(false)}
           onSubmitManual={handleAddManualLead}
           onSubmitBulk={handleAddBulkLeads}
-          agentsList={agentsList}
+          agentsList={uploadAssignableUsers(users, currentUser).map(u => u.name)}
           propertiesList={propertiesList}
         />
 
