@@ -3,9 +3,12 @@ import { requireAuth, requireRole } from "../../middleware/auth";
 import { validate } from "../../middleware/validate";
 import { asyncHandler } from "../../utils/asyncHandler";
 import {
+  bulkDeleteJobIdParamSchema,
   bulkDeleteLeadsSchema,
   bulkImportJobIdParamSchema,
   bulkImportLeadsSchema,
+  bulkReassignJobIdParamSchema,
+  bulkReassignLeadsSchema,
   createLeadSchema,
   editLeadSchema,
   leadIdParamSchema,
@@ -19,11 +22,14 @@ import {
 import {
   bulkDeleteLeadsHandler,
   bulkImportLeadsHandler,
+  bulkReassignLeadsHandler,
   createLeadHandler,
   deleteLeadHandler,
   editLeadHandler,
   fixSheetLeadTimestampsHandler,
+  getBulkDeleteStatusHandler,
   getBulkImportStatusHandler,
+  getBulkReassignStatusHandler,
   getLeadHandler,
   getLeadStatsHandler,
   listLeadsHandler,
@@ -72,6 +78,26 @@ leadsRouter.post(
   requireRole("ADMIN"),
   validate({ body: bulkDeleteLeadsSchema }),
   asyncHandler(bulkDeleteLeadsHandler)
+);
+leadsRouter.get(
+  "/bulk-delete/:jobId/status",
+  requireRole("ADMIN"),
+  validate({ params: bulkDeleteJobIdParamSchema }),
+  asyncHandler(getBulkDeleteStatusHandler)
+);
+// Bulk counterpart to PATCH /:id/reassign — backs Data Calling's and the
+// main CRM Leads page's Assign/Reshuffle toolbar actions. Open to every
+// role, same as the single-lead version below; who can reassign to whom is
+// enforced per-lead inside the worker (leads.service.ts's bulkReassignLeads).
+leadsRouter.post(
+  "/bulk-reassign",
+  validate({ body: bulkReassignLeadsSchema }),
+  asyncHandler(bulkReassignLeadsHandler)
+);
+leadsRouter.get(
+  "/bulk-reassign/:jobId/status",
+  validate({ params: bulkReassignJobIdParamSchema }),
+  asyncHandler(getBulkReassignStatusHandler)
 );
 leadsRouter.patch(
   "/:id/status",

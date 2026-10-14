@@ -595,6 +595,59 @@ export async function reassignLead(caller: AccessTokenPayload, leadId: string, n
   return updated;
 }
 
+export interface BulkReassignLeadsResult {
+  requested: number;
+  moved: number;
+  skipped: number; // already assigned to this agent
+  failed: { id: string; reason: string }[];
+}
+
+// Backs Data Calling's and the main CRM Leads page's bulk Assign/Reshuffle
+// toolbar actions, which previously fired one apiReassignLead call per
+// selected lead directly from the browser (unawaited in Data Calling's
+// case) — hundreds of concurrent requests for a large selection, no single
+// place to see how many actually succeeded. This reuses reassignLead's own
+// per-lead permission/validation logic one lead at a time (same
+// "each lead is its own transaction" reasoning as bulkDeleteLeads: one
+// blocked lead must not roll back the others), just server-side and
+// sequential instead of client-side and concurrent.
+export async function bulkReassignLeads(
+  caller: AccessTokenPayload,
+  leadIds: string[],
+  newAgentId: string,
+  note: string
+): Promise<BulkReassignLeadsResult> {
+  const ids = Array.from(new Set(leadIds));
+  let moved = 0;
+  let skipped = 0;
+  const failed: { id: string; reason: string }[] = [];
+
+  for (const id of ids) {
+    const currentAgentId = await repo.getAssignedAgentId(id);
+    if (!currentAgentId) {
+      failed.push({ id, reason: "Lead not found" });
+      continue;
+    }
+    if (currentAgentId === newAgentId) {
+      skipped++;
+      continue;
+    }
+    try {
+      await reassignLead(caller, id, newAgentId, note);
+      // No-op unless this lead was still on the internal UNASSIGNED
+      // sentinel (see the LeadStatus segregation memory) — promotes it to
+      // NEW_LEAD now that it has a real owner, same as the Assign flow did
+      // client-side before.
+      await repo.markLeadNewIfUnassigned(id);
+      moved++;
+    } catch (err) {
+      failed.push({ id, reason: err instanceof ApiError ? err.message : "Unexpected error" });
+    }
+  }
+
+  return { requested: ids.length, moved, skipped, failed };
+}
+
 /**
  * Hands a departing user's leads (`leadIds`, oldest first) to `targets`
  * round-robin, so each gets an equal share (±1), inside the caller's
@@ -723,8 +776,15 @@ export async function deleteLead(actor: { userId: string; name: string }, leadId
   broadcastLeadChanged(leadId);
 }
 
+export interface BulkDeleteLeadsResult {
+  requested: number;
+  deleted: number;
+  notFound: number;
+  blocked: { id: string; reason: string }[];
+}
+
 // Sequential on purpose: each lead is its own transaction, so one blocked lead must not roll back the others.
-export async function bulkDeleteLeads(actor: { userId: string; name: string }, leadIds: string[]) {
+export async function bulkDeleteLeads(actor: { userId: string; name: string }, leadIds: string[]): Promise<BulkDeleteLeadsResult> {
   const ids = Array.from(new Set(leadIds));
   let deleted = 0;
   let notFound = 0;

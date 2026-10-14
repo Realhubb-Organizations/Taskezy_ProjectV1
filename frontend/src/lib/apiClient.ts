@@ -358,12 +358,29 @@ export interface BulkImportLeadsApiResult {
 export function apiStartBulkImportLeads(input: BulkImportLeadsApiInput): Promise<{ jobId: string }> {
   return request<{ jobId: string }>("/api/v1/leads/bulk-import", { method: "POST", body: JSON.stringify(input) });
 }
-export interface BulkImportJobStatus {
+export interface JobStatus<T> {
   state: "created" | "retry" | "active" | "completed" | "cancelled" | "failed";
-  result?: BulkImportLeadsApiResult;
+  result?: T;
 }
-export function apiGetBulkImportStatus(jobId: string): Promise<BulkImportJobStatus> {
-  return request<BulkImportJobStatus>(`/api/v1/leads/bulk-import/${jobId}/status`);
+export function apiGetBulkImportStatus(jobId: string): Promise<JobStatus<BulkImportLeadsApiResult>> {
+  return request<JobStatus<BulkImportLeadsApiResult>>(`/api/v1/leads/bulk-import/${jobId}/status`);
+}
+
+// Shared by every queued bulk lead action (import/delete/reassign — see
+// Taskezy-Server/src/jobs/queue.ts) — polls a job's status endpoint until
+// pg-boss marks it settled, then returns its result or throws. 2s is
+// frequent enough to feel responsive without hammering the API for a job
+// that can run for several seconds.
+export async function pollJob<T>(getStatus: () => Promise<JobStatus<T>>): Promise<T> {
+  let status = await getStatus();
+  while (status.state === "created" || status.state === "retry" || status.state === "active") {
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    status = await getStatus();
+  }
+  if (status.state !== "completed" || status.result === undefined) {
+    throw new Error("The request failed — please try again.");
+  }
+  return status.result;
 }
 
 export function apiUpdateLeadStatus(
@@ -420,18 +437,42 @@ export function apiDeleteLead(leadId: string): Promise<{ deleted: boolean }> {
   return request<{ deleted: boolean }>(`/api/v1/leads/${leadId}`, { method: "DELETE" });
 }
 
-export function apiBulkDeleteLeads(leadIds: string[]): Promise<{
+export interface BulkDeleteLeadsApiResult {
   requested: number;
   deleted: number;
   notFound: number;
   blocked: { id: string; reason: string }[];
-}> {
-  return request<{
-    requested: number;
-    deleted: number;
-    notFound: number;
-    blocked: { id: string; reason: string }[];
-  }>("/api/v1/leads/bulk-delete", { method: "POST", body: JSON.stringify({ leadIds }) });
+}
+// Queued server-side (Taskezy-Server/src/jobs/queue.ts's bulk-delete-leads
+// worker); this still resolves to the final result like a normal await, so
+// callers (LeadDashboard/data-calling) needed no changes.
+export async function apiBulkDeleteLeads(leadIds: string[]): Promise<BulkDeleteLeadsApiResult> {
+  const { jobId } = await request<{ jobId: string }>("/api/v1/leads/bulk-delete", {
+    method: "POST",
+    body: JSON.stringify({ leadIds })
+  });
+  return pollJob<BulkDeleteLeadsApiResult>(() =>
+    request<JobStatus<BulkDeleteLeadsApiResult>>(`/api/v1/leads/bulk-delete/${jobId}/status`)
+  );
+}
+
+export interface BulkReassignLeadsApiResult {
+  requested: number;
+  moved: number;
+  skipped: number;
+  failed: { id: string; reason: string }[];
+}
+// Queued (bulk-reassign-leads worker) — backs both pages' bulk Assign/
+// Reshuffle actions, replacing what used to be one apiReassignLead call per
+// selected lead fired directly from the browser.
+export async function apiBulkReassignLeads(leadIds: string[], newAgentId: string, note: string): Promise<BulkReassignLeadsApiResult> {
+  const { jobId } = await request<{ jobId: string }>("/api/v1/leads/bulk-reassign", {
+    method: "POST",
+    body: JSON.stringify({ leadIds, newAgentId, note })
+  });
+  return pollJob<BulkReassignLeadsApiResult>(() =>
+    request<JobStatus<BulkReassignLeadsApiResult>>(`/api/v1/leads/bulk-reassign/${jobId}/status`)
+  );
 }
 
 export function apiVerifyLeadKyc(leadId: string): Promise<ApiLeadRow> {

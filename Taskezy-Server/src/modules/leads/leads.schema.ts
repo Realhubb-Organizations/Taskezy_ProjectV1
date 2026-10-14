@@ -106,6 +106,23 @@ export const bulkDeleteLeadsSchema = z.object({
   leadIds: z.array(z.string().uuid()).min(1).max(500)
 });
 
+export const bulkDeleteJobIdParamSchema = z.object({
+  jobId: z.string().uuid()
+});
+
+// Backs both Data Calling's and the main CRM Leads page's bulk Assign/
+// Reshuffle toolbar actions (see leads.service.ts's bulkReassignLeads) —
+// same note requirement as single-lead reassign (reassignLeadSchema).
+export const bulkReassignLeadsSchema = z.object({
+  leadIds: z.array(z.string().uuid()).min(1).max(5000),
+  newAgentId: z.string().uuid(),
+  note: noteText
+});
+
+export const bulkReassignJobIdParamSchema = z.object({
+  jobId: z.string().uuid()
+});
+
 // Bulk upload rows are deliberately NOT phone-regex-validated here the way
 // createLeadSchema is — an admin's Excel sheet is messy (formatting,
 // +91 prefixes, stray spaces), so invalid rows are normalized/validated

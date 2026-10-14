@@ -11,6 +11,7 @@ import {
   apiCreateLead,
   apiStartBulkImportLeads,
   apiGetBulkImportStatus,
+  pollJob,
   BulkImportLeadsApiInput,
   BulkImportLeadsApiResult,
   apiUpdateLeadStatus,
@@ -1174,15 +1175,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // via Round Robin/Percentage.
   const bulkImportLeads = async (input: BulkImportLeadsApiInput): Promise<BulkImportLeadsApiResult> => {
     const { jobId } = await apiStartBulkImportLeads(input);
-    let status = await apiGetBulkImportStatus(jobId);
-    while (status.state === "created" || status.state === "retry" || status.state === "active") {
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      status = await apiGetBulkImportStatus(jobId);
-    }
-    if (status.state !== "completed" || !status.result) {
-      throw new Error("The import failed — please try again.");
-    }
-    const result = status.result;
+    const result = await pollJob(() => apiGetBulkImportStatus(jobId));
     if (result.created > 0) {
       const apiLeads = await apiListAllLeads();
       setAllLeads(apiLeads.map(mapApiLeadToFrontendLead));

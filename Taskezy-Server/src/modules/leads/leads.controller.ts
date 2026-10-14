@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import { sendOk, sendPaginated } from "../../utils/apiResponse";
 import { ApiError } from "../../utils/ApiError";
-import { boss, BULK_IMPORT_LEADS_QUEUE } from "../../jobs/queue";
+import { boss, BULK_IMPORT_LEADS_QUEUE, BULK_DELETE_LEADS_QUEUE, BULK_REASSIGN_LEADS_QUEUE } from "../../jobs/queue";
 import * as leadsService from "./leads.service";
 
 export async function listLeadsHandler(req: Request, res: Response): Promise<void> {
@@ -95,9 +95,47 @@ export async function deleteLeadHandler(req: Request, res: Response): Promise<vo
   sendOk(res, { deleted: true });
 }
 
+// Queued (see jobs/queue.ts's bulk-delete-leads) — same enqueue/poll shape
+// as bulk-import, kept consistent across every bulk lead action even though
+// this one (capped at 500 leads) was never really a timeout risk on its own.
 export async function bulkDeleteLeadsHandler(req: Request, res: Response): Promise<void> {
-  const result = await leadsService.bulkDeleteLeads({ userId: req.user!.sub, name: req.user!.name }, req.body.leadIds);
-  sendOk(res, result);
+  const jobId = await boss.send(BULK_DELETE_LEADS_QUEUE, {
+    actor: { userId: req.user!.sub, name: req.user!.name },
+    leadIds: req.body.leadIds
+  });
+  if (!jobId) throw ApiError.internal("Could not queue the delete — try again.");
+  sendOk(res, { jobId }, 202);
+}
+
+export async function getBulkDeleteStatusHandler(req: Request, res: Response): Promise<void> {
+  const [job] = await boss.findJobs(BULK_DELETE_LEADS_QUEUE, { id: req.params.jobId });
+  if (!job) throw ApiError.notFound("Delete job not found");
+  sendOk(res, {
+    state: job.state,
+    result: job.state === "completed" ? (job.output as leadsService.BulkDeleteLeadsResult) : undefined
+  });
+}
+
+// Queued (jobs/queue.ts's bulk-reassign-leads) — replaces what used to be N
+// individual apiReassignLead calls fired directly from the browser by
+// Data Calling's and the main CRM Leads page's bulk Assign/Reshuffle
+// actions (see leads.service.ts's bulkReassignLeads for the full reasoning).
+// Open to every role, same as single-lead reassign (leads.routes.ts's
+// PATCH /:id/reassign) — permission is enforced per-lead inside the worker.
+export async function bulkReassignLeadsHandler(req: Request, res: Response): Promise<void> {
+  const { leadIds, newAgentId, note } = req.body;
+  const jobId = await boss.send(BULK_REASSIGN_LEADS_QUEUE, { caller: req.user!, leadIds, newAgentId, note });
+  if (!jobId) throw ApiError.internal("Could not queue the reassignment — try again.");
+  sendOk(res, { jobId }, 202);
+}
+
+export async function getBulkReassignStatusHandler(req: Request, res: Response): Promise<void> {
+  const [job] = await boss.findJobs(BULK_REASSIGN_LEADS_QUEUE, { id: req.params.jobId });
+  if (!job) throw ApiError.notFound("Reassignment job not found");
+  sendOk(res, {
+    state: job.state,
+    result: job.state === "completed" ? (job.output as leadsService.BulkReassignLeadsResult) : undefined
+  });
 }
 
 export async function verifyLeadKycHandler(req: Request, res: Response): Promise<void> {

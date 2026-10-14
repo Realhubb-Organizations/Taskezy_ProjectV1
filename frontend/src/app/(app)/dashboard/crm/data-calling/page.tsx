@@ -17,7 +17,7 @@ import { nextFollowupFor } from "@/lib/followups";
 import NextCallCell from "@/components/crm/NextCallCell";
 import { useDialog } from "@/components/ui/DialogProvider";
 import LeadNoteCell from "@/components/crm/LeadNoteCell";
-import { apiBulkDeleteLeads, apiDeleteLead } from "@/lib/apiClient";
+import { apiBulkDeleteLeads, apiBulkReassignLeads, apiDeleteLead } from "@/lib/apiClient";
 import { maskPhone, maskEmail } from "@/lib/maskPII";
 import { WhatsAppIcon, CallIcon } from "@/components/icons/ContactIcons";
 import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/callTrigger";
@@ -740,14 +740,17 @@ export default function DataCallingPage() {
   );
   const [assignNote, setAssignNote] = useState("");
   const canConfirmAssign = assignSelectedPropertyIds.size > 0 && !!assignSelectedAssigneeId && assignNote.trim().length > 0;
+  const [assignSubmitting, setAssignSubmitting] = useState(false);
+  const [assignError, setAssignError] = useState("");
 
   const openAssignFlow = (mode: "assign" | "reshuffle") => {
     setAssignSelectedPropertyIds(new Set());
     setAssignSelectedAssigneeId("");
     setAssignNote("");
+    setAssignError("");
     setAssignFlowMode(mode);
   };
-  const closeAssignFlow = () => setAssignFlowMode(null);
+  const closeAssignFlow = () => { if (!assignSubmitting) setAssignFlowMode(null); };
   const changePropertySelection = (ids: string[]) => {
     setAssignSelectedPropertyIds(new Set(ids));
     // Property set changed — an assignee chosen under the old scope may no
@@ -755,28 +758,45 @@ export default function DataCallingPage() {
     // keep a stale selection.
     setAssignSelectedAssigneeId("");
   };
-  const confirmBulkAssign = () => {
-    if (!canConfirmAssign || !assignFlowMode) return;
+  // Queued server-side (POST /leads/bulk-reassign — see jobs/queue.ts's
+  // bulk-reassign-leads worker) instead of firing one reassignLead call per
+  // selected lead from here: that used to be an unawaited fire-and-forget
+  // forEach, so a large selection meant hundreds of concurrent requests
+  // with no single place to see how many actually went through. The
+  // UNASSIGNED->NEW_LEAD promotion for the Assign flow now happens
+  // server-side too (leads.service.ts's bulkReassignLeads), so it's no
+  // longer a second call from here. Every moved lead still broadcasts
+  // leads-changed same as before, so AppContext's existing per-lead
+  // refetch listener picks up the change without an explicit refetch here.
+  const confirmBulkAssign = async () => {
+    if (!canConfirmAssign || !assignFlowMode || assignSubmitting) return;
+    const agentId = assignSelectedAssigneeId;
     const agentName = selectedAssigneeName;
     const note = assignNote.trim();
     const targetIds = flowTargetIds;
-    targetIds.forEach(id => {
-      const lead = leads.find(l => l.id === id);
-      reassignLead(id, agentName, note).catch((err) =>
-        toast(`Could not reassign ${lead?.name ?? "a lead"}: ${err instanceof Error ? err.message : "please try again."}`, "error")
+    const mode = assignFlowMode;
+
+    setAssignSubmitting(true);
+    setAssignError("");
+    try {
+      const result = await apiBulkReassignLeads(targetIds, agentId, note);
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        targetIds.forEach(id => next.delete(id));
+        return next;
+      });
+      setAssignFlowMode(null);
+      toast(
+        `${mode === "reshuffle" ? "Reshuffled" : "Assigned"} ${result.moved} lead${result.moved === 1 ? "" : "s"} to ${agentName}` +
+          (result.skipped > 0 ? ` (${result.skipped} already with ${agentName}, skipped)` : "") +
+          (result.failed.length > 0 ? ` — ${result.failed.length} could not be moved.` : ""),
+        result.failed.length > 0 ? "error" : "success"
       );
-      // Move it off the internal UNASSIGNED sentinel now that it actually
-      // has someone on it — otherwise it'd stay eligible for the Assign
-      // button. Not relevant to Reshuffle: those leads already have a real
-      // owner, isUnassignedInSystem is already false for them.
-      if (assignFlowMode === "assign" && lead?.isUnassignedInSystem) updateLeadStatus(id, "New Lead");
-    });
-    setSelectedIds(prev => {
-      const next = new Set(prev);
-      targetIds.forEach(id => next.delete(id));
-      return next;
-    });
-    closeAssignFlow();
+    } catch (err) {
+      setAssignError(err instanceof Error ? err.message : "Could not complete this action. Please try again.");
+    } finally {
+      setAssignSubmitting(false);
+    }
   };
 
   // Individual lead view — same LeadDetailDrawer the main admin dashboard
@@ -1980,24 +2000,26 @@ export default function DataCallingPage() {
                 />
                 <p className="text-[11px] text-slate-400">Required. Saved as the lead&apos;s note and in its activity history.</p>
               </div>
+              {assignError && <p className="text-[11px] text-red-600 font-semibold">{assignError}</p>}
             </div>
             <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100">
               <button
                 type="button"
+                disabled={assignSubmitting}
                 onClick={closeAssignFlow}
-                className="px-5 py-2 rounded-xl border border-slate-300 font-bold text-slate-700 text-sm hover:bg-slate-50 transition-colors"
+                className="px-5 py-2 rounded-xl border border-slate-300 font-bold text-slate-700 text-sm hover:bg-slate-50 transition-colors disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
                 type="button"
-                disabled={!canConfirmAssign}
+                disabled={!canConfirmAssign || assignSubmitting}
                 onClick={confirmBulkAssign}
                 className={`px-5 py-2 rounded-xl font-bold text-sm text-white transition-colors ${
-                  canConfirmAssign ? "bg-[#0B1E6E] hover:bg-[#081650]" : "bg-slate-300 cursor-not-allowed"
+                  canConfirmAssign && !assignSubmitting ? "bg-[#0B1E6E] hover:bg-[#081650]" : "bg-slate-300 cursor-not-allowed"
                 }`}
               >
-                {assignFlowMode === "reshuffle" ? "Reshuffle" : "Assign"}
+                {assignSubmitting ? "Working…" : assignFlowMode === "reshuffle" ? "Reshuffle" : "Assign"}
               </button>
             </div>
           </div>
