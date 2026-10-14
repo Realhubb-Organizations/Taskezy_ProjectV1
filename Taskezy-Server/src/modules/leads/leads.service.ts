@@ -10,6 +10,7 @@ import { findPropertyIdBySheetSource } from "../properties/properties.repository
 import { pickAgentForProperty, createPropertyAgentPicker } from "../properties/properties.assignment";
 import { broadcastLeadChanged } from "./leads.realtime";
 import { normalizeTypedIndianMobile } from "../../utils/validation";
+import { assertTransitionAllowed, LeadStatusCode } from "./leadStatusTransitions";
 
 /**
  * Mirrors the frontend's role-based lead-scoping convention (see the
@@ -76,10 +77,10 @@ export async function listLeads(caller: AccessTokenPayload, filter: {
 // "Site Visit" -> SITE_VISIT_DONE. Kept here (not imported from the frontend)
 // since this is backend code operating on DB codes, not frontend display
 // strings, but the bucket names/semantics must stay in lockstep with that file.
-const NEW_LEADS_CODE = "NEW";
+const NEW_LEADS_CODE = "NEW_LEAD";
 const RNR_CODE = "RNR";
 const CALL_BACKS_CODE = "CALL_BACK";
-const FOLLOW_UPS_CODE = "FOLLOW_UP";
+const FOLLOW_UPS_CODE = "FOLLOWUP";
 const SITE_VISIT_SCHEDULED_CODE = "SITE_VISIT_SCHEDULED";
 const SITE_VISIT_DONE_CODE = "SITE_VISIT_DONE";
 
@@ -306,11 +307,11 @@ export async function bulkImportLeads(_caller: AccessTokenPayload, input: BulkIm
     if (input.assignmentMode === "AGENT") {
       assignedAgentId = agentIds.length > 0 ? agentIds[agentCursor % agentIds.length] : undefined;
       agentCursor++;
-      statusCode = "NEW";
+      statusCode = "NEW_LEAD";
     } else {
       const autoAssignedAgentId = pickPropertyAgent?.();
       assignedAgentId = autoAssignedAgentId ?? fallbackAdminId;
-      statusCode = autoAssignedAgentId ? "NEW" : "UNASSIGNED";
+      statusCode = autoAssignedAgentId ? "NEW_LEAD" : "UNASSIGNED";
     }
     if (!assignedAgentId) {
       skipped.push({
@@ -381,11 +382,6 @@ export async function bulkImportLeads(_caller: AccessTokenPayload, input: BulkIm
   return { created, duplicates, skipped };
 }
 
-// Data Calling: a Connected lead's sub-status is only meaningful while it's
-// actually Connected — any other status change clears it, so a lead can't
-// be left showing a stale "Qualified" from a prior Connected visit.
-const VALID_SUB_STATUSES = new Set(["Qualified", "Not Qualified"]);
-
 /** A lead's status can be changed by the agent it's assigned to, that agent's manager, or an admin. */
 async function assertStatusChangeAllowed(caller: AccessTokenPayload, assignedAgentId: string, action = "change its status"): Promise<void> {
   if (caller.role === "ADMIN" || assignedAgentId === caller.sub) return;
@@ -397,44 +393,25 @@ async function assertStatusChangeAllowed(caller: AccessTokenPayload, assignedAge
 export async function updateLeadStatus(
   caller: AccessTokenPayload,
   leadId: string,
-  statusCode: string,
-  dealValue: number | undefined,
-  subStatus?: string
+  statusCode: LeadStatusCode,
+  dealValue: number | undefined
 ) {
   const scopedToAgentIds = await scopeForCaller(caller);
   const existing = await repo.findById(leadId, scopedToAgentIds);
   if (!existing) throw ApiError.notFound("Lead not found");
   await assertStatusChangeAllowed(caller, existing.assigned_agent_id);
+  // The one and only enforcement point for the Lead Status transition
+  // matrix — every other code path that writes status_code is either
+  // system-driven (markLeadNewIfUnassigned) or an initial INSERT, neither
+  // of which is a user-initiated transition.
+  await assertTransitionAllowed(existing.status_code, statusCode, leadId);
 
-  const stampFirstResponse = existing.status_code === "NEW"; // first-ever status change
-
-  const normalizedSubStatus = statusCode === "CONNECTED" && subStatus && VALID_SUB_STATUSES.has(subStatus) ? subStatus : null;
-  // Data Calling's promotion rule: a bulk-uploaded lead that reaches
-  // Connected + Qualified is a real, qualified prospect now — it graduates
-  // out of the cold-outreach pipeline into the main CRM leads list by
-  // losing its "Bulk Upload" source (sub_source, which records which
-  // purchased dataset it came from, is deliberately left untouched).
-  const promotedSource =
-    normalizedSubStatus === "Qualified" && existing.source === "Bulk Upload" ? "Data" : undefined;
+  const stampFirstResponse = existing.status_code === "NEW_LEAD"; // first-ever status change
 
   try {
     await withTransaction(async (client) => {
-      await repo.updateStatus(client, leadId, statusCode, dealValue, stampFirstResponse, normalizedSubStatus, promotedSource);
+      await repo.updateStatus(client, leadId, statusCode, dealValue, stampFirstResponse);
       await repo.insertLeadLog(client, leadId, caller.sub, caller.name, `Status changed to "${statusCode}"`);
-      // A second, explicit log entry for the promotion itself — distinct
-      // from the generic "Status changed" line above, so the Activity
-      // History timeline (both on the lead's real detail view and for
-      // anyone auditing later) shows plainly why this lead moved out of
-      // Data Calling, not just that its status happened to be Connected.
-      if (promotedSource) {
-        await repo.insertLeadLog(
-          client,
-          leadId,
-          caller.sub,
-          caller.name,
-          `Lead qualified and transferred to main leads (source changed from "Bulk Upload" to "${promotedSource}").`
-        );
-      }
       // The agent responded in time — this is what the follow-up SLA
       // scheduler (jobs/followupScheduler.ts) checks for before escalating
       // a missed reminder to admins, so it needs to land in the same
@@ -446,7 +423,8 @@ export async function updateLeadStatus(
     });
   } catch (err) {
     // status_code references lead_statuses(code) — an unrecognized code
-    // string passes Zod's min(1) check and only fails at the DB as an FK violation.
+    // string would pass Zod's enum check only if LEAD_STATUS_CODES drifts
+    // from lead_statuses' real rows; this stays as a defensive fallback.
     if (isForeignKeyViolation(err)) {
       throw ApiError.badRequest(`"${statusCode}" is not a recognized lead status.`);
     }
@@ -456,6 +434,52 @@ export async function updateLeadStatus(
   // The lead has been acted on, so its reminders/SLA/reassignment alerts are
   // stale for everyone who received them.
   await deleteLeadActivityNotifications(leadId);
+
+  broadcastLeadChanged(leadId);
+  return repo.findById(leadId, scopedToAgentIds);
+}
+
+const VALID_CALL_STATUSES = new Set(["Connected", "Called", "Not Reachable", "Wrong Number"]);
+
+/**
+ * Data Calling's own field (migration 030) — fully independent of
+ * updateLeadStatus above, no transition matrix between its 4 values. A
+ * Connected result promotes a bulk-uploaded lead out of the cold-outreach
+ * pipeline into the main CRM leads list (see leads.repository.ts's
+ * updateCallStatus for the mechanics) the same way reaching
+ * Connected+Qualified used to before this field existed.
+ */
+export async function updateCallStatus(caller: AccessTokenPayload, leadId: string, callStatus: string) {
+  if (!VALID_CALL_STATUSES.has(callStatus)) {
+    throw ApiError.badRequest(`"${callStatus}" is not a recognized call status.`);
+  }
+  const scopedToAgentIds = await scopeForCaller(caller);
+  const existing = await repo.findById(leadId, scopedToAgentIds);
+  if (!existing) throw ApiError.notFound("Lead not found");
+  await assertStatusChangeAllowed(caller, existing.assigned_agent_id, "change its call status");
+
+  const promotion =
+    callStatus === "Connected" && existing.source === "Bulk Upload"
+      ? { source: "Data", statusCode: "NEW_LEAD" }
+      : undefined;
+
+  await withTransaction(async (client) => {
+    await repo.updateCallStatus(client, leadId, callStatus, promotion);
+    await repo.insertLeadLog(client, leadId, caller.sub, caller.name, `Call status changed to "${callStatus}"`);
+    if (promotion) {
+      // A second, explicit log entry for the promotion itself — distinct
+      // from the generic "Call status changed" line above, so the
+      // Activity History timeline shows plainly why this lead moved out
+      // of Data Calling, not just that it was called.
+      await repo.insertLeadLog(
+        client,
+        leadId,
+        caller.sub,
+        caller.name,
+        `Lead qualified and transferred to main leads (source changed from "Bulk Upload" to "${promotion.source}").`
+      );
+    }
+  });
 
   broadcastLeadChanged(leadId);
   return repo.findById(leadId, scopedToAgentIds);

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { indianMobile } from "../../utils/validation";
+import { LEAD_STATUS_CODES } from "./leadStatusTransitions";
 
 // Express's default `qs` query parser turns a single `?status=A` into a bare
 // string but repeated `?status=A&status=B` into an array — these two helpers
@@ -65,13 +66,15 @@ export const createLeadSchema = z.object({
 });
 
 export const updateLeadStatusSchema = z.object({
-  statusCode: z.string().min(1),
-  dealValue: z.number().nonnegative().optional(),
-  // Data Calling's Connected sub-status — only persisted when statusCode is
-  // CONNECTED (see leads.service.ts), silently ignored otherwise rather
-  // than rejected, since callers that don't know about sub-status (every
-  // other status update in the app) never send it.
-  subStatus: z.enum(["Qualified", "Not Qualified"]).optional()
+  statusCode: z.enum(LEAD_STATUS_CODES),
+  dealValue: z.number().nonnegative().optional()
+});
+
+// Data Calling's own, independent field (see migration 030) — separate
+// endpoint from the main Lead Status above, since the two are no longer
+// the same column and have no transition rules between them.
+export const updateCallStatusSchema = z.object({
+  callStatus: z.enum(["Connected", "Called", "Not Reachable", "Wrong Number"])
 });
 
 export const editLeadSchema = z.object({

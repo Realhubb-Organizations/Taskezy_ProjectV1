@@ -28,8 +28,8 @@ export interface PendingTask {
 }
 
 // Lead statuses that themselves mean "the agent still has to act on this".
-const ACTIONABLE_LEAD_STATUSES = new Set<string>(["New Lead", "New", "New Leads", "RNR", "Call Back", "Follow-ups", "Follow up"]);
-const NEW_LEAD_STATUSES = new Set<string>(["New Lead", "New", "New Leads"]);
+const ACTIONABLE_LEAD_STATUSES = new Set<string>(["New Lead", "RNR", "Call Back", "Followup"]);
+const NEW_LEAD_STATUSES = new Set<string>(["New Lead"]);
 
 const toDate = (iso: string | undefined): Date | null => {
   if (!iso) return null;

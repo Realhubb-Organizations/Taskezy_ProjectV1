@@ -2,23 +2,16 @@ import { Lead, AdSpendRecord, LeadStatus, FollowupCall } from "@/context/AppCont
 import { toIsoDate } from "@/components/ui/DateRangePicker";
 
 const BUYER_STATUSES = new Set<LeadStatus>([
-  "Interested", "Follow up", "Follow-ups", "Call Back", "Meeting Scheduled", "Meeting Done",
-  "Site Visit Scheduled", "Site Visit Done", "Site Visit", "In Negotiation",
-  "Booking Done", "Booking Approved", "Booked", "EOI Customers", "Visit Schedule", "Completed", "Finance Review"
+  "Call Back", "Followup", "EOI", "Site Visit Scheduled", "Site Visit Done", "Booked"
 ]);
 
-const NON_BUYER_STATUSES = new Set<LeadStatus>([
-  "Dead", "Invalid", "Not Interested", "RNR", "Switch off", "Low Budget", "Finance Rejected"
-]);
+const NON_BUYER_STATUSES = new Set<LeadStatus>(["Dead Lead", "RNR", "Low Budget", "Cancelled"]);
 
-const BOOKING_STATUSES = new Set<LeadStatus>(["Booking Done", "Booking Approved", "Booked"]);
+const BOOKING_STATUSES = new Set<LeadStatus>(["Booked"]);
 
 // Site-visit/meeting conversion — kept as its own metric alongside (not
 // replacing) the buyer-vs-non-buyer Lead Quality above, per product decision.
-const VISIT_OR_MEETING_STATUSES = new Set<LeadStatus>([
-  "Site Visit Scheduled", "Site Visit Done", "Site Visit", "Visit Schedule",
-  "Meeting Scheduled", "Meeting Done"
-]);
+const VISIT_OR_MEETING_STATUSES = new Set<LeadStatus>(["Site Visit Scheduled", "Site Visit Done"]);
 
 export const SLA_MINUTES = 20;
 

@@ -38,7 +38,6 @@ export default function FinancePage() {
     approveClaim,
     rejectClaim,
     markInvoicePaid,
-    updateLeadStatus,
     addInvoice,
     generateInvoice,
     deleteInvoice,
@@ -197,9 +196,14 @@ export default function FinancePage() {
     fetchInvoicesPage(1, invoicesRowsPerPage);
   };
 
+  // Migration 029 collapsed the old Booking Done/Finance Review/Booking
+  // Approved distinction down to one "Booked" Lead Status — a lead is
+  // Booked immediately, with no separate pending-approval status. Finance's
+  // own review step now lives entirely on the auto-generated invoice
+  // itself (it starts as "Draft" the moment a lead is marked Booked, see
+  // AppContext's updateLeadStatus): approving activates it, rejecting
+  // deletes it. The lead's status never changes here anymore.
   const handleApproveBooking = (leadId: string) => {
-    updateLeadStatus(leadId, "Booking Approved");
-    // Find associated draft invoice and activate it
     const associatedInvoice = invoices.find(inv => inv.leadId === leadId);
     if (associatedInvoice) {
       generateInvoice(associatedInvoice.id);
@@ -207,7 +211,10 @@ export default function FinancePage() {
   };
 
   const handleRejectBooking = (leadId: string) => {
-    updateLeadStatus(leadId, "Finance Rejected");
+    const associatedInvoice = invoices.find(inv => inv.leadId === leadId);
+    if (associatedInvoice) {
+      deleteInvoice(associatedInvoice.id);
+    }
   };
 
   const handleDeleteInvoice = async (id: string) => {
@@ -218,7 +225,7 @@ export default function FinancePage() {
 
   // Calculate stats
   const totalInvoiced = invoices.reduce((sum, inv) => sum + inv.totalAmount, 0);
-  const pendingApprovals = leads.filter(l => l.status === "Booking Done" || l.status === "Finance Review");
+  const pendingApprovals = leads.filter(l => l.status === "Booked" && invoices.some(inv => inv.leadId === l.id && inv.status === "Draft"));
 
   return (
     <div className="space-y-6">

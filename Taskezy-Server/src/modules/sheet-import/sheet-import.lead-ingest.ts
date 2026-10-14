@@ -66,7 +66,7 @@ export async function ingestSheetLead(row: SheetLeadRow): Promise<SheetLeadInges
   if (!assignedAgentId) {
     return { outcome: "skipped", reason: "no assignable agent for the property and no active admin to fall back to" };
   }
-  const statusCode = autoAssignedAgentId ? "NEW" : "UNASSIGNED";
+  const statusCode = autoAssignedAgentId ? "NEW_LEAD" : "UNASSIGNED";
 
   const source = row.source || "Google Ads Sheet";
   const campaign = row.campaign || row.formSource || row.sourceSheet || undefined;

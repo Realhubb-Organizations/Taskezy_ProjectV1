@@ -46,7 +46,7 @@ function AgentTasksView() {
   // Same Booking guard as the Leads page and the dashboard: booking a lead
   // auto-generates an invoice from its deal value, so a real value is required.
   const handleStatusChange = async (leadId: string, status: LeadStatus) => {
-    if (status === "Booking Done" || status === "Booking Approved" || status === "Booked") {
+    if (status === "Booked") {
       const input = await promptDialog({
         title: "Enter deal value",
         message: "Enter the real deal value for this booking (INR):",

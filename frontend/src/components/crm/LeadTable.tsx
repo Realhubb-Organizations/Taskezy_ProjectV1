@@ -4,6 +4,7 @@ import { Lead, LeadStatus, useApp } from "@/context/AppContext";
 import { useDialog } from "@/components/ui/DialogProvider";
 import { maskPhone } from "@/lib/maskPII";
 import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/callTrigger";
+import { statusBadgeClasses } from "@/lib/leadStatusMapping";
 
 interface LeadTableProps {
   leads: Lead[];
@@ -23,35 +24,10 @@ export default function LeadTable({
   const isAdmin = activeRole === "ADMIN";
   const callAllowed = canTriggerLeadCall(isAdmin);
 
-  const getStatusColor = (status: LeadStatus) => {
-    switch (status) {
-      case "Booked":
-      case "Booking Done":
-      case "Booking Approved":
-      case "Completed":
-        return "bg-emerald-50 text-emerald-800 border-emerald-200";
-      case "New Lead":
-      case "New Leads":
-      case "New":
-        return "bg-blue-50 text-blue-800 border-blue-200";
-      case "Interested":
-      case "Connected":
-      case "EOI Customers":
-        return "bg-indigo-50 text-indigo-850 border-indigo-200";
-      case "Follow up":
-      case "Follow-ups":
-      case "Visit Schedule":
-      case "Site Visit Scheduled":
-      case "Meeting Scheduled":
-        return "bg-amber-50 text-amber-800 border-amber-200";
-      case "Dead":
-      case "Invalid":
-      case "Finance Rejected":
-        return "bg-red-50 text-red-800 border-red-200";
-      default:
-        return "bg-slate-50 text-slate-700 border-slate-200";
-    }
-  };
+  // Delegates to the shared status badge convention (leadStatusMapping.ts)
+  // used by every other status pill in the app, rather than its own
+  // separate color list that drifted out of sync with the real status set.
+  const getStatusColor = statusBadgeClasses;
 
   const handleCall = (lead: Lead) => {
     triggerLeadCall(lead, {

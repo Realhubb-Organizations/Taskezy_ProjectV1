@@ -29,10 +29,10 @@ export interface CampaignItem {
 }
 
 export const CAMPAIGN_STATUSES: CampaignItem["status"][] = ["Active", "Pause", "Stopped"];
-export const QUALIFIED_LEAD_STATUSES = ["Interested", "Connected", "Visit Schedule", "Site Visit", "Booking Done", "Booked"];
-export const UNQUALIFIED_LEAD_STATUSES = ["Dead", "Invalid", "RNR"];
-export const SITE_VISIT_LEAD_STATUSES = ["Visit Schedule", "Site Visit"];
-export const BOOKING_LEAD_STATUSES = ["Booking Done", "Booking Approved", "Booked"];
+export const QUALIFIED_LEAD_STATUSES = ["Call Back", "Followup", "EOI", "Site Visit Scheduled", "Site Visit Done", "Booked"];
+export const UNQUALIFIED_LEAD_STATUSES = ["Dead Lead", "RNR"];
+export const SITE_VISIT_LEAD_STATUSES = ["Site Visit Scheduled", "Site Visit Done"];
+export const BOOKING_LEAD_STATUSES = ["Booked"];
 
 // A campaign's totalLeads is the sum, over every real day it has data, of
 // max(that day's platform-reported leadsGenerated, that day's real synced

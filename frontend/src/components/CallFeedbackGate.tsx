@@ -6,8 +6,8 @@ import { Capacitor } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
 import { PhoneCall, MessageCircle, Check, X } from "lucide-react";
 import { useApp, LeadStatus } from "@/context/AppContext";
-import { apiCreateFollowup, apiUpdateLeadStatus } from "@/lib/apiClient";
-import { PICKABLE_STATUS_OPTIONS, frontendStatusToDbCode } from "@/lib/leadStatusMapping";
+import { apiCreateFollowup, apiUpdateLeadStatus, apiUpdateCallStatus } from "@/lib/apiClient";
+import { nextStatusOptions, frontendStatusToDbCode } from "@/lib/leadStatusMapping";
 
 // Full-screen, unclosable overlay — the app stays mounted behind it but
 // nothing in it can be reached (no backdrop-click, no Escape, and the
@@ -20,15 +20,22 @@ import { PICKABLE_STATUS_OPTIONS, frontendStatusToDbCode } from "@/lib/leadStatu
 //   1. Did it happen? — "Did the call connect?" / "Did you send the
 //      message?" — Yes, or No with a reason.
 //   2. Update the lead's status (current one pre-selected, may be kept).
-//      RNR / Call Back need the next call's date and time; Booked needs the
-//      deal value; a Data Calling lead marked Connected needs Qualified /
-//      Not Qualified.
+//      A Data Calling lead (source === "Bulk Upload" — matches
+//      AppContext's own dataCallingLeads split, not just the presence of a
+//      subSource label, which survives promotion) picks its own
+//      independent Call Status (migration 030) instead of the main Lead
+//      Status — Connected/Called/Not Reachable/Wrong Number, with
+//      Qualification Status derived automatically, never asked here.
+//      Every other lead picks from the real 14-value Lead Status list,
+//      narrowed to what the transition matrix actually allows from its
+//      current status (leadStatusMapping.ts's nextStatusOptions). RNR /
+//      Call Back (regular leads) or Not Reachable (Data Calling leads)
+//      need the next call's date and time; Booked needs the deal value.
 // The status is saved first (and must succeed), then the next call is
 // scheduled, then the attempt is closed — only then does the app unlock.
 
 const CALL_NOT_CONNECTED_REASONS = ["No answer", "Switched off", "Busy", "Wrong number", "Other"];
-// Data Calling leads use their own short pipeline (see data-calling/page.tsx).
-const DATA_CALLING_STATUSES: LeadStatus[] = ["New Lead", "RNR", "Connected"];
+const CALL_STATUS_OPTIONS = ["Connected", "Called", "Not Reachable", "Wrong Number"] as const;
 const NEEDS_NEXT_CALL: LeadStatus[] = ["RNR", "Call Back"];
 
 const todayIso = () => {
@@ -44,20 +51,26 @@ export default function CallFeedbackGate() {
     () => (pendingCallAttempt ? [...leads, ...dataCallingLeads].find(l => l.id === pendingCallAttempt.lead_id) ?? null : null),
     [pendingCallAttempt, leads, dataCallingLeads]
   );
-  const isDataCallingLead = !!lead?.subSource;
+  const isDataCallingLead = lead?.source === "Bulk Upload";
+  // Regular leads: only what the transition matrix allows from the lead's
+  // current status — mirrors LeadDetailDrawer, just without its separate
+  // confirm-step for "Optional" picks (this form already has its own
+  // explicit Save & Continue + inline error, and a stale pick here still
+  // can't actually commit anything the backend wouldn't also reject).
   const statusOptions = useMemo(() => {
-    const base = isDataCallingLead ? DATA_CALLING_STATUSES : PICKABLE_STATUS_OPTIONS;
-    return lead && !base.includes(lead.status) ? [lead.status, ...base] : base;
-  }, [isDataCallingLead, lead]);
+    if (!lead || isDataCallingLead) return [];
+    const choices = nextStatusOptions(lead.status).map(c => c.status);
+    return [lead.status, ...choices];
+  }, [lead, isDataCallingLead]);
 
   // Step 1: did it happen?
   const [step, setStep] = useState<"ask" | "reason" | "status">("ask");
   const [happened, setHappened] = useState(true);
   const [reason, setReason] = useState("");
   const [reasonText, setReasonText] = useState("");
-  // Step 2: the lead's status.
+  // Step 2: the lead's status (regular leads) or call status (Data Calling).
   const [status, setStatus] = useState<LeadStatus>("New Lead");
-  const [subStatus, setSubStatus] = useState<"" | "Qualified" | "Not Qualified">("");
+  const [callStatus, setCallStatus] = useState<"" | (typeof CALL_STATUS_OPTIONS)[number]>("");
   const [nextDate, setNextDate] = useState("");
   const [nextTime, setNextTime] = useState("");
   const [dealValue, setDealValue] = useState("");
@@ -71,7 +84,6 @@ export default function CallFeedbackGate() {
     setHappened(true);
     setReason("");
     setReasonText("");
-    setSubStatus("");
     setNextDate("");
     setNextTime("");
     setDealValue("");
@@ -80,11 +92,11 @@ export default function CallFeedbackGate() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingCallAttempt?.id]);
 
-  // Pre-select the lead's current status once it's known.
+  // Pre-select the lead's current status/call status once it's known.
   useEffect(() => {
     if (lead) {
       setStatus(lead.status);
-      setSubStatus(lead.subStatus ?? "");
+      setCallStatus(lead.callStatus ?? "");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lead?.id]);
@@ -117,15 +129,17 @@ export default function CallFeedbackGate() {
     setStep("status");
   };
 
-  const statusChanged = !!lead && (status !== lead.status || (status === "Connected" && subStatus !== (lead.subStatus ?? "")));
-  const needsNextCall = NEEDS_NEXT_CALL.includes(status) && statusChanged;
-  const needsSubStatus = isDataCallingLead && status === "Connected";
-  const needsDealValue = status === "Booked" && statusChanged;
+  const statusChanged = !!lead && !isDataCallingLead && status !== lead.status;
+  const callStatusChanged = !!lead && isDataCallingLead && callStatus !== "" && callStatus !== (lead.callStatus ?? "");
+  const needsNextCall = isDataCallingLead
+    ? callStatus === "Not Reachable" && callStatusChanged
+    : NEEDS_NEXT_CALL.includes(status) && statusChanged;
+  const needsDealValue = !isDataCallingLead && status === "Booked" && statusChanged;
+  const somethingChanged = statusChanged || callStatusChanged;
 
   const finish = async (e: React.FormEvent) => {
     e.preventDefault();
     if (submitting) return;
-    if (needsSubStatus && !subStatus) return setError("Pick Qualified or Not Qualified.");
     let scheduledAt: Date | null = null;
     if (needsNextCall) {
       if (!nextDate || !nextTime) return setError("Pick the date and time of the next call.");
@@ -134,16 +148,18 @@ export default function CallFeedbackGate() {
     }
     const deal = needsDealValue ? parseFloat(dealValue.replace(/[^0-9.]/g, "")) : undefined;
     if (needsDealValue && (!deal || deal <= 0)) return setError("Enter the booking's deal value.");
-    if (!statusChanged && !note.trim()) return setError("Status is unchanged — add a note about what happened.");
+    if (!somethingChanged && !note.trim()) return setError("Status is unchanged — add a note about what happened.");
 
     setSubmitting(true);
     setError("");
     try {
-      // 1. The lead's status — must succeed before the app unlocks.
-      if (lead && statusChanged) {
+      // 1. The lead's status (or call status) — must succeed before the app unlocks.
+      if (lead && isDataCallingLead && callStatusChanged) {
+        await apiUpdateCallStatus(lead.id, callStatus as (typeof CALL_STATUS_OPTIONS)[number]);
+      } else if (lead && statusChanged) {
         const code = frontendStatusToDbCode(status);
         if (!code) throw new Error(`"${status}" can't be set here.`);
-        await apiUpdateLeadStatus(lead.id, code, deal, needsSubStatus ? (subStatus || undefined) : undefined);
+        await apiUpdateLeadStatus(lead.id, code, deal);
       }
       // 2. Next call — after the status change, which closes older pending follow-ups.
       if (lead && scheduledAt) {
@@ -154,11 +170,10 @@ export default function CallFeedbackGate() {
       }
       // 3. Close the attempt (logged on the lead's timeline) — unlocks the app.
       const outcome = isWhatsApp ? (happened ? "Sent" : "Not Sent") : happened ? "Connected" : "Not connected";
-      const parts = [
-        !happened ? `Reason: ${notHappenedReason()}` : "",
-        statusChanged ? `Status → ${status}${needsSubStatus && subStatus ? ` (${subStatus})` : ""}` : `Status kept: ${lead?.status ?? "—"}`,
-        note.trim()
-      ].filter(Boolean);
+      const statusLine = isDataCallingLead
+        ? callStatusChanged ? `Call status → ${callStatus}` : `Call status kept: ${lead?.callStatus ?? "—"}`
+        : statusChanged ? `Status → ${status}` : `Status kept: ${lead?.status ?? "—"}`;
+      const parts = [!happened ? `Reason: ${notHappenedReason()}` : "", statusLine, note.trim()].filter(Boolean);
       await submitCallFeedback(outcome, parts.join(". ") || (isWhatsApp ? "Message sent via WhatsApp." : "Call completed."));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save. Please try again.");
@@ -168,7 +183,7 @@ export default function CallFeedbackGate() {
   };
 
   const title = step === "status"
-    ? "Update the lead's status"
+    ? isDataCallingLead ? "Update the call status" : "Update the lead's status"
     : isWhatsApp ? "Did you send the WhatsApp message?" : "Did the call connect?";
   const inputClass = "w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 text-xs font-semibold text-slate-800 focus:outline-none focus:border-brand-500";
 
@@ -181,7 +196,12 @@ export default function CallFeedbackGate() {
           </span>
           <div className="min-w-0">
             <h3 className="text-sm font-extrabold text-slate-900">{title}</h3>
-            {lead && <p className="text-[11px] text-slate-500 truncate">{lead.name}{step === "status" ? ` · now: ${lead.status}` : ""}</p>}
+            {lead && (
+              <p className="text-[11px] text-slate-500 truncate">
+                {lead.name}
+                {step === "status" ? ` · now: ${isDataCallingLead ? lead.callStatus ?? "Not called yet" : lead.status}` : ""}
+              </p>
+            )}
           </div>
         </div>
 
@@ -229,20 +249,20 @@ export default function CallFeedbackGate() {
 
         {step === "status" && (
           <form onSubmit={finish} className="space-y-3">
-            <div className="space-y-1">
-              <label className="block text-[10px] font-bold text-slate-500 uppercase">Lead status</label>
-              <select value={status} onChange={(e) => { setStatus(e.target.value as LeadStatus); setError(""); }} className={inputClass}>
-                {statusOptions.map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </div>
-            {needsSubStatus && (
-              <div className="flex gap-2">
-                {(["Qualified", "Not Qualified"] as const).map(s => (
-                  <button key={s} type="button" onClick={() => { setSubStatus(s); setError(""); }}
-                    className={`flex-1 py-2 rounded-lg border text-xs font-bold ${subStatus === s ? "bg-[#0B1E6E] border-[#0B1E6E] text-white" : "bg-white border-slate-200 text-slate-700"}`}>
-                    {s}
-                  </button>
-                ))}
+            {isDataCallingLead ? (
+              <div className="space-y-1">
+                <label className="block text-[10px] font-bold text-slate-500 uppercase">Call status</label>
+                <select value={callStatus} onChange={(e) => { setCallStatus(e.target.value as (typeof CALL_STATUS_OPTIONS)[number]); setError(""); }} className={inputClass}>
+                  <option value="" disabled>Not called yet</option>
+                  {CALL_STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+            ) : (
+              <div className="space-y-1">
+                <label className="block text-[10px] font-bold text-slate-500 uppercase">Lead status</label>
+                <select value={status} onChange={(e) => { setStatus(e.target.value as LeadStatus); setError(""); }} className={inputClass}>
+                  {statusOptions.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
               </div>
             )}
             {needsNextCall && (
@@ -264,7 +284,7 @@ export default function CallFeedbackGate() {
               </div>
             )}
             <div className="space-y-1">
-              <label className="block text-[10px] font-bold text-slate-500 uppercase">Note {statusChanged ? "(optional)" : "(required)"}</label>
+              <label className="block text-[10px] font-bold text-slate-500 uppercase">Note {somethingChanged ? "(optional)" : "(required)"}</label>
               <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} maxLength={1000} placeholder="What happened?" className={`${inputClass} font-normal resize-none`} />
             </div>
             <div className="flex gap-2.5">
