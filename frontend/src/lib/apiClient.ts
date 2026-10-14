@@ -1475,11 +1475,14 @@ export function apiListAdLevelSpend(): Promise<ApiAdLevelSpendRow[]> {
 // their regular interval (Campaign Deep Dive's Sync button) — ADMIN only.
 // Starts the same real Meta/Google sync already running on a timer; does
 // not bypass either platform's own rate limits, so a run can still take a
-// while to land. { started: false } for a platform means one was already
-// in progress, not that the request failed.
+// while to land. { started: false } for a platform means the request
+// itself didn't fail — either a sync was already in progress, or the
+// backend's own cooldown (10 min since the last completed cycle — see
+// Taskezy-Server/src/jobs/metaAdSpendSync.ts) is bounding how often even
+// several admins clicking this throughout the day can start a fresh cycle.
 export interface ApiAdSpendSyncTriggerResult {
-  meta: { started: boolean };
-  google: { started: boolean };
+  meta: { started: boolean; reason?: "in-progress" | "cooldown" };
+  google: { started: boolean; reason?: "in-progress" | "cooldown" };
 }
 export function apiTriggerAdSpendSync(): Promise<ApiAdSpendSyncTriggerResult> {
   return request<ApiAdSpendSyncTriggerResult>("/api/v1/ad-spend/sync", { method: "POST" });

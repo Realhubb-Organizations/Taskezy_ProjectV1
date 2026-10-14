@@ -33,6 +33,16 @@ function isoDateNDaysAgo(n: number): string {
  * Deep Dive's Ad Set Name / Ad creative Name columns and a real per-ad CPL.
  */
 let isSyncing = false;
+let lastCompletedAt = 0;
+
+// Caps how often the manual "Sync Now" button (see triggerMetaAdSpendSyncNow
+// below) can actually start a fresh cycle. With potentially 4 admins each
+// free to click it throughout the day, isSyncing alone only stops two runs
+// overlapping — it does nothing to stop five separate full cycles (each one
+// calling every ACTIVE campaign's insights endpoint) piling up on top of the
+// scheduled 6h one. This bounds that to roughly one extra cycle every 10
+// minutes, worst case, regardless of how many admins click it.
+const MANUAL_TRIGGER_COOLDOWN_MS = 10 * 60 * 1000;
 
 async function syncOnce(): Promise<void> {
   if (isSyncing) {
@@ -42,6 +52,7 @@ async function syncOnce(): Promise<void> {
   isSyncing = true;
   try {
     await runSync();
+    lastCompletedAt = Date.now();
   } finally {
     isSyncing = false;
   }
@@ -168,8 +179,9 @@ export function startMetaAdSpendSync(): void {
  * it only starts checking for new data sooner. Returns immediately rather
  * than waiting for the (potentially long, rate-limit-bound) run to finish.
  */
-export function triggerMetaAdSpendSyncNow(): { started: boolean } {
-  if (isSyncing) return { started: false };
+export function triggerMetaAdSpendSyncNow(): { started: boolean; reason?: "in-progress" | "cooldown" } {
+  if (isSyncing) return { started: false, reason: "in-progress" };
+  if (Date.now() - lastCompletedAt < MANUAL_TRIGGER_COOLDOWN_MS) return { started: false, reason: "cooldown" };
   syncOnce().catch(err => logger.error({ err }, "Manually triggered Meta ad spend sync failed"));
   return { started: true };
 }

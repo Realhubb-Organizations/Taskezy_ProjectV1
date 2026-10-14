@@ -696,9 +696,12 @@ export default function AdminCampaignsPage() {
     try {
       const result = await triggerAdSpendSync();
       const startedAny = result.meta.started || result.google.started;
+      const anyCooldown = result.meta.reason === "cooldown" || result.google.reason === "cooldown";
       setAdSyncNote(
         startedAny
           ? "Sync started. Meta/Google rate limits mean this can take a while to fully land — new rows will appear automatically."
+          : anyCooldown
+          ? "Already synced recently — try again in a few minutes."
           : "A sync from an earlier trigger is still running — refreshing with whatever has landed so far."
       );
       let pollsLeft = 9; // ~3 minutes of polling at 20s apart, then stop and let the admin re-trigger

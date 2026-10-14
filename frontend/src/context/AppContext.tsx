@@ -57,6 +57,7 @@ import {
   apiListAdSpend,
   apiListAdLevelSpend,
   apiTriggerAdSpendSync,
+  ApiAdSpendSyncTriggerResult,
   apiListMetaConnections,
   apiSetPropertyTeamMembers,
   apiListTimesheets,
@@ -539,7 +540,7 @@ interface AppState {
   adSpendRecords: AdSpendRecord[];
   adLevelSpendRecords: AdLevelSpendRecord[];
   refetchAdLevelSpend: () => Promise<void>;
-  triggerAdSpendSync: () => Promise<{ meta: { started: boolean }; google: { started: boolean } }>;
+  triggerAdSpendSync: () => Promise<ApiAdSpendSyncTriggerResult>;
   bulkImportLeads: (input: BulkImportLeadsApiInput) => Promise<BulkImportLeadsApiResult>;
 
   // System State
