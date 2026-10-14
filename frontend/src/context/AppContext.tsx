@@ -9,7 +9,8 @@ import {
   apiListAllLeads,
   apiGetLead,
   apiCreateLead,
-  apiBulkImportLeads,
+  apiStartBulkImportLeads,
+  apiGetBulkImportStatus,
   BulkImportLeadsApiInput,
   BulkImportLeadsApiResult,
   apiUpdateLeadStatus,
@@ -1159,14 +1160,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setAdLevelSpendRecords(apiAdLevelSpend.map(mapApiAdLevelSpendToFrontend));
   };
 
-  // Admin CRM Data Calling's bulk Excel upload. The API only returns counts
-  // (created/duplicates/skipped rows), not the created leads themselves, so
-  // a full leads refetch afterward is what actually brings the new rows
-  // into view — matches this file's optimistic-update-elsewhere/refetch-here
-  // split, since there's no local lead object to optimistically construct
-  // for rows the server assigned via Round Robin/Percentage.
+  // Admin CRM Data Calling's bulk Excel upload. The server queues this
+  // (jobs/queue.ts's bulk-import-leads worker — a real upload can be
+  // 100k+ rows, too long to hold an HTTP request open) and returns a
+  // jobId immediately; polling here keeps this function's contract
+  // (await it, get the final counts back) identical to before, so
+  // UploadLeadsModal/data-calling's page need no changes at all.
+  // The API only returns counts (created/duplicates/skipped rows), not the
+  // created leads themselves, so a full leads refetch afterward is what
+  // actually brings the new rows into view — matches this file's
+  // optimistic-update-elsewhere/refetch-here split, since there's no local
+  // lead object to optimistically construct for rows the server assigned
+  // via Round Robin/Percentage.
   const bulkImportLeads = async (input: BulkImportLeadsApiInput): Promise<BulkImportLeadsApiResult> => {
-    const result = await apiBulkImportLeads(input);
+    const { jobId } = await apiStartBulkImportLeads(input);
+    let status = await apiGetBulkImportStatus(jobId);
+    while (status.state === "created" || status.state === "retry" || status.state === "active") {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      status = await apiGetBulkImportStatus(jobId);
+    }
+    if (status.state !== "completed" || !status.result) {
+      throw new Error("The import failed — please try again.");
+    }
+    const result = status.result;
     if (result.created > 0) {
       const apiLeads = await apiListAllLeads();
       setAllLeads(apiLeads.map(mapApiLeadToFrontendLead));

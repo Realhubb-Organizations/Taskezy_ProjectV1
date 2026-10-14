@@ -4,6 +4,7 @@ import { validate } from "../../middleware/validate";
 import { asyncHandler } from "../../utils/asyncHandler";
 import {
   bulkDeleteLeadsSchema,
+  bulkImportJobIdParamSchema,
   bulkImportLeadsSchema,
   createLeadSchema,
   editLeadSchema,
@@ -22,6 +23,7 @@ import {
   deleteLeadHandler,
   editLeadHandler,
   fixSheetLeadTimestampsHandler,
+  getBulkImportStatusHandler,
   getLeadHandler,
   getLeadStatsHandler,
   listLeadsHandler,
@@ -54,6 +56,15 @@ leadsRouter.post(
   requireRole("ADMIN"),
   validate({ body: bulkImportLeadsSchema }),
   asyncHandler(bulkImportLeadsHandler)
+);
+// Polled by the upload modal after the above returns a jobId — ADMIN-only,
+// same as the upload itself, since a job's output (names/phones) is the
+// same data the upload was already gated on.
+leadsRouter.get(
+  "/bulk-import/:jobId/status",
+  requireRole("ADMIN"),
+  validate({ params: bulkImportJobIdParamSchema }),
+  asyncHandler(getBulkImportStatusHandler)
 );
 // Bulk counterpart to DELETE /:id — ADMIN-only, same archive-then-delete per lead.
 leadsRouter.post(

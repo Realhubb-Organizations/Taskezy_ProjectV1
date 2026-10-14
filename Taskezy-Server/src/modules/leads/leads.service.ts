@@ -224,6 +224,12 @@ export interface BulkImportSkippedRow {
   reason: string;
 }
 
+export interface BulkImportLeadsResult {
+  created: number;
+  duplicates: number;
+  skipped: BulkImportSkippedRow[];
+}
+
 // How many rows go into one INSERT statement. Postgres/node-pg handle far
 // more than this per statement, but keeping chunks at this size bounds how
 // much a single query's parameter arrays/working memory grow, while still
@@ -260,7 +266,7 @@ const BULK_IMPORT_CHUNK_SIZE = 1000;
  * and reported by its real spreadsheet row number, not a whole-batch
  * failure.
  */
-export async function bulkImportLeads(_caller: AccessTokenPayload, input: BulkImportLeadsInput) {
+export async function bulkImportLeads(input: BulkImportLeadsInput): Promise<BulkImportLeadsResult> {
   const fallbackAdminId = (await usersRepo.listActiveAdminIds())[0];
 
   // Set up once, outside the per-row loop — see createPropertyAgentPicker.

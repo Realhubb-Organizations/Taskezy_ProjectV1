@@ -1,6 +1,7 @@
 import { PgBoss } from "pg-boss";
 import { env } from "../config/env";
 import { logger } from "../utils/logger";
+import { bulkImportLeads, BulkImportLeadsInput } from "../modules/leads/leads.service";
 
 // Postgres-backed job queue (same RDS instance, its own `pgboss` schema —
 // see migrations-archive/031_pgboss_grants.sql for the one-time setup).
@@ -17,6 +18,15 @@ export const boss = new PgBoss({
 boss.on("error", (err) => logger.error({ err }, "pg-boss error"));
 
 const HELLO_QUEUE = "hello-world";
+
+// First real job on the queue (see leads.routes.ts's POST /bulk-import) —
+// an admin's Excel upload can be 100k+ rows, long enough to risk an
+// upstream proxy timeout if run inline in the request. The handler stays
+// the same bulkImportLeads function leads.service.ts always had; only the
+// trigger moved from "awaited in the request" to "queued, polled via
+// GET /bulk-import/:jobId/status". Its return value becomes this job's
+// `output`, which pg-boss stores for us — no separate results table needed.
+export const BULK_IMPORT_LEADS_QUEUE = "bulk-import-leads";
 
 /**
  * Starts the queue and registers every job worker this process handles.
@@ -43,6 +53,12 @@ export async function startQueue(): Promise<void> {
 
   const id = await boss.send(HELLO_QUEUE, { bootedAt: new Date().toISOString() });
   logger.info({ jobId: id }, "pg-boss started, hello-world smoke-test job queued");
+
+  await boss.createQueue(BULK_IMPORT_LEADS_QUEUE);
+  await boss.work<BulkImportLeadsInput>(BULK_IMPORT_LEADS_QUEUE, async ([job]) => {
+    logger.info({ jobId: job.id }, "Processing queued bulk lead import");
+    return bulkImportLeads(job.data);
+  });
 }
 
 export async function stopQueue(): Promise<void> {
