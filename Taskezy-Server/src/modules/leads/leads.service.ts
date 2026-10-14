@@ -9,6 +9,7 @@ import { createNotification, deleteLeadActivityNotifications } from "../notifica
 import { findPropertyIdBySheetSource } from "../properties/properties.repository";
 import { pickAgentForProperty, createPropertyAgentPicker } from "../properties/properties.assignment";
 import { broadcastLeadChanged } from "./leads.realtime";
+import { HANDOVER_NOTE_PREFIX } from "./leads.handover";
 import { normalizeTypedIndianMobile } from "../../utils/validation";
 import { assertTransitionAllowed, LeadStatusCode } from "./leadStatusTransitions";
 
@@ -150,6 +151,8 @@ export async function getLead(caller: AccessTokenPayload, id: string) {
 }
 
 export async function createLead(caller: AccessTokenPayload, input: CreateLeadInput) {
+  // A manager adds leads for themselves or their own direct reports only.
+  if (caller.role !== "ADMIN") await assertUploadAssigneeAllowed(caller, input.assignedAgentId);
   // Mirrors addLead()'s duplicate-phone rule in AppContext.tsx — the leads.phone
   // UNIQUE constraint would also catch this, but checking first gives a clean
   // 409 with a useful message instead of a raw constraint-violation error.
@@ -266,6 +269,17 @@ const BULK_IMPORT_CHUNK_SIZE = 1000;
  * and reported by its real spreadsheet row number, not a whole-batch
  * failure.
  */
+/**
+ * Managers picking agents by hand may only pick their own team (by
+ * property, the admin-defined property team decides). Called by the
+ * request handler before the import is queued, since the queued worker
+ * runs bulkImportLeads without a caller.
+ */
+export async function assertBulkImportAllowed(caller: AccessTokenPayload, input: BulkImportLeadsInput): Promise<void> {
+  if (caller.role === "ADMIN" || input.assignmentMode !== "AGENT") return;
+  for (const agentId of input.agentIds ?? []) await assertUploadAssigneeAllowed(caller, agentId);
+}
+
 export async function bulkImportLeads(input: BulkImportLeadsInput): Promise<BulkImportLeadsResult> {
   const fallbackAdminId = (await usersRepo.listActiveAdminIds())[0];
 
@@ -510,6 +524,14 @@ export async function editLead(caller: AccessTokenPayload, leadId: string, input
  * teammate who shares their manager (or to that manager). Checked here, not
  * just in the UI, since the route is open to every authenticated role.
  */
+/** Uploading (single or bulk): a manager may assign new leads to themselves or a direct report only. */
+async function assertUploadAssigneeAllowed(caller: AccessTokenPayload, agentId: string): Promise<void> {
+  if (caller.role === "ADMIN" || agentId === caller.sub) return;
+  const target = await usersRepo.findById(agentId);
+  if (caller.roleType === "MANAGER" && target?.manager_id === caller.sub) return;
+  throw ApiError.forbidden("You can only upload leads for yourself or your own team.");
+}
+
 async function assertReassignAllowed(caller: AccessTokenPayload, newAgentId: string): Promise<void> {
   if (caller.role === "ADMIN") return;
 
@@ -520,12 +542,9 @@ async function assertReassignAllowed(caller: AccessTokenPayload, newAgentId: str
     throw ApiError.forbidden("You can only reassign leads to one of your own direct reports.");
   }
 
-  // Member: peers under the same manager, or the manager themself.
-  const callerUser = await usersRepo.findById(caller.sub);
-  if (callerUser?.manager_id && newAgentId === callerUser.manager_id) return;
-  const target = await usersRepo.findById(newAgentId);
-  if (callerUser?.manager_id && target?.manager_id === callerUser.manager_id) return;
-  throw ApiError.forbidden("You can only reassign leads to a teammate under your own manager.");
+  // Agents can't reassign (the route already refuses them); kept as a guard
+  // for any internal caller.
+  throw ApiError.forbidden("Only admins and managers can reassign leads.");
 }
 
 // Deletion is ADMIN-only — enforced by requireRole at the route level (see
@@ -552,6 +571,12 @@ export async function reassignLead(caller: AccessTokenPayload, leadId: string, n
   if (!previousAgentId) throw ApiError.notFound("Lead not found");
   if (previousAgentId === newAgentId) {
     throw ApiError.badRequest("Lead is already assigned to this agent.");
+  }
+  // Only the lead owner's own manager (or an admin) may move it: a manager
+  // can't take leads from another manager's team, only hand out their own.
+  if (caller.role !== "ADMIN") {
+    const myTeam = await scopeForCaller(caller);
+    if (!myTeam?.includes(previousAgentId)) throw ApiError.forbidden("You can only reassign your own team's leads.");
   }
   await assertReassignAllowed(caller, newAgentId);
 
@@ -598,7 +623,8 @@ export async function reassignLead(caller: AccessTokenPayload, leadId: string, n
 /**
  * Hands a departing user's leads (`leadIds`, oldest first) to `targets`
  * round-robin, so each gets an equal share (±1), inside the caller's
- * transaction. Every lead gets the admin's note and an Activity History entry.
+ * transaction. Each lead's note and history name only its own new owner; the
+ * admin's typed note is kept as an admins/managers-only history entry.
  * Follow-ups are moved separately (repo.moveFollowupsToLeadOwners) once all
  * leads have their new owner.
  */
@@ -614,8 +640,12 @@ export async function handOverLeadsInTransaction(
   for (let i = 0; i < leadIds.length; i++) {
     const target = targets[i % targets.length];
     await repo.reassign(client, leadIds[i], fromUser.id, target.id);
-    await repo.setNote(client, leadIds[i], note, caller.sub);
-    await repo.insertLeadLog(client, leadIds[i], caller.sub, caller.name, `Reassigned to ${target.name} (${fromUser.name} was removed). Note: ${note}`);
+    // The lead's visible note names only its own new owner — never the other
+    // agents who got the rest of the split (see leads.handover.ts).
+    await repo.setNote(client, leadIds[i], `Reassigned from ${fromUser.name} to ${target.name}.`, caller.sub);
+    await repo.insertLeadLog(client, leadIds[i], caller.sub, caller.name, `Reassigned from ${fromUser.name} to ${target.name} (${fromUser.name} was removed).`);
+    // The admin's own note (may mention everyone) — admins & managers only.
+    await repo.insertLeadLog(client, leadIds[i], caller.sub, caller.name, `${HANDOVER_NOTE_PREFIX}${note}`);
     received.set(target.id, (received.get(target.id) ?? 0) + 1);
   }
   return received;

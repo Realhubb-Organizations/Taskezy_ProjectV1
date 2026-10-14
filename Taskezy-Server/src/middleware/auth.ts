@@ -38,3 +38,17 @@ export function requireRole(...allowedRoles: string[]) {
     next();
   };
 }
+
+/**
+ * Admins and sales managers only — for actions agents can't take, e.g.
+ * uploading or reassigning leads. `action` names it in the refusal message.
+ */
+export function requireAdminOrManager(action: string) {
+  return (req: Request, _res: Response, next: NextFunction): void => {
+    if (!req.user) throw ApiError.unauthorized();
+    if (req.user.role !== "ADMIN" && req.user.roleType !== "MANAGER") {
+      throw ApiError.forbidden(`Only admins and managers can ${action}.`);
+    }
+    next();
+  };
+}

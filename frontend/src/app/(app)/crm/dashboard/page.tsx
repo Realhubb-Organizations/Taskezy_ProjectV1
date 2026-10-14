@@ -10,6 +10,7 @@ import TeamTasksTable, { TeamTaskTab } from "@/components/dashboard/TeamTasksTab
 import TaskInsightsCharts from "@/components/dashboard/TaskInsightsCharts";
 import SalesPendingTasksTable from "@/components/dashboard/SalesPendingTasksTable";
 import { computeLeadSummaryStats } from "@/lib/leadSummaryStats";
+import { canUploadLeads, uploadAssignableUsers } from "@/lib/leadAssignment";
 import { ChevronDown, Plus, CheckCircle } from "lucide-react";
 import { LineSkeleton } from "@/components/ui/Skeletons";
 import DateRangeSelect from "@/components/ui/DateRangeSelect";
@@ -182,6 +183,8 @@ export default function CrmDashboardPage() {
       {/* No in-page title here — the shared app header above already shows
           "Dashboard" for this route, so repeating it as a page heading was
           just duplication. */}
+      {/* Upload Leads: admins and managers only, not agents. */}
+      {canUploadLeads(currentUser) && (
       <div className="flex justify-end">
         <button
           onClick={() => setIsUploadOpen(true)}
@@ -191,6 +194,7 @@ export default function CrmDashboardPage() {
           Upload Leads
         </button>
       </div>
+      )}
 
       {uploadMsg && (
         <div className="p-2.5 bg-emerald-50 border border-emerald-100 text-[11px] text-emerald-700 rounded-xl font-bold flex items-center gap-2 animate-fade-in shadow-sm">
@@ -283,7 +287,7 @@ export default function CrmDashboardPage() {
         onClose={() => setIsUploadOpen(false)}
         onSubmitManual={handleUploadManualLead}
         onSubmitBulk={handleUploadBulkLeads}
-        agentsList={agentsList}
+        agentsList={uploadAssignableUsers(users, currentUser).map(u => u.name)}
         propertiesList={propertiesList}
       />
 

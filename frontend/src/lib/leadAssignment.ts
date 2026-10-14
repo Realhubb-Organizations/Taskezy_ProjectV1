@@ -83,3 +83,43 @@ export function eligibleAssignees<U extends AssignableUser>({
 
   return pool.filter(u => u.id !== caller.id && !allHeldBy(u.name));
 }
+
+/** Uploading leads (manual entry or Data Calling bulk) — admins and sales managers only, never agents. Same rule as the server. */
+export function canUploadLeads(user: { role: string; role_type?: string } | null): boolean {
+  return !!user && (user.role === "ADMIN" || user.role_type === "Manager");
+}
+
+/**
+ * Who an uploader may hand new leads to: an admin — every active sales user;
+ * a manager — themselves and their own direct reports (the server rejects
+ * anyone else).
+ */
+export function uploadAssignableUsers<U extends { id: string; role: string; status?: string; department?: string; managerId?: string }>(
+  users: U[],
+  uploader: { id: string; role: string } | null
+): U[] {
+  const sales = users.filter(u => u.role === "AGENT" && u.status !== "INACTIVE" && (!u.department || u.department === "SALES"));
+  if (!uploader) return [];
+  if (uploader.role === "ADMIN") return sales;
+  return sales.filter(u => u.id === uploader.id || u.managerId === uploader.id);
+}
+
+/** Moving leads between people — admins and sales managers only, never agents. Same rule as the server. */
+export const canReassignLeads = canUploadLeads;
+
+/**
+ * Can this user reassign THIS lead? Admins: any lead. Managers: only leads
+ * owned by themselves or one of their direct reports (not another
+ * manager's team). Agents: never. Mirrors leads.service.ts's reassignLead.
+ */
+export function canReassignThisLead(
+  lead: { assignedAgent?: string } | null,
+  user: { id: string; name: string; role: string; role_type?: string } | null,
+  users: { id: string; name: string; managerId?: string }[]
+): boolean {
+  if (!lead || !user) return false;
+  if (user.role === "ADMIN") return true;
+  if (user.role_type !== "Manager") return false;
+  if (lead.assignedAgent === user.name) return true;
+  return users.find(u => u.name === lead.assignedAgent)?.managerId === user.id;
+}
