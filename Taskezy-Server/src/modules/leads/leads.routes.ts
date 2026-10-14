@@ -58,13 +58,12 @@ leadsRouter.post(
   validate({ body: bulkImportLeadsSchema }),
   asyncHandler(bulkImportLeadsHandler)
 );
-// Polled by the upload modal after the above returns a jobId — admins and
-// managers, same as the upload itself, since a job's output (names/phones) is the
+// Polled by the upload modal after the above returns a jobId — ADMIN-only,
+// same as the upload itself, since a job's output (names/phones) is the
 // same data the upload was already gated on.
 leadsRouter.get(
   "/bulk-import/:jobId/status",
-  // Same roles as the upload itself — managers upload too.
-  requireAdminOrManager("check upload status"),
+  requireRole("ADMIN"),
   validate({ params: bulkImportJobIdParamSchema }),
   asyncHandler(getBulkImportStatusHandler)
 );
