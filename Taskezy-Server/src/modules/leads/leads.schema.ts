@@ -54,6 +54,10 @@ export const leadIdParamSchema = z.object({
   id: z.string().uuid()
 });
 
+export const bulkImportJobIdParamSchema = z.object({
+  jobId: z.string().uuid()
+});
+
 export const createLeadSchema = z.object({
   name: z.string().trim().min(2, "Name must be at least 2 characters").max(200),
   // "+91 98450 12345", "098450…" etc. are accepted and stored as 10 bare digits.

@@ -7,7 +7,8 @@ import { sendOk, sendPaginated } from "../../utils/apiResponse";
 import { ApiError } from "../../utils/ApiError";
 import { pool, query } from "../../db/pool";
 import { deleteLeadActivityNotifications } from "../notifications/notifications.service";
-import { findDirectReportIds } from "../users/users.repository";
+import { findDirectReportIds, findById as findUserById } from "../users/users.repository";
+import { getAssignedAgentId } from "../leads/leads.repository";
 import { AccessTokenPayload } from "../../utils/tokens";
 
 export const followupsRouter = Router();
@@ -114,13 +115,38 @@ const createFollowupSchema = z.object({
   assignedToId: z.string().uuid()
 });
 
+// Same three-way ownership rule as leads.service.ts's
+// assertStatusChangeAllowed — duplicated rather than imported (that one
+// isn't exported; see this file's own scopedAssigneeIdsForCaller above for
+// the same precedent). Previously missing entirely: any authenticated role
+// could create a follow-up against ANY lead_id, which became a real
+// integrity gap once RNR -> Dead Lead's attempt-history check
+// (leadStatusTransitions.ts) started reading these rows — someone with no
+// relationship to a lead could pad or interfere with another agent's
+// attempt history for it. Only runs when leadId is actually provided;
+// assignedToId (who the reminder lands on) is intentionally left
+// unrestricted here, same as before — a Manager/Admin scheduling a
+// reminder FOR a teammate on a lead they're allowed to touch is the normal
+// case, not something this fix is about.
+async function assertCanScheduleFor(caller: AccessTokenPayload, leadId: string): Promise<void> {
+  if (caller.role === "ADMIN") return;
+  const assignedAgentId = await getAssignedAgentId(leadId);
+  if (!assignedAgentId) return; // bad/missing leadId — let the FK violation below report it, not this check
+  if (assignedAgentId === caller.sub) return;
+  const owner = await findUserById(assignedAgentId);
+  if (owner?.manager_id === caller.sub) return;
+  throw ApiError.forbidden("Only the lead's owner, their manager or an admin can schedule a follow-up for it.");
+}
+
 // Every authenticated role may schedule a follow-up for their own or a
 // teammate's lead — matches how the reminder picker in LeadDetailDrawer
-// works today (no admin gate on scheduling a reminder).
+// works today (no admin gate on scheduling a reminder). "Teammate's lead"
+// is enforced by assertCanScheduleFor above, not left open to any lead.
 followupsRouter.post(
   "/",
   validate({ body: createFollowupSchema }),
   asyncHandler(async (req, res) => {
+    if (req.body.leadId) await assertCanScheduleFor(req.user!, req.body.leadId);
     let insertedId: string;
     try {
       const { rows } = await pool.query(

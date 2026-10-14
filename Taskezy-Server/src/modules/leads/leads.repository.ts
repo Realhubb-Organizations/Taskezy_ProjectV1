@@ -482,7 +482,7 @@ export async function getAssignedAgentId(id: string): Promise<string | undefined
 export async function reassign(client: PoolClient, leadId: string, previousAgentId: string, newAgentId: string): Promise<void> {
   await client.query(
     // previous_agent_name keeps the previous owner's name on the lead, so
-    // "Reassigned From" survives that user being deleted (migration 031).
+    // "Reassigned From" survives that user being deleted (migration 032).
     `UPDATE leads
      SET previous_agent_id = $1,
          previous_agent_name = (SELECT first_name || COALESCE(' ' || last_name, '') FROM users WHERE id = $1),

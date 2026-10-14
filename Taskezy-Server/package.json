@@ -9,7 +9,8 @@
     "guard:logs": "tsx scripts/check-log-redaction.ts",
     "build": "npm run guard:logs && tsc -p tsconfig.json",
     "start": "node dist/server.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "pgboss:migrate": "pg-boss migrate --schema pgboss"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",
@@ -23,6 +24,7 @@
     "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.2",
     "pg": "^8.11.5",
+    "pg-boss": "^12.38.0",
     "pino": "^9.0.0",
     "pino-http": "^10.0.0",
     "zod": "^3.23.8"

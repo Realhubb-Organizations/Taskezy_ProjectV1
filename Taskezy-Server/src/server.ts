@@ -7,6 +7,7 @@ import { startMissedLeadScheduler } from "./jobs/missedLeadScheduler";
 import { startMetaAdSpendSync } from "./jobs/metaAdSpendSync";
 import { startGoogleAdsSpendSync } from "./jobs/googleAdsSpendSync";
 import { startDataRetentionJob } from "./jobs/dataRetentionJob";
+import { startQueue, stopQueue } from "./jobs/queue";
 
 async function main(): Promise<void> {
   const dbOk = await checkDatabaseConnection();
@@ -25,6 +26,18 @@ async function main(): Promise<void> {
   startMetaAdSpendSync();
   startGoogleAdsSpendSync();
   startDataRetentionJob();
+  // The pgboss schema must already exist (migrations-archive/031_pgboss_grants.sql's
+  // header) — until the one-time `pg-boss migrate` CLI step has been run in
+  // this environment, this throws. Caught locally (not left to crash the
+  // whole process like checkDatabaseConnection() above) because nothing
+  // user-facing depends on the queue yet during this rollout — once a real
+  // endpoint (bulk-import) actually relies on it, this should become a hard
+  // boot dependency instead.
+  try {
+    await startQueue();
+  } catch (err) {
+    logger.error({ err }, "Could not start the job queue — has `pg-boss migrate` been run yet? Continuing without it.");
+  }
 
   // Stateless by design (JWT auth, no in-memory session/state) — any number
   // of these processes can run behind a load balancer with zero coordination
@@ -32,6 +45,7 @@ async function main(): Promise<void> {
   const shutdown = (signal: string) => {
     logger.info(`${signal} received, shutting down gracefully...`);
     server.close(async () => {
+      await stopQueue().catch((err) => logger.error({ err }, "Error stopping the job queue"));
       await pool.end();
       logger.info("Shutdown complete.");
       process.exit(0);

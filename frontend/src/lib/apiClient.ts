@@ -352,8 +352,18 @@ export interface BulkImportLeadsApiResult {
   duplicates: number;
   skipped: { row: number; reason: string }[];
 }
-export function apiBulkImportLeads(input: BulkImportLeadsApiInput): Promise<BulkImportLeadsApiResult> {
-  return request<BulkImportLeadsApiResult>("/api/v1/leads/bulk-import", { method: "POST", body: JSON.stringify(input) });
+// Queued server-side (Taskezy-Server/src/jobs/queue.ts's bulk-import-leads
+// worker) since a real upload can be 100k+ rows — this just hands the file
+// off and returns a jobId; apiGetBulkImportStatus is polled for the result.
+export function apiStartBulkImportLeads(input: BulkImportLeadsApiInput): Promise<{ jobId: string }> {
+  return request<{ jobId: string }>("/api/v1/leads/bulk-import", { method: "POST", body: JSON.stringify(input) });
+}
+export interface BulkImportJobStatus {
+  state: "created" | "retry" | "active" | "completed" | "cancelled" | "failed";
+  result?: BulkImportLeadsApiResult;
+}
+export function apiGetBulkImportStatus(jobId: string): Promise<BulkImportJobStatus> {
+  return request<BulkImportJobStatus>(`/api/v1/leads/bulk-import/${jobId}/status`);
 }
 
 export function apiUpdateLeadStatus(

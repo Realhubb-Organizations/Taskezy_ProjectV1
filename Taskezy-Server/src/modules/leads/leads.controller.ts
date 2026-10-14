@@ -1,5 +1,7 @@
 import { Request, Response } from "express";
 import { sendOk, sendPaginated } from "../../utils/apiResponse";
+import { ApiError } from "../../utils/ApiError";
+import { boss, BULK_IMPORT_LEADS_QUEUE } from "../../jobs/queue";
 import { leadForCaller } from "./leads.handover";
 import * as leadsService from "./leads.service";
 
@@ -48,9 +50,27 @@ export async function editLeadHandler(req: Request, res: Response): Promise<void
   sendOk(res, leadForCaller(req.user!, lead));
 }
 
+// Queued, not run inline — a real admin upload can be 100k+ rows (see
+// leads.schema.ts's bulkImportLeadsSchema), long enough to risk an upstream
+// proxy timeout if awaited in the request. The actual import logic is
+// unchanged (leadsService.bulkImportLeads, now run by the worker registered
+// in jobs/queue.ts); this just hands the validated body to pg-boss and
+// returns the job id for the frontend to poll via the status route below.
 export async function bulkImportLeadsHandler(req: Request, res: Response): Promise<void> {
-  const result = await leadsService.bulkImportLeads(req.user!, req.body);
-  sendOk(res, result, 201);
+  // Checked here, before queueing — the worker runs without a caller.
+  await leadsService.assertBulkImportAllowed(req.user!, req.body);
+  const jobId = await boss.send(BULK_IMPORT_LEADS_QUEUE, req.body);
+  if (!jobId) throw ApiError.internal("Could not queue the import — try again.");
+  sendOk(res, { jobId }, 202);
+}
+
+export async function getBulkImportStatusHandler(req: Request, res: Response): Promise<void> {
+  const [job] = await boss.findJobs(BULK_IMPORT_LEADS_QUEUE, { id: req.params.jobId });
+  if (!job) throw ApiError.notFound("Import job not found");
+  sendOk(res, {
+    state: job.state,
+    result: job.state === "completed" ? (job.output as leadsService.BulkImportLeadsResult) : undefined
+  });
 }
 
 export async function reassignLeadHandler(req: Request, res: Response): Promise<void> {
