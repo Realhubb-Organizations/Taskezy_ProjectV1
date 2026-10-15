@@ -8,7 +8,7 @@ import { useDialog } from "@/components/ui/DialogProvider";
 import { Sliders, Sparkles, Plus, Check, ChevronDown, Search, X, Minus, Download, RotateCcw, Users, Trash2, AlertTriangle } from "lucide-react";
 import { STATUS_OPTIONS, PICKABLE_STATUS_OPTIONS, frontendStatusToDbCode } from "@/lib/leadStatusMapping";
 import { type LeadSummaryStats } from "@/lib/leadSummaryStats";
-import { apiListLeadsPage, apiGetLeadStats, apiDeleteLead, apiBulkDeleteLeads, apiReassignLead, apiUpdateLeadStatus, type LeadListFilters } from "@/lib/apiClient";
+import { apiListLeadsPage, apiGetLeadStats, apiDeleteLead, apiBulkDeleteLeads, apiBulkReassignLeads, type LeadListFilters } from "@/lib/apiClient";
 import { WhatsAppIcon, CallIcon, PlatformLabel } from "@/components/icons/ContactIcons";
 import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/callTrigger";
 import { LineSkeleton, TableRowsSkeleton } from "@/components/ui/Skeletons";
@@ -856,45 +856,46 @@ export default function LeadDashboard() {
     setAssignFlowMode(mode);
   };
   const closeAssignFlow = () => { if (!assignSubmitting) setAssignFlowMode(null); };
+  // Queued server-side (POST /leads/bulk-reassign — see Taskezy-Server's
+  // jobs/queue.ts bulk-reassign-leads worker) instead of a client-side
+  // Promise.allSettled fan-out: that was still N concurrent requests for a
+  // large selection, with no server-side record of how many went through.
+  // "Already assigned to this agent" / UNASSIGNED->NEW_LEAD promotion are
+  // both handled inside leads.service.ts's bulkReassignLeads now, so they
+  // don't need their own pre-filter or second call here. Every moved lead
+  // still broadcasts leads-changed same as before, picked up by AppContext's
+  // existing per-lead refetch listener without an explicit refetch here.
   const confirmBulkAssign = async () => {
     const assignee = users.find(u => u.id === assignAssigneeId);
     if (!canConfirmAssign || !assignFlowMode || !assignee || assignSubmitting) return;
     const mode = assignFlowMode;
-    // The backend rejects moving a lead to the agent who already holds it,
-    // so those are skipped rather than sent.
-    const toMove = flowTargetLeads.filter(l => l.assignedAgent?.trim().toLowerCase() !== assignee.name.trim().toLowerCase());
-    const skipped = flowTargetLeads.length - toMove.length;
+    const targetLeads = flowTargetLeads;
 
     setAssignSubmitting(true);
     setAssignError("");
-    const results = await Promise.allSettled(toMove.map(async (l) => {
-      await apiReassignLead(l.id, assignee.id, assignNote.trim());
-      if (mode === "assign" && l.isUnassignedInSystem) await apiUpdateLeadStatus(l.id, "NEW_LEAD");
-    }));
-    setAssignSubmitting(false);
+    try {
+      const result = await apiBulkReassignLeads(targetLeads.map(l => l.id), assignee.id, assignNote.trim());
+      clearSelected(targetLeads.map(l => l.id));
+      if (result.moved > 0) setLeadsRefreshKey(k => k + 1);
 
-    const failed = toMove.filter((_, i) => results[i].status === "rejected");
-    const moved = toMove.length - failed.length;
-    // Drop everything that went through from the selection; failed leads stay
-    // ticked so they can be retried.
-    clearSelected(flowTargetLeads.filter(l => !failed.includes(l)).map(l => l.id));
-    if (moved > 0) setLeadsRefreshKey(k => k + 1);
-
-    if (failed.length > 0) {
-      const firstError = results.find((r): r is PromiseRejectedResult => r.status === "rejected")?.reason;
-      const reason = firstError instanceof Error ? firstError.message : "Please try again.";
-      setAssignError(
-        `${moved > 0 ? `${moved} lead${moved === 1 ? "" : "s"} moved, but ` : ""}` +
-        `${failed.length} could not be ${mode === "reshuffle" ? "reshuffled" : "assigned"}: ${reason}`
+      if (result.failed.length > 0) {
+        setAssignError(
+          `${result.moved > 0 ? `${result.moved} lead${result.moved === 1 ? "" : "s"} moved, but ` : ""}` +
+          `${result.failed.length} could not be ${mode === "reshuffle" ? "reshuffled" : "assigned"}: ${result.failed[0].reason}`
+        );
+        return;
+      }
+      setAssignFlowMode(null);
+      setSuccessMsg(
+        `${mode === "reshuffle" ? "Reshuffled" : "Assigned"} ${result.moved} lead${result.moved === 1 ? "" : "s"} to ${assignee.name}` +
+        (result.skipped > 0 ? ` (${result.skipped} already with ${assignee.name}, skipped)` : "") + "."
       );
-      return;
+      setTimeout(() => setSuccessMsg(""), 4000);
+    } catch (err) {
+      setAssignError(err instanceof Error ? err.message : "Could not complete this action. Please try again.");
+    } finally {
+      setAssignSubmitting(false);
     }
-    setAssignFlowMode(null);
-    setSuccessMsg(
-      `${mode === "reshuffle" ? "Reshuffled" : "Assigned"} ${moved} lead${moved === 1 ? "" : "s"} to ${assignee.name}` +
-      (skipped > 0 ? ` (${skipped} already with ${assignee.name}, skipped)` : "") + "."
-    );
-    setTimeout(() => setSuccessMsg(""), 4000);
   };
 
   // ---- Admin delete (single from row, bulk from toolbar) ----

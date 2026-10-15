@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { useApp, Lead } from "@/context/AppContext";
 import { useDialog } from "@/components/ui/DialogProvider";
@@ -9,7 +9,8 @@ import LeadDrillDownPanel, { LeadQuickViewDrawer, useLeadStatusChange } from "@/
 import TeamTasksTable, { TeamTaskTab } from "@/components/dashboard/TeamTasksTable";
 import TaskInsightsCharts from "@/components/dashboard/TaskInsightsCharts";
 import SalesPendingTasksTable from "@/components/dashboard/SalesPendingTasksTable";
-import { computeLeadSummaryStats } from "@/lib/leadSummaryStats";
+import { type LeadSummaryStats } from "@/lib/leadSummaryStats";
+import { apiGetLeadStats, type LeadListFilters } from "@/lib/apiClient";
 import { canUploadLeads, uploadAssignableUsers } from "@/lib/leadAssignment";
 import { ChevronDown, Plus, CheckCircle } from "lucide-react";
 import { LineSkeleton } from "@/components/ui/Skeletons";
@@ -90,22 +91,76 @@ export default function CrmDashboardPage() {
   });
 
   const now = new Date();
-  // Every card below now respects Date Range — including RNR/Call Backs/
-  // Follow Ups/Site Visit Scheduled/Site Visit Done, which used to
-  // deliberately stay all-time live-pipeline snapshots (a lead created
-  // last week that's marked RNR today would used to still count; it won't
-  // now unless it was also created within the selected range). The user
-  // explicitly chose full Date Range reactivity across every admin CRM
-  // page over that older behavior. computeLeadSummaryStats is the single
-  // shared source for these 7 predicates — the admin Leads page and the
-  // Campaigns page's top bar call the exact same function, so a same-
-  // named card can never drift into a different real number per page.
+  // Every card below respects Date Range — including RNR/Call Backs/Follow
+  // Ups/Site Visit Scheduled/Site Visit Done, which used to deliberately
+  // stay all-time live-pipeline snapshots (a lead created last week that's
+  // marked RNR today would used to still count; it won't now unless it was
+  // also created within the selected range). The user explicitly chose full
+  // Date Range reactivity across every admin CRM page over that older
+  // behavior.
   const rangeLeads = scopedLeads.filter(l => dateInRange(l.createdAtStr, dateRange, now));
-  const stats = computeLeadSummaryStats(scopedLeads, l => dateInRange(l.createdAtStr, dateRange, now));
 
-  // Each card's real underlying lead list — same predicates
-  // computeLeadSummaryStats uses — so clicking a card can drill into
-  // exactly what it counted.
+  // Plain YYYY-MM-DD bounds for whichever date-range preset is active —
+  // same conversion LeadDashboard.tsx's adminServerDateBounds already does
+  // for the admin Leads tab's own stat cards, just against this page's own
+  // dateRange/customRange state shape.
+  const serverDateBounds = (): { dateFrom?: string; dateTo?: string } => {
+    const toYMD = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    if (dateRange === "all") return {};
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    if (dateRange === "today") return { dateFrom: toYMD(startOfToday), dateTo: toYMD(startOfToday) };
+    if (dateRange === "yesterday") {
+      const y = new Date(startOfToday);
+      y.setDate(y.getDate() - 1);
+      return { dateFrom: toYMD(y), dateTo: toYMD(y) };
+    }
+    if (dateRange === "week") {
+      const weekAgo = new Date(startOfToday);
+      weekAgo.setDate(weekAgo.getDate() - 6);
+      return { dateFrom: toYMD(weekAgo), dateTo: toYMD(startOfToday) };
+    }
+    if (dateRange === "custom") {
+      if (!customRange) return {};
+      return { dateFrom: customRange.start, dateTo: customRange.end };
+    }
+    // month
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    return { dateFrom: toYMD(monthStart), dateTo: toYMD(monthEnd) };
+  };
+
+  // Stat-card numbers now come from the server (GET /leads/stats — the same
+  // endpoint/shape LeadDashboard.tsx's admin Leads tab already uses) instead
+  // of computeLeadSummaryStats over the bulk leads array. This is the real
+  // fix for Manager scoping: the client-side isSalesMember filter above only
+  // ever handled the Member case, relying on the bulk `leads` array having
+  // already been Manager-scoped upstream by GET /leads's own scopeForCaller —
+  // this endpoint applies that same scoping itself, directly, regardless of
+  // what the bulk array does or doesn't contain. categoryLeads below still
+  // needs real row data for the drill-down panel and the tasks queue further
+  // down the page, so those keep reading the bulk array for now (see the
+  // server-side-aggregates plan for when that stops being necessary).
+  const [stats, setStats] = useState<LeadSummaryStats>({
+    totalLeads: 0, newLeads: 0, rnr: 0, callBacks: 0, followUps: 0, siteVisitScheduled: 0, siteVisitDone: 0
+  });
+  const [statsLoading, setStatsLoading] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    setStatsLoading(true);
+    const filters: LeadListFilters = serverDateBounds();
+    apiGetLeadStats(filters)
+      .then(result => { if (!cancelled) setStats(result); })
+      .catch(() => { /* leave the previous numbers showing on a transient failure */ })
+      .finally(() => { if (!cancelled) setStatsLoading(false); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateRange, customRange]);
+
+  // Each card's real underlying lead list for the drill-down panel — same
+  // per-status predicates the server-side stats above group by, so a
+  // clicked card's drill-down always matches its own count (both read the
+  // same status field; this part just can't move off the bulk array until
+  // the drill-down panel itself has a paginated-by-status fetch of its own).
   const categoryLeads: Record<string, Lead[]> = {
     "Total Leads": rangeLeads,
     "New Leads": rangeLeads.filter(l => l.status === "New Lead"),
@@ -247,7 +302,7 @@ export default function CrmDashboardPage() {
                   <ChevronDown className={`h-3 w-3 text-slate-300 shrink-0 transition-transform ${isActive ? "rotate-180 text-blue-500" : ""}`} />
                 </span>
                 <span className={`text-lg font-extrabold block mt-1.5 ${s.color}`}>
-                  {isDataLoading ? <LineSkeleton width={32} height={18} /> : s.value}
+                  {statsLoading ? <LineSkeleton width={32} height={18} /> : s.value}
                 </span>
               </button>
             );

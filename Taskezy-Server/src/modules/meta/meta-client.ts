@@ -206,19 +206,14 @@ export interface MetaDailyInsight {
 
 /** Daily spend + lead counts for one campaign over the given date range — one call, not one per day (time_increment=1 returns each day as its own row). */
 export async function getCampaignDailyInsights(campaignId: string, longLivedUserToken: string, since: string, until: string): Promise<MetaDailyInsight[]> {
-  const url = new URL(`${GRAPH_BASE}/${campaignId}/insights`);
-  url.searchParams.set("access_token", longLivedUserToken);
-  // impressions/clicks feed the Campaigns page's Impressions, Clicks and CTR.
-  url.searchParams.set("fields", "spend,actions,date_start,impressions,clicks");
-  url.searchParams.set("time_range", JSON.stringify({ since, until }));
-  url.searchParams.set("time_increment", "1");
-  const res = await fetch(url.toString());
-  const body = (await res.json()) as { data?: MetaDailyInsight[]; error?: { message: string } };
-  if (!res.ok || body.error) {
-    logger.error({ campaignId, metaError: body.error }, "Meta campaign insights call failed");
-    throw new Error(body.error?.message ?? `Insights call for campaign ${campaignId} failed with status ${res.status}`);
-  }
-  return body.data ?? [];
+  const data = await graphFetch<{ data: MetaDailyInsight[] }>(`/${campaignId}/insights`, {
+    access_token: longLivedUserToken,
+    // impressions/clicks feed the Campaigns page's Impressions, Clicks and CTR.
+    fields: "spend,actions,date_start,impressions,clicks",
+    time_range: JSON.stringify({ since, until }),
+    time_increment: "1"
+  });
+  return data.data ?? [];
 }
 
 /** Sums every action Meta classifies as a lead (naming varies: "lead", "onsite_conversion.lead_grouped", "leadgen.other", etc). */
@@ -268,20 +263,27 @@ export async function getAdsForCampaign(campaignId: string, longLivedUserToken: 
   return data.data;
 }
 
-/** Daily spend + lead counts for one individual ad — same shape/semantics as getCampaignDailyInsights, just one level finer, for a real per-ad-set/ad-creative CPL breakdown instead of just the campaign's own totals. */
+/**
+ * Daily spend + lead counts for one individual ad — same shape/semantics as
+ * getCampaignDailyInsights, just one level finer, for a real per-ad-set/
+ * ad-creative CPL breakdown instead of just the campaign's own totals.
+ *
+ * This is the highest-volume call in the whole sync (one per ad, and an ad
+ * account can easily have dozens-to-hundreds of ads) — it used to bypass
+ * graphFetch with its own bare fetch(), with no pacing between calls and no
+ * retry on a rate-limit hit, which is what let a long run of these blow
+ * through Meta's per-ad-account points budget well before every ad got its
+ * turn. Routing it through the same shared graphFetch as every other call
+ * here gives it the same 250ms pacing + exponential backoff-and-retry for free.
+ */
 export async function getAdDailyInsights(adId: string, longLivedUserToken: string, since: string, until: string): Promise<MetaDailyInsight[]> {
-  const url = new URL(`${GRAPH_BASE}/${adId}/insights`);
-  url.searchParams.set("access_token", longLivedUserToken);
-  url.searchParams.set("fields", "spend,actions,date_start");
-  url.searchParams.set("time_range", JSON.stringify({ since, until }));
-  url.searchParams.set("time_increment", "1");
-  const res = await fetch(url.toString());
-  const body = (await res.json()) as { data?: MetaDailyInsight[]; error?: { message: string } };
-  if (!res.ok || body.error) {
-    logger.error({ adId, metaError: body.error }, "Meta ad insights call failed");
-    throw new Error(body.error?.message ?? `Insights call for ad ${adId} failed with status ${res.status}`);
-  }
-  return body.data ?? [];
+  const data = await graphFetch<{ data: MetaDailyInsight[] }>(`/${adId}/insights`, {
+    access_token: longLivedUserToken,
+    fields: "spend,actions,date_start",
+    time_range: JSON.stringify({ since, until }),
+    time_increment: "1"
+  });
+  return data.data ?? [];
 }
 
 /**

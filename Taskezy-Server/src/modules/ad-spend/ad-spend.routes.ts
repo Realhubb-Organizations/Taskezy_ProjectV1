@@ -56,8 +56,9 @@ adSpendRouter.get(
  * the same jobs with the same real rate-limit pacing/backoff already in
  * place; it starts them sooner, it does not bypass Meta's or Google's
  * actual rate limits, so a run can still take a while to fully land.
- * Returns immediately — { started: false } for a platform means a sync
- * for it was already in progress, not that this request failed.
+ * Returns immediately — { started: false } for a platform means a sync for
+ * it was already in progress, or the 10-minute manual-trigger cooldown
+ * (see metaAdSpendSync.ts) hasn't elapsed yet, not that this request failed.
  */
 adSpendRouter.post(
   "/sync",

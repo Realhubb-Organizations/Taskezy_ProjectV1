@@ -11,6 +11,7 @@ import {
   apiCreateLead,
   apiStartBulkImportLeads,
   apiGetBulkImportStatus,
+  pollJob,
   BulkImportLeadsApiInput,
   BulkImportLeadsApiResult,
   apiUpdateLeadStatus,
@@ -56,6 +57,7 @@ import {
   apiListAdSpend,
   apiListAdLevelSpend,
   apiTriggerAdSpendSync,
+  ApiAdSpendSyncTriggerResult,
   apiListMetaConnections,
   apiSetPropertyTeamMembers,
   apiListTimesheets,
@@ -538,7 +540,7 @@ interface AppState {
   adSpendRecords: AdSpendRecord[];
   adLevelSpendRecords: AdLevelSpendRecord[];
   refetchAdLevelSpend: () => Promise<void>;
-  triggerAdSpendSync: () => Promise<{ meta: { started: boolean }; google: { started: boolean } }>;
+  triggerAdSpendSync: () => Promise<ApiAdSpendSyncTriggerResult>;
   bulkImportLeads: (input: BulkImportLeadsApiInput) => Promise<BulkImportLeadsApiResult>;
 
   // System State
@@ -1086,7 +1088,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // a 500 or 429 on resale units — used to throw away EVERY list and
       // show the whole CRM as empty. Now only that list stays empty.
       // HRMS/Finance lists are skipped entirely while CRM_ONLY_MODE hides
-      // those modules (3 fewer requests on every load).
+      // those modules (5 fewer requests on every load) — invoices and
+      // calendar events included: their only reachable consumers are
+      // dashboard/finance and dashboard/hrms, both Access-Denied while
+      // CRM_ONLY_MODE is on (see layout.tsx's checkUserAccess), and the
+      // real calendar pages (crm/calendar, admin/calendar) already fetch
+      // their own date-range data instead of reading this bulk array.
+      // Flipping CRM_ONLY_MODE back to false restores all five automatically.
       const skip = <T,>(empty: T) => Promise.resolve(empty);
       const [leadsR, usersR, propertiesR, resaleR, followupsR, attendanceR, reimbursementsR, invoicesR, calendarR, timesheetsR, tenantR] = await Promise.allSettled([
         apiListAllLeads(),
@@ -1096,8 +1104,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         apiListFollowups(),
         CRM_ONLY_MODE ? skip([] as Awaited<ReturnType<typeof apiListAttendance>>) : apiListAttendance(),
         CRM_ONLY_MODE ? skip([] as Awaited<ReturnType<typeof apiListReimbursements>>) : apiListReimbursements(),
-        apiListInvoices(),
-        apiListCalendarEvents(),
+        CRM_ONLY_MODE ? skip([] as Awaited<ReturnType<typeof apiListInvoices>>) : apiListInvoices(),
+        CRM_ONLY_MODE ? skip([] as Awaited<ReturnType<typeof apiListCalendarEvents>>) : apiListCalendarEvents(),
         CRM_ONLY_MODE ? skip([] as Awaited<ReturnType<typeof apiListTimesheets>>) : apiListTimesheets(),
         apiGetTenantSettings()
       ]);
@@ -1174,15 +1182,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // via Round Robin/Percentage.
   const bulkImportLeads = async (input: BulkImportLeadsApiInput): Promise<BulkImportLeadsApiResult> => {
     const { jobId } = await apiStartBulkImportLeads(input);
-    let status = await apiGetBulkImportStatus(jobId);
-    while (status.state === "created" || status.state === "retry" || status.state === "active") {
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      status = await apiGetBulkImportStatus(jobId);
-    }
-    if (status.state !== "completed" || !status.result) {
-      throw new Error("The import failed — please try again.");
-    }
-    const result = status.result;
+    const result = await pollJob(() => apiGetBulkImportStatus(jobId));
     if (result.created > 0) {
       const apiLeads = await apiListAllLeads();
       setAllLeads(apiLeads.map(mapApiLeadToFrontendLead));

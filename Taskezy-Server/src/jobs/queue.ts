@@ -1,7 +1,8 @@
 import { PgBoss } from "pg-boss";
 import { env } from "../config/env";
 import { logger } from "../utils/logger";
-import { bulkImportLeads, BulkImportLeadsInput } from "../modules/leads/leads.service";
+import { AccessTokenPayload } from "../utils/tokens";
+import { bulkImportLeads, BulkImportLeadsInput, bulkDeleteLeads, bulkReassignLeads } from "../modules/leads/leads.service";
 
 // Postgres-backed job queue (same RDS instance, its own `pgboss` schema —
 // see migrations-archive/031_pgboss_grants.sql for the one-time setup).
@@ -27,6 +28,27 @@ const HELLO_QUEUE = "hello-world";
 // GET /bulk-import/:jobId/status". Its return value becomes this job's
 // `output`, which pg-boss stores for us — no separate results table needed.
 export const BULK_IMPORT_LEADS_QUEUE = "bulk-import-leads";
+
+// Data Calling's and the main CRM Leads page's bulk-delete toolbar action —
+// already bounded (500 leads/request) and fast, but queued anyway for the
+// same reason as the other two: one consistent "enqueue, poll, show result"
+// shape across every bulk lead action rather than a special case.
+export const BULK_DELETE_LEADS_QUEUE = "bulk-delete-leads";
+interface BulkDeleteLeadsJobData {
+  actor: { userId: string; name: string };
+  leadIds: string[];
+}
+
+// Backs both pages' bulk Assign/Reshuffle — previously N individual
+// apiReassignLead calls fired directly from the browser (see
+// leads.service.ts's bulkReassignLeads for the full reasoning).
+export const BULK_REASSIGN_LEADS_QUEUE = "bulk-reassign-leads";
+interface BulkReassignLeadsJobData {
+  caller: AccessTokenPayload;
+  leadIds: string[];
+  newAgentId: string;
+  note: string;
+}
 
 /**
  * Starts the queue and registers every job worker this process handles.
@@ -58,6 +80,18 @@ export async function startQueue(): Promise<void> {
   await boss.work<BulkImportLeadsInput>(BULK_IMPORT_LEADS_QUEUE, async ([job]) => {
     logger.info({ jobId: job.id }, "Processing queued bulk lead import");
     return bulkImportLeads(job.data);
+  });
+
+  await boss.createQueue(BULK_DELETE_LEADS_QUEUE);
+  await boss.work<BulkDeleteLeadsJobData>(BULK_DELETE_LEADS_QUEUE, async ([job]) => {
+    logger.info({ jobId: job.id }, "Processing queued bulk lead delete");
+    return bulkDeleteLeads(job.data.actor, job.data.leadIds);
+  });
+
+  await boss.createQueue(BULK_REASSIGN_LEADS_QUEUE);
+  await boss.work<BulkReassignLeadsJobData>(BULK_REASSIGN_LEADS_QUEUE, async ([job]) => {
+    logger.info({ jobId: job.id }, "Processing queued bulk lead reassignment");
+    return bulkReassignLeads(job.data.caller, job.data.leadIds, job.data.newAgentId, job.data.note);
   });
 }
 

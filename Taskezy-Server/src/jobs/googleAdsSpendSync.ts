@@ -23,6 +23,12 @@ function isoDateNDaysAgo(n: number): string {
  * Deep Dive's Ad Set Name/Ad creative Name columns and a real per-ad CPL.
  */
 let isSyncing = false;
+let lastCompletedAt = 0;
+
+// Mirrors metaAdSpendSync.ts's own cooldown — same shared "Sync Now" button
+// triggers both, so both get the same floor on how often a manual click can
+// actually start a fresh cycle regardless of how many admins click it.
+const MANUAL_TRIGGER_COOLDOWN_MS = 10 * 60 * 1000;
 
 async function syncOnce(): Promise<void> {
   if (isSyncing) {
@@ -32,6 +38,7 @@ async function syncOnce(): Promise<void> {
   isSyncing = true;
   try {
     await runSync();
+    lastCompletedAt = Date.now();
   } finally {
     isSyncing = false;
   }
@@ -143,8 +150,9 @@ export function startGoogleAdsSpendSync(): void {
 }
 
 /** Mirrors metaAdSpendSync's triggerMetaAdSpendSyncNow — see its comment. */
-export function triggerGoogleAdsSpendSyncNow(): { started: boolean } {
-  if (isSyncing) return { started: false };
+export function triggerGoogleAdsSpendSyncNow(): { started: boolean; reason?: "in-progress" | "cooldown" } {
+  if (isSyncing) return { started: false, reason: "in-progress" };
+  if (Date.now() - lastCompletedAt < MANUAL_TRIGGER_COOLDOWN_MS) return { started: false, reason: "cooldown" };
   syncOnce().catch(err => logger.error({ err }, "Manually triggered Google Ads spend sync failed"));
   return { started: true };
 }
