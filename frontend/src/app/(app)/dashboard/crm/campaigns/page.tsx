@@ -721,15 +721,19 @@ export default function AdminCampaignsPage() {
     }
   };
 
-  // Page-level drill-downs from the Deep Dive table (breadcrumb-navigated,
-  // replacing the Analytics tab's content, matching the reference) — Ad Set
-  // Name's chevron opens a per-campaign ad-set breakdown page (no real
-  // ad-set/ad-creative data exists, so it honestly says so rather than
-  // fabricating names/numbers); a Qualified Leads count opens the real
-  // list of qualified leads behind that number.
-  const [analyticsDrillView, setAnalyticsDrillView] = useState<
-    { type: "adSetBreakdown"; campaign: CampaignItem } | { type: "qualifiedLeads"; campaign: CampaignItem } | null
-  >(null);
+  // Page-level drill-down from the Deep Dive table (breadcrumb-navigated,
+  // replacing the Analytics tab's content) — a Qualified Leads count opens
+  // the real list of qualified leads behind that number.
+  const [analyticsDrillView, setAnalyticsDrillView] = useState<{ type: "qualifiedLeads"; campaign: CampaignItem } | null>(null);
+  // Ad Set Name expands the campaign's row in place (all its real ad sets /
+  // ads underneath it) instead of opening a separate page.
+  const [expandedDeepDiveCampaigns, setExpandedDeepDiveCampaigns] = useState<Set<string>>(new Set());
+  const toggleDeepDiveCampaign = (name: string) =>
+    setExpandedDeepDiveCampaigns(prev => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name); else next.add(name);
+      return next;
+    });
 
   const deepDiveSourceOptions = useMemo(() => Array.from(new Set(campaignsList.map(c => c.platform))), [campaignsList]);
 
@@ -765,7 +769,7 @@ export default function AdminCampaignsPage() {
   // "stable structural data stays all-time" precedent as campaignsListAllTime.
   // Covers both Meta and Google — adId/platform are generic across both.
   // Feeds both the compact Deep Dive card's Ad Set/Creative columns (the
-  // dominant real ad by spend) and the "adSetBreakdown" drill view's full
+  // dominant real ad by spend) and the row's in-place expansion — the full
   // real per-ad table (whose Spend/CPL/Qualified Leads are therefore also
   // real all-time figures for that ad, not Date-Range-scoped).
   interface DeepDiveAdRow {
@@ -955,11 +959,6 @@ export default function AdminCampaignsPage() {
     10,
     JSON.stringify([deepDiveSearchQuery, deepDiveSourceFilters, dateRangeResetKey])
   );
-  const adSetDrillRows = useMemo(
-    () => (analyticsDrillView?.type === "adSetBreakdown" ? adRowsByCampaign[analyticsDrillView.campaign.name.toLowerCase()] || [] : []),
-    [analyticsDrillView, adRowsByCampaign]
-  );
-  const adSetDrillPagination = usePagination(adSetDrillRows, 10, analyticsDrillView?.campaign.id);
   const qualifiedLeadsPagination = usePagination(
     qualifiedLeadsDrillList,
     25,
@@ -1262,76 +1261,11 @@ export default function AdminCampaignsPage() {
               </button>
               <span>&gt;</span>
               <span className="text-slate-700 font-semibold">
-                {analyticsDrillView.type === "adSetBreakdown" ? "Campaign Deep Dive" : "Qualified Leads"}
+                Qualified Leads
               </span>
             </div>
 
-            {analyticsDrillView.type === "adSetBreakdown" ? (() => {
-              const adRows = adSetDrillPagination.pageRows;
-              return (
-              <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden">
-                <div className="px-5 py-3.5 border-b border-slate-200/80">
-                  <h3 className="text-sm font-bold text-slate-900">Campaign Deep Dive</h3>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="table-fixed w-full text-left border-collapse min-w-[1050px]">
-                    <colgroup>
-                      <col />
-                      <col />
-                      <col />
-                      <col />
-                      <col />
-                      <col />
-                      <col />
-                    </colgroup>
-                    <thead>
-                      <tr className="border-b border-slate-200/80 text-left text-xs font-bold text-slate-800 whitespace-nowrap">
-                        <th className="px-4 py-3 whitespace-nowrap">Campaign Name</th>
-                        <th className="px-4 py-3 whitespace-nowrap">Source</th>
-                        <th className="px-4 py-3 whitespace-nowrap">Ad Set Name</th>
-                        <th className="px-4 py-3 whitespace-nowrap">Ad creative Name</th>
-                        <th className="px-4 py-3 whitespace-nowrap">Qualified Leads</th>
-                        <th className="px-4 py-3 whitespace-nowrap">CPL</th>
-                        <th className="px-4 py-3 whitespace-nowrap">Spend</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 text-[12px] font-medium text-slate-700">
-                      {adSetDrillRows.length === 0 ? (
-                        <tr>
-                          <td className="px-4 py-3 text-slate-900 font-semibold [overflow-wrap:anywhere]">{analyticsDrillView.campaign.name}</td>
-                          <td className="px-4 py-3"><PlatformIcon platform={analyticsDrillView.campaign.platform} /></td>
-                          <td className="px-4 py-3 text-slate-300" title="No ad-set-level data synced for this campaign yet">—</td>
-                          <td className="px-4 py-3 text-slate-300" title="No ad-creative-level data synced for this campaign yet">—</td>
-                          <td className="px-4 py-3">{analyticsDrillView.campaign.qualifiedLeads}</td>
-                          <td className="px-4 py-3">{analyticsDrillView.campaign.cpl.toFixed(2)}</td>
-                          <td className="px-4 py-3 font-semibold text-slate-800">{formatCurrency(analyticsDrillView.campaign.spend)}</td>
-                        </tr>
-                      ) : (
-                        adRows.map((ad, i) => (
-                          <tr key={ad.adId}>
-                            <td className="px-4 py-3 text-slate-900 font-semibold [overflow-wrap:anywhere]">{i === 0 ? analyticsDrillView.campaign.name : ""}</td>
-                            <td className="px-4 py-3">{i === 0 && <PlatformIcon platform={analyticsDrillView.campaign.platform} />}</td>
-                            <td className="px-4 py-3 [overflow-wrap:anywhere]">{ad.adSetName}</td>
-                            <td className="px-4 py-3 [overflow-wrap:anywhere]">{ad.creativeName || ad.adType || ad.adName || "—"}</td>
-                            <td className="px-4 py-3">{qualifiedLeadsForAd(ad.adId)}</td>
-                            <td className="px-4 py-3">{cplForAd(ad).toFixed(2)}</td>
-                            <td className="px-4 py-3 font-semibold text-slate-800">{formatCurrency(ad.spend)}</td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-                {adSetDrillRows.length === 0 ? (
-                  <p className="px-5 py-3 text-[11px] text-slate-400 italic border-t border-slate-100">
-                    No real ad-set/ad-creative data has synced for this campaign yet. The Qualified Leads/CPL/Spend above are this campaign&apos;s real totals.
-                  </p>
-                ) : (
-                  <TablePagination {...adSetDrillPagination.paginationProps} rowLabel="Ad" />
-                )}
-              </div>
-              );
-            })() : (
+            {(
               <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden">
                 <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5 border-b border-slate-200/80">
                   <h3 className="text-sm font-bold text-slate-900">
@@ -1898,15 +1832,18 @@ export default function AdminCampaignsPage() {
             </div>
             <div className="overflow-x-auto md:overflow-y-auto md:max-h-[45vh]">
               <table className="table-fixed w-full text-left border-collapse min-w-[1180px]">
+                {/* The three name columns are wide; Source and the four number
+                    columns share one equal width. The expanded ad rows below
+                    reuse the same widths so they line up. */}
                 <colgroup>
-                  <col />
-                  <col />
-                  <col />
-                  <col />
-                  <col />
-                  <col />
-                  <col />
-                  <col />
+                  <col className="w-[19%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[19%]" />
+                  <col className="w-[17%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[9%]" />
                 </colgroup>
                 <thead className="sticky top-0 z-10 bg-white">
                   <tr className="border-b border-slate-200/80 text-left text-xs font-bold text-slate-800 whitespace-nowrap">
@@ -1963,23 +1900,34 @@ export default function AdminCampaignsPage() {
                     deepDivePagination.pageRows.map(c => {
                       const adRows = adRowsByCampaign[c.name.toLowerCase()] || [];
                       const topAd = adRows[0];
+                      const isOpen = expandedDeepDiveCampaigns.has(c.name);
                       return (
-                      <tr key={c.id} className="hover:bg-slate-50/50 transition-colors">
+                      <React.Fragment key={c.id}>
+                      <tr className={`transition-colors ${isOpen ? "bg-slate-50/70" : "hover:bg-slate-50/50"}`}>
                         <td className="px-4 py-3 text-slate-900 font-semibold [overflow-wrap:anywhere]">{c.name}</td>
                         <td className="px-4 py-3"><PlatformIcon platform={c.platform} /></td>
                         <td className="px-4 py-3">
-                          <button
-                            type="button"
-                            onClick={() => setAnalyticsDrillView({ type: "adSetBreakdown", campaign: c })}
-                            className="flex items-center gap-1 text-left text-slate-700 hover:text-[#0B1E6E] transition-colors max-w-full"
-                            title={adRows.length > 1 ? `${adRows.length} real ad sets/ads — click to see all` : "Open ad-set breakdown"}
-                          >
-                            <span className="[overflow-wrap:anywhere]">
-                              {topAd ? topAd.adSetName : "—"}
-                              {adRows.length > 1 && <span className="text-slate-400"> +{adRows.length - 1}</span>}
-                            </span>
-                            <ChevronDown className="h-3.5 w-3.5 shrink-0" />
-                          </button>
+                          {topAd ? (
+                            <button
+                              type="button"
+                              onClick={() => toggleDeepDiveCampaign(c.name)}
+                              aria-expanded={isOpen}
+                              className="group/adset flex items-center gap-2 w-full min-w-0 text-left text-slate-700 hover:text-[#0B1E6E] transition-colors"
+                              title={topAd.adSetName}
+                            >
+                              <span className="truncate">{topAd.adSetName}</span>
+                              {adRows.length > 1 && <span className="glass-chip shrink-0">+{adRows.length - 1}</span>}
+                              <span
+                                className={`ml-auto shrink-0 h-5 w-5 rounded-full flex items-center justify-center transition-all duration-300 ${
+                                  isOpen ? "bg-[#0B1E6E] text-white rotate-180" : "bg-slate-100 text-slate-500 group-hover/adset:bg-slate-200"
+                                }`}
+                              >
+                                <ChevronDown className="h-3 w-3" />
+                              </span>
+                            </button>
+                          ) : (
+                            <span className="text-slate-300" title="No ad-set data synced for this campaign yet">—</span>
+                          )}
                         </td>
                         <td className="px-4 py-3 [overflow-wrap:anywhere]" title={topAd ? (topAd.creativeName || topAd.adType || topAd.adName || undefined) : undefined}>
                           {topAd ? (topAd.creativeName || topAd.adType || topAd.adName || "—") : <span className="text-slate-300" title="No ad-creative data synced for this campaign yet">—</span>}
@@ -2000,6 +1948,52 @@ export default function AdminCampaignsPage() {
                         </td>
                         <td className="px-4 py-3 font-semibold text-slate-800">{formatCurrency(c.spend)}</td>
                       </tr>
+                      {/* In-place expansion: every real ad set / ad of this
+                          campaign, lined up under the same columns. Always
+                          rendered so it can animate both open and closed
+                          (grid-rows 0fr <-> 1fr). */}
+                      <tr className={isOpen ? "" : "!border-t-0"} aria-hidden={!isOpen}>
+                        <td colSpan={8} className="p-0">
+                          <div className={`grid transition-[grid-template-rows] duration-300 ease-out ${isOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
+                            <div className="overflow-hidden">
+                              <div className={`bg-slate-50/70 transition-opacity duration-300 ${isOpen ? "opacity-100" : "opacity-0"}`}>
+                                {adRows.length > 0 && (
+                                  <div className="max-h-72 overflow-y-auto">
+                                    <table className="table-fixed w-full text-left border-collapse">
+                                      <colgroup>
+                                        <col className="w-[19%]" /><col className="w-[9%]" /><col className="w-[19%]" /><col className="w-[17%]" /><col className="w-[9%]" /><col className="w-[9%]" /><col className="w-[9%]" /><col className="w-[9%]" />
+                                      </colgroup>
+                                      <tbody className="divide-y divide-slate-100">
+                                        {adRows.map(ad => {
+                                          const syncedLeads = leads.filter(l => l.metaAdId === ad.adId).length;
+                                          return (
+                                            <tr key={ad.adId}>
+                                              <td className="px-4 py-2.5" />
+                                              <td className="px-4 py-2.5" />
+                                              <td className="px-4 py-2.5">
+                                                <span className="flex items-center gap-2 min-w-0" title={ad.adSetName}>
+                                                  <span className="h-1.5 w-1.5 rounded-full bg-slate-300 shrink-0" />
+                                                  <span className="truncate">{ad.adSetName}</span>
+                                                </span>
+                                              </td>
+                                              <td className="px-4 py-2.5"><span className="block truncate" title={ad.creativeName || ad.adType || ad.adName || undefined}>{ad.creativeName || ad.adType || ad.adName || "—"}</span></td>
+                                              <td className="px-4 py-2.5">{Math.max(ad.platformReportedLeads, syncedLeads)}</td>
+                                              <td className="px-4 py-2.5">{qualifiedLeadsForAd(ad.adId)}</td>
+                                              <td className="px-4 py-2.5">{cplForAd(ad) > 0 ? cplForAd(ad).toFixed(2) : <span className="text-slate-300">—</span>}</td>
+                                              <td className="px-4 py-2.5 font-semibold text-slate-800">{formatCurrency(ad.spend)}</td>
+                                            </tr>
+                                          );
+                                        })}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                      </React.Fragment>
                       );
                     })
                   )}
