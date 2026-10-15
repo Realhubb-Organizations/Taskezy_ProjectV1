@@ -18,9 +18,10 @@ interface DateRangeFilterProps {
 // clear (×) control — the range can only be replaced, never removed.
 export default function DateRangeFilter({ value, onChange }: DateRangeFilterProps) {
   return (
-    <div className="bg-slate-100/70 border border-slate-200/60 rounded-2xl shadow-sm p-4 flex flex-col sm:flex-row sm:items-center gap-3">
-      <div className="flex items-center gap-1.5 text-xs font-bold text-slate-600 shrink-0">
-        <CalendarRange className="h-4 w-4 text-brand-600" />
+    // Inline (no card of its own) — sits on the right of the Reports tab row.
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+      <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 shrink-0">
+        <CalendarRange className="h-4 w-4 text-slate-400" />
         Report Date Range
       </div>
 

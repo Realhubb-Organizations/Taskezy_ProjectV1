@@ -86,13 +86,57 @@ body {
     animation: slide-in 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
   }
 
-  /* Notification banners (NotificationPopup) drop in from the top. */
-  @keyframes slide-down {
-    from { opacity: 0; transform: translateY(-12px); }
+  /* Notification banners (NotificationPopup) — iOS-style "liquid glass":
+     frosted see-through glass, a bright specular top edge, soft depth, and
+     springy (overshooting) motion. */
+  .liquid-glass {
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.86) 0%, rgba(255, 255, 255, 0.66) 100%);
+    -webkit-backdrop-filter: blur(24px) saturate(190%);
+    backdrop-filter: blur(24px) saturate(190%);
+    border: 1px solid rgba(255, 255, 255, 0.7);
+    box-shadow:
+      0 18px 40px -16px rgba(15, 23, 42, 0.35),
+      0 4px 12px -4px rgba(15, 23, 42, 0.12),
+      inset 0 1px 0 rgba(255, 255, 255, 0.9),
+      inset 0 -1px 0 rgba(255, 255, 255, 0.25);
+  }
+  .liquid-glass::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0) 38%);
+    mix-blend-mode: soft-light;
+  }
+  @keyframes liquid-in {
+    0% { opacity: 0; transform: translateY(-28px) scale(0.92); filter: blur(4px); }
+    60% { opacity: 1; transform: translateY(4px) scale(1.015); filter: blur(0); }
+    100% { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  @keyframes liquid-out {
+    0% { opacity: 1; transform: translateY(0) scale(1); }
+    100% { opacity: 0; transform: translateY(-36px) scale(0.94); filter: blur(3px); }
+  }
+  @keyframes liquid-expand {
+    from { opacity: 0; transform: translateY(-6px); }
     to { opacity: 1; transform: translateY(0); }
   }
-  .animate-slide-down {
-    animation: slide-down 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+  /* "backwards", not "both": a transform left on the card after the
+     animation would stop backdrop-filter from blurring the page behind it. */
+  .animate-liquid-in { animation: liquid-in 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) backwards; }
+  /* The cards peeking out under a collapsed bundle (iOS stack effect). */
+  .liquid-glass-ghost {
+    background: rgba(226, 232, 240, 0.96);
+    -webkit-backdrop-filter: blur(16px);
+    backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.9);
+    box-shadow: 0 8px 18px -10px rgba(15, 23, 42, 0.45);
+  }
+  .animate-liquid-out { animation: liquid-out 0.32s cubic-bezier(0.4, 0, 1, 1) both; }
+  .animate-liquid-expand { animation: liquid-expand 0.3s cubic-bezier(0.22, 1, 0.36, 1) both; }
+  @media (prefers-reduced-motion: reduce) {
+    .animate-liquid-in, .animate-liquid-out, .animate-liquid-expand { animation-duration: 0.01ms; }
   }
 
   /* Landing-page hero entrance — more pronounced than the small-UI fade-in above. */
@@ -288,4 +332,30 @@ body {
 .native-app .app-header {
   height: calc(3.5rem + 2rem);
   padding-top: 2rem;
+}
+
+/* Agent report KPI detail popup (components/reports/MetricDetailModal.tsx):
+   soft scale-up on desktop, slide-up sheet on phones. */
+@keyframes metric-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes metric-fade-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes metric-in {
+  from { opacity: 0; transform: translateY(16px) scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes metric-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateY(12px) scale(0.98); }
+}
+@keyframes metric-sheet-in { from { transform: translateY(100%); } to { transform: none; } }
+@keyframes metric-sheet-out { from { transform: none; } to { transform: translateY(100%); } }
+.animate-metric-fade-in { animation: metric-fade-in 220ms ease-out backwards; }
+.animate-metric-fade-out { animation: metric-fade-out 180ms ease-in forwards; }
+.animate-metric-in { animation: metric-in 280ms cubic-bezier(0.22, 1, 0.36, 1) backwards; }
+.animate-metric-out { animation: metric-out 180ms ease-in forwards; }
+@media (max-width: 639px) {
+  .animate-metric-in { animation: metric-sheet-in 320ms cubic-bezier(0.22, 1, 0.36, 1) backwards; }
+  .animate-metric-out { animation: metric-sheet-out 200ms ease-in forwards; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-metric-fade-in, .animate-metric-fade-out, .animate-metric-in, .animate-metric-out { animation: none; }
 }

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { requireAuth, requireRole } from "../../middleware/auth";
+import { requireAuth, requireRole, requireAdminOrManager } from "../../middleware/auth";
 import { validate } from "../../middleware/validate";
 import { asyncHandler } from "../../utils/asyncHandler";
 import {
@@ -54,12 +54,13 @@ leadsRouter.get("/", validate({ query: listLeadsQuerySchema }), asyncHandler(lis
 // scoping as listLeads, just not a role gate beyond being logged in.
 leadsRouter.get("/stats", validate({ query: leadStatsQuerySchema }), asyncHandler(getLeadStatsHandler));
 leadsRouter.get("/:id", validate({ params: leadIdParamSchema }), asyncHandler(getLeadHandler));
-leadsRouter.post("/", validate({ body: createLeadSchema }), asyncHandler(createLeadHandler));
-// Admin CRM Data Calling's bulk Excel upload (Name + Mobile Number only) —
-// ADMIN-only since it can immediately assign hundreds of leads at once.
+// Uploading leads (single entry or Data Calling's bulk Excel) is for admins
+// and managers only — agents work leads, they don't add them. Managers can
+// only hand them to their own team (checked in leads.service.ts).
+leadsRouter.post("/", requireAdminOrManager("upload leads"), validate({ body: createLeadSchema }), asyncHandler(createLeadHandler));
 leadsRouter.post(
   "/bulk-import",
-  requireRole("ADMIN"),
+  requireAdminOrManager("upload leads"),
   validate({ body: bulkImportLeadsSchema }),
   asyncHandler(bulkImportLeadsHandler)
 );
@@ -127,8 +128,11 @@ leadsRouter.patch(
   validate({ params: leadIdParamSchema, body: updateLeadNoteSchema }),
   asyncHandler(updateLeadNoteHandler)
 );
+// Agents work the leads they're given; only admins and managers move leads
+// between people (managers within their own team — see leads.service.ts).
 leadsRouter.patch(
   "/:id/reassign",
+  requireAdminOrManager("reassign leads"),
   validate({ params: leadIdParamSchema, body: reassignLeadSchema }),
   asyncHandler(reassignLeadHandler)
 );

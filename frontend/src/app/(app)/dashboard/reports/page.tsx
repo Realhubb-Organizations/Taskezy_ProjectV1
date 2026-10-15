@@ -86,6 +86,9 @@ function ReportsPageContent() {
             </button>
           ))}
         </div>
+        <div className="flex flex-wrap items-center gap-3">
+        {/* Shared date-range filter — every report is generated for this selected window */}
+        <DateRangeFilter value={dateRange} onChange={setDateRange} />
         {/* Bulk lead export (incl. phone/email) is an Admin-only capability —
             Manager/Member never get a raw CSV of leads beyond their own scope. */}
         {isAdmin && (
@@ -97,10 +100,8 @@ function ReportsPageContent() {
             Export Leads CSV
           </button>
         )}
+        </div>
       </div>
-
-      {/* Shared date-range filter — every report is generated for this selected window */}
-      <DateRangeFilter value={dateRange} onChange={setDateRange} />
 
       {/* Every report below is driven entirely by AppContext's single bulk
           data load (leads/adSpend/properties) — there's no per-report fetch

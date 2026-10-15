@@ -12,7 +12,7 @@ import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/Searcha
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
 import DateRangePicker, { DatePicker, DateRangeValue, formatDisplayDate, todayIso, toIsoDate } from "@/components/ui/DateRangePicker";
 import DateRangeSelect from "@/components/ui/DateRangeSelect";
-import { canChangeLeadStatus, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
+import { canChangeLeadStatus, canReassignThisLead, canUploadLeads, uploadAssignableUsers, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
 import { nextFollowupFor } from "@/lib/followups";
 import NextCallCell from "@/components/crm/NextCallCell";
 import { useDialog } from "@/components/ui/DialogProvider";
@@ -225,8 +225,8 @@ export default function DataCallingPage() {
   // feeds display/filter UI.
   const bulkUploadPropertiesList = useMemo(() => properties.map(p => ({ id: p.id, name: p.name })), [properties]);
   const bulkUploadAgentsList = useMemo(
-    () => users.filter(u => u.role === "AGENT" && u.status !== "INACTIVE").map(u => ({ id: u.id, name: u.name })),
-    [users]
+    () => uploadAssignableUsers(users, currentUser).map(u => ({ id: u.id, name: u.name })),
+    [users, currentUser]
   );
 
   const [isUploadLeadsOpen, setIsUploadLeadsOpen] = useState(false);
@@ -943,7 +943,8 @@ export default function DataCallingPage() {
             </button>
           )}
         </div>
-        {isAdmin && activeTab === "DataCalling" && (
+        {/* Upload Leads: admins and managers only, not agents. */}
+        {canUploadLeads(currentUser) && activeTab === "DataCalling" && (
           <button
             onClick={() => setIsUploadLeadsOpen(true)}
             className="inline-flex items-center justify-center gap-2 h-9 px-3.5 bg-[#0B1E6E] hover:bg-[#081650] text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer shrink-0"
@@ -1762,16 +1763,21 @@ export default function DataCallingPage() {
                         )}
                         {visibleColumns.assignedTo && (
                           <td className="px-4 py-3.5">
-                            <SearchableSelect
-                              variant="inline"
-                              value={l.assignedAgent || ""}
-                              onChange={(v) => reassignWithNote(l, v)}
-                              options={assignedOptions}
-                              placeholder="—"
-                              searchPlaceholder="Search agents..."
-                              panelWidth={176}
-                              className="max-w-full text-slate-700"
-                            />
+                            {/* Agents see who has it; only admins/managers can move it. */}
+                            {canReassignThisLead(l, currentUser, users) ? (
+                              <SearchableSelect
+                                variant="inline"
+                                value={l.assignedAgent || ""}
+                                onChange={(v) => reassignWithNote(l, v)}
+                                options={assignedOptions}
+                                placeholder="—"
+                                searchPlaceholder="Search agents..."
+                                panelWidth={176}
+                                className="max-w-full text-slate-700"
+                              />
+                            ) : (
+                              <span className="text-slate-700 [overflow-wrap:anywhere]">{l.assignedAgent || "—"}</span>
+                            )}
                           </td>
                         )}
                         {visibleColumns.date && <td className="px-4 py-3.5">{formatDateTime(l.createdAtStr)}</td>}
