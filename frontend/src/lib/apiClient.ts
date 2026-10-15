@@ -1475,6 +1475,25 @@ export function apiListAdSpend(): Promise<ApiAdSpendRow[]> {
   return request<ApiAdSpendRow[]>("/api/v1/ad-spend");
 }
 
+export interface CampaignLeadStats {
+  campaign: string;
+  totalLeads: number;
+  qualifiedLeads: number;
+  unqualifiedLeads: number;
+  siteVisit: number;
+}
+// Backend counterpart to campaignBuilder.ts's buildCampaignsList — just the
+// lead-derived numbers, keyed by campaign name, so the Campaigns page no
+// longer needs the full bulk-loaded leads array for these. Omit both dates
+// for "All Time" (matches the page's own all-time buildCampaignsList call).
+export function apiGetCampaignLeadStats(dateFrom?: string, dateTo?: string): Promise<CampaignLeadStats[]> {
+  const params = new URLSearchParams();
+  if (dateFrom) params.set("dateFrom", dateFrom);
+  if (dateTo) params.set("dateTo", dateTo);
+  const qs = params.toString();
+  return request<CampaignLeadStats[]>(`/api/v1/ad-spend/campaign-lead-stats${qs ? `?${qs}` : ""}`);
+}
+
 // Real per-ad, per-day spend/leads with each row's real ad set/ad/creative
 // name attached — un-aggregated (one row per ad per day), same grain as
 // ApiAdSpendRow, for Campaign Deep Dive's Ad Set Name/Ad creative Name
