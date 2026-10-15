@@ -34,6 +34,8 @@ import {
   apiListResaleUnits,
   apiCreateResaleUnit,
   apiListFollowups,
+  apiGetPendingTasks,
+  ApiPendingTaskRow,
   apiCreateFollowup,
   apiListAttendance,
   apiListReimbursements,
@@ -525,6 +527,7 @@ interface AppState {
   properties: Property[];
   resaleUnits: ResaleUnit[];
   followupCalls: FollowupCall[];
+  pendingTasks: ApiPendingTaskRow[];
   attendanceRecords: AttendanceRecord[];
   reimbursements: ReimbursementClaim[];
   timesheets: TimesheetLog[];
@@ -1055,6 +1058,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [properties, setProperties] = useState<Property[]>([]);
   const [resaleUnits, setResaleUnits] = useState<ResaleUnit[]>([]);
   const [followupCalls, setFollowupCalls] = useState<FollowupCall[]>([]);
+  // Sales dashboard's Pending Tasks queue — server-merged (see
+  // apiGetPendingTasks), scoped entirely server-side off the session. Kept
+  // out of loadAllRealData's own Promise.allSettled batch and given its own
+  // effect below (watching leadsChangedSignal) instead, since a changed
+  // lead/follow-up should refetch this live, the same way LeadDashboard's
+  // own server-paginated fetch already does.
+  const [pendingTasks, setPendingTasks] = useState<ApiPendingTaskRow[]>([]);
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
   const [reimbursements, setReimbursements] = useState<ReimbursementClaim[]>([]);
   const [timesheets, setTimesheets] = useState<TimesheetLog[]>([]);
@@ -1350,6 +1360,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setManualRefreshSignal((s) => s + 1);
     loadAllRealData(currentUser?.role);
   };
+
+  // Fetched once per login (plus pull-to-refresh via manualRefreshSignal),
+  // not on every live leadsChangedSignal bump — a real production check
+  // found this can be a multi-MB response (thousands of still-untouched
+  // "New Lead" leads each becoming their own task), so refetching it on
+  // every single lead/follow-up change anywhere in the company was too
+  // expensive. Same "fetch at login, refresh on pull-to-refresh" cadence
+  // leads/followupCalls themselves already use.
+  useEffect(() => {
+    if (!currentUser) return;
+    let cancelled = false;
+    apiGetPendingTasks()
+      .then(result => { if (!cancelled) setPendingTasks(result); })
+      .catch(() => { /* leave the previous tasks showing on a transient failure */ });
+    return () => { cancelled = true; };
+  }, [currentUser, manualRefreshSignal]);
 
   // Live notifications (Meta leads, etc.) over Server-Sent Events — one
   // connection per session, reopened whenever the signed-in user changes.
@@ -2486,6 +2512,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         properties,
         resaleUnits,
         followupCalls,
+        pendingTasks,
         attendanceRecords,
         reimbursements,
         timesheets,

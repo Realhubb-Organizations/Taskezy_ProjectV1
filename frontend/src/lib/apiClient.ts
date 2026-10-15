@@ -317,6 +317,59 @@ export function apiGetLeadStats(filters: LeadListFilters = {}): Promise<LeadSumm
   return request<LeadSummaryStats>(`/api/v1/leads/stats${qs ? `?${qs}` : ""}`);
 }
 
+// Leads Analytics tab's own filter set (LeadDashboard.tsx) — Property
+// instead of status/assignedAgentId/search/excludeBulkUpload, since this
+// tab filters per-agent, not per-status.
+export interface LeadAnalyticsStatsFilters {
+  propertyId?: string[];
+  campaign?: string[];
+  dateFrom?: string;
+  dateTo?: string;
+}
+export interface AgentAnalyticsStats {
+  assignedAgentId: string;
+  total: number;
+  qualified: number;
+  unqualified: number;
+  siteVisits: number;
+}
+// One row per agent instead of the full lead list — backs LeadDashboard.tsx's
+// Analytics tab breakdown table (computeLeadStats/adminManagerRows), which
+// still does the manager roll-up and "No manager assigned" bucketing
+// client-side over this small per-agent array, same as apiGetLeadStats's
+// 7 buckets above.
+export function apiGetLeadAnalyticsStats(filters: LeadAnalyticsStatsFilters = {}): Promise<AgentAnalyticsStats[]> {
+  const params = new URLSearchParams();
+  filters.propertyId?.forEach(p => params.append("propertyId", p));
+  filters.campaign?.forEach(c => params.append("campaign", c));
+  if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
+  if (filters.dateTo) params.set("dateTo", filters.dateTo);
+  const qs = params.toString();
+  return request<AgentAnalyticsStats[]>(`/api/v1/leads/analytics-stats${qs ? `?${qs}` : ""}`);
+}
+
+export interface AgentReportStats {
+  assigned: number;
+  contacted: number;
+  qualified: number;
+  siteVisits: number;
+  bookingValue: number;
+  bookingCount: number;
+}
+// Backs the Agent report tab's 4 funnel KPI cards + booking value/count
+// (AgentReports.tsx) for one agent at a time — pass that agent's user id as
+// the single-element assignedAgentId array (same shape GET /leads/stats
+// already takes). Campaign-attributed spend and missed-lead/follow-up
+// detection stay client-side (reportMetrics.ts), same as every KPI card's
+// own drill-down popup, which still reads real lead rows from the bulk array.
+export function apiGetAgentReportStats(assignedAgentId: string, dateFrom?: string, dateTo?: string): Promise<AgentReportStats> {
+  const params = new URLSearchParams();
+  params.set("assignedAgentId", assignedAgentId);
+  if (dateFrom) params.set("dateFrom", dateFrom);
+  if (dateTo) params.set("dateTo", dateTo);
+  return request<AgentReportStats>(`/api/v1/leads/report-stats?${params.toString()}`);
+}
+
 export function apiGetLead(leadId: string): Promise<ApiLeadRow> {
   return request<ApiLeadRow>(`/api/v1/leads/${leadId}`);
 }
@@ -914,13 +967,11 @@ export interface ApiFollowupRow {
 // Pages through every follow-up and concatenates the results — same bridge
 // pattern as apiListAllLeads, now that GET /followups has real LIMIT/OFFSET
 // pagination (see followups.routes.ts) instead of one unbounded SELECT.
-// Still the right shape for AppContext's bulk load: TeamTasksTable/
-// SalesPendingTasksTable's buildSalesPendingTasks merges followupCalls with
-// leads and buckets them by elapsed time (missed/pending/upcoming), which
-// needs the *whole* dataset in memory to compute correctly — it can't be
-// switched to a single fetched page without reimplementing that time-bucket
-// logic server-side, so this keeps delivering the full array exactly as
-// apiListFollowups() always did, just via capped page-sized round trips.
+// TeamTasksTable/SalesPendingTasksTable/TaskInsightsCharts no longer need
+// this bulk array themselves — see apiGetPendingTasks below, which now
+// does their merge server-side — but Reports' own filterFollowupsByRange/
+// missed-follow-up counts (reportMetrics.ts) still read this full array,
+// so it stays.
 export async function apiListFollowups(): Promise<ApiFollowupRow[]> {
   const all: ApiFollowupRow[] = [];
   let page = 1;
@@ -932,6 +983,30 @@ export async function apiListFollowups(): Promise<ApiFollowupRow[]> {
     page += 1;
   }
   return all;
+}
+
+export interface ApiPendingTaskRow {
+  id: string;
+  leadId?: string;
+  dueAt: string | null;
+  forceMissed: boolean;
+  name: string;
+  phone: string;
+  email: string;
+  status: string;
+  feedback: string;
+  taskType: string;
+  assignedTo: string;
+}
+// Backs the sales dashboard's Pending Tasks queue (SalesPendingTasksTable/
+// TeamTasksTable/TaskInsightsCharts) — the server-side merge of open
+// follow-ups + actionable-status leads with no open follow-up (see
+// Taskezy-Server/src/modules/tasks/tasks.routes.ts), already scoped to
+// whatever the caller is allowed to see. Bucketing (missed/pending/
+// upcoming) stays client-side — see lib/salesPendingTasks.ts's
+// applyTaskBuckets — since it needs to update live every 30s.
+export function apiGetPendingTasks(): Promise<ApiPendingTaskRow[]> {
+  return request<ApiPendingTaskRow[]>("/api/v1/tasks/pending");
 }
 
 // Real server-side pagination for a dedicated, specifically-filtered
@@ -1442,6 +1517,25 @@ export interface ApiAdSpendRow {
 }
 export function apiListAdSpend(): Promise<ApiAdSpendRow[]> {
   return request<ApiAdSpendRow[]>("/api/v1/ad-spend");
+}
+
+export interface CampaignLeadStats {
+  campaign: string;
+  totalLeads: number;
+  qualifiedLeads: number;
+  unqualifiedLeads: number;
+  siteVisit: number;
+}
+// Backend counterpart to campaignBuilder.ts's buildCampaignsList — just the
+// lead-derived numbers, keyed by campaign name, so the Campaigns page no
+// longer needs the full bulk-loaded leads array for these. Omit both dates
+// for "All Time" (matches the page's own all-time buildCampaignsList call).
+export function apiGetCampaignLeadStats(dateFrom?: string, dateTo?: string): Promise<CampaignLeadStats[]> {
+  const params = new URLSearchParams();
+  if (dateFrom) params.set("dateFrom", dateFrom);
+  if (dateTo) params.set("dateTo", dateTo);
+  const qs = params.toString();
+  return request<CampaignLeadStats[]>(`/api/v1/ad-spend/campaign-lead-stats${qs ? `?${qs}` : ""}`);
 }
 
 // Real per-ad, per-day spend/leads with each row's real ad set/ad/creative

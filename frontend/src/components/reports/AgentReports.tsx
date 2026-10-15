@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useApp, LeadStatus } from "@/context/AppContext";
 import { isLeadAssignableUser } from "@/lib/leadAssignment";
 import { useDialog } from "@/components/ui/DialogProvider";
 import { maskPhone } from "@/lib/maskPII";
+import { apiGetAgentReportStats, type AgentReportStats } from "@/lib/apiClient";
 import { AlertTriangle, ArrowRight, CheckSquare, Clock, DollarSign, Info, MapPin, Phone, TrendingUp, Users, RefreshCw } from "lucide-react";
 import { DateRange } from "./DateRangeFilter";
 import MetricDetailModal, { MetricDetailRow } from "./MetricDetailModal";
@@ -14,11 +15,8 @@ import {
   filterLeadsByRange,
   filterAdSpendByRange,
   filterFollowupsByRange,
-  computeBookingValue,
-  computeBookingCount,
   computeROIMultiple,
   computeCampaignAttributedSpend,
-  computeAgentFunnel,
   agentFunnelLeads,
   getMissedInfo,
   formatCurrency,
@@ -80,17 +78,34 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
 
   const agentLeads = rangeLeads.filter(l => l.assignedAgent === activeAgent);
   const allocatedSpend = computeCampaignAttributedSpend(agentLeads, rangeSpend);
-  const bookingValue = computeBookingValue(agentLeads);
-  const bookingCount = computeBookingCount(agentLeads);
-  const roi = computeROIMultiple(bookingValue, allocatedSpend);
   const missedLeads = agentLeads
     .map(l => ({ lead: l, info: getMissedInfo(l) }))
     .filter(x => x.info.missed);
   const agentFollowups = rangeFollowups.filter(f => f.assignedTo === activeAgent);
   const missedFollowups = agentFollowups.filter(f => f.status === "Missed");
 
-  // KPI cards + Sales Funnel (percentages are of leads assigned in range).
-  const funnel = computeAgentFunnel(agentLeads);
+  // KPI cards + Sales Funnel numbers now come from the server (GET
+  // /leads/report-stats) instead of computeAgentFunnel/computeBookingValue/
+  // computeBookingCount over the bulk leads array — agentLeads above still
+  // feeds the drill-down popup (kpiDetail below) and campaign-attributed
+  // spend/missed-lead detection, which stay client-side (see
+  // leads.service.ts's getAgentReportStats doc comment for why).
+  const activeAgentId = users.find(u => u.name === activeAgent)?.id;
+  const [reportStats, setReportStats] = useState<AgentReportStats>({
+    assigned: 0, contacted: 0, qualified: 0, siteVisits: 0, bookingValue: 0, bookingCount: 0
+  });
+  useEffect(() => {
+    if (!activeAgentId) { setReportStats({ assigned: 0, contacted: 0, qualified: 0, siteVisits: 0, bookingValue: 0, bookingCount: 0 }); return; }
+    let cancelled = false;
+    apiGetAgentReportStats(activeAgentId, dateRange.from, dateRange.to)
+      .then(result => { if (!cancelled) setReportStats(result); })
+      .catch(() => { /* leave the previous numbers showing on a transient failure */ });
+    return () => { cancelled = true; };
+  }, [activeAgentId, dateRange.from, dateRange.to]);
+  const funnel = { assigned: reportStats.assigned, contacted: reportStats.contacted, qualified: reportStats.qualified, siteVisits: reportStats.siteVisits };
+  const bookingValue = reportStats.bookingValue;
+  const bookingCount = reportStats.bookingCount;
+  const roi = computeROIMultiple(bookingValue, allocatedSpend);
   const pct = (n: number) => (funnel.assigned === 0 ? 0 : Math.round((n / funnel.assigned) * 100));
   const kpiCards = [
     { key: "assigned", label: "Total Leads Assigned", value: funnel.assigned, sub: "In selected range", icon: Users, iconBg: "bg-blue-50 text-blue-600", alert: false },

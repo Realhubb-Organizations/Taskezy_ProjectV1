@@ -2,9 +2,10 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { Search, Copy, Check, X } from "lucide-react";
-import { Lead, FollowupCall, LeadStatus, useApp } from "@/context/AppContext";
+import { LeadStatus, useApp } from "@/context/AppContext";
+import { ApiPendingTaskRow } from "@/lib/apiClient";
 import { PICKABLE_STATUS_OPTIONS } from "@/lib/leadStatusMapping";
-import { buildSalesPendingTasks, PendingTask, TaskBucket } from "@/lib/salesPendingTasks";
+import { applyTaskBuckets, PendingTask, TaskBucket } from "@/lib/salesPendingTasks";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
@@ -28,8 +29,7 @@ const formatTaskClock = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())
 // its own title/subtitle and a taskFilter (agent + tab + type + date range);
 // with those left unset it behaves exactly as the sales dashboard expects.
 export default function SalesPendingTasksTable({
-  leads,
-  followupCalls,
+  pendingTasks,
   onViewLead,
   onStatusChange,
   isLoading = false,
@@ -38,8 +38,7 @@ export default function SalesPendingTasksTable({
   taskFilter,
   visibleBuckets = ["missed", "pending", "upcoming"]
 }: {
-  leads: Lead[];
-  followupCalls: FollowupCall[];
+  pendingTasks: ApiPendingTaskRow[];
   onViewLead: (leadId: string) => void;
   onStatusChange: (leadId: string, status: LeadStatus) => void;
   isLoading?: boolean;
@@ -70,9 +69,9 @@ export default function SalesPendingTasksTable({
   const [copied, setCopied] = useState<string | null>(null);
 
   const tasks = useMemo(() => {
-    const all = buildSalesPendingTasks(leads, followupCalls, now);
+    const all = applyTaskBuckets(pendingTasks, now);
     return taskFilter ? all.filter(taskFilter) : all;
-  }, [leads, followupCalls, now, taskFilter]);
+  }, [pendingTasks, now, taskFilter]);
   const statusOptions = useMemo(() => Array.from(new Set(tasks.map(t => t.status))), [tasks]);
 
   const visibleTasks = useMemo(() => tasks.filter(t => {

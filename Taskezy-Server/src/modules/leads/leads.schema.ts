@@ -50,6 +50,17 @@ export const listLeadsQuerySchema = z.object({
 // `GET /` and `GET /stats` and get consistent, filter-matching results.
 export const leadStatsQuerySchema = listLeadsQuerySchema.omit({ page: true, pageSize: true });
 
+// Leads Analytics tab's own filter set (Property/Campaign/Date Range) —
+// deliberately NOT listLeadsQuerySchema.omit(...) like leadStatsQuerySchema
+// above, since this tab has no status/search/excludeBulkUpload filters but
+// does have a Property one the plain Leads tab doesn't.
+export const leadAnalyticsStatsQuerySchema = z.object({
+  propertyId: uuidToArray,
+  campaign: stringToArray,
+  dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateFrom must be YYYY-MM-DD").optional(),
+  dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateTo must be YYYY-MM-DD").optional()
+});
+
 export const leadIdParamSchema = z.object({
   id: z.string().uuid()
 });
