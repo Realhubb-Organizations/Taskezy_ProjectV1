@@ -371,6 +371,90 @@ export async function getMissedFollowupCount(
   return Number(rows[0]?.count ?? 0);
 }
 
+export interface ManagerReportRow {
+  assigned_agent_id: string;
+  leads_count: string;
+  spend: string;
+  booking_value: string;
+  missed_count: string;
+  missed_followups: string;
+}
+
+/**
+ * Backend aggregate for the Manager report tab (ManagerReports.tsx) — one
+ * row per agent (manager or direct report alike), same shape precedent as
+ * getAnalyticsStatsByAgent: the Individual/Team/Combined split and the
+ * per-member breakdown both stay client-side, summing each manager's own
+ * row with their direct reports' rows (same "sum small per-agent rows"
+ * pattern LeadDashboard.tsx's adminManagerRows already uses) — only the
+ * per-agent numbers themselves move here. spend/missed_count mirror
+ * getAgentReportStats' own campaign_cpl join and live-clock missed rule;
+ * missed_followups is a separate grouped query against follow-up_calls
+ * (different table, different scope column) left-joined on by agent id.
+ */
+export async function getManagerReportStatsByAgent(
+  filter: LeadFilterConditions,
+  slaMinutes: number
+): Promise<ManagerReportRow[]> {
+  const { whereClause, params } = buildLeadWhereClause(filter);
+  params.push(filter.dateFrom ?? null, filter.dateTo ?? null, slaMinutes);
+  const dateFromParam = params.length - 2;
+  const dateToParam = params.length - 1;
+  const slaParam = params.length;
+
+  // Continues the SAME params array (not a fresh one) — this subquery's
+  // placeholders are interpolated into the one query string below, so
+  // they must count on from where the leads-side params left off.
+  let followupScopeClause = "";
+  if (filter.scopedToAgentIds) {
+    params.push(filter.scopedToAgentIds);
+    followupScopeClause = `AND fc.assigned_to_id = ANY($${params.length}::uuid[])`;
+  }
+  let followupDateClause = "";
+  if (filter.dateFrom) {
+    params.push(filter.dateFrom);
+    followupDateClause += ` AND fc.scheduled_at >= $${params.length}::date`;
+  }
+  if (filter.dateTo) {
+    params.push(filter.dateTo);
+    followupDateClause += ` AND fc.scheduled_at < ($${params.length}::date + 1)`;
+  }
+
+  const { rows } = await query<ManagerReportRow>(
+    `WITH campaign_cpl AS (
+       SELECT account_name, SUM(spend) / NULLIF(SUM(leads_generated), 0) AS spend_per_lead
+       FROM ad_spend_records
+       WHERE ($${dateFromParam}::date IS NULL OR spend_date >= $${dateFromParam}::date)
+         AND ($${dateToParam}::date IS NULL OR spend_date <= $${dateToParam}::date)
+       GROUP BY account_name
+     ),
+     followup_stats AS (
+       SELECT fc.assigned_to_id, count(*) FILTER (WHERE fc.status = 'MISSED') AS missed_followups
+       FROM followup_calls fc
+       WHERE fc.status = 'MISSED' ${followupScopeClause} ${followupDateClause}
+       GROUP BY fc.assigned_to_id
+     )
+     SELECT l.assigned_agent_id,
+            count(*) AS leads_count,
+            COALESCE(SUM(c.spend_per_lead), 0) AS spend,
+            COALESCE(SUM(l.deal_value) FILTER (WHERE l.status_code = 'BOOKED'), 0) AS booking_value,
+            count(*) FILTER (
+              WHERE l.assigned_at IS NOT NULL AND (
+                (l.first_response_at IS NOT NULL AND EXTRACT(EPOCH FROM (l.first_response_at - l.assigned_at)) / 60 > $${slaParam}::numeric)
+                OR (l.first_response_at IS NULL AND EXTRACT(EPOCH FROM (now() - l.assigned_at)) / 60 > $${slaParam}::numeric)
+              )
+            ) AS missed_count,
+            COALESCE(MAX(fs.missed_followups), 0) AS missed_followups
+     FROM leads l
+     LEFT JOIN campaign_cpl c ON c.account_name = l.campaign
+     LEFT JOIN followup_stats fs ON fs.assigned_to_id = l.assigned_agent_id
+     ${whereClause}
+     GROUP BY l.assigned_agent_id`,
+    params
+  );
+  return rows;
+}
+
 export async function findById(id: string, scopedToAgentIds?: string[]): Promise<LeadListRow | undefined> {
   const params: unknown[] = [id];
   let whereExtra = "";

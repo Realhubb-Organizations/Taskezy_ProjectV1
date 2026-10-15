@@ -15,6 +15,7 @@ import {
   leadIdParamSchema,
   leadStatsQuerySchema,
   listLeadsQuerySchema,
+  managerReportStatsQuerySchema,
   reassignLeadSchema,
   updateCallStatusSchema,
   updateLeadNoteSchema,
@@ -35,6 +36,7 @@ import {
   getLeadAnalyticsStatsHandler,
   getLeadHandler,
   getLeadStatsHandler,
+  getManagerReportStatsHandler,
   listLeadsHandler,
   reassignLeadHandler,
   updateCallStatusHandler,
@@ -67,6 +69,10 @@ leadsRouter.get("/analytics-stats", validate({ query: leadAnalyticsStatsQuerySch
 // Member/Manager requesting another agent's id gets zero rows back, not
 // that agent's data (scopeForCaller's AND-only boundary).
 leadsRouter.get("/report-stats", validate({ query: leadStatsQuerySchema }), asyncHandler(getAgentReportStatsHandler));
+// Manager report's per-agent rollup (ManagerReports.tsx) — same no-extra-
+// role-gate reasoning as the others above; a Manager's call naturally
+// returns exactly themself + direct reports via scopeForCaller.
+leadsRouter.get("/manager-report-stats", validate({ query: managerReportStatsQuerySchema }), asyncHandler(getManagerReportStatsHandler));
 leadsRouter.get("/:id", validate({ params: leadIdParamSchema }), asyncHandler(getLeadHandler));
 // Uploading leads (single entry or Data Calling's bulk Excel) is for admins
 // and managers only — agents work leads, they don't add them. Managers can

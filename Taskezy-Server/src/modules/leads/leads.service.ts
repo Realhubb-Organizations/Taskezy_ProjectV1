@@ -264,6 +264,46 @@ export async function getAgentReportStats(caller: AccessTokenPayload, filter: {
   };
 }
 
+export interface ManagerReportAgentStats {
+  assignedAgentId: string;
+  leadsCount: number;
+  spend: number;
+  bookingValue: number;
+  missedCount: number;
+  missedFollowups: number;
+}
+
+/**
+ * Backend counterpart to ManagerReports.tsx's per-manager Individual/Team/
+ * Combined rollup — one row per agent (manager or direct report alike).
+ * The Individual/Team/Combined split and the per-member breakdown both
+ * stay client-side, summing each manager's own row with their direct
+ * reports' — same "sum small per-agent rows" pattern LeadDashboard.tsx's
+ * adminManagerRows already uses for the Leads Analytics tab. No extra
+ * role gate: scopeForCaller already makes a Manager's own call return
+ * exactly themself + direct reports (their real Individual+Team scope),
+ * and a Member's call return just their own row — both harmless, same
+ * precedent as getLeadStats/getAgentReportStats.
+ */
+export async function getManagerReportStats(caller: AccessTokenPayload, filter: {
+  dateFrom?: string;
+  dateTo?: string;
+}): Promise<ManagerReportAgentStats[]> {
+  const scopedToAgentIds = await scopeForCaller(caller);
+  const rows = await repo.getManagerReportStatsByAgent(
+    { dateFrom: filter.dateFrom, dateTo: filter.dateTo, scopedToAgentIds },
+    REPORT_SLA_MINUTES
+  );
+  return rows.map(r => ({
+    assignedAgentId: r.assigned_agent_id,
+    leadsCount: Number(r.leads_count),
+    spend: Number(r.spend),
+    bookingValue: Number(r.booking_value),
+    missedCount: Number(r.missed_count),
+    missedFollowups: Number(r.missed_followups)
+  }));
+}
+
 export async function getLead(caller: AccessTokenPayload, id: string) {
   const scopedToAgentIds = await scopeForCaller(caller);
   const lead = await repo.findById(id, scopedToAgentIds);

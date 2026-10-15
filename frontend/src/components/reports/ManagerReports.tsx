@@ -1,29 +1,38 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/context/AppContext";
 import { ChevronDown, ChevronUp, AlertTriangle, Users } from "lucide-react";
 import { DateRange } from "./DateRangeFilter";
-import {
-  filterLeadsByRange,
-  filterAdSpendByRange,
-  filterFollowupsByRange,
-  computeBookingValue,
-  computeROIMultiple,
-  computeCampaignAttributedSpend,
-  isMissedLead,
-  formatCurrency
-} from "@/lib/reportMetrics";
+import { computeROIMultiple, formatCurrency } from "@/lib/reportMetrics";
+import { apiGetManagerReportStats, type ManagerReportAgentStats } from "@/lib/apiClient";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
 
+const ZERO_AGENT_STATS = { leadsCount: 0, spend: 0, bookingValue: 0, missedCount: 0, missedFollowups: 0 };
+
 export default function ManagerReports({ dateRange }: { dateRange: DateRange }) {
-  const { leads, adSpendRecords, followupCalls, users, currentUser, activeRole, isDataLoading } = useApp();
+  const { users, currentUser, activeRole, isDataLoading } = useApp();
   const [expanded, setExpanded] = useState<string | null>(null);
 
-  const rangeLeads = useMemo(() => filterLeadsByRange(leads, dateRange.from, dateRange.to), [leads, dateRange]);
-  const rangeSpend = useMemo(() => filterAdSpendByRange(adSpendRecords, dateRange.from, dateRange.to), [adSpendRecords, dateRange]);
-  const rangeFollowups = useMemo(() => filterFollowupsByRange(followupCalls, dateRange.from, dateRange.to), [followupCalls, dateRange]);
+  // Per-agent numbers now come from the server (GET /leads/manager-report-stats)
+  // instead of scanning the bulk leads/adSpendRecords/followupCalls arrays —
+  // the Individual/Team/Combined split and per-member breakdown below still
+  // just sum these small per-agent rows client-side, same as before.
+  const [agentStats, setAgentStats] = useState<ManagerReportAgentStats[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    apiGetManagerReportStats(dateRange.from, dateRange.to)
+      .then(result => { if (!cancelled) setAgentStats(result); })
+      .catch(() => { /* leave the previous numbers showing on a transient failure */ });
+    return () => { cancelled = true; };
+  }, [dateRange.from, dateRange.to]);
+  const statsByAgentId = useMemo(() => new Map(agentStats.map(s => [s.assignedAgentId, s])), [agentStats]);
+  const userIdByName = useMemo(() => new Map(users.map(u => [u.name, u.id])), [users]);
+  const statsForName = (name: string): ManagerReportAgentStats | typeof ZERO_AGENT_STATS => {
+    const id = userIdByName.get(name);
+    return (id && statsByAgentId.get(id)) || ZERO_AGENT_STATS;
+  };
 
   // Real reporting-line grouping via users.managerId (see Settings → Manage
   // Users → "Reports To") — previously this grouped leads against a hardcoded
@@ -42,61 +51,53 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
   const managerRows = useMemo(() => {
     return managers.map(manager => {
       const teamMembers = users.filter(u => u.managerId === manager.id).map(u => u.name);
-      const individualLeads = rangeLeads.filter(l => l.assignedAgent === manager.name);
-      const teamLeads = rangeLeads.filter(l => teamMembers.includes(l.assignedAgent));
-      const allLeads = [...individualLeads, ...teamLeads];
 
-      // Individual (manager's own leads) — spend/ROI computed on their own leads only
-      const individualSpend = computeCampaignAttributedSpend(individualLeads, rangeSpend);
-      const individualBookingValue = computeBookingValue(individualLeads);
-      const individualROI = computeROIMultiple(individualBookingValue, individualSpend);
-      const individualMissed = individualLeads.filter(isMissedLead);
+      // Individual (manager's own leads)
+      const individual = statsForName(manager.name);
+      const individualROI = computeROIMultiple(individual.bookingValue, individual.spend);
 
-      // Team (every direct report's leads) — spend/ROI computed on the team's leads only
-      const teamSpend = computeCampaignAttributedSpend(teamLeads, rangeSpend);
-      const teamBookingValue = computeBookingValue(teamLeads);
-      const teamROI = computeROIMultiple(teamBookingValue, teamSpend);
-      const teamMissed = teamLeads.filter(isMissedLead);
+      // Team (sum of every direct report's own row — same "sum small
+      // per-agent rows" pattern LeadDashboard.tsx's Analytics tab uses)
+      const memberStats = teamMembers.map(member => ({ name: member, ...statsForName(member) }));
+      const memberBreakdown = memberStats.map(m => ({
+        name: m.name,
+        leadsCount: m.leadsCount,
+        spend: m.spend,
+        roi: computeROIMultiple(m.bookingValue, m.spend),
+        missedCount: m.missedCount,
+        missedFollowupsCount: m.missedFollowups
+      }));
+      const team = memberStats.reduce((acc, m) => ({
+        leadsCount: acc.leadsCount + m.leadsCount,
+        spend: acc.spend + m.spend,
+        bookingValue: acc.bookingValue + m.bookingValue,
+        missedCount: acc.missedCount + m.missedCount
+      }), { leadsCount: 0, spend: 0, bookingValue: 0, missedCount: 0 });
+      const teamROI = computeROIMultiple(team.bookingValue, team.spend);
 
       // Combined (individual + team together)
-      const totalSpendForManager = individualSpend + teamSpend;
-      const totalBookingValue = individualBookingValue + teamBookingValue;
+      const totalSpendForManager = individual.spend + team.spend;
+      const totalBookingValue = individual.bookingValue + team.bookingValue;
       const combinedROI = computeROIMultiple(totalBookingValue, totalSpendForManager);
-
-      const memberBreakdown = teamMembers.map(member => {
-        const memberLeads = rangeLeads.filter(l => l.assignedAgent === member);
-        const memberSpend = computeCampaignAttributedSpend(memberLeads, rangeSpend);
-        const memberBookingValue = computeBookingValue(memberLeads);
-        const memberROI = computeROIMultiple(memberBookingValue, memberSpend);
-        const memberMissed = memberLeads.filter(isMissedLead);
-        const memberMissedFollowups = rangeFollowups.filter(f => f.assignedTo === member && f.status === "Missed");
-        return {
-          name: member,
-          leadsCount: memberLeads.length,
-          spend: memberSpend,
-          roi: memberROI,
-          missedCount: memberMissed.length,
-          missedFollowupsCount: memberMissedFollowups.length
-        };
-      });
 
       return {
         manager: manager.name,
-        individualLeadsCount: individualLeads.length,
-        individualSpend,
+        individualLeadsCount: individual.leadsCount,
+        individualSpend: individual.spend,
         individualROI,
-        individualMissedCount: individualMissed.length,
-        teamLeadsCount: teamLeads.length,
-        teamSpend,
+        individualMissedCount: individual.missedCount,
+        teamLeadsCount: team.leadsCount,
+        teamSpend: team.spend,
         teamROI,
-        teamMissedCount: teamMissed.length,
-        totalLeadsCount: allLeads.length,
+        teamMissedCount: team.missedCount,
+        totalLeadsCount: individual.leadsCount + team.leadsCount,
         totalSpendForManager,
         combinedROI,
         memberBreakdown
       };
     });
-  }, [managers, users, rangeLeads, rangeFollowups, rangeSpend]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [managers, users, statsByAgentId]);
   const managerPagination = usePagination(managerRows, 10, JSON.stringify(dateRange));
 
   return (

@@ -374,6 +374,27 @@ export function apiGetAgentReportStats(assignedAgentId: string, dateFrom?: strin
   return request<AgentReportStats>(`/api/v1/leads/report-stats?${params.toString()}`);
 }
 
+export interface ManagerReportAgentStats {
+  assignedAgentId: string;
+  leadsCount: number;
+  spend: number;
+  bookingValue: number;
+  missedCount: number;
+  missedFollowups: number;
+}
+// Backs ManagerReports.tsx — one row per agent (manager or direct report
+// alike). The Individual/Team/Combined split and per-member breakdown
+// stay client-side, summing a manager's own row with their direct
+// reports' rows, same pattern LeadDashboard.tsx's Analytics tab already
+// uses for its own per-agent rollup.
+export function apiGetManagerReportStats(dateFrom?: string, dateTo?: string): Promise<ManagerReportAgentStats[]> {
+  const params = new URLSearchParams();
+  if (dateFrom) params.set("dateFrom", dateFrom);
+  if (dateTo) params.set("dateTo", dateTo);
+  const qs = params.toString();
+  return request<ManagerReportAgentStats[]>(`/api/v1/leads/manager-report-stats${qs ? `?${qs}` : ""}`);
+}
+
 export function apiGetLead(leadId: string): Promise<ApiLeadRow> {
   return request<ApiLeadRow>(`/api/v1/leads/${leadId}`);
 }
