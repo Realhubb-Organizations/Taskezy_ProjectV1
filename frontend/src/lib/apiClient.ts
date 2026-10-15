@@ -348,6 +348,28 @@ export function apiGetLeadAnalyticsStats(filters: LeadAnalyticsStatsFilters = {}
   return request<AgentAnalyticsStats[]>(`/api/v1/leads/analytics-stats${qs ? `?${qs}` : ""}`);
 }
 
+export interface AgentReportStats {
+  assigned: number;
+  contacted: number;
+  qualified: number;
+  siteVisits: number;
+  bookingValue: number;
+  bookingCount: number;
+}
+// Backs the Agent report tab's 4 funnel KPI cards + booking value/count
+// (AgentReports.tsx) for one agent at a time — pass that agent's user id as
+// the single-element assignedAgentId array (same shape GET /leads/stats
+// already takes). Campaign-attributed spend and missed-lead/follow-up
+// detection stay client-side (reportMetrics.ts), same as every KPI card's
+// own drill-down popup, which still reads real lead rows from the bulk array.
+export function apiGetAgentReportStats(assignedAgentId: string, dateFrom?: string, dateTo?: string): Promise<AgentReportStats> {
+  const params = new URLSearchParams();
+  params.set("assignedAgentId", assignedAgentId);
+  if (dateFrom) params.set("dateFrom", dateFrom);
+  if (dateTo) params.set("dateTo", dateTo);
+  return request<AgentReportStats>(`/api/v1/leads/report-stats?${params.toString()}`);
+}
+
 export function apiGetLead(leadId: string): Promise<ApiLeadRow> {
   return request<ApiLeadRow>(`/api/v1/leads/${leadId}`);
 }

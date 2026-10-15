@@ -252,6 +252,48 @@ export async function getAnalyticsStatsByAgent(
   return rows;
 }
 
+export interface AgentReportRow {
+  assigned: string;
+  contacted: string;
+  qualified: string;
+  site_visits: string;
+  booking_value: string;
+  booking_count: string;
+}
+
+/**
+ * Backend aggregate for the Agent report tab (AgentReports.tsx's
+ * computeAgentFunnel/computeBookingValue/computeBookingCount) — a single
+ * aggregate row (the caller passes one agent's id via filter.assignedAgentId,
+ * same scopedToAgentIds security boundary as every other leads endpoint; a
+ * Member/Manager requesting another agent's id gets zero rows, not that
+ * agent's data, since scopedToAgentIds is always ANDed in). No GROUP BY
+ * needed — unlike getAnalyticsStatsByAgent, this never returns more than
+ * one agent's numbers per call.
+ */
+export async function getAgentReportStats(
+  filter: LeadFilterConditions,
+  qualifiedCodes: string[],
+  siteVisitCodes: string[]
+): Promise<AgentReportRow> {
+  const { whereClause, params } = buildLeadWhereClause(filter);
+  params.push(qualifiedCodes, siteVisitCodes);
+  const qualifiedParam = params.length - 1;
+  const siteVisitParam = params.length;
+  const { rows } = await query<AgentReportRow>(
+    `SELECT count(*) AS assigned,
+            count(*) FILTER (WHERE l.status_code != 'NEW_LEAD') AS contacted,
+            count(*) FILTER (WHERE l.status_code = ANY($${qualifiedParam}::text[])) AS qualified,
+            count(*) FILTER (WHERE l.status_code = ANY($${siteVisitParam}::text[])) AS site_visits,
+            COALESCE(SUM(l.deal_value) FILTER (WHERE l.status_code = 'BOOKED'), 0) AS booking_value,
+            count(*) FILTER (WHERE l.status_code = 'BOOKED') AS booking_count
+     FROM leads l
+     ${whereClause}`,
+    params
+  );
+  return rows[0];
+}
+
 export async function findById(id: string, scopedToAgentIds?: string[]): Promise<LeadListRow | undefined> {
   const params: unknown[] = [id];
   let whereExtra = "";

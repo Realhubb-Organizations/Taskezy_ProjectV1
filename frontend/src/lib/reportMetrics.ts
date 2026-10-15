@@ -71,12 +71,6 @@ export function agentFunnelLeads(leads: Lead[]): { assigned: Lead[]; contacted: 
   };
 }
 
-/** Counts of agentFunnelLeads — the KPI cards' popups list the leads behind each one. */
-export function computeAgentFunnel(leads: Lead[]): { assigned: number; contacted: number; qualified: number; siteVisits: number } {
-  const f = agentFunnelLeads(leads);
-  return { assigned: f.assigned.length, contacted: f.contacted.length, qualified: f.qualified.length, siteVisits: f.siteVisits.length };
-}
-
 export function computeBookingValue(leads: Lead[]): number {
   return leads.filter(l => BOOKING_STATUSES.has(l.status)).reduce((sum, l) => sum + (l.dealValue || 0), 0);
 }
