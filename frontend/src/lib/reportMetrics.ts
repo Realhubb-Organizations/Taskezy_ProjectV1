@@ -25,8 +25,15 @@ export function inRange(dateKey: string, from: string, to: string): boolean {
   return dateKey >= from && dateKey <= to;
 }
 
+// Filters by created_at (when a lead entered the system), not assignedAt —
+// matches CRM Dashboard/Leads page/Campaigns' Date Range semantics and the
+// backend's own dateFrom/dateTo filtering (leads.repository.ts's
+// buildLeadWhereClause), per an explicit decision to make Reports agree
+// with every other admin page instead of quietly using a different field
+// (2026-10-15). A lead reassigned mid-range no longer moves its own
+// range membership the way assignedAt-based filtering used to.
 export function filterLeadsByRange(leads: Lead[], from: string, to: string): Lead[] {
-  return leads.filter(l => l.assignedAt && inRange(toDateKey(l.assignedAt), from, to));
+  return leads.filter(l => l.createdAtStr && inRange(toDateKey(l.createdAtStr), from, to));
 }
 
 export function filterAdSpendByRange(records: AdSpendRecord[], from: string, to: string): AdSpendRecord[] {

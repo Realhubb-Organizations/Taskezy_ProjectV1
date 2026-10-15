@@ -210,18 +210,26 @@ export interface AgentReportStats {
   siteVisits: number;
   bookingValue: number;
   bookingCount: number;
+  allocatedSpend: number;
+  missedLeads: number;
+  missedFollowups: number;
 }
+
+// Mirrors reportMetrics.ts's SLA_MINUTES — the response-time window a lead
+// is given before isMissedLead/getMissedInfo calls it missed.
+const REPORT_SLA_MINUTES = 20;
 
 /**
  * Backend counterpart to AgentReports.tsx's computeAgentFunnel/
- * computeBookingValue/computeBookingCount — the Agent report's 4 funnel
- * KPI cards (Assigned/Contacted/Qualified/Site Visits) plus booking value/
- * count, for the one agent named in filter.assignedAgentId. Deliberately
- * does NOT cover campaign-attributed spend (needs a per-agent ad-spend
- * join) or missed-lead/missed-follow-up detection (computed live against
- * the clock, not a cacheable count) — both stay client-side for now, same
- * as the drill-down popup behind each of these cards, which still reads
- * the bulk leads array to list the real rows a number represents.
+ * computeBookingValue/computeBookingCount/computeCampaignAttributedSpend/
+ * isMissedLead (leads + follow-ups) — the Agent report's 4 funnel KPI
+ * cards, booking value/count, campaign-attributed spend, and missed-lead/
+ * missed-follow-up counts, for the one agent named in
+ * filter.assignedAgentId. ROI itself stays client-side (one division of
+ * bookingValue/allocatedSpend, both already here). Each KPI card's own
+ * drill-down popup still reads the bulk leads/followupCalls arrays to
+ * list the real rows a number represents — only the numbers themselves
+ * moved here.
  */
 export async function getAgentReportStats(caller: AccessTokenPayload, filter: {
   assignedAgentId?: string[];
@@ -229,23 +237,30 @@ export async function getAgentReportStats(caller: AccessTokenPayload, filter: {
   dateTo?: string;
 }): Promise<AgentReportStats> {
   const scopedToAgentIds = await scopeForCaller(caller);
-  const row = await repo.getAgentReportStats(
-    {
-      assignedAgentId: filter.assignedAgentId,
-      dateFrom: filter.dateFrom,
-      dateTo: filter.dateTo,
-      scopedToAgentIds
-    },
-    REPORT_QUALIFIED_CODES,
-    REPORT_SITE_VISIT_CODES
-  );
+  const [row, missedFollowups] = await Promise.all([
+    repo.getAgentReportStats(
+      {
+        assignedAgentId: filter.assignedAgentId,
+        dateFrom: filter.dateFrom,
+        dateTo: filter.dateTo,
+        scopedToAgentIds
+      },
+      REPORT_QUALIFIED_CODES,
+      REPORT_SITE_VISIT_CODES,
+      REPORT_SLA_MINUTES
+    ),
+    repo.getMissedFollowupCount(filter.assignedAgentId?.[0], scopedToAgentIds, filter.dateFrom, filter.dateTo)
+  ]);
   return {
     assigned: Number(row.assigned),
     contacted: Number(row.contacted),
     qualified: Number(row.qualified),
     siteVisits: Number(row.site_visits),
     bookingValue: Number(row.booking_value),
-    bookingCount: Number(row.booking_count)
+    bookingCount: Number(row.booking_count),
+    allocatedSpend: Number(row.allocated_spend),
+    missedLeads: Number(row.missed_leads),
+    missedFollowups
   };
 }
 

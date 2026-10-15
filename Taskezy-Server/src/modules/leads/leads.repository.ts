@@ -259,39 +259,116 @@ export interface AgentReportRow {
   site_visits: string;
   booking_value: string;
   booking_count: string;
+  allocated_spend: string;
+  missed_leads: string;
 }
 
 /**
  * Backend aggregate for the Agent report tab (AgentReports.tsx's
- * computeAgentFunnel/computeBookingValue/computeBookingCount) — a single
- * aggregate row (the caller passes one agent's id via filter.assignedAgentId,
- * same scopedToAgentIds security boundary as every other leads endpoint; a
+ * computeAgentFunnel/computeBookingValue/computeBookingCount/
+ * computeCampaignAttributedSpend/isMissedLead) — a single aggregate row
+ * (the caller passes one agent's id via filter.assignedAgentId, same
+ * scopedToAgentIds security boundary as every other leads endpoint; a
  * Member/Manager requesting another agent's id gets zero rows, not that
  * agent's data, since scopedToAgentIds is always ANDed in). No GROUP BY
  * needed — unlike getAnalyticsStatsByAgent, this never returns more than
  * one agent's numbers per call.
+ *
+ * allocated_spend mirrors computeCampaignAttributedSpend's exact
+ * same-string campaign match (l.campaign = ad_spend_records.account_name,
+ * case-sensitive, no COALESCE-to-source fallback) — a deliberately
+ * stricter rule than campaign-lead-stats' LOWER(COALESCE(...)) join,
+ * since that's what the frontend function it replaces always did.
+ *
+ * missed_leads is computed at query time (now() for a lead with no
+ * response yet), not cached — a still-unanswered lead becomes "missed"
+ * purely by time passing, same live-clock rule reportMetrics.ts's
+ * getMissedInfo always used client-side.
  */
 export async function getAgentReportStats(
   filter: LeadFilterConditions,
   qualifiedCodes: string[],
-  siteVisitCodes: string[]
+  siteVisitCodes: string[],
+  slaMinutes: number
 ): Promise<AgentReportRow> {
   const { whereClause, params } = buildLeadWhereClause(filter);
-  params.push(qualifiedCodes, siteVisitCodes);
-  const qualifiedParam = params.length - 1;
-  const siteVisitParam = params.length;
+  params.push(qualifiedCodes, siteVisitCodes, filter.dateFrom ?? null, filter.dateTo ?? null, slaMinutes);
+  const qualifiedParam = params.length - 4;
+  const siteVisitParam = params.length - 3;
+  const dateFromParam = params.length - 2;
+  const dateToParam = params.length - 1;
+  const slaParam = params.length;
   const { rows } = await query<AgentReportRow>(
-    `SELECT count(*) AS assigned,
+    `WITH campaign_cpl AS (
+       SELECT account_name, SUM(spend) / NULLIF(SUM(leads_generated), 0) AS spend_per_lead
+       FROM ad_spend_records
+       WHERE ($${dateFromParam}::date IS NULL OR spend_date >= $${dateFromParam}::date)
+         AND ($${dateToParam}::date IS NULL OR spend_date <= $${dateToParam}::date)
+       GROUP BY account_name
+     )
+     SELECT count(*) AS assigned,
             count(*) FILTER (WHERE l.status_code != 'NEW_LEAD') AS contacted,
             count(*) FILTER (WHERE l.status_code = ANY($${qualifiedParam}::text[])) AS qualified,
             count(*) FILTER (WHERE l.status_code = ANY($${siteVisitParam}::text[])) AS site_visits,
             COALESCE(SUM(l.deal_value) FILTER (WHERE l.status_code = 'BOOKED'), 0) AS booking_value,
-            count(*) FILTER (WHERE l.status_code = 'BOOKED') AS booking_count
+            count(*) FILTER (WHERE l.status_code = 'BOOKED') AS booking_count,
+            COALESCE(SUM(c.spend_per_lead), 0) AS allocated_spend,
+            count(*) FILTER (
+              WHERE l.assigned_at IS NOT NULL AND (
+                (l.first_response_at IS NOT NULL AND EXTRACT(EPOCH FROM (l.first_response_at - l.assigned_at)) / 60 > $${slaParam}::numeric)
+                OR (l.first_response_at IS NULL AND EXTRACT(EPOCH FROM (now() - l.assigned_at)) / 60 > $${slaParam}::numeric)
+              )
+            ) AS missed_leads
      FROM leads l
+     LEFT JOIN campaign_cpl c ON c.account_name = l.campaign
      ${whereClause}`,
     params
   );
   return rows[0];
+}
+
+/**
+ * The Agent report's "Missed Follow-ups" KPI count — follow_up_calls isn't
+ * otherwise part of this repository, but this stat is tightly coupled to
+ * getAgentReportStats above (same report, same one-agent/date-range shape),
+ * so it lives here rather than a one-function followups.repository.ts.
+ * Mirrors reportMetrics.ts's filterFollowupsByRange + `f.status === "Missed"`
+ * — scheduled_at is the same date field FollowupCall.date maps from.
+ *
+ * scopedToAgentIds is the same hard security boundary buildLeadWhereClause
+ * applies to the leads side — ANDed with assignedToId, never overridden by
+ * it, so a Member/Manager requesting an id outside their own scope gets 0,
+ * not that agent's real count.
+ */
+export async function getMissedFollowupCount(
+  assignedToId: string | undefined,
+  scopedToAgentIds: string[] | undefined,
+  dateFrom?: string,
+  dateTo?: string
+): Promise<number> {
+  const conditions: string[] = [`fc.status = 'MISSED'`];
+  const params: unknown[] = [];
+  if (assignedToId) {
+    params.push(assignedToId);
+    conditions.push(`fc.assigned_to_id = $${params.length}`);
+  }
+  if (scopedToAgentIds) {
+    params.push(scopedToAgentIds);
+    conditions.push(`fc.assigned_to_id = ANY($${params.length}::uuid[])`);
+  }
+  if (dateFrom) {
+    params.push(dateFrom);
+    conditions.push(`fc.scheduled_at >= $${params.length}::date`);
+  }
+  if (dateTo) {
+    params.push(dateTo);
+    conditions.push(`fc.scheduled_at < ($${params.length}::date + 1)`);
+  }
+  const { rows } = await query<{ count: string }>(
+    `SELECT count(*) FROM followup_calls fc WHERE ${conditions.join(" AND ")}`,
+    params
+  );
+  return Number(rows[0]?.count ?? 0);
 }
 
 export async function findById(id: string, scopedToAgentIds?: string[]): Promise<LeadListRow | undefined> {
