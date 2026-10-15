@@ -34,6 +34,8 @@ import {
   apiListResaleUnits,
   apiCreateResaleUnit,
   apiListFollowups,
+  apiGetPendingTasks,
+  ApiPendingTaskRow,
   apiCreateFollowup,
   apiListAttendance,
   apiListReimbursements,
@@ -525,6 +527,7 @@ interface AppState {
   properties: Property[];
   resaleUnits: ResaleUnit[];
   followupCalls: FollowupCall[];
+  pendingTasks: ApiPendingTaskRow[];
   attendanceRecords: AttendanceRecord[];
   reimbursements: ReimbursementClaim[];
   timesheets: TimesheetLog[];
@@ -1055,6 +1058,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [properties, setProperties] = useState<Property[]>([]);
   const [resaleUnits, setResaleUnits] = useState<ResaleUnit[]>([]);
   const [followupCalls, setFollowupCalls] = useState<FollowupCall[]>([]);
+  // Sales dashboard's Pending Tasks queue — server-merged (see
+  // apiGetPendingTasks), scoped entirely server-side off the session. Kept
+  // out of loadAllRealData's own Promise.allSettled batch and given its own
+  // effect below (watching leadsChangedSignal) instead, since a changed
+  // lead/follow-up should refetch this live, the same way LeadDashboard's
+  // own server-paginated fetch already does.
+  const [pendingTasks, setPendingTasks] = useState<ApiPendingTaskRow[]>([]);
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
   const [reimbursements, setReimbursements] = useState<ReimbursementClaim[]>([]);
   const [timesheets, setTimesheets] = useState<TimesheetLog[]>([]);
@@ -1350,6 +1360,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setManualRefreshSignal((s) => s + 1);
     loadAllRealData(currentUser?.role);
   };
+
+  // Refetches the Pending Tasks queue whenever a lead/follow-up changes
+  // (leadsChangedSignal — see its own comment above) or on login, instead
+  // of holding the full leads/followupCalls arrays just to rebuild it
+  // client-side on every render.
+  useEffect(() => {
+    if (!currentUser) return;
+    let cancelled = false;
+    apiGetPendingTasks()
+      .then(result => { if (!cancelled) setPendingTasks(result); })
+      .catch(() => { /* leave the previous tasks showing on a transient failure */ });
+    return () => { cancelled = true; };
+  }, [currentUser, leadsChangedSignal]);
 
   // Live notifications (Meta leads, etc.) over Server-Sent Events — one
   // connection per session, reopened whenever the signed-in user changes.
@@ -2486,6 +2509,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         properties,
         resaleUnits,
         followupCalls,
+        pendingTasks,
         attendanceRecords,
         reimbursements,
         timesheets,

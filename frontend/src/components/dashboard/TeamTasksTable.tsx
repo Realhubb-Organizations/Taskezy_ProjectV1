@@ -4,8 +4,8 @@ import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createPortal } from "react-dom";
 import { Minus, Sliders, X } from "lucide-react";
-import { Lead, FollowupCall } from "@/context/AppContext";
-import { buildSalesPendingTasks, TaskBucket } from "@/lib/salesPendingTasks";
+import { ApiPendingTaskRow } from "@/lib/apiClient";
+import { applyTaskBuckets, TaskBucket } from "@/lib/salesPendingTasks";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
 import { SearchableMultiSelect } from "@/components/ui/SearchableDropdown";
 import TablePagination from "@/components/ui/TablePagination";
@@ -41,15 +41,13 @@ interface TeamRow {
 // Admin / Manager dashboard only — per-agent task counts across the team.
 // The sales agent's own dashboard uses SalesPendingTasksTable instead.
 export default function TeamTasksTable({
-  leads,
-  followupCalls,
+  pendingTasks,
   teamMembers,
   tab,
   onTabChange,
   isLoading = false
 }: {
-  leads: Lead[];
-  followupCalls: FollowupCall[];
+  pendingTasks: ApiPendingTaskRow[];
   teamMembers: string[]; // active sales agents, so "Show team members with no tasks" can list them
   // Owned by the dashboard so TaskInsightsCharts below follows the same tab.
   tab: Tab;
@@ -77,7 +75,7 @@ export default function TeamTasksTable({
   const [page, setPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(10);
 
-  const tasks = useMemo(() => buildSalesPendingTasks(leads, followupCalls, now), [leads, followupCalls, now]);
+  const tasks = useMemo(() => applyTaskBuckets(pendingTasks, now), [pendingTasks, now]);
   const taskTypeOptions = useMemo(() => Array.from(new Set(tasks.map(t => t.taskType))).sort(), [tasks]);
   const taskTypeLabel = taskTypes.length === 0 ? "All" : taskTypes.join(", ");
 

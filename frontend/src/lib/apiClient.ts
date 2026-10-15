@@ -967,13 +967,11 @@ export interface ApiFollowupRow {
 // Pages through every follow-up and concatenates the results — same bridge
 // pattern as apiListAllLeads, now that GET /followups has real LIMIT/OFFSET
 // pagination (see followups.routes.ts) instead of one unbounded SELECT.
-// Still the right shape for AppContext's bulk load: TeamTasksTable/
-// SalesPendingTasksTable's buildSalesPendingTasks merges followupCalls with
-// leads and buckets them by elapsed time (missed/pending/upcoming), which
-// needs the *whole* dataset in memory to compute correctly — it can't be
-// switched to a single fetched page without reimplementing that time-bucket
-// logic server-side, so this keeps delivering the full array exactly as
-// apiListFollowups() always did, just via capped page-sized round trips.
+// TeamTasksTable/SalesPendingTasksTable/TaskInsightsCharts no longer need
+// this bulk array themselves — see apiGetPendingTasks below, which now
+// does their merge server-side — but Reports' own filterFollowupsByRange/
+// missed-follow-up counts (reportMetrics.ts) still read this full array,
+// so it stays.
 export async function apiListFollowups(): Promise<ApiFollowupRow[]> {
   const all: ApiFollowupRow[] = [];
   let page = 1;
@@ -985,6 +983,30 @@ export async function apiListFollowups(): Promise<ApiFollowupRow[]> {
     page += 1;
   }
   return all;
+}
+
+export interface ApiPendingTaskRow {
+  id: string;
+  leadId?: string;
+  dueAt: string | null;
+  forceMissed: boolean;
+  name: string;
+  phone: string;
+  email: string;
+  status: string;
+  feedback: string;
+  taskType: string;
+  assignedTo: string;
+}
+// Backs the sales dashboard's Pending Tasks queue (SalesPendingTasksTable/
+// TeamTasksTable/TaskInsightsCharts) — the server-side merge of open
+// follow-ups + actionable-status leads with no open follow-up (see
+// Taskezy-Server/src/modules/tasks/tasks.routes.ts), already scoped to
+// whatever the caller is allowed to see. Bucketing (missed/pending/
+// upcoming) stays client-side — see lib/salesPendingTasks.ts's
+// applyTaskBuckets — since it needs to update live every 30s.
+export function apiGetPendingTasks(): Promise<ApiPendingTaskRow[]> {
+  return request<ApiPendingTaskRow[]>("/api/v1/tasks/pending");
 }
 
 // Real server-side pagination for a dedicated, specifically-filtered
