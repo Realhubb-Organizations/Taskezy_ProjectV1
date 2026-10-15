@@ -1043,6 +1043,9 @@ export function apiGetPendingTasks(): Promise<ApiPendingTaskRow[]> {
 // param multi-select over MISSED/UPCOMING/COMPLETED.
 export interface FollowupListFilters {
   status?: ("MISSED" | "UPCOMING" | "COMPLETED")[];
+  // "Just the follow-ups for these leads" — e.g. a drill-down table's
+  // next-call-date column, without paging through every follow-up.
+  leadId?: string[];
 }
 
 export interface FollowupsPageResult {
@@ -1060,6 +1063,7 @@ export async function apiListFollowupsPage(
 ): Promise<FollowupsPageResult> {
   const params = new URLSearchParams();
   filters.status?.forEach(s => params.append("status", s));
+  filters.leadId?.forEach(id => params.append("leadId", id));
   params.set("page", String(page));
   params.set("pageSize", String(pageSize));
   const { data, meta } = await requestWithMeta<ApiFollowupRow>(`/api/v1/followups?${params.toString()}`);

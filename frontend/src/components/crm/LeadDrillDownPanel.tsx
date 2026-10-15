@@ -2,7 +2,8 @@
 
 import React, { useEffect, useMemo, useState, useRef } from "react";
 import { createPortal } from "react-dom";
-import { useApp, Lead, LeadStatus } from "@/context/AppContext";
+import { useApp, Lead, LeadStatus, FollowupCall, mapApiFollowupToFrontend } from "@/context/AppContext";
+import { apiListFollowupsPage } from "@/lib/apiClient";
 import { useDialog } from "@/components/ui/DialogProvider";
 import { deriveActivityTimeline, PICKABLE_STATUS_OPTIONS, statusBadgeClasses } from "@/lib/leadStatusMapping";
 import { WhatsAppIcon, CallIcon } from "@/components/icons/ContactIcons";
@@ -316,7 +317,7 @@ export default function LeadDrillDownPanel({ title, leads, onClose }: {
   leads: Lead[];
   onClose: () => void;
 }) {
-  const { followupCalls, isDataLoading, currentUser, users, activeRole, recordCallEnded, recordWhatsAppOpened } = useApp();
+  const { isDataLoading, currentUser, users, activeRole, recordCallEnded, recordWhatsAppOpened } = useApp();
   const handleDrillStatusChange = useLeadStatusChange();
   const callAllowed = canTriggerLeadCall(activeRole === "ADMIN");
   const handleCall = (lead: Lead) => {
@@ -401,8 +402,20 @@ export default function LeadDrillDownPanel({ title, leads, onClose }: {
 
   // Real next-scheduled-call date, from the actual followup_calls queue —
   // "—" when no reminder was ever set for this lead, rather than a
-  // fabricated createdAt+1day placeholder.
-  const nextCallDateFor = (leadId: string) => nextFollowupFor(leadId, followupCalls);
+  // fabricated createdAt+1day placeholder. Fetched just for the leads on
+  // the current drill-down page (10 at a time), not the whole company's
+  // follow-up table.
+  const [pageFollowups, setPageFollowups] = useState<FollowupCall[]>([]);
+  const pageLeadIds = drillPageLeads.map(l => l.id).join(",");
+  useEffect(() => {
+    if (!pageLeadIds) { setPageFollowups([]); return; }
+    let cancelled = false;
+    apiListFollowupsPage(1, 500, { leadId: pageLeadIds.split(",") })
+      .then(({ rows }) => { if (!cancelled) setPageFollowups(rows.map(mapApiFollowupToFrontend)); })
+      .catch(() => { if (!cancelled) setPageFollowups([]); });
+    return () => { cancelled = true; };
+  }, [pageLeadIds]);
+  const nextCallDateFor = (leadId: string) => nextFollowupFor(leadId, pageFollowups);
 
   // Drill-down table's per-row Status cell — the shared searchable dropdown,
   // in place of a plain native <select> (whose OS-default popup, e.g. dark
