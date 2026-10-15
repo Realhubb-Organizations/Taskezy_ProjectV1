@@ -10,6 +10,7 @@ import { canChangeLeadStatus, canReassignThisLead, isLeadAssignableUser, STATUS_
 import { maskPhone, maskEmail } from "@/lib/maskPII";
 import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/callTrigger";
 import { WhatsAppIcon } from "@/components/icons/ContactIcons";
+import { callSubStatusOf } from "@/lib/callSubStatus";
 
 interface LeadDetailDrawerProps {
   lead: Lead | null;
@@ -398,16 +399,16 @@ export default function LeadDetailDrawer({
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold text-slate-500">Current Status :</span>
             <div className="flex items-center gap-1.5">
-              {(lead.callStatus === "Connected" || lead.callStatus === "Called") && (
+              {callSubStatusOf(lead) && (
                 <span
                   className={`text-[10px] font-extrabold px-2 py-0.5 rounded-lg border ${
-                    lead.callStatus === "Connected"
+                    callSubStatusOf(lead) === "Qualified"
                       ? "text-emerald-700 bg-emerald-50 border-emerald-200"
                       : "text-red-600 bg-red-50 border-red-200"
                   }`}
-                  title="Qualification Status — derived from Data Calling's Call Status"
+                  title="Sub-status, set from Data Calling when the call is Connected"
                 >
-                  {lead.callStatus === "Connected" ? "Qualified" : "Unqualified"}
+                  {callSubStatusOf(lead)}
                 </span>
               )}
               {canChangeLeadStatus(lead, currentUser, users) && !(managerStatusReadOnly && currentUser?.role_type === "Manager") ? (

@@ -221,6 +221,7 @@ export interface ApiLeadRow {
   // Called/Not Reachable/Wrong Number. null until the lead has been called
   // at least once.
   call_status: string | null;
+  call_sub_status?: string | null;
   logs: { message: string; timestamp: string; user: string }[];
 }
 
@@ -395,14 +396,18 @@ export function apiUpdateLeadStatus(
 }
 
 // Data Calling's own, independent field (migration 030) — separate
-// endpoint from status above, no transition rules between them.
+// endpoint from status above, no transition rules between them. The note is
+// required and saved as the lead's note; callSubStatus (migration 033) is
+// optional and only allowed with Connected.
 export function apiUpdateCallStatus(
   leadId: string,
-  callStatus: "Connected" | "Called" | "Not Reachable" | "Wrong Number"
+  callStatus: "Connected" | "Called" | "Not Reachable" | "Wrong Number",
+  callSubStatus: "Qualified" | "Unqualified" | null | undefined,
+  note: string
 ): Promise<ApiLeadRow> {
   return request<ApiLeadRow>(`/api/v1/leads/${leadId}/call-status`, {
     method: "PATCH",
-    body: JSON.stringify({ callStatus })
+    body: JSON.stringify(callSubStatus !== undefined ? { callStatus, callSubStatus, note } : { callStatus, note })
   });
 }
 

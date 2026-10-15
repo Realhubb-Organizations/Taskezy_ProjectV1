@@ -51,6 +51,9 @@ export interface LeadListRow {
   // Called / Not Reachable / Wrong Number, completely separate from
   // status_code. null until the lead has been called at least once.
   call_status: string | null;
+  // Qualified / Unqualified — only ever set while call_status is Connected
+  // (migration 033).
+  call_sub_status: string | null;
   logs: { message: string; timestamp: string; user: string }[];
 }
 
@@ -146,7 +149,7 @@ const LIST_SELECT = `
     nu.first_name || COALESCE(' ' || nu.last_name, '') AS notes_updated_by_name,
     l.property_id, p.name AS property_name,
     l.assigned_at, l.first_response_at, l.created_at,
-    l.source, l.sub_source, l.call_status, l.campaign, l.meta_page_name, l.meta_form_id, l.meta_ad_id,
+    l.source, l.sub_source, l.call_status, l.call_sub_status, l.campaign, l.meta_page_name, l.meta_form_id, l.meta_ad_id,
     COALESCE(
       (SELECT json_agg(json_build_object('message', ll.message, 'timestamp', ll.created_at, 'user', ll.user_name_snapshot) ORDER BY ll.created_at)
        FROM lead_logs ll
@@ -314,6 +317,7 @@ export async function updateCallStatus(
   client: PoolClient,
   leadId: string,
   callStatus: string,
+  callSubStatus: string | null,
   // Set only when this exact update is the Connected promotion — flips
   // source off "Bulk Upload" (graduating the lead out of Data Calling into
   // the main CRM leads list, see AppContext.tsx's leads/dataCallingLeads
@@ -325,10 +329,11 @@ export async function updateCallStatus(
   await client.query(
     `UPDATE leads
      SET call_status = $1,
+         call_sub_status = $5,
          source = COALESCE($2, source),
          status_code = COALESCE($3, status_code)
      WHERE id = $4`,
-    [callStatus, promotion?.source ?? null, promotion?.statusCode ?? null, leadId]
+    [callStatus, promotion?.source ?? null, promotion?.statusCode ?? null, leadId, callSubStatus]
   );
 }
 

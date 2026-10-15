@@ -469,9 +469,21 @@ const VALID_CALL_STATUSES = new Set(["Connected", "Called", "Not Reachable", "Wr
  * updateCallStatus for the mechanics) the same way reaching
  * Connected+Qualified used to before this field existed.
  */
-export async function updateCallStatus(caller: AccessTokenPayload, leadId: string, callStatus: string) {
+export async function updateCallStatus(
+  caller: AccessTokenPayload,
+  leadId: string,
+  callStatus: string,
+  // Qualified / Unqualified (migration 033). Optional, only valid with
+  // Connected; undefined = leave the current one as is (still Connected) or none.
+  callSubStatus?: "Qualified" | "Unqualified" | null,
+  // Required by the API (updateCallStatusSchema) — saved as the lead's note.
+  note?: string
+) {
   if (!VALID_CALL_STATUSES.has(callStatus)) {
     throw ApiError.badRequest(`"${callStatus}" is not a recognized call status.`);
+  }
+  if (callSubStatus && callStatus !== "Connected") {
+    throw ApiError.badRequest("Sub-status can only be set when the call status is Connected.");
   }
   const scopedToAgentIds = await scopeForCaller(caller);
   const existing = await repo.findById(leadId, scopedToAgentIds);
@@ -483,9 +495,27 @@ export async function updateCallStatus(caller: AccessTokenPayload, leadId: strin
       ? { source: "Data", statusCode: "NEW_LEAD" }
       : undefined;
 
+  const nextSubStatus =
+    callStatus !== "Connected"
+      ? null
+      : callSubStatus !== undefined
+        ? callSubStatus
+        : existing.call_status === "Connected" ? existing.call_sub_status : null;
+  const statusChanged = existing.call_status !== callStatus;
+  const subStatusChanged = (existing.call_sub_status ?? null) !== nextSubStatus;
+
   await withTransaction(async (client) => {
-    await repo.updateCallStatus(client, leadId, callStatus, promotion);
-    await repo.insertLeadLog(client, leadId, caller.sub, caller.name, `Call status changed to "${callStatus}"`);
+    await repo.updateCallStatus(client, leadId, callStatus, nextSubStatus, promotion);
+    if (statusChanged || !subStatusChanged) {
+      await repo.insertLeadLog(client, leadId, caller.sub, caller.name, `Call status changed to "${callStatus}"`);
+    }
+    if (subStatusChanged) {
+      await repo.insertLeadLog(client, leadId, caller.sub, caller.name, nextSubStatus ? `Sub-status changed to "${nextSubStatus}"` : "Sub-status cleared");
+    }
+    if (note) {
+      await repo.setNote(client, leadId, note, caller.sub);
+      await repo.insertLeadLog(client, leadId, caller.sub, caller.name, `Note: ${note}`);
+    }
     if (promotion) {
       // A second, explicit log entry for the promotion itself — distinct
       // from the generic "Call status changed" line above, so the

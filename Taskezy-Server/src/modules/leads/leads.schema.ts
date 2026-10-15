@@ -77,9 +77,20 @@ export const updateLeadStatusSchema = z.object({
 // Data Calling's own, independent field (see migration 030) — separate
 // endpoint from the main Lead Status above, since the two are no longer
 // the same column and have no transition rules between them.
-export const updateCallStatusSchema = z.object({
-  callStatus: z.enum(["Connected", "Called", "Not Reachable", "Wrong Number"])
-});
+// callSubStatus (migration 033) is optional and only accepted with
+// Connected — Called / Not Reachable / Wrong Number never carry one. A note
+// is required with every call status update (saved as the lead's note in
+// the same transaction; same rules as noteText below).
+export const updateCallStatusSchema = z
+  .object({
+    callStatus: z.enum(["Connected", "Called", "Not Reachable", "Wrong Number"]),
+    callSubStatus: z.enum(["Qualified", "Unqualified"]).nullable().optional(),
+    note: z.string().trim().min(1, "Please write a note").max(2000, "Notes are limited to 2,000 characters")
+  })
+  .refine(d => !d.callSubStatus || d.callStatus === "Connected", {
+    message: "Sub-status can only be set when the call status is Connected.",
+    path: ["callSubStatus"]
+  });
 
 export const editLeadSchema = z.object({
   name: z.string().trim().min(1).max(200).optional(),

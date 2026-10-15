@@ -8,6 +8,7 @@ import { PhoneCall, MessageCircle, Check, X } from "lucide-react";
 import { useApp, LeadStatus } from "@/context/AppContext";
 import { apiCreateFollowup, apiUpdateLeadStatus, apiUpdateCallStatus } from "@/lib/apiClient";
 import { nextStatusOptions, frontendStatusToDbCode } from "@/lib/leadStatusMapping";
+import { CALL_SUB_STATUS_OPTIONS, CallSubStatus, callSubStatusOf } from "@/lib/callSubStatus";
 
 // Full-screen, unclosable overlay — the app stays mounted behind it but
 // nothing in it can be reached (no backdrop-click, no Escape, and the
@@ -71,6 +72,8 @@ export default function CallFeedbackGate() {
   // Step 2: the lead's status (regular leads) or call status (Data Calling).
   const [status, setStatus] = useState<LeadStatus>("New Lead");
   const [callStatus, setCallStatus] = useState<"" | (typeof CALL_STATUS_OPTIONS)[number]>("");
+  // Data Calling only: optional Qualified / Unqualified, shown only for Connected.
+  const [callSubStatus, setCallSubStatus] = useState<CallSubStatus | null>(null);
   const [nextDate, setNextDate] = useState("");
   const [nextTime, setNextTime] = useState("");
   const [dealValue, setDealValue] = useState("");
@@ -97,6 +100,7 @@ export default function CallFeedbackGate() {
     if (lead) {
       setStatus(lead.status);
       setCallStatus(lead.callStatus ?? "");
+      setCallSubStatus(callSubStatusOf(lead));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lead?.id]);
@@ -130,7 +134,9 @@ export default function CallFeedbackGate() {
   };
 
   const statusChanged = !!lead && !isDataCallingLead && status !== lead.status;
-  const callStatusChanged = !!lead && isDataCallingLead && callStatus !== "" && callStatus !== (lead.callStatus ?? "");
+  const nextCallSubStatus = callStatus === "Connected" ? callSubStatus : null;
+  const callStatusChanged = !!lead && isDataCallingLead && callStatus !== "" &&
+    (callStatus !== (lead.callStatus ?? "") || nextCallSubStatus !== callSubStatusOf(lead));
   const needsNextCall = isDataCallingLead
     ? callStatus === "Not Reachable" && callStatusChanged
     : NEEDS_NEXT_CALL.includes(status) && statusChanged;
@@ -148,6 +154,8 @@ export default function CallFeedbackGate() {
     }
     const deal = needsDealValue ? parseFloat(dealValue.replace(/[^0-9.]/g, "")) : undefined;
     if (needsDealValue && (!deal || deal <= 0)) return setError("Enter the booking's deal value.");
+    // Data Calling: a note is always required (it's saved as the lead's note).
+    if (isDataCallingLead && !note.trim()) return setError("Please add a note about the call.");
     if (!somethingChanged && !note.trim()) return setError("Status is unchanged — add a note about what happened.");
 
     setSubmitting(true);
@@ -155,7 +163,7 @@ export default function CallFeedbackGate() {
     try {
       // 1. The lead's status (or call status) — must succeed before the app unlocks.
       if (lead && isDataCallingLead && callStatusChanged) {
-        await apiUpdateCallStatus(lead.id, callStatus as (typeof CALL_STATUS_OPTIONS)[number]);
+        await apiUpdateCallStatus(lead.id, callStatus as (typeof CALL_STATUS_OPTIONS)[number], nextCallSubStatus, note.trim());
       } else if (lead && statusChanged) {
         const code = frontendStatusToDbCode(status);
         if (!code) throw new Error(`"${status}" can't be set here.`);
@@ -171,7 +179,9 @@ export default function CallFeedbackGate() {
       // 3. Close the attempt (logged on the lead's timeline) — unlocks the app.
       const outcome = isWhatsApp ? (happened ? "Sent" : "Not Sent") : happened ? "Connected" : "Not connected";
       const statusLine = isDataCallingLead
-        ? callStatusChanged ? `Call status → ${callStatus}` : `Call status kept: ${lead?.callStatus ?? "—"}`
+        ? callStatusChanged
+          ? `Call status → ${callStatus}${nextCallSubStatus ? ` (${nextCallSubStatus})` : ""}`
+          : `Call status kept: ${lead?.callStatus ?? "—"}`
         : statusChanged ? `Status → ${status}` : `Status kept: ${lead?.status ?? "—"}`;
       const parts = [!happened ? `Reason: ${notHappenedReason()}` : "", statusLine, note.trim()].filter(Boolean);
       await submitCallFeedback(outcome, parts.join(". ") || (isWhatsApp ? "Message sent via WhatsApp." : "Call completed."));
@@ -257,7 +267,32 @@ export default function CallFeedbackGate() {
                   {CALL_STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
               </div>
-            ) : (
+            ) : null}
+            {isDataCallingLead && callStatus === "Connected" && (
+              <div className="space-y-1">
+                <label className="block text-[10px] font-bold text-slate-500 uppercase">Sub-status (optional)</label>
+                <div className="flex gap-2">
+                  {CALL_SUB_STATUS_OPTIONS.map(o => {
+                    const selected = callSubStatus === o;
+                    return (
+                      <button
+                        key={o}
+                        type="button"
+                        onClick={() => { setCallSubStatus(cur => (cur === o ? null : o)); setError(""); }}
+                        className={`flex-1 px-3 py-2 rounded-lg border text-xs font-semibold transition-colors ${
+                          selected
+                            ? o === "Qualified" ? "bg-emerald-50 border-emerald-300 text-emerald-700" : "bg-red-50 border-red-300 text-red-600"
+                            : "bg-slate-50 border-slate-200 text-slate-600"
+                        }`}
+                      >
+                        {o}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            {!isDataCallingLead && (
               <div className="space-y-1">
                 <label className="block text-[10px] font-bold text-slate-500 uppercase">Lead status</label>
                 <select value={status} onChange={(e) => { setStatus(e.target.value as LeadStatus); setError(""); }} className={inputClass}>
@@ -284,7 +319,7 @@ export default function CallFeedbackGate() {
               </div>
             )}
             <div className="space-y-1">
-              <label className="block text-[10px] font-bold text-slate-500 uppercase">Note {somethingChanged ? "(optional)" : "(required)"}</label>
+              <label className="block text-[10px] font-bold text-slate-500 uppercase">Note {isDataCallingLead || !somethingChanged ? "(required)" : "(optional)"}</label>
               <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} maxLength={1000} placeholder="What happened?" className={`${inputClass} font-normal resize-none`} />
             </div>
             <div className="flex gap-2.5">
