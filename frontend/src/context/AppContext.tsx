@@ -1361,10 +1361,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     loadAllRealData(currentUser?.role);
   };
 
-  // Refetches the Pending Tasks queue whenever a lead/follow-up changes
-  // (leadsChangedSignal — see its own comment above) or on login, instead
-  // of holding the full leads/followupCalls arrays just to rebuild it
-  // client-side on every render.
+  // Fetched once per login (plus pull-to-refresh via manualRefreshSignal),
+  // not on every live leadsChangedSignal bump — a real production check
+  // found this can be a multi-MB response (thousands of still-untouched
+  // "New Lead" leads each becoming their own task), so refetching it on
+  // every single lead/follow-up change anywhere in the company was too
+  // expensive. Same "fetch at login, refresh on pull-to-refresh" cadence
+  // leads/followupCalls themselves already use.
   useEffect(() => {
     if (!currentUser) return;
     let cancelled = false;
@@ -1372,7 +1375,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       .then(result => { if (!cancelled) setPendingTasks(result); })
       .catch(() => { /* leave the previous tasks showing on a transient failure */ });
     return () => { cancelled = true; };
-  }, [currentUser, leadsChangedSignal]);
+  }, [currentUser, manualRefreshSignal]);
 
   // Live notifications (Meta leads, etc.) over Server-Sent Events — one
   // connection per session, reopened whenever the signed-in user changes.
