@@ -1,23 +1,20 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/context/AppContext";
 import { DollarSign, Target, Gauge, TrendingUp, Building2 } from "lucide-react";
 import { DateRange } from "./DateRangeFilter";
-import {
-  filterLeadsByRange,
-  filterAdSpendByRange,
-  computeCPL,
-  computeLeadQuality,
-  computeVisitConversion,
-  computeBookingValue,
-  computeBookingCount,
-  computeROIMultiple,
-  formatCurrency
-} from "@/lib/reportMetrics";
+import { filterAdSpendByRange, computeCPL, computeROIMultiple, formatCurrency } from "@/lib/reportMetrics";
+import { apiGetMarketingReportStats, type MarketingReportStats } from "@/lib/apiClient";
 import { LineSkeleton, TableRowsSkeleton } from "@/components/ui/Skeletons";
 import { SearchableMultiSelect } from "@/components/ui/SearchableDropdown";
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
+
+const ZERO_MARKETING_STATS: MarketingReportStats = {
+  overall: { buyerCount: 0, nonBuyerCount: 0, convertedCount: 0, totalCount: 0, bookingValue: 0, bookingCount: 0 },
+  byCampaign: [],
+  byProperty: []
+};
 
 const SUB_TABS = ["By Ad Account", "Overall", "Property-wise"] as const;
 type SubTab = (typeof SUB_TABS)[number];
@@ -28,7 +25,7 @@ const CAMPAIGN_STATUS_OPTIONS = [
 ];
 
 export default function MarketingReports({ dateRange }: { dateRange: DateRange }) {
-  const { leads, adSpendRecords, properties, isDataLoading } = useApp();
+  const { adSpendRecords, properties, isDataLoading } = useApp();
   const [subTab, setSubTab] = useState<SubTab>("Overall");
   // Active/Inactive ([] = all) — records with no linked Meta campaign
   // (legacy/manual rows, or any campaign the sync job hasn't reached yet)
@@ -36,7 +33,6 @@ export default function MarketingReports({ dateRange }: { dateRange: DateRange }
   // Active/Inactive filter, since we genuinely don't know their status.
   const [campaignStatuses, setCampaignStatuses] = useState<string[]>([]);
 
-  const rangeLeads = useMemo(() => filterLeadsByRange(leads, dateRange.from, dateRange.to), [leads, dateRange]);
   const dateFilteredSpend = useMemo(() => filterAdSpendByRange(adSpendRecords, dateRange.from, dateRange.to), [adSpendRecords, dateRange]);
   const rangeSpend = useMemo(() => {
     if (campaignStatuses.length === 0) return dateFilteredSpend;
@@ -46,13 +42,37 @@ export default function MarketingReports({ dateRange }: { dateRange: DateRange }
   const totalSpend = rangeSpend.reduce((sum, r) => sum + r.spend, 0);
   const totalPlatformLeads = rangeSpend.reduce((sum, r) => sum + r.leadsGenerated, 0);
   const cpl = computeCPL(totalSpend, totalPlatformLeads);
-  const quality = computeLeadQuality(rangeLeads);
-  const visitConversion = computeVisitConversion(rangeLeads);
-  const bookingValue = computeBookingValue(rangeLeads);
-  const bookingCount = computeBookingCount(rangeLeads);
+
+  // Lead quality/visit-conversion/booking numbers now come from the server
+  // (GET /ad-spend/marketing-report-stats) instead of computeLeadQuality/
+  // computeVisitConversion/computeBookingValue/computeBookingCount over the
+  // bulk leads array — spend/CPL above stay client-side, unchanged, same
+  // split Campaigns' own campaign-lead-stats uses.
+  const [marketingStats, setMarketingStats] = useState<MarketingReportStats>(ZERO_MARKETING_STATS);
+  useEffect(() => {
+    let cancelled = false;
+    apiGetMarketingReportStats(dateRange.from, dateRange.to)
+      .then(result => { if (!cancelled) setMarketingStats(result); })
+      .catch(() => { /* leave the previous numbers showing on a transient failure */ });
+    return () => { cancelled = true; };
+  }, [dateRange.from, dateRange.to]);
+  const { overall, byCampaign, byProperty } = marketingStats;
+  const qualityPercentOf = (buyerCount: number, nonBuyerCount: number) => {
+    const classified = buyerCount + nonBuyerCount;
+    return classified === 0 ? 0 : (buyerCount / classified) * 100;
+  };
+  const quality = { buyerCount: overall.buyerCount, nonBuyerCount: overall.nonBuyerCount, qualityPercent: qualityPercentOf(overall.buyerCount, overall.nonBuyerCount) };
+  const visitConversion = { convertedCount: overall.convertedCount, conversionPercent: overall.totalCount === 0 ? 0 : (overall.convertedCount / overall.totalCount) * 100 };
+  const bookingValue = overall.bookingValue;
+  const bookingCount = overall.bookingCount;
   const roi = computeROIMultiple(bookingValue, totalSpend);
 
-  // Per ad account aggregation, joined against CRM leads by matching campaign name
+  const byCampaignMap = useMemo(() => new Map(byCampaign.map(c => [c.campaign, c])), [byCampaign]);
+  const byPropertyMap = useMemo(() => new Map(byProperty.map(p => [p.property, p])), [byProperty]);
+
+  // Per ad account aggregation — spend/platformLeads still come from
+  // adSpendRecords; lead-quality/booking numbers are looked up from the
+  // server's byCampaign (exact-string campaign-name match, same as before).
   const accountRows = useMemo(() => {
     const grouped: Record<string, { platform: string; accountName: string; property?: string; spend: number; platformLeads: number }> = {};
     rangeSpend.forEach(r => {
@@ -62,42 +82,40 @@ export default function MarketingReports({ dateRange }: { dateRange: DateRange }
       grouped[key].platformLeads += r.leadsGenerated;
     });
     return Object.values(grouped).map(acc => {
-      const matchedLeads = rangeLeads.filter(l => l.campaign === acc.accountName);
-      const accQuality = computeLeadQuality(matchedLeads);
-      const accBookingValue = computeBookingValue(matchedLeads);
+      const matched = byCampaignMap.get(acc.accountName);
+      const matchedLeadsCount = (matched?.buyerCount ?? 0) + (matched?.nonBuyerCount ?? 0);
       return {
         ...acc,
         cpl: computeCPL(acc.spend, acc.platformLeads),
-        matchedLeadsCount: matchedLeads.length,
-        qualityPercent: accQuality.qualityPercent,
-        hasMatchedLeads: matchedLeads.length > 0,
-        roi: computeROIMultiple(accBookingValue, acc.spend)
+        matchedLeadsCount,
+        qualityPercent: matched ? qualityPercentOf(matched.buyerCount, matched.nonBuyerCount) : 0,
+        hasMatchedLeads: matchedLeadsCount > 0,
+        roi: computeROIMultiple(matched?.bookingValue ?? 0, acc.spend)
       };
     }).sort((a, b) => b.spend - a.spend);
-  }, [rangeSpend, rangeLeads]);
+  }, [rangeSpend, byCampaignMap]);
 
-  // Property-wise aggregation
+  // Property-wise aggregation — same split as accountRows above.
   const propertyRows = useMemo(() => {
     const propertyNames = Array.from(new Set([...properties.map(p => p.name), ...rangeSpend.map(r => r.property).filter(Boolean) as string[]]));
     return propertyNames.map(name => {
       const propSpendRecords = rangeSpend.filter(r => r.property === name);
       const spend = propSpendRecords.reduce((sum, r) => sum + r.spend, 0);
       const platformLeads = propSpendRecords.reduce((sum, r) => sum + r.leadsGenerated, 0);
-      const propLeads = rangeLeads.filter(l => l.property === name);
-      const propBookingValue = computeBookingValue(propLeads);
-      const propBookingCount = computeBookingCount(propLeads);
+      const matched = byPropertyMap.get(name);
+      const propBookingValue = matched?.bookingValue ?? 0;
       return {
         name,
         spend,
         platformLeads,
         cpl: computeCPL(spend, platformLeads),
-        crmLeadsCount: propLeads.length,
-        bookingCount: propBookingCount,
+        crmLeadsCount: matched?.leadsCount ?? 0,
+        bookingCount: matched?.bookingCount ?? 0,
         bookingValue: propBookingValue,
         roi: computeROIMultiple(propBookingValue, spend)
       };
     }).filter(row => row.spend > 0 || row.crmLeadsCount > 0).sort((a, b) => b.spend - a.spend);
-  }, [properties, rangeSpend, rangeLeads]);
+  }, [properties, rangeSpend, byPropertyMap]);
 
   // Both tables jump back to page 1 when the date range or campaign filter changes.
   const tableResetKey = JSON.stringify([dateRange, campaignStatuses]);
@@ -172,7 +190,7 @@ export default function MarketingReports({ dateRange }: { dateRange: DateRange }
             <div className="space-y-1">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Visit/Meeting Conversion</span>
               {isDataLoading ? <LineSkeleton width={50} height={24} /> : <p className="text-xl font-black text-slate-800">{visitConversion.conversionPercent.toFixed(1)}%</p>}
-              <span className="text-[9px] text-slate-450">{visitConversion.convertedCount} of {rangeLeads.length} leads</span>
+              <span className="text-[9px] text-slate-450">{visitConversion.convertedCount} of {overall.totalCount} leads</span>
             </div>
             <div className="h-9 w-9 rounded-lg bg-pink-50 border border-pink-100 flex items-center justify-center text-pink-600 shrink-0">
               <Building2 className="h-4.5 w-4.5" />

@@ -1563,6 +1563,23 @@ export function apiGetCampaignLeadStats(dateFrom?: string, dateTo?: string): Pro
   return request<CampaignLeadStats[]>(`/api/v1/ad-spend/campaign-lead-stats${qs ? `?${qs}` : ""}`);
 }
 
+export interface MarketingReportStats {
+  overall: { buyerCount: number; nonBuyerCount: number; convertedCount: number; totalCount: number; bookingValue: number; bookingCount: number };
+  byCampaign: { campaign: string; buyerCount: number; nonBuyerCount: number; bookingValue: number }[];
+  byProperty: { property: string; leadsCount: number; bookingValue: number; bookingCount: number }[];
+}
+// Backs MarketingReports.tsx's Overall summary cards (Lead Quality, Visit
+// Conversion, Booking ROI) and the lead-derived half of its By Ad Account/
+// Property-wise tables — spend/CPL/platform stay client-side from the
+// already-fetched adSpendRecords, same split campaign-lead-stats uses.
+export function apiGetMarketingReportStats(dateFrom?: string, dateTo?: string): Promise<MarketingReportStats> {
+  const params = new URLSearchParams();
+  if (dateFrom) params.set("dateFrom", dateFrom);
+  if (dateTo) params.set("dateTo", dateTo);
+  const qs = params.toString();
+  return request<MarketingReportStats>(`/api/v1/ad-spend/marketing-report-stats${qs ? `?${qs}` : ""}`);
+}
+
 // Real per-ad, per-day spend/leads with each row's real ad set/ad/creative
 // name attached — un-aggregated (one row per ad per day), same grain as
 // ApiAdSpendRow, for Campaign Deep Dive's Ad Set Name/Ad creative Name
