@@ -11,6 +11,7 @@ import {
   bulkReassignLeadsSchema,
   createLeadSchema,
   editLeadSchema,
+  leadAnalyticsStatsQuerySchema,
   leadIdParamSchema,
   leadStatsQuerySchema,
   listLeadsQuerySchema,
@@ -30,6 +31,7 @@ import {
   getBulkDeleteStatusHandler,
   getBulkImportStatusHandler,
   getBulkReassignStatusHandler,
+  getLeadAnalyticsStatsHandler,
   getLeadHandler,
   getLeadStatsHandler,
   listLeadsHandler,
@@ -53,6 +55,10 @@ leadsRouter.get("/", validate({ query: listLeadsQuerySchema }), asyncHandler(lis
 // leadsService.getLeadStats applies the same sales-member -> own-leads-only
 // scoping as listLeads, just not a role gate beyond being logged in.
 leadsRouter.get("/stats", validate({ query: leadStatsQuerySchema }), asyncHandler(getLeadStatsHandler));
+// Leads Analytics tab's per-agent breakdown (LeadDashboard.tsx) — same
+// no-extra-role-gate reasoning as /stats above; a Member calling this
+// directly just gets their own single-row self-scoped result.
+leadsRouter.get("/analytics-stats", validate({ query: leadAnalyticsStatsQuerySchema }), asyncHandler(getLeadAnalyticsStatsHandler));
 leadsRouter.get("/:id", validate({ params: leadIdParamSchema }), asyncHandler(getLeadHandler));
 // Uploading leads (single entry or Data Calling's bulk Excel) is for admins
 // and managers only — agents work leads, they don't add them. Managers can

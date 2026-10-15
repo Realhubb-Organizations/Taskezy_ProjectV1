@@ -8,7 +8,7 @@ import { useDialog } from "@/components/ui/DialogProvider";
 import { Sliders, Sparkles, Plus, Check, ChevronDown, Search, X, Minus, Download, RotateCcw, Users, Trash2, AlertTriangle } from "lucide-react";
 import { STATUS_OPTIONS, PICKABLE_STATUS_OPTIONS, frontendStatusToDbCode } from "@/lib/leadStatusMapping";
 import { type LeadSummaryStats } from "@/lib/leadSummaryStats";
-import { apiListLeadsPage, apiGetLeadStats, apiDeleteLead, apiBulkDeleteLeads, apiBulkReassignLeads, type LeadListFilters } from "@/lib/apiClient";
+import { apiListLeadsPage, apiGetLeadStats, apiGetLeadAnalyticsStats, apiDeleteLead, apiBulkDeleteLeads, apiBulkReassignLeads, type LeadListFilters, type AgentAnalyticsStats } from "@/lib/apiClient";
 import { WhatsAppIcon, CallIcon, PlatformLabel } from "@/components/icons/ContactIcons";
 import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/callTrigger";
 import { LineSkeleton, TableRowsSkeleton } from "@/components/ui/Skeletons";
@@ -410,31 +410,39 @@ export default function LeadDashboard() {
   // Plain YYYY-MM-DD bounds for whichever date-range preset is active —
   // mirrors the boundary logic dateInRange already uses for the old
   // client-side filter, just emitting dates instead of a predicate, since
-  // the server does the actual comparison now.
-  const adminServerDateBounds = (): { dateFrom?: string; dateTo?: string } => {
+  // the server does the actual comparison now. Shared by the admin Leads
+  // tab's own date range and the Analytics tab's (see
+  // analyticsServerDateBounds below) — same preset semantics, different state.
+  const dateRangeToServerBounds = (
+    range: "today" | "yesterday" | "week" | "month" | "all" | "custom",
+    customRange: { start: string; end: string } | null,
+    refNow: Date
+  ): { dateFrom?: string; dateTo?: string } => {
     const toYMD = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    if (adminDateRange === "all") return {};
-    const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-    if (adminDateRange === "today") return { dateFrom: toYMD(startOfToday), dateTo: toYMD(startOfToday) };
-    if (adminDateRange === "yesterday") {
+    if (range === "all") return {};
+    const startOfToday = new Date(refNow.getFullYear(), refNow.getMonth(), refNow.getDate());
+    if (range === "today") return { dateFrom: toYMD(startOfToday), dateTo: toYMD(startOfToday) };
+    if (range === "yesterday") {
       const y = new Date(startOfToday);
       y.setDate(y.getDate() - 1);
       return { dateFrom: toYMD(y), dateTo: toYMD(y) };
     }
-    if (adminDateRange === "week") {
+    if (range === "week") {
       const weekAgo = new Date(startOfToday);
       weekAgo.setDate(weekAgo.getDate() - 6);
       return { dateFrom: toYMD(weekAgo), dateTo: toYMD(startOfToday) };
     }
-    if (adminDateRange === "custom") {
-      if (!adminCustomRange) return {};
-      return { dateFrom: adminCustomRange.start.split("T")[0], dateTo: adminCustomRange.end.split("T")[0] };
+    if (range === "custom") {
+      if (!customRange) return {};
+      return { dateFrom: customRange.start.split("T")[0], dateTo: customRange.end.split("T")[0] };
     }
     // month
-    const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-    const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+    const monthStart = new Date(refNow.getFullYear(), refNow.getMonth(), 1);
+    const monthEnd = new Date(refNow.getFullYear(), refNow.getMonth() + 1, 0);
     return { dateFrom: toYMD(monthStart), dateTo: toYMD(monthEnd) };
   };
+  const adminServerDateBounds = (): { dateFrom?: string; dateTo?: string } =>
+    dateRangeToServerBounds(adminDateRange, adminCustomRange, today);
 
   // Non-admin's stat-card quick-filter (adminMetric) maps onto the same
   // server status filter rather than a separate client-side predicate — see
@@ -984,18 +992,51 @@ export default function LeadDashboard() {
   // re-implemented.
   const analyticsCampaignOptions = groupCampaignOptions(analyticsCampaignsList);
 
-  const computeLeadStats = (leadsForPerson: Lead[]) => {
-    const qualified = leadsForPerson.filter(l => !UNQUALIFIED_STATUSES.includes(l.status)).length;
-    const siteVisits = leadsForPerson.filter(l => SITE_VISIT_STATUSES.includes(l.status)).length;
-    const total = leadsForPerson.length;
-    return {
-      total,
-      qualified,
-      unqualified: total - qualified,
-      siteVisits,
-      qlPct: total > 0 ? (qualified / total) * 100 : 0,
-      ql2svPct: qualified > 0 ? (siteVisits / qualified) * 100 : 0
-    };
+  // Per-agent counts now come from the server (GET /leads/analytics-stats —
+  // see leads.service.ts's getLeadAnalyticsStats) instead of scanning
+  // analyticsScopedLeads, which stays around only for the drill-down panel
+  // below (still bulk-array-based for now — see the server-side-aggregates
+  // plan for when that changes too). Property/Campaign/Date filters are
+  // sent to the server; Member stays a client-side pass over this small
+  // per-agent array, same "which rows are even considered" role it always
+  // played, just no longer over raw leads.
+  const [analyticsStats, setAnalyticsStats] = useState<AgentAnalyticsStats[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    const propertyIds = properties.filter(p => analyticsPropertyFilter.includes(p.name)).map(p => p.id);
+    apiGetLeadAnalyticsStats({
+      propertyId: propertyIds.length > 0 ? propertyIds : undefined,
+      campaign: analyticsCampaignFilter.length > 0 ? analyticsCampaignFilter : undefined,
+      ...dateRangeToServerBounds(analyticsDateRange, analyticsCustomRange, today)
+    })
+      .then(result => { if (!cancelled) setAnalyticsStats(result); })
+      .catch(() => { /* leave the previous numbers showing on a transient failure */ });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analyticsPropertyFilter, analyticsCampaignFilter, analyticsDateRange, analyticsCustomRange, properties]);
+
+  const statsByAgentId = new Map(analyticsStats.map(r => [r.assignedAgentId, r]));
+  const userIdByName = new Map(users.map(u => [u.name, u.id]));
+
+  const deriveRates = (total: number, qualified: number, siteVisits: number) => ({
+    qlPct: total > 0 ? (qualified / total) * 100 : 0,
+    ql2svPct: qualified > 0 ? (siteVisits / qualified) * 100 : 0
+  });
+
+  // One agent's stats, honoring the Member filter the same way it always
+  // worked (narrows which agents are even considered, not a server param —
+  // the grouped-by-agent result is already small enough that filtering it
+  // here is cheap).
+  const statsForAgentName = (agentName: string) => {
+    if (analyticsMemberFilter.length > 0 && !analyticsMemberFilter.includes(agentName)) {
+      return { total: 0, qualified: 0, unqualified: 0, siteVisits: 0, ...deriveRates(0, 0, 0) };
+    }
+    const agentId = userIdByName.get(agentName);
+    const row = agentId ? statsByAgentId.get(agentId) : undefined;
+    const total = row?.total ?? 0;
+    const qualified = row?.qualified ?? 0;
+    const siteVisits = row?.siteVisits ?? 0;
+    return { total, qualified, unqualified: row?.unqualified ?? 0, siteVisits, ...deriveRates(total, qualified, siteVisits) };
   };
 
   // Real reporting-line data (User.role_type/managerId) — not a fabricated
@@ -1011,17 +1052,13 @@ export default function LeadDashboard() {
   // needed): QL's %age = qualified/total, QL2SV %age = of the qualified
   // leads, what share also reached a site-visit status.
   const adminManagerRows = agentsList.map(agentName => {
-    const agentLeads = analyticsScopedLeads.filter(l => l.assignedAgent === agentName);
-    const stats = computeLeadStats(agentLeads);
+    const stats = statsForAgentName(agentName);
     const salesUser = salesTeamUsers.find(u => u.name === agentName);
     const isManager = salesUser?.role_type === "Manager";
     const directReports = isManager && salesUser
       ? salesTeamUsers
           .filter(u => u.managerId === salesUser.id)
-          .map(member => ({
-            name: member.name,
-            ...computeLeadStats(analyticsScopedLeads.filter(l => l.assignedAgent === member.name))
-          }))
+          .map(member => ({ name: member.name, ...statsForAgentName(member.name) }))
       : [];
     const teamTotal = stats.total + directReports.reduce((sum, d) => sum + d.total, 0);
     return { agentName, isManager, directReports, teamTotal, ...stats };
@@ -1037,20 +1074,29 @@ export default function LeadDashboard() {
   // agents misrepresents it as one (2026-10-09 fix).
   const adminNames = new Set(users.filter(u => u.role === "ADMIN").map(u => u.name));
   const teamCoveredNames = new Set(adminManagerRows.flatMap(r => [r.agentName, ...r.directReports.map(d => d.name)]));
+  const nameByAgentId = new Map(users.map(u => [u.id, u.name]));
+  const dataAgentNames = Array.from(statsByAgentId.keys()).map(id => nameByAgentId.get(id)).filter((n): n is string => !!n);
   const noTeamNames = Array.from(new Set(
-    analyticsScopedLeads.map(l => l.assignedAgent).filter(n => n && !teamCoveredNames.has(n) && !adminNames.has(n))
+    dataAgentNames.filter(n =>
+      !teamCoveredNames.has(n) && !adminNames.has(n) &&
+      (analyticsMemberFilter.length === 0 || analyticsMemberFilter.includes(n))
+    )
   ));
-  const noTeamReports = noTeamNames.map(name => ({
-    name,
-    ...computeLeadStats(analyticsScopedLeads.filter(l => l.assignedAgent === name))
-  }));
+  const noTeamReports = noTeamNames.map(name => ({ name, ...statsForAgentName(name) }));
+  const noTeamTotals = noTeamReports.reduce((acc, d) => ({
+    total: acc.total + d.total,
+    qualified: acc.qualified + d.qualified,
+    unqualified: acc.unqualified + d.unqualified,
+    siteVisits: acc.siteVisits + d.siteVisits
+  }), { total: 0, qualified: 0, unqualified: 0, siteVisits: 0 });
   const noTeamRow = noTeamReports.length > 0
     ? {
         agentName: NO_TEAM_LABEL,
         isManager: true,
         directReports: noTeamReports,
-        teamTotal: noTeamReports.reduce((sum, d) => sum + d.total, 0),
-        ...computeLeadStats(analyticsScopedLeads.filter(l => noTeamNames.includes(l.assignedAgent)))
+        teamTotal: noTeamTotals.total,
+        ...noTeamTotals,
+        ...deriveRates(noTeamTotals.total, noTeamTotals.qualified, noTeamTotals.siteVisits)
       }
     : null;
 

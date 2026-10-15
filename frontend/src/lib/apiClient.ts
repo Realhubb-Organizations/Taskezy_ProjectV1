@@ -317,6 +317,37 @@ export function apiGetLeadStats(filters: LeadListFilters = {}): Promise<LeadSumm
   return request<LeadSummaryStats>(`/api/v1/leads/stats${qs ? `?${qs}` : ""}`);
 }
 
+// Leads Analytics tab's own filter set (LeadDashboard.tsx) — Property
+// instead of status/assignedAgentId/search/excludeBulkUpload, since this
+// tab filters per-agent, not per-status.
+export interface LeadAnalyticsStatsFilters {
+  propertyId?: string[];
+  campaign?: string[];
+  dateFrom?: string;
+  dateTo?: string;
+}
+export interface AgentAnalyticsStats {
+  assignedAgentId: string;
+  total: number;
+  qualified: number;
+  unqualified: number;
+  siteVisits: number;
+}
+// One row per agent instead of the full lead list — backs LeadDashboard.tsx's
+// Analytics tab breakdown table (computeLeadStats/adminManagerRows), which
+// still does the manager roll-up and "No manager assigned" bucketing
+// client-side over this small per-agent array, same as apiGetLeadStats's
+// 7 buckets above.
+export function apiGetLeadAnalyticsStats(filters: LeadAnalyticsStatsFilters = {}): Promise<AgentAnalyticsStats[]> {
+  const params = new URLSearchParams();
+  filters.propertyId?.forEach(p => params.append("propertyId", p));
+  filters.campaign?.forEach(c => params.append("campaign", c));
+  if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
+  if (filters.dateTo) params.set("dateTo", filters.dateTo);
+  const qs = params.toString();
+  return request<AgentAnalyticsStats[]>(`/api/v1/leads/analytics-stats${qs ? `?${qs}` : ""}`);
+}
+
 export function apiGetLead(leadId: string): Promise<ApiLeadRow> {
   return request<ApiLeadRow>(`/api/v1/leads/${leadId}`);
 }

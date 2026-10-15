@@ -62,6 +62,8 @@ export interface LeadFilterConditions {
   assignedAgentId?: string[];
   /** Matches lead.campaign || lead.source, mirroring the frontend's client-side filter. */
   campaign?: string[];
+  /** Not exposed on GET /leads or /leads/stats today — only the Leads Analytics tab's aggregate (getAnalyticsStatsByAgent) takes this, to mirror that tab's Property toolbar filter. */
+  propertyId?: string[];
   /** Inclusive calendar-date bounds (YYYY-MM-DD) on created_at. */
   dateFrom?: string;
   dateTo?: string;
@@ -114,6 +116,11 @@ function buildLeadWhereClause(filter: LeadFilterConditions): { whereClause: stri
   if (filter.campaign && filter.campaign.length > 0) {
     params.push(filter.campaign);
     conditions.push(`COALESCE(l.campaign, l.source) = ANY($${params.length}::text[])`);
+  }
+
+  if (filter.propertyId && filter.propertyId.length > 0) {
+    params.push(filter.propertyId);
+    conditions.push(`l.property_id = ANY($${params.length}::uuid[])`);
   }
 
   // dateFrom/dateTo are business-calendar days, so each bound is midnight in
@@ -199,6 +206,47 @@ export async function getStats(filter: LeadFilterConditions): Promise<StatusCode
   const { whereClause, params } = buildLeadWhereClause(filter);
   const { rows } = await query<StatusCodeCount>(
     `SELECT l.status_code, count(*) FROM leads l ${whereClause} GROUP BY l.status_code`,
+    params
+  );
+  return rows;
+}
+
+export interface AgentAnalyticsRow {
+  assigned_agent_id: string;
+  total: string;
+  unqualified: string;
+  site_visits: string;
+}
+
+/**
+ * Backend aggregate for the Leads Analytics tab (LeadDashboard.tsx's
+ * computeLeadStats/adminManagerRows) — one row per agent instead of the
+ * full lead list, same buildLeadWhereClause as findMany/getStats so this
+ * tab's Property/Campaign/Date filters produce numbers consistent with the
+ * plain Leads tab's. `unqualified`/`siteVisits` use Postgres's FILTER
+ * clause rather than two separate GROUP BY buckets, since a Site Visit
+ * Done lead must count toward both `total` and `siteVisits` at once (it's
+ * never "unqualified" — the two sets don't overlap, see unqualifiedCodes/
+ * siteVisitCodes in leads.service.ts). qualified = total - unqualified is
+ * computed in the service layer, matching the frontend's own computeLeadStats.
+ */
+export async function getAnalyticsStatsByAgent(
+  filter: LeadFilterConditions,
+  unqualifiedCodes: string[],
+  siteVisitCodes: string[]
+): Promise<AgentAnalyticsRow[]> {
+  const { whereClause, params } = buildLeadWhereClause(filter);
+  params.push(unqualifiedCodes, siteVisitCodes);
+  const unqualifiedParam = params.length - 1;
+  const siteVisitParam = params.length;
+  const { rows } = await query<AgentAnalyticsRow>(
+    `SELECT l.assigned_agent_id,
+            count(*) AS total,
+            count(*) FILTER (WHERE l.status_code = ANY($${unqualifiedParam}::text[])) AS unqualified,
+            count(*) FILTER (WHERE l.status_code = ANY($${siteVisitParam}::text[])) AS site_visits
+     FROM leads l
+     ${whereClause}
+     GROUP BY l.assigned_agent_id`,
     params
   );
   return rows;
