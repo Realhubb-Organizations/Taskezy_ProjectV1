@@ -168,6 +168,17 @@ export async function apiLogin(email: string, password: string): Promise<ApiUser
   return data.user;
 }
 
+// "Sign in with Google": sends the ID token Google gave the browser; the
+// server verifies it and answers exactly like a password login.
+export async function apiGoogleLogin(credential: string): Promise<ApiUser> {
+  const data = await request<{ accessToken: string; user: ApiUser }>("/api/v1/auth/google", {
+    method: "POST",
+    body: JSON.stringify({ credential })
+  });
+  setAccessToken(data.accessToken);
+  return data.user;
+}
+
 export async function apiLogout(): Promise<void> {
   try {
     await request("/api/v1/auth/logout", { method: "POST" });

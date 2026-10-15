@@ -30,6 +30,13 @@ export async function loginHandler(req: Request, res: Response): Promise<void> {
   sendOk(res, { accessToken: result.accessToken, user: result.user });
 }
 
+// Same response and refresh cookie as a password login.
+export async function googleLoginHandler(req: Request, res: Response): Promise<void> {
+  const result = await authService.loginWithGoogle(req.body.credential);
+  setRefreshCookie(res, result.refreshToken);
+  sendOk(res, { accessToken: result.accessToken, user: result.user });
+}
+
 export async function refreshHandler(req: Request, res: Response): Promise<void> {
   const token = req.cookies?.[REFRESH_COOKIE_NAME];
   if (!token) throw ApiError.unauthorized("No refresh token provided");

@@ -53,6 +53,11 @@ const envSchema = z.object({
 
   // Optional: Firebase service-account JSON, base64-encoded. Without it, push is disabled and the server still starts.
   FIREBASE_SERVICE_ACCOUNT_B64: z.string().min(1).optional(),
+  // "Sign in with Google" (POST /auth/google). The Web OAuth client ID from
+  // Google Cloud (not a secret). Unset = Google sign-in is switched off.
+  GOOGLE_SIGNIN_CLIENT_ID: z.string().min(1).optional(),
+  // Only Google accounts from this Workspace domain may sign in.
+  GOOGLE_SIGNIN_ALLOWED_DOMAIN: z.string().min(1).default("realhubb.in"),
 
   // IANA timezone that defines the business calendar day (attendance dates,
   // "today" in reports and alerts). The servers and database run in UTC.

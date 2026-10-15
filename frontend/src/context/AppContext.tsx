@@ -4,6 +4,7 @@ import React, { createContext, useContext, useState, useEffect, useMemo, useRef 
 import { parseIndianPrice } from "@/lib/validation";
 import {
   apiLogin,
+  apiGoogleLogin,
   apiLogout,
   apiGetMe,
   apiListAllLeads,
@@ -601,6 +602,8 @@ interface AppActions {
     email: string,
     pass: string
   ) => Promise<{ user: User } | { user: null; errorType: "invalid_credentials" | "rate_limited" | "network" }>;
+  /** "Sign in with Google" — on failure, `error` is the server's own message (e.g. wrong domain, no account). */
+  loginWithGoogle: (credential: string) => Promise<{ user: User } | { user: null; error: string }>;
   logout: () => void;
   switchUserRole: (role: Role, userId?: string) => void;
   setActiveSystem: (system: SystemType) => void;
@@ -1677,6 +1680,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  // Same post-login steps as loginWithTempPassword above. The server's
+  // refusal messages are specific and safe to show as is ("Please use your
+  // @realhubb.in Google account.", "No Taskezy account is linked to …").
+  const loginWithGoogle = async (credential: string): Promise<{ user: User } | { user: null; error: string }> => {
+    try {
+      const mapped = mapApiUserToFrontendUser(await apiGoogleLogin(credential));
+      setCurrentUser(mapped);
+      setActiveRole(mapped.role);
+      setActiveSystem(getDefaultSystem(mapped));
+      loadAllRealData(mapped.role);
+      setShowLoginSplash(true);
+      return { user: mapped };
+    } catch (err) {
+      if (err instanceof ApiRequestError) {
+        if (err.status === 429) return { user: null, error: "Too many sign-in attempts. Please wait a few minutes and try again." };
+        if (err.status < 500) return { user: null, error: err.message };
+      } else {
+        console.error("Google sign-in request failed (is Taskezy-Server running?):", err);
+      }
+      return { user: null, error: "We couldn't reach the server. Please check your connection and try again in a moment." };
+    }
+  };
+
   const setCurrentUserPasswordActive = () => {
     if (!currentUser) return;
     setUsers(prev => prev.map(u => {
@@ -2542,6 +2568,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setCurrentUserPasswordActive,
         changeOwnPassword,
         loginWithTempPassword,
+        loginWithGoogle,
         logout,
         switchUserRole,
         addLead,
