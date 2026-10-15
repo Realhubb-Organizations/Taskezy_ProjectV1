@@ -24,7 +24,7 @@ import { DateRangeValue, toIsoDate } from "@/components/ui/DateRangePicker";
 // this rendered, even for users who weren't in CRM at all) into its own
 // real path, alongside /hrms/dashboard and /finance/dashboard.
 export default function CrmDashboardPage() {
-  const { leads, properties, users, currentUser, addLead, followupCalls, isDataLoading } = useApp();
+  const { leads, properties, users, currentUser, addLead, pendingTasks, isDataLoading } = useApp();
   const { toast } = useDialog();
 
   // Opens on All Time (every role) so the cards' Total/New Leads match the
@@ -318,11 +318,11 @@ export default function CrmDashboardPage() {
 
       {isSalesMember ? (
         // Sales agent: one color-coded Pending Tasks queue (missed / pending /
-        // upcoming) in place of the two per-status tables below. followupCalls
-        // is already scoped server-side to the agent's own calls.
+        // upcoming) in place of the two per-status tables below. pendingTasks
+        // is already scoped server-side (GET /tasks/pending) to the agent's
+        // own leads/calls — same scoping tasks.routes.ts applies for every role.
         <SalesPendingTasksTable
-          leads={scopedLeads}
-          followupCalls={followupCalls}
+          pendingTasks={pendingTasks}
           onViewLead={openQuickView}
           onStatusChange={handleDrillStatusChange}
           isLoading={isDataLoading}
@@ -332,8 +332,8 @@ export default function CrmDashboardPage() {
         // Pending Task), then the same open tasks charted by due date and
         // by task type.
         <>
-          <TeamTasksTable leads={scopedLeads} followupCalls={followupCalls} teamMembers={agentsList} tab={teamTaskTab} onTabChange={setTeamTaskTab} isLoading={isDataLoading} />
-          <TaskInsightsCharts leads={scopedLeads} followupCalls={followupCalls} agents={chartAgents} tab={teamTaskTab} />
+          <TeamTasksTable pendingTasks={pendingTasks} teamMembers={agentsList} tab={teamTaskTab} onTabChange={setTeamTaskTab} isLoading={isDataLoading} />
+          <TaskInsightsCharts pendingTasks={pendingTasks} agents={chartAgents} tab={teamTaskTab} />
         </>
       )}
 

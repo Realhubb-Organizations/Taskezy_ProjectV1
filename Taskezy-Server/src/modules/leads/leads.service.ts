@@ -143,6 +143,112 @@ export async function getLeadStats(caller: AccessTokenPayload, filter: {
   };
 }
 
+// Mirrors LeadDashboard.tsx's UNQUALIFIED_STATUSES/SITE_VISIT_STATUSES —
+// kept here (DB codes, not frontend display strings) for the same reason
+// the 7-stat-card codes above are, but must stay in lockstep with that
+// file if either list ever changes.
+const UNQUALIFIED_CODES = ["RNR", "LOW_BUDGET", "DEAD_LEAD"];
+const SITE_VISIT_CODES = ["SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE"];
+
+export interface AgentAnalyticsStats {
+  assignedAgentId: string;
+  total: number;
+  qualified: number;
+  unqualified: number;
+  siteVisits: number;
+}
+
+/**
+ * Backend counterpart to the Leads Analytics tab's computeLeadStats/
+ * adminManagerRows (LeadDashboard.tsx) — one row per agent instead of
+ * scanning the full in-memory leads array. Manager roll-up (an agent's own
+ * numbers plus their direct reports') and the "No manager assigned"
+ * fallback bucket stay client-side, same as getLeadStats's 7 buckets:
+ * this just replaces where the per-agent counts themselves come from.
+ */
+export async function getLeadAnalyticsStats(caller: AccessTokenPayload, filter: {
+  propertyId?: string[];
+  campaign?: string[];
+  dateFrom?: string;
+  dateTo?: string;
+}): Promise<AgentAnalyticsStats[]> {
+  const scopedToAgentIds = await scopeForCaller(caller);
+  const rows = await repo.getAnalyticsStatsByAgent(
+    {
+      propertyId: filter.propertyId,
+      campaign: filter.campaign,
+      dateFrom: filter.dateFrom,
+      dateTo: filter.dateTo,
+      scopedToAgentIds
+    },
+    UNQUALIFIED_CODES,
+    SITE_VISIT_CODES
+  );
+  return rows.map(r => {
+    const total = Number(r.total);
+    const unqualified = Number(r.unqualified);
+    return {
+      assignedAgentId: r.assigned_agent_id,
+      total,
+      qualified: total - unqualified,
+      unqualified,
+      siteVisits: Number(r.site_visits)
+    };
+  });
+}
+
+// Mirrors frontend/src/lib/reportMetrics.ts's BUYER_STATUSES (the Agent
+// report's "Qualified" bucket) and VISIT_OR_MEETING_STATUSES — same
+// lockstep requirement as the other code-list constants above.
+const REPORT_QUALIFIED_CODES = ["CALL_BACK", "FOLLOWUP", "EOI", "SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE", "BOOKED"];
+const REPORT_SITE_VISIT_CODES = ["SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE"];
+
+export interface AgentReportStats {
+  assigned: number;
+  contacted: number;
+  qualified: number;
+  siteVisits: number;
+  bookingValue: number;
+  bookingCount: number;
+}
+
+/**
+ * Backend counterpart to AgentReports.tsx's computeAgentFunnel/
+ * computeBookingValue/computeBookingCount — the Agent report's 4 funnel
+ * KPI cards (Assigned/Contacted/Qualified/Site Visits) plus booking value/
+ * count, for the one agent named in filter.assignedAgentId. Deliberately
+ * does NOT cover campaign-attributed spend (needs a per-agent ad-spend
+ * join) or missed-lead/missed-follow-up detection (computed live against
+ * the clock, not a cacheable count) — both stay client-side for now, same
+ * as the drill-down popup behind each of these cards, which still reads
+ * the bulk leads array to list the real rows a number represents.
+ */
+export async function getAgentReportStats(caller: AccessTokenPayload, filter: {
+  assignedAgentId?: string[];
+  dateFrom?: string;
+  dateTo?: string;
+}): Promise<AgentReportStats> {
+  const scopedToAgentIds = await scopeForCaller(caller);
+  const row = await repo.getAgentReportStats(
+    {
+      assignedAgentId: filter.assignedAgentId,
+      dateFrom: filter.dateFrom,
+      dateTo: filter.dateTo,
+      scopedToAgentIds
+    },
+    REPORT_QUALIFIED_CODES,
+    REPORT_SITE_VISIT_CODES
+  );
+  return {
+    assigned: Number(row.assigned),
+    contacted: Number(row.contacted),
+    qualified: Number(row.qualified),
+    siteVisits: Number(row.site_visits),
+    bookingValue: Number(row.booking_value),
+    bookingCount: Number(row.booking_count)
+  };
+}
+
 export async function getLead(caller: AccessTokenPayload, id: string) {
   const scopedToAgentIds = await scopeForCaller(caller);
   const lead = await repo.findById(id, scopedToAgentIds);

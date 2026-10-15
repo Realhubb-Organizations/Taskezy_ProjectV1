@@ -42,6 +42,7 @@ import {
 import { formatNextFollowup, nextFollowupFor } from "@/lib/followups";
 import NextCallCell from "@/components/crm/NextCallCell";
 import { maskPhone, maskEmail } from "@/lib/maskPII";
+import { apiGetCampaignLeadStats, type CampaignLeadStats } from "@/lib/apiClient";
 
 // Same icon URLs the admin leads page uses for these platforms (LeadDashboard.tsx).
 const PLATFORM_ICON_URL: Partial<Record<CampaignItem["platform"], string>> = {
@@ -362,6 +363,69 @@ export default function AdminCampaignsPage() {
   // above) so the Campaign Deep Dive page can build the exact same real
   // per-campaign numbers without duplicating this logic.
 
+  // Plain YYYY-MM-DD bounds for the current Date Range pill/custom range —
+  // same boundary semantics as leadInSelectedRange/recordInSelectedRange
+  // above, just emitting dates for the server-backed campaign-lead-stats
+  // call below instead of a client-side predicate. Undefined/undefined
+  // means "All Time", matching campaignsListAllTime's own unscoped call.
+  const campaignServerDateBounds = (): { dateFrom?: string; dateTo?: string } => {
+    if (dateRange === "Custom") {
+      if (!appliedCustomRange) return {};
+      return { dateFrom: appliedCustomRange.start, dateTo: appliedCustomRange.end };
+    }
+    if (dateRange === "All Time") return {};
+    const toYMD = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    if (dateRange === "Today") return { dateFrom: toYMD(startOfToday), dateTo: toYMD(startOfToday) };
+    if (dateRange === "Yesterday") {
+      const y = new Date(startOfToday);
+      y.setDate(y.getDate() - 1);
+      return { dateFrom: toYMD(y), dateTo: toYMD(y) };
+    }
+    if (dateRange === "This Week") {
+      const weekAgo = new Date(startOfToday);
+      weekAgo.setDate(weekAgo.getDate() - 6);
+      return { dateFrom: toYMD(weekAgo), dateTo: toYMD(startOfToday) };
+    }
+    // This Month
+    const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+    const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+    return { dateFrom: toYMD(monthStart), dateTo: toYMD(monthEnd) };
+  };
+
+  // Per-campaign lead-derived numbers (totalLeads/qualified/unqualified/
+  // siteVisit) now come from the server instead of the bulk leads array —
+  // see Taskezy-Server's ad-spend.routes.ts campaign-lead-stats endpoint.
+  // Two independent fetches, matching the two buildCampaignsList call sites
+  // below: one scoped to the current Date Range, one always all-time.
+  const [scopedLeadStats, setScopedLeadStats] = useState<CampaignLeadStats[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    const { dateFrom, dateTo } = campaignServerDateBounds();
+    apiGetCampaignLeadStats(dateFrom, dateTo)
+      .then(result => { if (!cancelled) setScopedLeadStats(result); })
+      .catch(() => { /* leave the previous numbers showing on a transient failure */ });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateRange, appliedCustomRange]);
+  const scopedLeadStatsMap = useMemo(
+    () => new Map(scopedLeadStats.map(s => [s.campaign.toLowerCase(), s])),
+    [scopedLeadStats]
+  );
+
+  const [allTimeLeadStats, setAllTimeLeadStats] = useState<CampaignLeadStats[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    apiGetCampaignLeadStats()
+      .then(result => { if (!cancelled) setAllTimeLeadStats(result); })
+      .catch(() => { /* leave the previous numbers showing on a transient failure */ });
+    return () => { cancelled = true; };
+  }, []);
+  const allTimeLeadStatsMap = useMemo(
+    () => new Map(allTimeLeadStats.map(s => [s.campaign.toLowerCase(), s])),
+    [allTimeLeadStats]
+  );
+
   // The real, Date-Range-scoped campaigns list — each campaign's own
   // totalLeads is the sum of its real per-day leads (see
   // buildCampaignsList) within the selected range. Drives the Campaigns
@@ -371,8 +435,8 @@ export default function AdminCampaignsPage() {
   // real individual Lead records directly (categoryLeadsInRange), same as
   // the CRM Dashboard and admin Leads page, so all three agree.
   const campaignsListResult = useMemo(
-    () => buildCampaignsList(adSpendRecords.filter(recordInSelectedRange), leads, leadInSelectedRange),
-    [adSpendRecords, leads, appliedCustomRange, dateRange, today]
+    () => buildCampaignsList(adSpendRecords.filter(recordInSelectedRange), scopedLeadStatsMap),
+    [adSpendRecords, scopedLeadStatsMap, appliedCustomRange, dateRange, today]
   );
   const campaignsList: CampaignItem[] = campaignsListResult.items;
   // Pure Meta+Google+Other self-reported total for the same Date Range —
@@ -398,8 +462,8 @@ export default function AdminCampaignsPage() {
   // Status breakdown's checkboxes so a type never disappears from the list
   // just because it had no activity in the current range.
   const campaignsListAllTime: CampaignItem[] = useMemo(
-    () => buildCampaignsList(adSpendRecords, leads, () => true).items,
-    [adSpendRecords, leads]
+    () => buildCampaignsList(adSpendRecords, allTimeLeadStatsMap).items,
+    [adSpendRecords, allTimeLeadStatsMap]
   );
 
   // Shared campaign-name lookup — sourced from the all-time list so a

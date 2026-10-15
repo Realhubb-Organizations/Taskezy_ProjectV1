@@ -1,5 +1,3 @@
-import { Lead, FollowupCall } from "@/context/AppContext";
-
 // Sales-agent dashboard "Pending Tasks" — one queue of everything the agent
 // still owes an action on, bucketed by how urgent it is:
 //   upcoming — due in the future
@@ -27,21 +25,33 @@ export interface PendingTask {
   assignedTo: string;
 }
 
-// Lead statuses that themselves mean "the agent still has to act on this".
-const ACTIONABLE_LEAD_STATUSES = new Set<string>(["New Lead", "RNR", "Call Back", "Followup"]);
-const NEW_LEAD_STATUSES = new Set<string>(["New Lead"]);
+// The server-fetched, not-yet-bucketed shape (AppContext.tsx's pendingTasks,
+// from GET /api/v1/tasks/pending) — see Taskezy-Server/src/modules/tasks/
+// tasks.routes.ts, which merges open follow-ups + actionable-status leads
+// with no open follow-up server-side (the same two-source logic
+// buildSalesPendingTasks used to run itself over the full bulk leads/
+// followupCalls arrays). Only bucketing is left client-side, below — it
+// needs to update live every 30s against the current time, which is cheap
+// to keep doing locally and not worth a 30s poll loop against the server.
+export interface PendingTaskRaw {
+  id: string;
+  leadId?: string;
+  dueAt: string | null;
+  forceMissed: boolean; // a follow-up the scheduler already flipped to MISSED
+  name: string;
+  phone: string;
+  email: string;
+  status: string;
+  feedback: string;
+  taskType: string;
+  assignedTo: string;
+}
 
-const toDate = (iso: string | undefined): Date | null => {
+const toDate = (iso: string | null | undefined): Date | null => {
   if (!iso) return null;
   const d = new Date(iso);
   return isNaN(d.getTime()) ? null : d;
 };
-
-const latestLog = (l: Lead) =>
-  (l.logs || []).reduce<Lead["logs"][number] | null>(
-    (latest, log) => (!latest || new Date(log.timestamp).getTime() > new Date(latest.timestamp).getTime() ? log : latest),
-    null
-  );
 
 const bucketFor = (dueAt: Date | null, now: Date): TaskBucket => {
   if (!dueAt) return "missed";
@@ -50,68 +60,27 @@ const bucketFor = (dueAt: Date | null, now: Date): TaskBucket => {
   return overdueBy <= TASK_GRACE_MS ? "pending" : "missed";
 };
 
-// Any activity logged on the lead at/after the task fell due counts as the
-// agent having acted on it.
-const actedSince = (lead: Lead | undefined, dueAt: Date | null): boolean => {
-  if (!lead || !dueAt) return false;
-  return (lead.logs || []).some(log => new Date(log.timestamp).getTime() >= dueAt.getTime());
-};
-
-// Works for any scope: the sales dashboard passes one agent's leads/calls,
-// the admin/manager dashboard passes everyone's and groups by assignedTo.
-export function buildSalesPendingTasks(leads: Lead[], followupCalls: FollowupCall[], now: Date): PendingTask[] {
-  const leadById = new Map(leads.map(l => [l.id, l]));
-  const leadsWithTask = new Set<string>();
-  const tasks: PendingTask[] = [];
-
-  // 1. Scheduled follow-ups (callbacks / meetings / site visits) — the real
-  //    task queue. Completed ones are done; everything else is still owed.
-  for (const call of followupCalls) {
-    if (call.status === "Completed") continue;
-    const lead = call.leadId ? leadById.get(call.leadId) : undefined;
-    const dueAt = toDate(call.scheduledAt);
-    if (dueAt && dueAt.getTime() <= now.getTime() && actedSince(lead, dueAt)) continue;
-
-    const bucket: TaskBucket = call.status === "Missed" ? "missed" : bucketFor(dueAt, now);
-    if (lead) leadsWithTask.add(lead.id);
-    tasks.push({
-      id: `fc-${call.id}`,
-      leadId: lead?.id,
+// Buckets + sorts the server-fetched raw task list — the client-side half
+// of what buildSalesPendingTasks used to do entirely itself. Called with a
+// fresh `now` every ~30s by each consumer so a task's bucket transitions
+// live without needing to refetch from the server.
+export function applyTaskBuckets(rawTasks: PendingTaskRaw[], now: Date): PendingTask[] {
+  const tasks: PendingTask[] = rawTasks.map(r => {
+    const dueAt = toDate(r.dueAt);
+    return {
+      id: r.id,
+      leadId: r.leadId,
       dueAt,
-      bucket,
-      name: lead?.name || call.leadName,
-      phone: lead?.phone || call.phone,
-      email: lead?.email || "",
-      status: lead?.status || call.type,
-      feedback: (lead && latestLog(lead)?.message) || "No feedback yet",
-      taskType: call.type,
-      assignedTo: call.assignedTo || lead?.assignedAgent || ""
-    });
-  }
-
-  // 2. Leads sitting in an actionable status with no scheduled follow-up —
-  //    due from the moment they entered that state (assignment for a new
-  //    lead, the latest logged activity otherwise).
-  for (const lead of leads) {
-    if (!ACTIONABLE_LEAD_STATUSES.has(lead.status) || leadsWithTask.has(lead.id)) continue;
-    const last = latestLog(lead);
-    const dueAt = NEW_LEAD_STATUSES.has(lead.status)
-      ? toDate(lead.assignedAt) || toDate(lead.createdAtStr)
-      : toDate(last?.timestamp) || toDate(lead.createdAtStr);
-    tasks.push({
-      id: `lead-${lead.id}`,
-      leadId: lead.id,
-      dueAt,
-      bucket: bucketFor(dueAt, now),
-      name: lead.name,
-      phone: lead.phone,
-      email: lead.email || "",
-      status: lead.status,
-      feedback: last?.message || "No feedback yet",
-      taskType: lead.status,
-      assignedTo: lead.assignedAgent || ""
-    });
-  }
+      bucket: r.forceMissed ? "missed" : bucketFor(dueAt, now),
+      name: r.name,
+      phone: r.phone,
+      email: r.email,
+      status: r.status,
+      feedback: r.feedback,
+      taskType: r.taskType,
+      assignedTo: r.assignedTo
+    };
+  });
 
   // Missed first (most recent first), then pending and upcoming (soonest first).
   const order: Record<TaskBucket, number> = { missed: 0, pending: 1, upcoming: 2 };

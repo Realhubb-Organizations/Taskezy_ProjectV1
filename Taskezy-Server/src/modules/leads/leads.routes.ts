@@ -11,6 +11,7 @@ import {
   bulkReassignLeadsSchema,
   createLeadSchema,
   editLeadSchema,
+  leadAnalyticsStatsQuerySchema,
   leadIdParamSchema,
   leadStatsQuerySchema,
   listLeadsQuerySchema,
@@ -27,9 +28,11 @@ import {
   deleteLeadHandler,
   editLeadHandler,
   fixSheetLeadTimestampsHandler,
+  getAgentReportStatsHandler,
   getBulkDeleteStatusHandler,
   getBulkImportStatusHandler,
   getBulkReassignStatusHandler,
+  getLeadAnalyticsStatsHandler,
   getLeadHandler,
   getLeadStatsHandler,
   listLeadsHandler,
@@ -53,6 +56,17 @@ leadsRouter.get("/", validate({ query: listLeadsQuerySchema }), asyncHandler(lis
 // leadsService.getLeadStats applies the same sales-member -> own-leads-only
 // scoping as listLeads, just not a role gate beyond being logged in.
 leadsRouter.get("/stats", validate({ query: leadStatsQuerySchema }), asyncHandler(getLeadStatsHandler));
+// Leads Analytics tab's per-agent breakdown (LeadDashboard.tsx) — same
+// no-extra-role-gate reasoning as /stats above; a Member calling this
+// directly just gets their own single-row self-scoped result.
+leadsRouter.get("/analytics-stats", validate({ query: leadAnalyticsStatsQuerySchema }), asyncHandler(getLeadAnalyticsStatsHandler));
+// Agent report's 4 funnel KPI cards + booking value/count (AgentReports.tsx)
+// for the one agent named in ?assignedAgentId — reuses leadStatsQuerySchema
+// (same filter shape as /stats) since this only ever needs assignedAgentId/
+// dateFrom/dateTo of it. Same no-extra-role-gate reasoning as /stats: a
+// Member/Manager requesting another agent's id gets zero rows back, not
+// that agent's data (scopeForCaller's AND-only boundary).
+leadsRouter.get("/report-stats", validate({ query: leadStatsQuerySchema }), asyncHandler(getAgentReportStatsHandler));
 leadsRouter.get("/:id", validate({ params: leadIdParamSchema }), asyncHandler(getLeadHandler));
 // Uploading leads (single entry or Data Calling's bulk Excel) is for admins
 // and managers only — agents work leads, they don't add them. Managers can

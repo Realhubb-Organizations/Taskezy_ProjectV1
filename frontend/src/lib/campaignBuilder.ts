@@ -1,4 +1,5 @@
-import { Lead, AdSpendRecord } from "@/context/AppContext";
+import { AdSpendRecord } from "@/context/AppContext";
+import { CampaignLeadStats } from "@/lib/apiClient";
 
 // Single source of truth for turning real AdSpendRecord rows + real Leads
 // into the per-campaign CampaignItem shape — shared by the Campaigns
@@ -34,24 +35,21 @@ export const UNQUALIFIED_LEAD_STATUSES = ["Dead Lead", "RNR"];
 export const SITE_VISIT_LEAD_STATUSES = ["Site Visit Scheduled", "Site Visit Done"];
 export const BOOKING_LEAD_STATUSES = ["Booked"];
 
-// A campaign's totalLeads is the sum, over every real day it has data, of
-// max(that day's platform-reported leadsGenerated, that day's real synced
-// Lead count) — never less than what the platform reported, and never less
-// than what's actually been synced into the CRM either. Taking the max per
-// day (not once across the whole range) means the exact same real
-// per-(campaign, day) numbers (returned as leadsByDateByCampaign) can drive
-// both a day-by-day chart AND the range's grand total, and the two are then
-// mathematically guaranteed to always agree, however the data is sliced.
-//
-// leadDateFilter scopes which of a campaign's real leads count toward the
-// synced side — records is expected to already be pre-filtered to the same
-// Date Range, otherwise a campaign's leads from months ago leak into a
-// narrow range's union of dates and get summed in as if they happened then.
+// A campaign's totalLeads (and its qualified/unqualified/siteVisit
+// breakdown) now comes from the server — GET /ad-spend/campaign-lead-stats
+// (see Taskezy-Server/src/modules/ad-spend/ad-spend.routes.ts), which runs
+// the exact "per real day, max(platform-reported, real-synced-count), then
+// sum" rule this function used to compute client-side over the full
+// bulk-loaded leads array. leadStats is keyed by campaign name
+// (case-insensitively — same join key the old client-side filter used),
+// fetched once per call site (date-scoped or all-time, matching whichever
+// records/leadStats pair the caller passed) with a zeroed fallback for any
+// campaign the server didn't return a row for (e.g. a brand-new campaign
+// with ad-spend but not yet matched by any lead-stats call).
 export function buildCampaignsList(
   records: AdSpendRecord[],
-  leads: Lead[],
-  leadDateFilter: (l: Lead) => boolean
-): { items: CampaignItem[]; leadsByDateByCampaign: Record<string, Record<string, number>>; platformReportedTotal: number } {
+  leadStats: Map<string, CampaignLeadStats>
+): { items: CampaignItem[]; platformReportedTotal: number } {
   const spendCampaignMap: Record<string, { spend: number; platformLeadsByDate: Record<string, number>; status: "Active" | "Pause" | "Stopped"; platform: "Meta" | "Google" | "Other"; property?: string; impressions: number | null; clicks: number | null }> = {};
 
   records.forEach(rec => {
@@ -83,7 +81,6 @@ export function buildCampaignsList(
   });
 
   const result: CampaignItem[] = [];
-  const leadsByDateByCampaign: Record<string, Record<string, number>> = {};
   let platformReportedTotal = 0;
 
   Object.keys(spendCampaignMap).forEach((cName, idx) => {
@@ -91,41 +88,21 @@ export function buildCampaignsList(
       const item = spendCampaignMap[cName];
       const campaignPlatformReportedLeads = Object.values(item.platformLeadsByDate).reduce((acc, v) => acc + v, 0);
       platformReportedTotal += campaignPlatformReportedLeads;
-      // Qualified/Unqualified/Site Visit are current pipeline status
-      // snapshots (like the CRM Dashboard's own cards) — a lead qualified
-      // today should still count even if it came in last week, so those
-      // read off every matched lead regardless of creation date.
-      const campaignLeads = leads.filter(l => (l.campaign || l.source)?.toLowerCase() === cName.toLowerCase());
 
-      const syncedLeadsByDate: Record<string, number> = {};
-      campaignLeads.filter(leadDateFilter).forEach(l => {
-        if (!l.createdAtStr) return;
-        const d = new Date(l.createdAtStr);
-        if (isNaN(d.getTime())) return;
-        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-        syncedLeadsByDate[key] = (syncedLeadsByDate[key] || 0) + 1;
-      });
-
-      const perDayMax: Record<string, number> = {};
-      new Set([...Object.keys(item.platformLeadsByDate), ...Object.keys(syncedLeadsByDate)]).forEach(date => {
-        perDayMax[date] = Math.max(item.platformLeadsByDate[date] || 0, syncedLeadsByDate[date] || 0);
-      });
-      leadsByDateByCampaign[cName] = perDayMax;
-
-      const total = Object.values(perDayMax).reduce((acc, v) => acc + v, 0);
-      const qualified = campaignLeads.filter(l => QUALIFIED_LEAD_STATUSES.includes(l.status)).length;
-      const unqualified = campaignLeads.filter(l => UNQUALIFIED_LEAD_STATUSES.includes(l.status)).length;
-      const siteVisits = campaignLeads.filter(l => SITE_VISIT_LEAD_STATUSES.includes(l.status)).length;
-      const cplVal = total > 0 ? Number((item.spend / total).toFixed(2)) : 0;
+      // Zeroed fallback for a campaign the server's lead-stats call didn't
+      // return a row for — same as this function's old behavior when a
+      // campaign genuinely had zero matching leads.
+      const stats = leadStats.get(cName.toLowerCase()) ?? { totalLeads: 0, qualifiedLeads: 0, unqualifiedLeads: 0, siteVisit: 0 };
+      const cplVal = stats.totalLeads > 0 ? Number((item.spend / stats.totalLeads).toFixed(2)) : 0;
 
       result.push({
         id: `dyn-${idx}`,
         name: cName,
         status: item.status,
-        totalLeads: total,
-        qualifiedLeads: qualified,
-        unqualifiedLeads: unqualified,
-        siteVisit: siteVisits,
+        totalLeads: stats.totalLeads,
+        qualifiedLeads: stats.qualifiedLeads,
+        unqualifiedLeads: stats.unqualifiedLeads,
+        siteVisit: stats.siteVisit,
         cpl: cplVal,
         spend: item.spend,
         platform: item.platform,
@@ -137,5 +114,5 @@ export function buildCampaignsList(
     }
   });
 
-  return { items: result, leadsByDateByCampaign, platformReportedTotal };
+  return { items: result, platformReportedTotal };
 }

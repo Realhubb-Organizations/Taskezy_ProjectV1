@@ -29,6 +29,7 @@ import { tenantSettingsRouter } from "./modules/tenant-settings/tenant-settings.
 import { sheetImportRouter } from "./modules/sheet-import/sheet-import.routes";
 import { callAttemptsRouter } from "./modules/call-attempts/call-attempts.routes";
 import { callLogRouter } from "./modules/call-log/call-log.routes";
+import { tasksRouter } from "./modules/tasks/tasks.routes";
 
 export function createApp(): Express {
   const app = express();
@@ -81,6 +82,7 @@ export function createApp(): Express {
   app.use("/api/v1/properties", propertiesRouter);
   app.use("/api/v1/resale-units", resaleUnitsRouter);
   app.use("/api/v1/followups", followupsRouter);
+  app.use("/api/v1/tasks", tasksRouter);
   app.use("/api/v1/call-attempts", callAttemptsRouter);
   app.use("/api/v1/call-log", callLogRouter);
   app.use("/api/v1/attendance", attendanceRouter);

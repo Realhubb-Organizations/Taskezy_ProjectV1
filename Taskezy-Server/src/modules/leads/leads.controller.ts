@@ -23,6 +23,22 @@ export async function getLeadStatsHandler(req: Request, res: Response): Promise<
   sendOk(res, stats);
 }
 
+export async function getLeadAnalyticsStatsHandler(req: Request, res: Response): Promise<void> {
+  const { propertyId, campaign, dateFrom, dateTo } = req.query as unknown as {
+    propertyId?: string[]; campaign?: string[]; dateFrom?: string; dateTo?: string;
+  };
+  const stats = await leadsService.getLeadAnalyticsStats(req.user!, { propertyId, campaign, dateFrom, dateTo });
+  sendOk(res, stats);
+}
+
+export async function getAgentReportStatsHandler(req: Request, res: Response): Promise<void> {
+  const { assignedAgentId, dateFrom, dateTo } = req.query as unknown as {
+    assignedAgentId?: string[]; dateFrom?: string; dateTo?: string;
+  };
+  const stats = await leadsService.getAgentReportStats(req.user!, { assignedAgentId, dateFrom, dateTo });
+  sendOk(res, stats);
+}
+
 export async function getLeadHandler(req: Request, res: Response): Promise<void> {
   const lead = await leadsService.getLead(req.user!, req.params.id);
   sendOk(res, leadForCaller(req.user!, lead));

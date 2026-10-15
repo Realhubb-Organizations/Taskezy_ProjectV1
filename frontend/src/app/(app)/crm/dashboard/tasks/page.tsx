@@ -18,7 +18,7 @@ import { PendingTask } from "@/lib/salesPendingTasks";
 // carries ?agent=&tab=&type= so this page lists exactly what was counted;
 // the date range then narrows it by task due date.
 function AgentTasksView() {
-  const { leads, followupCalls, currentUser, updateLeadStatus, isDataLoading } = useApp();
+  const { leads, pendingTasks, currentUser, updateLeadStatus, isDataLoading } = useApp();
   const { toast, prompt: promptDialog } = useDialog();
   const params = useSearchParams();
   const agent = params.get("agent") || "";
@@ -93,8 +93,7 @@ function AgentTasksView() {
         title={tab === "pending" ? "Pending Task" : "All Task"}
         subtitle={subtitle}
         visibleBuckets={(["missed", "pending", "upcoming"] as const).filter(b => TAB_BUCKETS[tab].includes(b))}
-        leads={leads}
-        followupCalls={followupCalls}
+        pendingTasks={pendingTasks}
         taskFilter={taskFilter}
         onViewLead={(leadId) => setDrawerLead(leads.find(l => l.id === leadId) || null)}
         onStatusChange={handleStatusChange}

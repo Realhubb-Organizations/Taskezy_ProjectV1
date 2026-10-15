@@ -3,8 +3,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import type { ApexOptions } from "apexcharts";
-import { Lead, FollowupCall } from "@/context/AppContext";
-import { buildSalesPendingTasks, PendingTask } from "@/lib/salesPendingTasks";
+import { ApiPendingTaskRow } from "@/lib/apiClient";
+import { applyTaskBuckets, PendingTask } from "@/lib/salesPendingTasks";
 import { SearchableMultiSelect } from "@/components/ui/SearchableDropdown";
 import { TAB_BUCKETS, TeamTaskTab } from "@/components/dashboard/TeamTasksTable";
 
@@ -77,13 +77,11 @@ function CardFilters({ filter, agents, taskTypes, onChange }: {
 // charted: tasks by due date, and the split by task type. Each card has its
 // own agent + status filter.
 export default function TaskInsightsCharts({
-  leads,
-  followupCalls,
+  pendingTasks,
   agents,
   tab
 }: {
-  leads: Lead[];
-  followupCalls: FollowupCall[];
+  pendingTasks: ApiPendingTaskRow[];
   agents: string[];
   tab: TeamTaskTab;
 }) {
@@ -96,7 +94,7 @@ export default function TaskInsightsCharts({
   const [lineFilter, setLineFilter] = useState<TaskFilter>({ agents: [], statuses: [] });
   const [pieFilter, setPieFilter] = useState<TaskFilter>({ agents: [], statuses: [] });
 
-  const allTasks = useMemo(() => buildSalesPendingTasks(leads, followupCalls, now), [leads, followupCalls, now]);
+  const allTasks = useMemo(() => applyTaskBuckets(pendingTasks, now), [pendingTasks, now]);
   const tasks = useMemo(() => allTasks.filter(t => TAB_BUCKETS[tab].includes(t.bucket)), [allTasks, tab]);
   // Built exactly like TeamTasksTable's Task Type options, so both list the same values.
   const taskTypeOptions = useMemo(() => Array.from(new Set(allTasks.map(t => t.taskType))).sort(), [allTasks]);
