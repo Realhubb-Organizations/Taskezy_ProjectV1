@@ -4,6 +4,7 @@ import React, { createContext, useContext, useState, useEffect, useMemo, useRef 
 import { parseIndianPrice } from "@/lib/validation";
 import {
   apiLogin,
+  apiGoogleLogin,
   apiLogout,
   apiGetMe,
   apiListAllLeads,
@@ -220,6 +221,8 @@ export interface Lead {
   // Called/Not Reachable/Wrong Number, completely separate from `status`
   // above. undefined until the lead has been called at least once.
   callStatus?: "Connected" | "Called" | "Not Reachable" | "Wrong Number";
+  /** Qualified / Unqualified — only set while callStatus is Connected (migration 033). */
+  callSubStatus?: "Qualified" | "Unqualified";
   // True when this lead's backend status_code is the internal UNASSIGNED
   // sentinel (no real agent picked it up yet — see leads.service.ts) — it
   // always carries a fallback admin as assignedAgent/assignedAgentId (the
@@ -602,6 +605,8 @@ interface AppActions {
     email: string,
     pass: string
   ) => Promise<{ user: User } | { user: null; errorType: "invalid_credentials" | "rate_limited" | "network" }>;
+  /** "Sign in with Google" — on failure, `error` is the server's own message (e.g. wrong domain, no account). */
+  loginWithGoogle: (credential: string) => Promise<{ user: User } | { user: null; error: string }>;
   logout: () => void;
   switchUserRole: (role: Role, userId?: string) => void;
   setActiveSystem: (system: SystemType) => void;
@@ -617,8 +622,12 @@ interface AppActions {
   /** Data Calling's own, independent field (migration 030) — see updateLeadStatus for the main Lead Status. */
   updateCallStatus: (
     leadId: string,
-    callStatus: "Connected" | "Called" | "Not Reachable" | "Wrong Number"
-  ) => { success: boolean; error?: string };
+    callStatus: "Connected" | "Called" | "Not Reachable" | "Wrong Number",
+    /** Qualified / Unqualified — optional, only with Connected; null clears it, undefined keeps the current one. */
+    callSubStatus: "Qualified" | "Unqualified" | null | undefined,
+    /** Required — saved as the lead's note with the update. */
+    note: string
+  ) => Promise<void>;
   reassignLead: (leadId: string, newAgent: string, note: string) => Promise<void>;
   /** Saves the lead's current note; resolves with the updated lead (or null for a local-only lead). */
   updateLeadNote: (leadId: string, note: string) => Promise<Lead | null>;
@@ -726,6 +735,10 @@ export function mapApiLeadToFrontendLead(row: ApiLeadRow): Lead {
     callStatus:
       row.call_status === "Connected" || row.call_status === "Called" || row.call_status === "Not Reachable" || row.call_status === "Wrong Number"
         ? row.call_status
+        : undefined,
+    callSubStatus:
+      row.call_status === "Connected" && (row.call_sub_status === "Qualified" || row.call_sub_status === "Unqualified")
+        ? row.call_sub_status
         : undefined,
     campaign: row.campaign || undefined,
     metaPageName: row.meta_page_name || undefined,
@@ -1693,6 +1706,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  // Same post-login steps as loginWithTempPassword above. The server's
+  // refusal messages are specific and safe to show as is ("Please use your
+  // @realhubb.in Google account.", "No Taskezy account is linked to …").
+  const loginWithGoogle = async (credential: string): Promise<{ user: User } | { user: null; error: string }> => {
+    try {
+      const mapped = mapApiUserToFrontendUser(await apiGoogleLogin(credential));
+      setCurrentUser(mapped);
+      setActiveRole(mapped.role);
+      setActiveSystem(getDefaultSystem(mapped));
+      loadAllRealData(mapped.role);
+      setShowLoginSplash(true);
+      return { user: mapped };
+    } catch (err) {
+      if (err instanceof ApiRequestError) {
+        if (err.status === 429) return { user: null, error: "Too many sign-in attempts. Please wait a few minutes and try again." };
+        if (err.status < 500) return { user: null, error: err.message };
+      } else {
+        console.error("Google sign-in request failed (is Taskezy-Server running?):", err);
+      }
+      return { user: null, error: "We couldn't reach the server. Please check your connection and try again in a moment." };
+    }
+  };
+
   const setCurrentUserPasswordActive = () => {
     if (!currentUser) return;
     setUsers(prev => prev.map(u => {
@@ -1899,32 +1935,48 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // rules, no dealValue/kycDocName/invoice/calendar side effects like
   // updateLeadStatus above; a Connected result on a bulk-uploaded lead
   // graduates it out of Data Calling into the main CRM leads list.
-  const updateCallStatus = (leadId: string, callStatus: "Connected" | "Called" | "Not Reachable" | "Wrong Number") => {
+  // Every update carries a required note, saved as the lead's note in the
+  // same server transaction, plus the optional Connected-only sub-status
+  // (migration 033). Saved to the server first, so the row never shows a
+  // change the server refused. Rejects on failure.
+  const updateCallStatus = async (
+    leadId: string,
+    callStatus: "Connected" | "Called" | "Not Reachable" | "Wrong Number",
+    callSubStatus: "Qualified" | "Unqualified" | null | undefined,
+    note: string
+  ): Promise<void> => {
     const lead = allLeads.find(l => l.id === leadId);
-    if (!lead) return { success: false, error: "Lead not found." };
-
-    lead.logs.push({
-      timestamp: new Date().toISOString(),
-      message: `Call status changed to "${callStatus}"`,
-      user: currentUser?.name || "System"
-    });
-    lead.callStatus = callStatus;
-    // Updating source here (not just on the server) moves it immediately
-    // from dataCallingLeads into leads (see the useMemo split below),
-    // instead of waiting for the next full refetch.
-    if (callStatus === "Connected" && lead.source === "Bulk Upload") {
-      lead.source = "Data";
-      lead.status = "New Lead";
-    }
-    setAllLeads([...allLeads]);
+    if (!lead) throw new Error("Lead not found.");
 
     if (isApiSessionActive() && isRealLeadId(leadId)) {
-      apiUpdateCallStatus(leadId, callStatus).catch((err) =>
-        console.warn("Could not persist call status update to the database:", err)
-      );
+      const updated = mapApiLeadToFrontendLead(await apiUpdateCallStatus(leadId, callStatus, callSubStatus, note));
+      // Replace the server-owned fields explicitly so a cleared sub-status
+      // (undefined) doesn't get skipped by the spread.
+      setAllLeads(prev => prev.map(l => (l.id === leadId ? { ...l, ...updated, callSubStatus: updated.callSubStatus } : l)));
+      return;
     }
 
-    return { success: true };
+    // Local-only lead: same rules as the server.
+    const nextSub = callStatus !== "Connected" ? undefined : callSubStatus !== undefined ? callSubStatus ?? undefined : lead.callStatus === "Connected" ? lead.callSubStatus : undefined;
+    const now = new Date().toISOString();
+    const by = currentUser?.name || "System";
+    const logs = [...lead.logs];
+    if (lead.callStatus !== callStatus || nextSub === lead.callSubStatus) logs.push({ timestamp: now, message: `Call status changed to "${callStatus}"`, user: by });
+    if (nextSub !== lead.callSubStatus) logs.push({ timestamp: now, message: nextSub ? `Sub-status changed to "${nextSub}"` : "Sub-status cleared", user: by });
+    logs.push({ timestamp: now, message: `Note: ${note}`, user: by });
+    const promote = callStatus === "Connected" && lead.source === "Bulk Upload";
+    setAllLeads(prev => prev.map(l => (l.id === leadId
+      ? {
+          ...l,
+          callStatus,
+          callSubStatus: nextSub,
+          notes: note,
+          notesUpdatedAt: now,
+          notesUpdatedBy: by,
+          logs,
+          ...(promote ? { source: "Data", status: "New Lead" as LeadStatus } : {})
+        }
+      : l)));
   };
 
   // Reassigns a lead to a new agent and restarts its SLA clock (used to correct missed leads)
@@ -2543,6 +2595,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setCurrentUserPasswordActive,
         changeOwnPassword,
         loginWithTempPassword,
+        loginWithGoogle,
         logout,
         switchUserRole,
         addLead,

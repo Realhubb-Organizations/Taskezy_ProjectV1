@@ -16,6 +16,7 @@ import { nextFollowupFor } from "@/lib/followups";
 import { maskPhone, maskEmail } from "@/lib/maskPII";
 import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/callTrigger";
 import NextCallCell from "./NextCallCell";
+import { callSubStatusOf } from "@/lib/callSubStatus";
 
 // Drill-down table + lead quick-view drawer behind the 7 lead stat cards
 // (Total Leads … Site Visit Done). Shared by the CRM Dashboard and the admin
@@ -172,14 +173,14 @@ export function LeadQuickViewDrawer({ lead, onClose }: {
             {/* Read-only here (every role): the dashboard quick view only shows
                 the status; it's changed from the Leads table or lead drawer. */}
             <div className="flex items-center gap-1.5">
-              {(lead.callStatus === "Connected" || lead.callStatus === "Called") && (
+              {callSubStatusOf(lead) && (
                 <span
                   className={`text-[10px] font-extrabold px-2 py-0.5 rounded-lg border ${
-                    lead.callStatus === "Connected" ? "text-emerald-700 bg-emerald-50 border-emerald-200" : "text-red-600 bg-red-50 border-red-200"
+                    callSubStatusOf(lead) === "Qualified" ? "text-emerald-700 bg-emerald-50 border-emerald-200" : "text-red-600 bg-red-50 border-red-200"
                   }`}
-                  title="Qualification Status — derived from Data Calling's Call Status"
+                  title="Sub-status, set from Data Calling when the call is Connected"
                 >
-                  {lead.callStatus === "Connected" ? "Qualified" : "Unqualified"}
+                  {callSubStatusOf(lead)}
                 </span>
               )}
               <span className={`border rounded-lg px-2 py-0.5 text-[11px] font-semibold ${statusBadgeClasses(lead.status)}`}>

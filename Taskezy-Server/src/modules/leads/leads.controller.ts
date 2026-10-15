@@ -56,8 +56,8 @@ export async function updateLeadStatusHandler(req: Request, res: Response): Prom
 }
 
 export async function updateCallStatusHandler(req: Request, res: Response): Promise<void> {
-  const { callStatus } = req.body;
-  const lead = await leadsService.updateCallStatus(req.user!, req.params.id, callStatus);
+  const { callStatus, callSubStatus, note } = req.body;
+  const lead = await leadsService.updateCallStatus(req.user!, req.params.id, callStatus, callSubStatus, note);
   sendOk(res, leadForCaller(req.user!, lead));
 }
 

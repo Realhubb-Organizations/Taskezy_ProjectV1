@@ -1,3 +1,5 @@
+import { OAuth2Client } from "google-auth-library";
+import { env } from "../../config/env";
 import { query } from "../../db/pool";
 import { ApiError } from "../../utils/ApiError";
 import { logger } from "../../utils/logger";
@@ -88,6 +90,78 @@ export async function login(email: string, password: string): Promise<AuthResult
 
   const { accessToken, refreshToken } = await issueTokenPair(user);
   return { accessToken, refreshToken, user: stripPasswordHash(user) };
+}
+
+// "Sign in with Google". The browser (Google Identity Services) hands us a
+// Google-signed ID token; we verify it with Google's keys, then log in the
+// matching EXISTING Taskezy user exactly like a password login. Rules:
+//  - only verified @<GOOGLE_SIGNIN_ALLOWED_DOMAIN> Google accounts;
+//  - only an existing ACTIVE user whose login email or company email is
+//    that Google email (no self sign-up), or who already linked this
+//    Google account earlier (users.google_sub, migration 034);
+//  - the temporary-password reset is skipped: Google already proved who
+//    they are (they can still change their password from the app).
+const googleClient = new OAuth2Client();
+
+const USER_COLUMNS = `id, first_name, last_name, email, role, department, role_type, designation, status, password_hash, must_reset_password`;
+
+export async function loginWithGoogle(credential: string): Promise<AuthResult> {
+  if (!env.GOOGLE_SIGNIN_CLIENT_ID) {
+    throw ApiError.badRequest("Google sign-in is not set up yet.");
+  }
+
+  let payload;
+  try {
+    const ticket = await googleClient.verifyIdToken({ idToken: credential, audience: env.GOOGLE_SIGNIN_CLIENT_ID });
+    payload = ticket.getPayload();
+  } catch (err) {
+    logger.warn({ err }, "Google sign-in: ID token verification failed");
+    throw ApiError.unauthorized("Google sign-in failed. Please try again.");
+  }
+  if (!payload?.sub || !payload.email || payload.email_verified !== true) {
+    throw ApiError.unauthorized("Google sign-in failed. Please try again.");
+  }
+
+  const domain = env.GOOGLE_SIGNIN_ALLOWED_DOMAIN.toLowerCase();
+  const googleEmail = payload.email.toLowerCase();
+  // `hd` is only present for Workspace accounts — together with the email
+  // suffix this rules out a personal Gmail that merely looks similar.
+  if (payload.hd?.toLowerCase() !== domain || !googleEmail.endsWith(`@${domain}`)) {
+    throw ApiError.forbidden(`Please use your @${domain} Google account.`);
+  }
+
+  const { rows } = await query<UserRow & { google_sub: string | null; match: number }>(
+    `SELECT ${USER_COLUMNS}, google_sub,
+            CASE WHEN google_sub = $1 THEN 0 WHEN LOWER(email) = $2 THEN 1 ELSE 2 END AS match
+     FROM users
+     WHERE google_sub = $1 OR LOWER(email) = $2 OR LOWER(company_email) = $2
+     ORDER BY match`,
+    [payload.sub, googleEmail]
+  );
+  const best = rows[0];
+  if (!best) {
+    throw ApiError.forbidden(`No Taskezy account is linked to ${googleEmail}. Please ask your admin.`);
+  }
+  // Two different users matching only by email would make the pick a guess.
+  if (best.match > 0 && rows.filter(r => r.match === best.match).length > 1) {
+    logger.warn({ googleEmail }, "Google sign-in: email matches more than one user");
+    throw ApiError.forbidden(`More than one Taskezy account uses ${googleEmail}. Please ask your admin.`);
+  }
+  if (best.google_sub && best.google_sub !== payload.sub) {
+    throw ApiError.forbidden("This Taskezy account is linked to a different Google account.");
+  }
+  if (best.status !== "ACTIVE") {
+    throw ApiError.forbidden("Your Taskezy account is inactive. Please ask your admin.");
+  }
+
+  if (!best.google_sub) {
+    await query(`UPDATE users SET google_sub = $1, updated_at = now() WHERE id = $2 AND google_sub IS NULL`, [payload.sub, best.id]);
+    logger.info({ userId: best.id }, "Google sign-in: linked Google account to user");
+  }
+
+  const { google_sub: _googleSub, match: _match, ...user } = best;
+  const { accessToken, refreshToken } = await issueTokenPair(user);
+  return { accessToken, refreshToken, user: { ...stripPasswordHash(user), must_reset_password: false } };
 }
 
 // How long after a token's rotation a reuse of that same (now-revoked)

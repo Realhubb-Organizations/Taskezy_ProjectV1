@@ -10,7 +10,7 @@ import LeadDetailDrawer from "@/components/crm/LeadDetailDrawer";
 import { LineSkeleton, TableRowsSkeleton } from "@/components/ui/Skeletons";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
-import DateRangePicker, { DatePicker, DateRangeValue, formatDisplayDate, todayIso, toIsoDate } from "@/components/ui/DateRangePicker";
+import DateRangePicker, { DatePicker, DateRangeValue, todayIso, toIsoDate } from "@/components/ui/DateRangePicker";
 import DateRangeSelect from "@/components/ui/DateRangeSelect";
 import { canChangeLeadStatus, canReassignThisLead, canUploadLeads, uploadAssignableUsers, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
 import { nextFollowupFor } from "@/lib/followups";
@@ -21,6 +21,7 @@ import { apiBulkDeleteLeads, apiBulkReassignLeads, apiDeleteLead } from "@/lib/a
 import { maskPhone, maskEmail } from "@/lib/maskPII";
 import { WhatsAppIcon, CallIcon } from "@/components/icons/ContactIcons";
 import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/callTrigger";
+import { CALL_SUB_STATUS_OPTIONS, CallSubStatus, callSubStatusOf, isQualifiedCall, isUnqualifiedCall } from "@/lib/callSubStatus";
 
 // Data Calling's own, independent Call Status (migration 030) — completely
 // separate from the main 14-value Lead Status. "Not Reachable" always
@@ -142,7 +143,7 @@ function computeAnalyticsPerformanceRows(list: Lead[], groupBy: (l: Lead) => str
     groups.get(key)!.push(l);
   });
   return Array.from(groups.entries()).map(([name, group]) => {
-    const qualifiedLeads = group.filter(l => l.callStatus === "Connected").length;
+    const qualifiedLeads = group.filter(isQualifiedCall).length;
     return {
       name,
       totalLeads: group.length,
@@ -159,11 +160,11 @@ function computeAnalyticsPerformanceRows(list: Lead[], groupBy: (l: Lead) => str
 
 function analyticsLeadMatchesMetric(l: Lead, metric: AnalyticsChartMetric): boolean {
   switch (metric) {
-    case "Qualified": return l.callStatus === "Connected";
+    case "Qualified": return isQualifiedCall(l);
     case "RNR": return l.callStatus === "Not Reachable";
     case "Calls Made": return !!(l.logs && l.logs.length > 0);
     case "Total Leads": return true;
-    case "Not Qualified": return l.callStatus === "Called";
+    case "Not Qualified": return isUnqualifiedCall(l);
   }
 }
 
@@ -378,11 +379,11 @@ export default function DataCallingPage() {
     "Total Leads Assigned": leads.filter(l => !!l.assignedAgent),
     "Calls Made": leads.filter(l => l.logs && l.logs.length > 0),
     // Qualified/Not Qualified is Data Calling's own Connected sub-status
-    // (see updateLeadStatus), not a CRM-wide status list — a
-    // Connected+Not-Qualified lead must not also count as "qualified".
-    "Qualified Leads": leads.filter(l => l.callStatus === "Connected"),
+    // (lib/callSubStatus.ts), not a CRM-wide status list — a
+    // Connected+Unqualified lead must not also count as "qualified".
+    "Qualified Leads": leads.filter(isQualifiedCall),
     "RNR": leads.filter(l => l.callStatus === "Not Reachable"),
-    "Not Qualified": leads.filter(l => l.callStatus === "Called")
+    "Not Qualified": leads.filter(isUnqualifiedCall)
   }), [leads]);
 
   const categoryLeadsInRange = useMemo(() => {
@@ -437,9 +438,9 @@ export default function DataCallingPage() {
   const analyticsSummaryMetrics = useMemo(() => ({
     totalAssigned: subSourceScopedLeads.filter(l => !!l.assignedAgent).length,
     callsMade: subSourceScopedLeads.filter(l => l.logs && l.logs.length > 0).length,
-    qualifiedLeads: subSourceScopedLeads.filter(l => l.callStatus === "Connected").length,
+    qualifiedLeads: subSourceScopedLeads.filter(isQualifiedCall).length,
     rnr: subSourceScopedLeads.filter(l => l.callStatus === "Not Reachable").length,
-    notQualified: subSourceScopedLeads.filter(l => l.callStatus === "Called").length
+    notQualified: subSourceScopedLeads.filter(isUnqualifiedCall).length
   }), [subSourceScopedLeads]);
 
   // Real underlying lead list behind each Analytics stat card, keyed the
@@ -448,9 +449,9 @@ export default function DataCallingPage() {
   const analyticsCategoryLeads: Record<string, Lead[]> = useMemo(() => ({
     "Total Leads Assigned": subSourceScopedLeads.filter(l => !!l.assignedAgent),
     "Calls Made": subSourceScopedLeads.filter(l => l.logs && l.logs.length > 0),
-    "Qualified Leads": subSourceScopedLeads.filter(l => l.callStatus === "Connected"),
+    "Qualified Leads": subSourceScopedLeads.filter(isQualifiedCall),
     "RNR": subSourceScopedLeads.filter(l => l.callStatus === "Not Reachable"),
-    "Not Qualified": subSourceScopedLeads.filter(l => l.callStatus === "Called")
+    "Not Qualified": subSourceScopedLeads.filter(isUnqualifiedCall)
   }), [subSourceScopedLeads]);
 
   // Manager sees only their own direct reports' rows here — never other
@@ -601,7 +602,7 @@ export default function DataCallingPage() {
   const [subStatusFilters, setSubStatusFilters] = useState<string[]>([]);
   const SUB_STATUS_NONE = "—";
   const qualificationStatusOf = (l: Lead): string =>
-    l.callStatus === "Connected" ? "Qualified" : l.callStatus === "Called" ? "Unqualified" : SUB_STATUS_NONE;
+    callSubStatusOf(l) ?? SUB_STATUS_NONE;
   const subStatusOptions = useMemo(
     () => Array.from(new Set(leads.map(qualificationStatusOf))).sort(),
     [leads]
@@ -630,7 +631,7 @@ export default function DataCallingPage() {
     isAdmin
       ? DATA_CALLING_DEFAULT_VISIBLE_COLUMNS
       : isMember
-        ? { ...DATA_CALLING_DEFAULT_VISIBLE_COLUMNS, actions: true, property: false, qualificationStatus: false }
+        ? { ...DATA_CALLING_DEFAULT_VISIBLE_COLUMNS, actions: true, property: false }
         : { ...DATA_CALLING_DEFAULT_VISIBLE_COLUMNS, actions: true }
   );
   const toggleColumn = (key: DataCallingColumnKey) => setVisibleColumns(prev => ({ ...prev, [key]: !prev[key] }));
@@ -804,46 +805,66 @@ export default function DataCallingPage() {
   // own Call Status model (see callStatusOptions/restrictedCallStatuses below).
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
 
-  // "Not Reachable" can't commit as a bare call-status change — it always
-  // needs a next-call date (scheduled the same way Follow-up/Call Back does
-  // elsewhere, via addFollowupCall). Connected/Called/Wrong Number commit
-  // immediately — Qualification Status is auto-derived from the pick, never
-  // asked separately (see callStatusMapping.ts). Picking "Not Reachable"
-  // from the row Call Status dropdown opens this modal instead of
-  // committing immediately.
-  const [pendingCallStatusAction, setPendingCallStatusAction] = useState<{ leadId: string; leadName: string } | null>(null);
+  // Every Call Status change opens this popup instead of committing straight
+  // from the row: a note is always required, Sub-status (Qualified /
+  // Unqualified) is optional and only shown for Connected, and Not
+  // Reachable also needs the next call's date (scheduled via
+  // addFollowupCall, same as Follow-up/Call Back elsewhere). Picking a
+  // Sub-status from the table opens it too, with Connected preselected.
+  type CallStatusValue = NonNullable<Lead["callStatus"]>;
+  const [callUpdate, setCallUpdate] = useState<{ leadId: string; leadName: string; callStatus: CallStatusValue; subStatus: CallSubStatus | null } | null>(null);
+  const [callUpdateNote, setCallUpdateNote] = useState("");
   const [rnrDate, setRnrDate] = useState("");
   const [rnrTime, setRnrTime] = useState("10:00");
   const [pendingActionError, setPendingActionError] = useState<string | null>(null);
+  const [callUpdateSaving, setCallUpdateSaving] = useState(false);
 
-  const openCallStatusChange = (lead: Lead, callStatus: NonNullable<Lead["callStatus"]>) => {
-    if (callStatus === "Not Reachable") {
-      setPendingActionError(null);
-      setRnrDate("");
-      setRnrTime("10:00");
-      setPendingCallStatusAction({ leadId: lead.id, leadName: lead.name });
-      return;
-    }
-    updateCallStatus(lead.id, callStatus);
+  const openCallStatusChange = (lead: Lead, callStatus: CallStatusValue, subStatus?: CallSubStatus) => {
+    setPendingActionError(null);
+    setCallUpdateNote("");
+    setRnrDate("");
+    setRnrTime("10:00");
+    setCallUpdate({
+      leadId: lead.id,
+      leadName: lead.name,
+      callStatus,
+      subStatus: subStatus ?? (callStatus === "Connected" ? callSubStatusOf(lead) : null)
+    });
   };
 
-  const confirmNotReachable = () => {
-    if (!pendingCallStatusAction) return;
-    if (!rnrDate) {
-      setPendingActionError("Please select the next calling date.");
-      return;
+  const confirmCallUpdate = async () => {
+    if (!callUpdate || callUpdateSaving) return;
+    const note = callUpdateNote.trim();
+    if (!note) return setPendingActionError("Please write a note.");
+    const needsNextCall = callUpdate.callStatus === "Not Reachable";
+    if (needsNextCall && !rnrDate) return setPendingActionError("Please select the next calling date.");
+    const lead = leads.find(l => l.id === callUpdate.leadId);
+    setCallUpdateSaving(true);
+    setPendingActionError(null);
+    try {
+      await updateCallStatus(
+        callUpdate.leadId,
+        callUpdate.callStatus,
+        callUpdate.callStatus === "Connected" ? callUpdate.subStatus : null,
+        note
+      );
+      if (needsNextCall) {
+        addFollowupCall({
+          scheduledAt: new Date(`${rnrDate}T${rnrTime}`).toISOString(),
+          leadId: callUpdate.leadId,
+          leadName: callUpdate.leadName,
+          phone: lead?.phone,
+          callType: "CALLBACK",
+          assignedToName: lead?.assignedAgent || ""
+        });
+      }
+      toast(`${callUpdate.leadName}: call status saved.`, "success");
+      setCallUpdate(null);
+    } catch (err) {
+      setPendingActionError(err instanceof Error ? err.message : "Could not save. Please try again.");
+    } finally {
+      setCallUpdateSaving(false);
     }
-    const lead = leads.find(l => l.id === pendingCallStatusAction.leadId);
-    updateCallStatus(pendingCallStatusAction.leadId, "Not Reachable");
-    addFollowupCall({
-      scheduledAt: new Date(`${rnrDate}T${rnrTime}`).toISOString(),
-      leadId: pendingCallStatusAction.leadId,
-      leadName: pendingCallStatusAction.leadName,
-      phone: lead?.phone,
-      callType: "CALLBACK",
-      assignedToName: lead?.assignedAgent || ""
-    });
-    setPendingCallStatusAction(null);
   };
 
   const copyToClipboard = (text: string) => {
@@ -1307,7 +1328,9 @@ export default function DataCallingPage() {
                   setAppliedCustomRange(v);
                   setCurrentPage(1);
                 }}
-                emptyLabel={formatDisplayDate(todayIso())}
+                // No range picked = every lead, so say so (it used to show
+                // today's date here, which read as "filtered to today").
+                emptyLabel="All Time"
               />
 
               <button
@@ -1749,15 +1772,29 @@ export default function DataCallingPage() {
                         </td>
                         {visibleColumns.qualificationStatus && (
                         <td className="px-4 py-3.5 whitespace-nowrap">
-                          {/* Qualification Status is fully derived from Call Status (see
-                              callStatusMapping.ts) — never independently editable, so this
-                              is a read-only badge, not a dropdown. */}
-                          {l.callStatus === "Connected" ? (
-                            <span className="text-emerald-600" title="Derived from Call Status">Qualified</span>
-                          ) : l.callStatus === "Called" ? (
-                            <span className="text-red-500" title="Derived from Call Status">Unqualified</span>
+                          {/* Sub-status: pickable only while Call Status is Connected
+                              (lib/callSubStatus.ts). Called / Not Reachable / Wrong
+                              Number keep it disabled. Same edit rule as Call Status. */}
+                          {l.callStatus === "Connected" && canEditLeadStatus(l) ? (
+                            <SearchableSelect
+                              variant="inline"
+                              value={l.callSubStatus || ""}
+                              onChange={(v) => openCallStatusChange(l, "Connected", v as CallSubStatus)}
+                              options={CALL_SUB_STATUS_OPTIONS}
+                              placeholder="Select"
+                              searchPlaceholder="Search sub-status..."
+                              panelWidth={160}
+                              className={l.callSubStatus === "Qualified" ? "text-emerald-600" : l.callSubStatus === "Unqualified" ? "text-red-500" : "text-slate-400"}
+                            />
+                          ) : l.callStatus === "Connected" && l.callSubStatus ? (
+                            <span className={l.callSubStatus === "Qualified" ? "text-emerald-600" : "text-red-500"}>{l.callSubStatus}</span>
                           ) : (
-                            <span className="text-slate-300">—</span>
+                            <span
+                              className="text-slate-300 cursor-not-allowed"
+                              title={l.callStatus === "Connected" ? STATUS_LOCKED_HINT : "Available when Call Status is Connected"}
+                            >
+                              —
+                            </span>
                           )}
                         </td>
                         )}
@@ -2100,50 +2137,98 @@ export default function DataCallingPage() {
         document.body
       )}
 
-      {pendingCallStatusAction && createPortal(
+      {callUpdate && createPortal(
         <>
-          <div className="fixed inset-0 bg-slate-900/40 z-[80]" onClick={() => setPendingCallStatusAction(null)} />
-          <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
-            <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-slate-200 p-6">
-              <h3 className="text-sm font-extrabold text-slate-900">Schedule Next Call</h3>
-              <p className="text-xs text-slate-500 mt-1">{pendingCallStatusAction.leadName}</p>
+          <div className="fixed inset-0 bg-slate-900/40 z-[80]" onClick={() => !callUpdateSaving && setCallUpdate(null)} />
+          <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 pointer-events-none">
+            <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-slate-200 p-6 pointer-events-auto">
+              <h3 className="text-sm font-extrabold text-slate-900">Update Call Status</h3>
+              <p className="text-xs text-slate-500 mt-1">
+                {callUpdate.leadName} · <span className="font-semibold text-slate-700">{callUpdate.callStatus}</span>
+              </p>
 
               <div className="mt-4 space-y-3">
-                <div className="grid grid-cols-2 gap-3">
+                {/* Sub-status is shown only for Connected, and is optional —
+                    click the selected one again to clear it. */}
+                {callUpdate.callStatus === "Connected" && (
                   <div className="space-y-1">
-                    <label className="block text-[11px] font-bold text-slate-700">Next Call Date</label>
-                    <DatePicker
-                      value={rnrDate}
-                      minDate={todayIso()}
-                      onChange={(v) => { setRnrDate(v); setPendingActionError(null); }}
-                      className="w-full flex items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:bg-white focus:border-[#0B1E6E]"
-                    />
+                    <label className="block text-[11px] font-bold text-slate-700">
+                      Sub-status <span className="font-normal text-slate-400">(optional)</span>
+                    </label>
+                    <div className="flex gap-2">
+                      {CALL_SUB_STATUS_OPTIONS.map(o => {
+                        const selected = callUpdate.subStatus === o;
+                        return (
+                          <button
+                            key={o}
+                            type="button"
+                            onClick={() => setCallUpdate(u => (u ? { ...u, subStatus: u.subStatus === o ? null : o } : u))}
+                            className={`flex-1 px-3 py-2 rounded-xl border text-xs font-semibold transition-colors ${
+                              selected
+                                ? o === "Qualified" ? "bg-emerald-50 border-emerald-300 text-emerald-700" : "bg-red-50 border-red-300 text-red-600"
+                                : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-white"
+                            }`}
+                          >
+                            {o}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
-                  <div className="space-y-1">
-                    <label className="block text-[11px] font-bold text-slate-700">Time</label>
-                    <input
-                      type="time"
-                      value={rnrTime}
-                      onChange={(e) => setRnrTime(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:bg-white focus:border-[#0B1E6E]"
-                    />
+                )}
+
+                {callUpdate.callStatus === "Not Reachable" && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="block text-[11px] font-bold text-slate-700">Next Call Date</label>
+                      <DatePicker
+                        value={rnrDate}
+                        minDate={todayIso()}
+                        onChange={(v) => { setRnrDate(v); setPendingActionError(null); }}
+                        className="w-full flex items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:bg-white focus:border-[#0B1E6E]"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="block text-[11px] font-bold text-slate-700">Time</label>
+                      <input
+                        type="time"
+                        value={rnrTime}
+                        onChange={(e) => setRnrTime(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:bg-white focus:border-[#0B1E6E]"
+                      />
+                    </div>
                   </div>
+                )}
+
+                <div className="space-y-1">
+                  <label className="block text-[11px] font-bold text-slate-700">Notes</label>
+                  <textarea
+                    value={callUpdateNote}
+                    onChange={(e) => { setCallUpdateNote(e.target.value); setPendingActionError(null); }}
+                    rows={3}
+                    maxLength={2000}
+                    placeholder="What happened on the call?"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:bg-white focus:border-[#0B1E6E] font-normal resize-none"
+                  />
                 </div>
+
                 {pendingActionError && <p className="text-[11px] text-red-600 font-semibold">{pendingActionError}</p>}
                 <div className="flex justify-end gap-2 pt-1">
                   <button
                     type="button"
-                    onClick={() => setPendingCallStatusAction(null)}
-                    className="bg-slate-100 border border-slate-200 text-slate-700 font-bold px-5 py-2 rounded-xl text-sm hover:bg-slate-200 transition-colors"
+                    disabled={callUpdateSaving}
+                    onClick={() => setCallUpdate(null)}
+                    className="bg-slate-100 border border-slate-200 text-slate-700 font-bold px-5 py-2 rounded-xl text-sm hover:bg-slate-200 transition-colors disabled:opacity-60"
                   >
                     Cancel
                   </button>
                   <button
                     type="button"
-                    onClick={confirmNotReachable}
-                    className="bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold px-5 py-2 rounded-xl text-sm transition-colors"
+                    disabled={callUpdateSaving}
+                    onClick={confirmCallUpdate}
+                    className="bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold px-5 py-2 rounded-xl text-sm transition-colors disabled:opacity-60"
                   >
-                    Schedule
+                    {callUpdateSaving ? "Saving..." : "Save"}
                   </button>
                 </div>
               </div>

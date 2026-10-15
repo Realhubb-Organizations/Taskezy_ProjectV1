@@ -37,6 +37,18 @@ export const authRateLimiter = rateLimit({
   message: { success: false, error: { code: "RATE_LIMITED", message: "Too many auth attempts, please try again later" } }
 });
 
+// /auth/google — there's no password to guess (Google signs the token), so
+// this is a backstop against a looping client. Keyed by IP since the body
+// carries no email; only failed attempts count, like /login.
+export const googleAuthRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  skipSuccessfulRequests: true,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: { code: "RATE_LIMITED", message: "Too many sign-in attempts, please try again later" } }
+});
+
 // /auth/refresh is NOT a brute-forceable-credential endpoint the way
 // /login is — it takes no password, just the caller's own httpOnly
 // refresh-token cookie, so there's nothing here to guess and this limiter
