@@ -162,6 +162,110 @@ adSpendRouter.get(
   })
 );
 
+// Mirrors frontend/src/lib/reportMetrics.ts's BUYER_STATUSES/
+// NON_BUYER_STATUSES/VISIT_OR_MEETING_STATUSES (DB codes, not display
+// labels) — BUYER_CODES is the same set leads.service.ts's
+// REPORT_QUALIFIED_CODES already uses for the Agent/Manager reports;
+// NON_BUYER_CODES is its own, wider set (also includes Low Budget and
+// Cancelled, unlike campaign-lead-stats' UNQUALIFIED_CODES above). Must
+// stay in lockstep with reportMetrics.ts if either list ever changes.
+const BUYER_CODES = ["CALL_BACK", "FOLLOWUP", "EOI", "SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE", "BOOKED"];
+const NON_BUYER_CODES = ["DEAD_LEAD", "RNR", "LOW_BUDGET", "CANCELLED"];
+const VISIT_CODES = ["SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE"];
+
+const marketingReportStatsQuerySchema = z.object({
+  dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateFrom must be YYYY-MM-DD").optional(),
+  dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateTo must be YYYY-MM-DD").optional()
+});
+
+/**
+ * Backend counterpart to MarketingReports.tsx — the "Overall" summary
+ * cards (Lead Quality, Visit Conversion, Booking ROI) plus the "By Ad
+ * Account" and "Property-wise" tables' lead-derived numbers (CPL/spend
+ * stay client-side from the already-fetched adSpendRecords, same split
+ * as Campaigns' own campaign-lead-stats above). Campaign matching is the
+ * exact-string rule reportMetrics.ts's computeCampaignAttributedSpend
+ * always used (l.campaign = ad_spend's account_name, case-sensitive, no
+ * COALESCE-to-source fallback) — deliberately stricter than campaign-
+ * lead-stats' LOWER(COALESCE(...)) join, matching what this page's own
+ * accountRows always did. byCampaign/byProperty only return rows with at
+ * least one matching lead; the frontend already drives the full account/
+ * property list from adSpendRecords/properties and looks these up,
+ * zero-defaulting whatever isn't present here.
+ */
+adSpendRouter.get(
+  "/marketing-report-stats",
+  validate({ query: marketingReportStatsQuerySchema }),
+  asyncHandler(async (req, res) => {
+    const { dateFrom, dateTo } = req.query as unknown as { dateFrom?: string; dateTo?: string };
+    const dateBounds = `($1::date IS NULL OR (l.created_at AT TIME ZONE $3)::date >= $1::date)
+         AND ($2::date IS NULL OR (l.created_at AT TIME ZONE $3)::date <= $2::date)`;
+    const baseParams = [dateFrom ?? null, dateTo ?? null, BUSINESS_TIMEZONE];
+
+    const [overallResult, byCampaignResult, byPropertyResult] = await Promise.all([
+      query<{
+        buyer_count: string; non_buyer_count: string; converted_count: string;
+        total_count: string; booking_value: string; booking_count: string;
+      }>(
+        `SELECT count(*) FILTER (WHERE l.status_code = ANY($4::text[])) AS buyer_count,
+                count(*) FILTER (WHERE l.status_code = ANY($5::text[])) AS non_buyer_count,
+                count(*) FILTER (WHERE l.status_code = ANY($6::text[])) AS converted_count,
+                count(*) AS total_count,
+                COALESCE(SUM(l.deal_value) FILTER (WHERE l.status_code = 'BOOKED'), 0) AS booking_value,
+                count(*) FILTER (WHERE l.status_code = 'BOOKED') AS booking_count
+         FROM leads l
+         WHERE ${dateBounds}`,
+        [...baseParams, BUYER_CODES, NON_BUYER_CODES, VISIT_CODES]
+      ),
+      query<{ campaign: string; buyer_count: string; non_buyer_count: string; booking_value: string }>(
+        `SELECT l.campaign,
+                count(*) FILTER (WHERE l.status_code = ANY($4::text[])) AS buyer_count,
+                count(*) FILTER (WHERE l.status_code = ANY($5::text[])) AS non_buyer_count,
+                COALESCE(SUM(l.deal_value) FILTER (WHERE l.status_code = 'BOOKED'), 0) AS booking_value
+         FROM leads l
+         WHERE l.campaign IS NOT NULL AND ${dateBounds}
+         GROUP BY l.campaign`,
+        [...baseParams, BUYER_CODES, NON_BUYER_CODES]
+      ),
+      query<{ property_name: string; leads_count: string; booking_value: string; booking_count: string }>(
+        `SELECT p.name AS property_name,
+                count(*) AS leads_count,
+                COALESCE(SUM(l.deal_value) FILTER (WHERE l.status_code = 'BOOKED'), 0) AS booking_value,
+                count(*) FILTER (WHERE l.status_code = 'BOOKED') AS booking_count
+         FROM leads l
+         JOIN properties p ON p.id = l.property_id
+         WHERE ${dateBounds}
+         GROUP BY p.name`,
+        baseParams
+      )
+    ]);
+
+    const o = overallResult.rows[0];
+    sendOk(res, {
+      overall: {
+        buyerCount: Number(o?.buyer_count ?? 0),
+        nonBuyerCount: Number(o?.non_buyer_count ?? 0),
+        convertedCount: Number(o?.converted_count ?? 0),
+        totalCount: Number(o?.total_count ?? 0),
+        bookingValue: Number(o?.booking_value ?? 0),
+        bookingCount: Number(o?.booking_count ?? 0)
+      },
+      byCampaign: byCampaignResult.rows.map(r => ({
+        campaign: r.campaign,
+        buyerCount: Number(r.buyer_count),
+        nonBuyerCount: Number(r.non_buyer_count),
+        bookingValue: Number(r.booking_value)
+      })),
+      byProperty: byPropertyResult.rows.map(r => ({
+        property: r.property_name,
+        leadsCount: Number(r.leads_count),
+        bookingValue: Number(r.booking_value),
+        bookingCount: Number(r.booking_count)
+      }))
+    });
+  })
+);
+
 /**
  * Manually wakes both platforms' ad-level sync jobs early instead of
  * waiting for their 6h interval — Campaign Deep Dive's Sync button. Fires

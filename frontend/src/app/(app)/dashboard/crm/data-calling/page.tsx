@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useMemo, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { useApp, Lead } from "@/context/AppContext";
+import { useApp, Lead, FollowupCall, mapApiFollowupToFrontend } from "@/context/AppContext";
 import { ChevronRight, Search, Sliders, Minus, X, Copy, Users, Plus, Check, Trash2, AlertTriangle } from "lucide-react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine } from "recharts";
 import UploadLeadsModal from "@/components/crm/UploadLeadsModal";
@@ -14,6 +14,7 @@ import DateRangePicker, { DatePicker, DateRangeValue, todayIso, toIsoDate } from
 import DateRangeSelect from "@/components/ui/DateRangeSelect";
 import { canChangeLeadStatus, canReassignThisLead, canUploadLeads, uploadAssignableUsers, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
 import { nextFollowupFor } from "@/lib/followups";
+import { apiListFollowupsPage } from "@/lib/apiClient";
 import NextCallCell from "@/components/crm/NextCallCell";
 import { useDialog } from "@/components/ui/DialogProvider";
 import LeadNoteCell from "@/components/crm/LeadNoteCell";
@@ -175,7 +176,7 @@ export default function DataCallingPage() {
   // AppContext.tsx), aliased to `leads` here so the rest of this large file
   // needs no other changes.
   const {
-    dataCallingLeads: leads, followupCalls, properties, users, currentUser, activeRole, updateLeadStatus, updateCallStatus, reassignLead,
+    dataCallingLeads: leads, properties, users, currentUser, activeRole, updateLeadStatus, updateCallStatus, reassignLead,
     bulkImportLeads, addFollowupCall, removeLeadsLocally, isDataLoading, recordCallEnded, recordWhatsAppOpened
   } = useApp();
   const { toast, prompt: promptDialog } = useDialog();
@@ -891,7 +892,6 @@ export default function DataCallingPage() {
       toast(err instanceof Error ? err.message : "Could not reassign this lead. Please try again.", "error");
     }
   };
-  const nextCallDateFor = (leadId: string) => nextFollowupFor(leadId, followupCalls);
 
   const filteredLeads = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -925,6 +925,20 @@ export default function DataCallingPage() {
   useEffect(() => {
     tableScrollRef.current?.scrollTo({ top: 0 });
   }, [currentPageClamped, rowsPerPage]);
+
+  // Real next-scheduled-call date, fetched for just the leads on the
+  // current table page (not the whole company's follow-up table).
+  const [pageFollowups, setPageFollowups] = useState<FollowupCall[]>([]);
+  const pageLeadIds = paginatedLeads.map(l => l.id).join(",");
+  useEffect(() => {
+    if (!pageLeadIds) { setPageFollowups([]); return; }
+    let cancelled = false;
+    apiListFollowupsPage(1, 500, { leadId: pageLeadIds.split(",") })
+      .then(({ rows }) => { if (!cancelled) setPageFollowups(rows.map(mapApiFollowupToFrontend)); })
+      .catch(() => { if (!cancelled) setPageFollowups([]); });
+    return () => { cancelled = true; };
+  }, [pageLeadIds]);
+  const nextCallDateFor = (leadId: string) => nextFollowupFor(leadId, pageFollowups);
 
   const allOnPageSelected = paginatedLeads.length > 0 && paginatedLeads.every(l => selectedIds.has(l.id));
   const toggleSelectAllOnPage = () => setSelectedIds(prev => {

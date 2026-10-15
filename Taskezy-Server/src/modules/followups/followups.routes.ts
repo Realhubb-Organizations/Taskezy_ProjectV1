@@ -53,12 +53,21 @@ const SELECT = `
 // its time-based buckets correctly, so none of them can safely be switched
 // to a single filtered server page today; this keeps that door open without
 // changing any of their behavior.
+const uuidToArray = z.union([z.string().uuid(), z.array(z.string().uuid())])
+  .optional()
+  .transform(v => v === undefined ? undefined : (Array.isArray(v) ? v : [v]));
+
 const listFollowupsQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().positive().max(500).default(10),
   status: z.union([z.enum(["MISSED", "UPCOMING", "COMPLETED"]), z.array(z.enum(["MISSED", "UPCOMING", "COMPLETED"]))])
     .optional()
-    .transform(v => v === undefined ? undefined : (Array.isArray(v) ? v : [v]))
+    .transform(v => v === undefined ? undefined : (Array.isArray(v) ? v : [v])),
+  // Lets a drill-down table fetch "the follow-ups for just these leads"
+  // (e.g. for a next-call-date column) instead of paging through every
+  // follow-up in the company — same uuidToArray pattern leads.schema.ts's
+  // assignedAgentId already uses.
+  leadId: uuidToArray
 });
 
 // Mirrors leads.service.ts's scopeForCaller rule: a Member only ever sees
@@ -71,8 +80,8 @@ followupsRouter.get(
   "/",
   validate({ query: listFollowupsQuerySchema }),
   asyncHandler(async (req, res) => {
-    const { page, pageSize, status } = req.query as unknown as {
-      page: number; pageSize: number; status?: ("MISSED" | "UPCOMING" | "COMPLETED")[];
+    const { page, pageSize, status, leadId } = req.query as unknown as {
+      page: number; pageSize: number; status?: ("MISSED" | "UPCOMING" | "COMPLETED")[]; leadId?: string[];
     };
     const scopedAssigneeIds = await scopedAssigneeIdsForCaller(req.user!);
 
@@ -81,6 +90,10 @@ followupsRouter.get(
     if (scopedAssigneeIds) {
       params.push(scopedAssigneeIds);
       conditions.push(`fc.assigned_to_id = ANY($${params.length}::uuid[])`);
+    }
+    if (leadId && leadId.length > 0) {
+      params.push(leadId);
+      conditions.push(`fc.lead_id = ANY($${params.length}::uuid[])`);
     }
     if (status && status.length > 0) {
       if (status.length === 1) {

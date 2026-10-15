@@ -61,6 +61,15 @@ export const leadAnalyticsStatsQuerySchema = z.object({
   dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateTo must be YYYY-MM-DD").optional()
 });
 
+// Manager report's per-agent rollup (ManagerReports.tsx) — just a date
+// range, same bounds format as every other stats endpoint; grouping by
+// agent/manager/team happens server-side (GROUP BY) or client-side
+// (the Individual/Team/Combined roll-up), not via a request filter here.
+export const managerReportStatsQuerySchema = z.object({
+  dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateFrom must be YYYY-MM-DD").optional(),
+  dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateTo must be YYYY-MM-DD").optional()
+});
+
 export const leadIdParamSchema = z.object({
   id: z.string().uuid()
 });

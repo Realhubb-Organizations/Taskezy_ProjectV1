@@ -847,7 +847,7 @@ export function mapApiResaleUnitToFrontend(row: ApiResaleUnitRow): ResaleUnit {
 const FOLLOWUP_STATUS_MAP: Record<string, FollowupCall["status"]> = { MISSED: "Missed", UPCOMING: "Upcoming", COMPLETED: "Completed" };
 const FOLLOWUP_TYPE_MAP: Record<string, FollowupCall["type"]> = { CALLBACK: "Callback", MEETING: "Meeting", SITE_VISIT: "Site Visit" };
 
-function mapApiFollowupToFrontend(row: ApiFollowupRow): FollowupCall {
+export function mapApiFollowupToFrontend(row: ApiFollowupRow): FollowupCall {
   return {
     id: row.id,
     leadId: row.lead_id || undefined,

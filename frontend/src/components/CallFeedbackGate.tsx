@@ -5,8 +5,8 @@ import { createPortal } from "react-dom";
 import { Capacitor } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
 import { PhoneCall, MessageCircle, Check, X } from "lucide-react";
-import { useApp, LeadStatus } from "@/context/AppContext";
-import { apiCreateFollowup, apiUpdateLeadStatus, apiUpdateCallStatus } from "@/lib/apiClient";
+import { useApp, LeadStatus, Lead, mapApiLeadToFrontendLead } from "@/context/AppContext";
+import { apiCreateFollowup, apiUpdateLeadStatus, apiUpdateCallStatus, apiGetLead } from "@/lib/apiClient";
 import { nextStatusOptions, frontendStatusToDbCode } from "@/lib/leadStatusMapping";
 import { CALL_SUB_STATUS_OPTIONS, CallSubStatus, callSubStatusOf } from "@/lib/callSubStatus";
 
@@ -45,13 +45,21 @@ const todayIso = () => {
 };
 
 export default function CallFeedbackGate() {
-  const { pendingCallAttempt, submitCallFeedback, leads, dataCallingLeads, users, currentUser } = useApp();
+  const { pendingCallAttempt, submitCallFeedback, users, currentUser } = useApp();
   const isWhatsApp = pendingCallAttempt?.channel === "WHATSAPP";
 
-  const lead = useMemo(
-    () => (pendingCallAttempt ? [...leads, ...dataCallingLeads].find(l => l.id === pendingCallAttempt.lead_id) ?? null : null),
-    [pendingCallAttempt, leads, dataCallingLeads]
-  );
+  // Fetched directly by id instead of scanning the bulk leads/dataCallingLeads
+  // arrays — this overlay only ever needs the one lead the call attempt is for.
+  const [lead, setLead] = useState<Lead | null>(null);
+  useEffect(() => {
+    const leadId = pendingCallAttempt?.lead_id;
+    if (!leadId) { setLead(null); return; }
+    let cancelled = false;
+    apiGetLead(leadId)
+      .then(row => { if (!cancelled) setLead(mapApiLeadToFrontendLead(row)); })
+      .catch(() => { if (!cancelled) setLead(null); });
+    return () => { cancelled = true; };
+  }, [pendingCallAttempt?.lead_id]);
   const isDataCallingLead = lead?.source === "Bulk Upload";
   // Regular leads: only what the transition matrix allows from the lead's
   // current status — mirrors LeadDetailDrawer, just without its separate

@@ -367,19 +367,44 @@ export interface AgentReportStats {
   siteVisits: number;
   bookingValue: number;
   bookingCount: number;
+  allocatedSpend: number;
+  missedLeads: number;
+  missedFollowups: number;
 }
-// Backs the Agent report tab's 4 funnel KPI cards + booking value/count
-// (AgentReports.tsx) for one agent at a time — pass that agent's user id as
-// the single-element assignedAgentId array (same shape GET /leads/stats
-// already takes). Campaign-attributed spend and missed-lead/follow-up
-// detection stay client-side (reportMetrics.ts), same as every KPI card's
-// own drill-down popup, which still reads real lead rows from the bulk array.
+// Backs the Agent report tab's 4 funnel KPI cards, booking value/count,
+// campaign-attributed spend, and missed-lead/missed-follow-up counts
+// (AgentReports.tsx) for one agent at a time — pass that agent's user id
+// as the single-element assignedAgentId array (same shape GET /leads/stats
+// already takes). ROI stays client-side (one division of bookingValue/
+// allocatedSpend). Each KPI card's own drill-down popup still reads real
+// lead/follow-up rows from the bulk arrays — only the numbers moved here.
 export function apiGetAgentReportStats(assignedAgentId: string, dateFrom?: string, dateTo?: string): Promise<AgentReportStats> {
   const params = new URLSearchParams();
   params.set("assignedAgentId", assignedAgentId);
   if (dateFrom) params.set("dateFrom", dateFrom);
   if (dateTo) params.set("dateTo", dateTo);
   return request<AgentReportStats>(`/api/v1/leads/report-stats?${params.toString()}`);
+}
+
+export interface ManagerReportAgentStats {
+  assignedAgentId: string;
+  leadsCount: number;
+  spend: number;
+  bookingValue: number;
+  missedCount: number;
+  missedFollowups: number;
+}
+// Backs ManagerReports.tsx — one row per agent (manager or direct report
+// alike). The Individual/Team/Combined split and per-member breakdown
+// stay client-side, summing a manager's own row with their direct
+// reports' rows, same pattern LeadDashboard.tsx's Analytics tab already
+// uses for its own per-agent rollup.
+export function apiGetManagerReportStats(dateFrom?: string, dateTo?: string): Promise<ManagerReportAgentStats[]> {
+  const params = new URLSearchParams();
+  if (dateFrom) params.set("dateFrom", dateFrom);
+  if (dateTo) params.set("dateTo", dateTo);
+  const qs = params.toString();
+  return request<ManagerReportAgentStats[]>(`/api/v1/leads/manager-report-stats${qs ? `?${qs}` : ""}`);
 }
 
 export function apiGetLead(leadId: string): Promise<ApiLeadRow> {
@@ -1034,6 +1059,9 @@ export function apiGetPendingTasks(): Promise<ApiPendingTaskRow[]> {
 // param multi-select over MISSED/UPCOMING/COMPLETED.
 export interface FollowupListFilters {
   status?: ("MISSED" | "UPCOMING" | "COMPLETED")[];
+  // "Just the follow-ups for these leads" — e.g. a drill-down table's
+  // next-call-date column, without paging through every follow-up.
+  leadId?: string[];
 }
 
 export interface FollowupsPageResult {
@@ -1051,6 +1079,7 @@ export async function apiListFollowupsPage(
 ): Promise<FollowupsPageResult> {
   const params = new URLSearchParams();
   filters.status?.forEach(s => params.append("status", s));
+  filters.leadId?.forEach(id => params.append("leadId", id));
   params.set("page", String(page));
   params.set("pageSize", String(pageSize));
   const { data, meta } = await requestWithMeta<ApiFollowupRow>(`/api/v1/followups?${params.toString()}`);
@@ -1552,6 +1581,23 @@ export function apiGetCampaignLeadStats(dateFrom?: string, dateTo?: string): Pro
   if (dateTo) params.set("dateTo", dateTo);
   const qs = params.toString();
   return request<CampaignLeadStats[]>(`/api/v1/ad-spend/campaign-lead-stats${qs ? `?${qs}` : ""}`);
+}
+
+export interface MarketingReportStats {
+  overall: { buyerCount: number; nonBuyerCount: number; convertedCount: number; totalCount: number; bookingValue: number; bookingCount: number };
+  byCampaign: { campaign: string; buyerCount: number; nonBuyerCount: number; bookingValue: number }[];
+  byProperty: { property: string; leadsCount: number; bookingValue: number; bookingCount: number }[];
+}
+// Backs MarketingReports.tsx's Overall summary cards (Lead Quality, Visit
+// Conversion, Booking ROI) and the lead-derived half of its By Ad Account/
+// Property-wise tables — spend/CPL/platform stay client-side from the
+// already-fetched adSpendRecords, same split campaign-lead-stats uses.
+export function apiGetMarketingReportStats(dateFrom?: string, dateTo?: string): Promise<MarketingReportStats> {
+  const params = new URLSearchParams();
+  if (dateFrom) params.set("dateFrom", dateFrom);
+  if (dateTo) params.set("dateTo", dateTo);
+  const qs = params.toString();
+  return request<MarketingReportStats>(`/api/v1/ad-spend/marketing-report-stats${qs ? `?${qs}` : ""}`);
 }
 
 // Real per-ad, per-day spend/leads with each row's real ad set/ad/creative

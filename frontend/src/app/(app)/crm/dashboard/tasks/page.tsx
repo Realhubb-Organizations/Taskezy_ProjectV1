@@ -4,7 +4,8 @@ import React, { Suspense, useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
-import { useApp, Lead, LeadStatus } from "@/context/AppContext";
+import { useApp, Lead, LeadStatus, mapApiLeadToFrontendLead } from "@/context/AppContext";
+import { apiGetLead } from "@/lib/apiClient";
 import { useDialog } from "@/components/ui/DialogProvider";
 import SalesPendingTasksTable from "@/components/dashboard/SalesPendingTasksTable";
 import { TAB_BUCKETS, TeamTaskTab } from "@/components/dashboard/TeamTasksTable";
@@ -18,7 +19,7 @@ import { PendingTask } from "@/lib/salesPendingTasks";
 // carries ?agent=&tab=&type= so this page lists exactly what was counted;
 // the date range then narrows it by task due date.
 function AgentTasksView() {
-  const { leads, pendingTasks, currentUser, updateLeadStatus, isDataLoading } = useApp();
+  const { pendingTasks, currentUser, updateLeadStatus, isDataLoading } = useApp();
   const { toast, prompt: promptDialog } = useDialog();
   const params = useSearchParams();
   const agent = params.get("agent") || "";
@@ -95,13 +96,13 @@ function AgentTasksView() {
         visibleBuckets={(["missed", "pending", "upcoming"] as const).filter(b => TAB_BUCKETS[tab].includes(b))}
         pendingTasks={pendingTasks}
         taskFilter={taskFilter}
-        onViewLead={(leadId) => setDrawerLead(leads.find(l => l.id === leadId) || null)}
+        onViewLead={(leadId) => { apiGetLead(leadId).then(row => setDrawerLead(mapApiLeadToFrontendLead(row))).catch(() => setDrawerLead(null)); }}
         onStatusChange={handleStatusChange}
         isLoading={isDataLoading}
       />
 
       <LeadDetailDrawer
-        lead={drawerLead ? leads.find(l => l.id === drawerLead.id) || drawerLead : null}
+        lead={drawerLead}
         isOpen={drawerLead !== null}
         onClose={() => setDrawerLead(null)}
         onUpdateStatus={handleStatusChange}

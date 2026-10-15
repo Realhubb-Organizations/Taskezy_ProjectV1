@@ -13,10 +13,8 @@ import LeadDetailDrawer from "@/components/crm/LeadDetailDrawer";
 import { statusBadgeClasses } from "@/lib/leadStatusMapping";
 import {
   filterLeadsByRange,
-  filterAdSpendByRange,
   filterFollowupsByRange,
   computeROIMultiple,
-  computeCampaignAttributedSpend,
   agentFunnelLeads,
   getMissedInfo,
   formatCurrency,
@@ -27,11 +25,10 @@ import { LineSkeleton, TableRowsSkeleton, CardListSkeleton } from "@/components/
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
 
 export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
-  const { leads, adSpendRecords, followupCalls, users, currentUser, activeRole, reassignLead, updateLeadStatus, isDataLoading } = useApp();
+  const { leads, followupCalls, users, currentUser, activeRole, reassignLead, updateLeadStatus, isDataLoading } = useApp();
   const { toast, prompt: promptDialog } = useDialog();
 
   const rangeLeads = useMemo(() => filterLeadsByRange(leads, dateRange.from, dateRange.to), [leads, dateRange]);
-  const rangeSpend = useMemo(() => filterAdSpendByRange(adSpendRecords, dateRange.from, dateRange.to), [adSpendRecords, dateRange]);
   const rangeFollowups = useMemo(() => filterFollowupsByRange(followupCalls, dateRange.from, dateRange.to), [followupCalls, dateRange]);
 
   // Real reporting-line lookup (see Settings → Manage Users → "Reports To"),
@@ -76,35 +73,37 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
     return Array.from(names).sort();
   }, [agentNames, managerNames]);
 
+  // agentLeads/agentFollowups (and the missedLeads/missedFollowups arrays
+  // below) still feed every KPI card's drill-down popup and the tabbed
+  // missed-items tables further down this page, which need real rows, not
+  // just counts — only the numbers displayed on the cards themselves come
+  // from the server now (see leads.service.ts's getAgentReportStats).
   const agentLeads = rangeLeads.filter(l => l.assignedAgent === activeAgent);
-  const allocatedSpend = computeCampaignAttributedSpend(agentLeads, rangeSpend);
   const missedLeads = agentLeads
     .map(l => ({ lead: l, info: getMissedInfo(l) }))
     .filter(x => x.info.missed);
   const agentFollowups = rangeFollowups.filter(f => f.assignedTo === activeAgent);
   const missedFollowups = agentFollowups.filter(f => f.status === "Missed");
 
-  // KPI cards + Sales Funnel numbers now come from the server (GET
-  // /leads/report-stats) instead of computeAgentFunnel/computeBookingValue/
-  // computeBookingCount over the bulk leads array — agentLeads above still
-  // feeds the drill-down popup (kpiDetail below) and campaign-attributed
-  // spend/missed-lead detection, which stay client-side (see
-  // leads.service.ts's getAgentReportStats doc comment for why).
   const activeAgentId = users.find(u => u.name === activeAgent)?.id;
-  const [reportStats, setReportStats] = useState<AgentReportStats>({
-    assigned: 0, contacted: 0, qualified: 0, siteVisits: 0, bookingValue: 0, bookingCount: 0
-  });
+  const ZERO_REPORT_STATS: AgentReportStats = {
+    assigned: 0, contacted: 0, qualified: 0, siteVisits: 0, bookingValue: 0, bookingCount: 0,
+    allocatedSpend: 0, missedLeads: 0, missedFollowups: 0
+  };
+  const [reportStats, setReportStats] = useState<AgentReportStats>(ZERO_REPORT_STATS);
   useEffect(() => {
-    if (!activeAgentId) { setReportStats({ assigned: 0, contacted: 0, qualified: 0, siteVisits: 0, bookingValue: 0, bookingCount: 0 }); return; }
+    if (!activeAgentId) { setReportStats(ZERO_REPORT_STATS); return; }
     let cancelled = false;
     apiGetAgentReportStats(activeAgentId, dateRange.from, dateRange.to)
       .then(result => { if (!cancelled) setReportStats(result); })
       .catch(() => { /* leave the previous numbers showing on a transient failure */ });
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeAgentId, dateRange.from, dateRange.to]);
   const funnel = { assigned: reportStats.assigned, contacted: reportStats.contacted, qualified: reportStats.qualified, siteVisits: reportStats.siteVisits };
   const bookingValue = reportStats.bookingValue;
   const bookingCount = reportStats.bookingCount;
+  const allocatedSpend = reportStats.allocatedSpend;
   const roi = computeROIMultiple(bookingValue, allocatedSpend);
   const pct = (n: number) => (funnel.assigned === 0 ? 0 : Math.round((n / funnel.assigned) * 100));
   const kpiCards = [
@@ -112,8 +111,8 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
     { key: "contacted", label: "Leads Contacted", value: funnel.contacted, sub: `${pct(funnel.contacted)}% of assigned`, icon: Phone, iconBg: "bg-emerald-50 text-emerald-600", alert: false },
     { key: "qualified", label: "Qualified Leads", value: funnel.qualified, sub: `${pct(funnel.qualified)}% of assigned`, icon: CheckSquare, iconBg: "bg-violet-50 text-violet-600", alert: false },
     { key: "siteVisits", label: "Site Visits", value: funnel.siteVisits, sub: `${pct(funnel.siteVisits)}% of assigned`, icon: MapPin, iconBg: "bg-orange-50 text-orange-500", alert: false },
-    { key: "missedLeads", label: "Missed Leads", value: missedLeads.length, sub: `${SLA_MINUTES} min response window`, icon: AlertTriangle, iconBg: "bg-red-50 text-red-600", alert: missedLeads.length > 0 },
-    { key: "missedFollowups", label: "Missed Follow-ups", value: missedFollowups.length, sub: "10 min after reminder", icon: Clock, iconBg: "bg-sky-50 text-sky-600", alert: false }
+    { key: "missedLeads", label: "Missed Leads", value: reportStats.missedLeads, sub: `${SLA_MINUTES} min response window`, icon: AlertTriangle, iconBg: "bg-red-50 text-red-600", alert: reportStats.missedLeads > 0 },
+    { key: "missedFollowups", label: "Missed Follow-ups", value: reportStats.missedFollowups, sub: "10 min after reminder", icon: Clock, iconBg: "bg-sky-50 text-sky-600", alert: false }
   ] as const;
   const funnelRows = [
     { label: "Assigned", value: funnel.assigned, bar: "bg-[#0B1E6E]" },
@@ -442,8 +441,8 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                 <div className="lg:col-span-5 bg-white border border-slate-100 rounded-2xl shadow-sm p-5 space-y-3 min-w-0">
                   <h3 className="text-sm font-bold text-slate-800">Action Required</h3>
                   {[
-                    { key: "missedLeads", label: "Missed Leads", value: missedLeads.length, sub: `Leads not contacted within ${SLA_MINUTES} min SLA`, icon: AlertTriangle, tone: "bg-red-50 border-red-100", iconTone: "bg-red-100 text-red-600", btn: "bg-red-100/70 text-red-700 hover:bg-red-100", cta: "View Leads", tab: "leads" as const },
-                    { key: "missedFollowups", label: "Missed Follow-ups", value: missedFollowups.length, sub: "Follow-ups past reminder due time", icon: Clock, tone: "bg-amber-50 border-amber-100", iconTone: "bg-amber-100 text-amber-600", btn: "bg-amber-100/70 text-amber-800 hover:bg-amber-100", cta: "View Follow-ups", tab: "followups" as const }
+                    { key: "missedLeads", label: "Missed Leads", value: reportStats.missedLeads, sub: `Leads not contacted within ${SLA_MINUTES} min SLA`, icon: AlertTriangle, tone: "bg-red-50 border-red-100", iconTone: "bg-red-100 text-red-600", btn: "bg-red-100/70 text-red-700 hover:bg-red-100", cta: "View Leads", tab: "leads" as const },
+                    { key: "missedFollowups", label: "Missed Follow-ups", value: reportStats.missedFollowups, sub: "Follow-ups past reminder due time", icon: Clock, tone: "bg-amber-50 border-amber-100", iconTone: "bg-amber-100 text-amber-600", btn: "bg-amber-100/70 text-amber-800 hover:bg-amber-100", cta: "View Follow-ups", tab: "followups" as const }
                   ].map(a => (
                     <div key={a.label} className={`flex items-center gap-3 rounded-xl border p-3.5 ${a.tone}`}>
                       <span className={`h-11 w-11 rounded-full flex items-center justify-center shrink-0 ${a.iconTone}`}>

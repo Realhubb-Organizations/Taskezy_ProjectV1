@@ -39,6 +39,12 @@ export async function getAgentReportStatsHandler(req: Request, res: Response): P
   sendOk(res, stats);
 }
 
+export async function getManagerReportStatsHandler(req: Request, res: Response): Promise<void> {
+  const { dateFrom, dateTo } = req.query as unknown as { dateFrom?: string; dateTo?: string };
+  const stats = await leadsService.getManagerReportStats(req.user!, { dateFrom, dateTo });
+  sendOk(res, stats);
+}
+
 export async function getLeadHandler(req: Request, res: Response): Promise<void> {
   const lead = await leadsService.getLead(req.user!, req.params.id);
   sendOk(res, leadForCaller(req.user!, lead));
