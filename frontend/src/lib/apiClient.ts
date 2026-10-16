@@ -274,11 +274,14 @@ export interface LeadListFilters {
   status?: string[];
   assignedAgentId?: string[];
   campaign?: string[];
+  propertyId?: string[];
   dateFrom?: string;
   dateTo?: string;
   search?: string;
   /** Leave out Data Calling ("Bulk Upload") leads. */
   excludeBulkUpload?: boolean;
+  /** Live-clock SLA check — see leads.repository.ts's buildLeadWhereClause. */
+  missedOnly?: boolean;
 }
 
 function buildLeadFilterParams(filters: LeadListFilters): URLSearchParams {
@@ -286,10 +289,12 @@ function buildLeadFilterParams(filters: LeadListFilters): URLSearchParams {
   filters.status?.forEach(s => params.append("status", s));
   filters.assignedAgentId?.forEach(a => params.append("assignedAgentId", a));
   filters.campaign?.forEach(c => params.append("campaign", c));
+  filters.propertyId?.forEach(p => params.append("propertyId", p));
   if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
   if (filters.dateTo) params.set("dateTo", filters.dateTo);
   if (filters.search) params.set("search", filters.search);
   if (filters.excludeBulkUpload) params.set("excludeBulkUpload", "true");
+  if (filters.missedOnly) params.set("missedOnly", "true");
   return params;
 }
 
@@ -327,6 +332,14 @@ export function apiGetLeadStats(filters: LeadListFilters = {}): Promise<LeadSumm
   const params = buildLeadFilterParams(filters);
   const qs = params.toString();
   return request<LeadSummaryStats>(`/api/v1/leads/stats${qs ? `?${qs}` : ""}`);
+}
+
+// LeadDrillDownPanel's Campaign filter dropdown — distinct campaign names
+// for the same scope/filters as whatever the panel is currently showing.
+export function apiGetDistinctCampaigns(filters: LeadListFilters = {}): Promise<string[]> {
+  const params = buildLeadFilterParams(filters);
+  const qs = params.toString();
+  return request<string[]>(`/api/v1/leads/campaigns${qs ? `?${qs}` : ""}`);
 }
 
 // Leads Analytics tab's own filter set (LeadDashboard.tsx) — Property
