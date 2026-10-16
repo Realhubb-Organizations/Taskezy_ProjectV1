@@ -3,16 +3,17 @@
 import React, { useEffect, useMemo, useState, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useApp, Lead, LeadStatus, FollowupCall, mapApiFollowupToFrontend } from "@/context/AppContext";
-import { apiListFollowupsPage } from "@/lib/apiClient";
+import { apiListFollowupsPage, apiGetDistinctCampaigns, LeadListFilters } from "@/lib/apiClient";
+import { useServerLeadList } from "@/lib/useServerLeadList";
 import { useDialog } from "@/components/ui/DialogProvider";
-import { deriveActivityTimeline, PICKABLE_STATUS_OPTIONS, statusBadgeClasses } from "@/lib/leadStatusMapping";
+import { deriveActivityTimeline, PICKABLE_STATUS_OPTIONS, statusBadgeClasses, frontendStatusToDbCode } from "@/lib/leadStatusMapping";
 import { WhatsAppIcon, CallIcon } from "@/components/icons/ContactIcons";
 import { Phone, Mail, X, Copy, Check, User, Search, ArrowRight } from "lucide-react";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
 import { DateTimeLines, dateTimeParts } from "@/components/ui/DateTimeLines";
-import { canChangeLeadStatus, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
+import { canChangeLeadStatus, STATUS_LOCKED_HINT, isLeadAssignableUser } from "@/lib/leadAssignment";
 import { nextFollowupFor } from "@/lib/followups";
 import { maskPhone, maskEmail } from "@/lib/maskPII";
 import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/callTrigger";
@@ -311,14 +312,16 @@ export function LeadQuickViewDrawer({ lead, onClose }: {
   );
 }
 
-export default function LeadDrillDownPanel({ title, leads, onClose }: {
+export default function LeadDrillDownPanel({ title, baseFilters, onClose }: {
   // Selected stat card's label; null hides the panel.
   title: string | null;
-  // That card's full, unfiltered lead list.
-  leads: Lead[];
+  // That card's own filters (status codes + date range, etc.) — the
+  // server applies the caller's own role-scope on top automatically, same
+  // boundary every other leads endpoint already enforces.
+  baseFilters: LeadListFilters;
   onClose: () => void;
 }) {
-  const { isDataLoading, currentUser, users, activeRole, recordCallEnded, recordWhatsAppOpened } = useApp();
+  const { currentUser, users, activeRole, recordCallEnded, recordWhatsAppOpened } = useApp();
   const handleDrillStatusChange = useLeadStatusChange();
   const callAllowed = canTriggerLeadCall(activeRole === "ADMIN");
   const handleCall = (lead: Lead) => {
@@ -340,53 +343,83 @@ export default function LeadDrillDownPanel({ title, leads, onClose }: {
     });
   };
 
-  const [drillPage, setDrillPage] = useState(1);
-  const [drillRowsPerPage, setDrillRowsPerPage] = useState(10);
   const [quickViewLead, setQuickViewLead] = useState<Lead | null>(null);
-  const [drillSearch, setDrillSearch] = useState("");
   const [drillSearchOpen, setDrillSearchOpen] = useState(false);
   const [drillStatusFilter, setDrillStatusFilter] = useState<string[]>([]);
   const [drillAssignedFilter, setDrillAssignedFilter] = useState<string[]>([]);
   const [drillCampaignFilter, setDrillCampaignFilter] = useState<string[]>([]);
 
-  // Switching (or re-opening) a card starts its drill-down fresh — page,
-  // search and column filters reset, rows-per-page is kept.
+  // Switching (or re-opening) a card starts its drill-down fresh — search
+  // and the three column filters reset (the server fetch below resets its
+  // own page whenever the resulting filters change); rows-per-page is kept.
   const [prevTitle, setPrevTitle] = useState(title);
   if (title !== prevTitle) {
     setPrevTitle(title);
-    setDrillPage(1);
-    setDrillSearch("");
+    setDrillSearchOpen(false);
     setDrillStatusFilter([]);
     setDrillAssignedFilter([]);
     setDrillCampaignFilter([]);
   }
 
-  // Any filter change starts back at page 1.
-  const setDrillFilter = (setList: (v: string[]) => void) => (next: string[]) => {
-    setDrillPage(1);
-    setList(next);
-  };
+  const setDrillFilter = (setList: (v: string[]) => void) => (next: string[]) => setList(next);
 
-  // Filter option lists are built from the full, unfiltered set so they
-  // don't shrink as filters are applied.
-  const drillStatusOptions = Array.from(new Set(leads.map(l => l.status)));
-  const drillAssignedOptions = Array.from(new Set(leads.map(l => l.assignedAgent).filter(Boolean)));
-  const drillCampaignOptions = Array.from(new Set(leads.map(l => l.campaign || l.source).filter(Boolean))) as string[];
+  // The secondary Status filter narrows (ANDs with) the category's own
+  // base status codes — e.g. opening "New Leads" then picking "RNR" here
+  // always yields nothing, same as the old client-side filter's AND
+  // behavior, not a silent override of the category.
+  const effectiveStatus = useMemo(() => {
+    const secondaryCodes = drillStatusFilter.map(s => frontendStatusToDbCode(s as LeadStatus)).filter((c): c is string => !!c);
+    if (secondaryCodes.length === 0) return baseFilters.status;
+    if (!baseFilters.status || baseFilters.status.length === 0) return secondaryCodes;
+    const baseSet = new Set(baseFilters.status);
+    return secondaryCodes.filter(c => baseSet.has(c));
+  }, [drillStatusFilter, baseFilters.status]);
 
-  const drillLeads = leads.filter(l => {
-    const matchesSearch = !drillSearch || l.name.toLowerCase().includes(drillSearch.toLowerCase()) || l.phone.includes(drillSearch);
-    const matchesStatus = drillStatusFilter.length === 0 || drillStatusFilter.includes(l.status);
-    const matchesAssigned = drillAssignedFilter.length === 0 || drillAssignedFilter.includes(l.assignedAgent);
-    const campaignVal = l.campaign || l.source || "";
-    const matchesCampaign = drillCampaignFilter.length === 0 || drillCampaignFilter.includes(campaignVal);
-    return matchesSearch && matchesStatus && matchesAssigned && matchesCampaign;
-  });
-  const drillTotalPages = Math.max(1, Math.ceil(drillLeads.length / drillRowsPerPage));
-  const drillCurrentPage = Math.min(drillPage, drillTotalPages);
+  const assignedAgentId = useMemo(
+    () => (drillAssignedFilter.length > 0 ? users.filter(u => drillAssignedFilter.includes(u.name)).map(u => u.id) : baseFilters.assignedAgentId),
+    [drillAssignedFilter, users, baseFilters.assignedAgentId]
+  );
+  const campaign = drillCampaignFilter.length > 0 ? drillCampaignFilter : baseFilters.campaign;
+
+  const filters: LeadListFilters = useMemo(
+    () => ({ ...baseFilters, status: effectiveStatus, assignedAgentId, campaign }),
+    [baseFilters, effectiveStatus, assignedAgentId, campaign]
+  );
+
   // One page at a time (10 rows by default), so opening a card never turns
   // the dashboard into one endless list — the graphs and task tables stay
-  // right below. Changing page keeps the table's header in view.
-  const drillPageLeads = drillLeads.slice((drillCurrentPage - 1) * drillRowsPerPage, drillCurrentPage * drillRowsPerPage);
+  // right below. Real server pagination — totalCount is the true count,
+  // never silently capped at whatever one page happens to return.
+  const {
+    rows: drillPageLeads,
+    totalCount,
+    loading: drillLoading,
+    search: drillSearch,
+    setSearch: setDrillSearch,
+    paginationProps
+  } = useServerLeadList(filters, 10);
+
+  // Assigned-To dropdown options — the active sales roster, same as the
+  // reassign-lead picker (can't derive from an in-memory full list anymore).
+  const drillAssignedOptions = useMemo(
+    () => Array.from(new Set(users.filter(isLeadAssignableUser).map(u => u.name))).sort(),
+    [users]
+  );
+
+  // Campaign dropdown options — real distinct values for this category's
+  // own scope, fetched from the server (same reason as Assigned above).
+  const [drillCampaignOptions, setDrillCampaignOptions] = useState<string[]>([]);
+  const baseFiltersKey = JSON.stringify(baseFilters);
+  useEffect(() => {
+    if (!title) return;
+    let cancelled = false;
+    apiGetDistinctCampaigns(baseFilters)
+      .then(result => { if (!cancelled) setDrillCampaignOptions(result); })
+      .catch(() => { if (!cancelled) setDrillCampaignOptions([]); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [baseFiltersKey, title]);
+
   const drillScrollRef = useRef<HTMLDivElement>(null);
   const keepDrillTableInView = () => {
     const el = drillScrollRef.current;
@@ -394,11 +427,6 @@ export default function LeadDrillDownPanel({ title, leads, onClose }: {
     if (!el || !main) return;
     const offset = el.getBoundingClientRect().top - main.getBoundingClientRect().top;
     if (offset < 0) main.scrollTo({ top: main.scrollTop + offset - 80, behavior: "smooth" });
-  };
-
-  const goToDrillPage = (page: number) => {
-    setDrillPage(Math.max(1, Math.min(drillTotalPages, page)));
-    keepDrillTableInView();
   };
 
   // Real next-scheduled-call date, from the actual followup_calls queue —
@@ -474,7 +502,7 @@ export default function LeadDrillDownPanel({ title, leads, onClose }: {
                         <input
                           autoFocus
                           value={drillSearch}
-                          onChange={(e) => { setDrillSearch(e.target.value); setDrillPage(1); }}
+                          onChange={(e) => setDrillSearch(e.target.value)}
                           onBlur={() => { setDrillSearch(""); setDrillSearchOpen(false); }}
                           placeholder="Search name or phone..."
                           className="min-w-0 flex-1 bg-white border border-brand-400 rounded-md px-1.5 py-1 text-[11px] font-normal focus:outline-none"
@@ -502,7 +530,7 @@ export default function LeadDrillDownPanel({ title, leads, onClose }: {
                     <SearchableMultiSelect
                       variant="inline"
                       label="Status"
-                      options={drillStatusOptions}
+                      options={PICKABLE_STATUS_OPTIONS}
                       selected={drillStatusFilter}
                       onChange={setDrillFilter(setDrillStatusFilter)}
                       panelWidth={208}
@@ -536,9 +564,9 @@ export default function LeadDrillDownPanel({ title, leads, onClose }: {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-xs">
-                {isDataLoading && drillLeads.length === 0 ? (
+                {drillLoading && drillPageLeads.length === 0 ? (
                   <TableRowsSkeleton rows={6} columns={9} />
-                ) : drillLeads.length === 0 ? (
+                ) : totalCount === 0 ? (
                   <tr>
                     <td colSpan={9} className="px-4 py-8 text-center text-slate-400 font-semibold italic">
                       No leads in this category for the selected date range.
@@ -596,15 +624,9 @@ export default function LeadDrillDownPanel({ title, leads, onClose }: {
           </div>
 
           <TablePagination
-            totalRows={drillLeads.length}
-            page={drillCurrentPage}
-            rowsPerPage={drillRowsPerPage}
-            onPageChange={goToDrillPage}
-            onRowsPerPageChange={(n) => {
-              setDrillRowsPerPage(n);
-              setDrillPage(1);
-              keepDrillTableInView();
-            }}
+            {...paginationProps}
+            onPageChange={(p) => { paginationProps.onPageChange(p); keepDrillTableInView(); }}
+            onRowsPerPageChange={(n) => { paginationProps.onRowsPerPageChange(n); keepDrillTableInView(); }}
             rowLabel="Lead"
           />
         </div>

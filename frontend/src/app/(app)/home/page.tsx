@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useApp } from "@/context/AppContext";
+import { apiGetLeadStats, apiListFollowupsPage } from "@/lib/apiClient";
 import { Activity, Users, TrendingUp, ArrowRight } from "lucide-react";
 import { LineSkeleton } from "@/components/ui/Skeletons";
 import { toIsoDate } from "@/components/ui/DateRangePicker";
@@ -42,7 +43,7 @@ function ComingSoonRibbon() {
 }
 
 export default function HomePage() {
-  const { leads, followupCalls, currentUser, invoices, reimbursements, timesheets, adSpendRecords, isDataLoading, users } = useApp();
+  const { leads, currentUser, invoices, reimbursements, timesheets, adSpendRecords, isDataLoading, users } = useApp();
 
   const now = new Date();
   const sevenDaysAgo = new Date(now);
@@ -53,35 +54,43 @@ export default function HomePage() {
   // it has to read as that person's own pipeline — not an org-wide number —
   // for anyone below Admin. Mirrors the isSalesMember/scopedLeads scoping
   // already used on the CRM dashboard (crm/dashboard/page.tsx) for sales
-  // agents, extended here to also scope Managers to their own direct team
-  // (matched by name, same convention every other lead-scoping spot in this
-  // app uses — see LeadDetailDrawer's reassignTargets). Admin is untouched:
-  // myAgentNames stays null and every leads.filter below falls through to
-  // the full, unscoped list exactly as before.
+  // agents, extended here to also scope Managers to their own direct team.
+  // Admin is untouched: scopedAgentIds stays undefined and GET /leads/stats
+  // falls through to the full, unscoped count exactly as before.
   const isAdmin = currentUser?.role === "ADMIN";
-  const myAgentNames = useMemo(() => {
-    if (isAdmin || !currentUser) return null;
-    const names = new Set([currentUser.name]);
+  const scopedAgentIds = useMemo(() => {
+    if (isAdmin || !currentUser) return undefined;
+    const ids = new Set([currentUser.id]);
     if (currentUser.role_type === "Manager") {
-      users.filter(u => u.managerId === currentUser.id).forEach(u => names.add(u.name));
+      users.filter(u => u.managerId === currentUser.id).forEach(u => ids.add(u.id));
     }
-    return names;
+    return Array.from(ids);
   }, [isAdmin, currentUser, users]);
-  const crmScopedLeads = myAgentNames ? leads.filter(l => myAgentNames.has(l.assignedAgent)) : leads;
 
   // CRM — all real: leads created in the window (scoped above for
   // non-admins), campaigns the ad-spend sync currently reports ACTIVE,
   // spend/lead-count in the same window (CPL derived from those, not a
   // separate estimate — these stay org-wide, since an ad campaign isn't
   // owned by one agent), and follow-ups still pending action.
-  const leadsLast7Days = crmScopedLeads.filter(l => isWithinLast7Days(l.createdAtStr)).length;
+  const [leadsLast7Days, setLeadsLast7Days] = useState<number | null>(null);
+  useEffect(() => {
+    apiGetLeadStats({ assignedAgentId: scopedAgentIds, dateFrom: toIsoDate(sevenDaysAgo), dateTo: toIsoDate(now) })
+      .then(stats => setLeadsLast7Days(stats.totalLeads))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopedAgentIds]);
   const activeCampaignsCount = new Set(
     adSpendRecords.filter(r => r.campaignStatus === "ACTIVE").map(r => r.accountName)
   ).size;
   const spendLast7Days = adSpendRecords.filter(r => isWithinLast7Days(r.date)).reduce((s, r) => s + r.spend, 0);
   const leadsGenLast7Days = adSpendRecords.filter(r => isWithinLast7Days(r.date)).reduce((s, r) => s + r.leadsGenerated, 0);
   const avgCplLast7Days = leadsGenLast7Days > 0 ? spendLast7Days / leadsGenLast7Days : 0;
-  const pendingFollowUps = followupCalls.filter(c => c.status === "Upcoming").length;
+  const [pendingFollowUps, setPendingFollowUps] = useState<number | null>(null);
+  useEffect(() => {
+    apiListFollowupsPage(1, 1, { status: ["UPCOMING"] })
+      .then(result => setPendingFollowUps(result.totalCount))
+      .catch(() => {});
+  }, []);
 
   // HRMS — Present/Pending Info use real timesheet/regularization data.
   // "Leave applications" and "WFH" have no backing feature anywhere in this
@@ -120,7 +129,7 @@ export default function HomePage() {
             </h3>
             <div>
               <p className="text-xs text-slate-450">Leads in last 7 days</p>
-              <Metric loading={isDataLoading} className="text-xl font-black text-slate-900 mt-0.5">{leadsLast7Days}</Metric>
+              <Metric loading={leadsLast7Days === null} className="text-xl font-black text-slate-900 mt-0.5">{leadsLast7Days}</Metric>
               <Metric loading={isDataLoading} className="text-xs font-bold text-[#006AFF] mt-0.5">{activeCampaignsCount} Active Campaigns</Metric>
             </div>
             <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-100">
@@ -134,7 +143,7 @@ export default function HomePage() {
               </div>
               <div>
                 <p className="text-[10px] text-slate-450">Follow Ups</p>
-                <Metric loading={isDataLoading} className="text-sm font-bold text-slate-900">{pendingFollowUps}</Metric>
+                <Metric loading={pendingFollowUps === null} className="text-sm font-bold text-slate-900">{pendingFollowUps}</Metric>
               </div>
             </div>
           </div>

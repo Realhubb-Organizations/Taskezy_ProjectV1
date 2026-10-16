@@ -1,18 +1,26 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChevronRight, Search, X } from "lucide-react";
-import TablePagination, { usePagination } from "@/components/ui/TablePagination";
+import TablePagination from "@/components/ui/TablePagination";
 
 export interface MetricDetailRow {
   key: string;
   /** One node per column, in the same order as `columns`. */
   cells: React.ReactNode[];
-  /** Lower-cased text the search box matches against. */
-  searchText: string;
   /** Lead to open in the Lead Detail drawer when the row is clicked. */
   leadId?: string;
+}
+
+// Spreads straight onto <TablePagination /> — same shape
+// useServerLeadList's paginationProps already returns.
+export interface MetricDetailPaginationProps {
+  totalRows: number;
+  page: number;
+  rowsPerPage: number;
+  onPageChange: (page: number) => void;
+  onRowsPerPageChange?: (rowsPerPage: number) => void;
 }
 
 interface MetricDetailModalProps {
@@ -21,7 +29,12 @@ interface MetricDetailModalProps {
   title: string;
   subtitle: string;
   columns: string[];
+  /** Just the current page's rows — pagination/search are controlled by the caller now (see search/onSearchChange/paginationProps), not computed here from a full in-memory list. */
   rows: MetricDetailRow[];
+  loading?: boolean;
+  search: string;
+  onSearchChange: (query: string) => void;
+  paginationProps: MetricDetailPaginationProps;
   emptyText: string;
   onRowClick?: (leadId: string) => void;
   rowLabel?: string;
@@ -31,12 +44,13 @@ interface MetricDetailModalProps {
 // desktop / bottom sheet on phones, with search + pagination.
 // Sits below the Lead Detail drawer (z-50), so a clicked row opens the
 // drawer on top and closing it comes straight back here.
-export default function MetricDetailModal({ open, onClose, title, subtitle, columns, rows, emptyText, onRowClick, rowLabel = "Lead" }: MetricDetailModalProps) {
-  const [query, setQuery] = useState("");
+export default function MetricDetailModal({
+  open, onClose, title, subtitle, columns, rows, loading, search, onSearchChange, paginationProps, emptyText, onRowClick, rowLabel = "Lead"
+}: MetricDetailModalProps) {
   const [closing, setClosing] = useState(false);
 
   useEffect(() => {
-    if (open) { setQuery(""); setClosing(false); }
+    if (open) setClosing(false);
   }, [open, title]);
 
   const close = () => {
@@ -59,12 +73,6 @@ export default function MetricDetailModal({ open, onClose, title, subtitle, colu
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
-
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return q ? rows.filter(r => r.searchText.includes(q)) : rows;
-  }, [rows, query]);
-  const pagination = usePagination(filtered, 10, JSON.stringify([title, query]));
 
   if (!open || typeof document === "undefined") return null;
 
@@ -97,8 +105,8 @@ export default function MetricDetailModal({ open, onClose, title, subtitle, colu
             <Search className="h-4 w-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="search"
-              value={query}
-              onChange={e => setQuery(e.target.value)}
+              value={search}
+              onChange={e => onSearchChange(e.target.value)}
               placeholder="Search leads"
               className="w-full h-9 pl-9 pr-3 rounded-lg bg-white border border-slate-200 text-xs text-slate-700 placeholder:text-slate-400 outline-none focus:border-[#0B1E6E] transition-colors"
             />
@@ -109,10 +117,10 @@ export default function MetricDetailModal({ open, onClose, title, subtitle, colu
         <div className="flex-1 overflow-auto">
           {/* Phones: one card per row, column names as small labels */}
           <ul className="sm:hidden divide-y divide-slate-100">
-            {pagination.pageRows.length === 0 ? (
-              <li className="px-5 py-14 text-center text-xs text-slate-400 font-semibold">{query ? `No results for "${query}".` : emptyText}</li>
+            {rows.length === 0 ? (
+              <li className="px-5 py-14 text-center text-xs text-slate-400 font-semibold">{loading ? "Loading..." : search ? `No results for "${search}".` : emptyText}</li>
             ) : (
-              pagination.pageRows.map(r => {
+              rows.map(r => {
                 const clickable = !!(onRowClick && r.leadId);
                 return (
                   <li
@@ -147,14 +155,14 @@ export default function MetricDetailModal({ open, onClose, title, subtitle, colu
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {pagination.pageRows.length === 0 ? (
+              {rows.length === 0 ? (
                 <tr>
                   <td colSpan={columns.length + 1} className="px-6 py-14 text-center text-slate-400 font-semibold">
-                    {query ? `No results for "${query}".` : emptyText}
+                    {loading ? "Loading..." : search ? `No results for "${search}".` : emptyText}
                   </td>
                 </tr>
               ) : (
-                pagination.pageRows.map(r => {
+                rows.map(r => {
                   const clickable = !!(onRowClick && r.leadId);
                   return (
                     <tr
@@ -178,9 +186,9 @@ export default function MetricDetailModal({ open, onClose, title, subtitle, colu
           </table>
         </div>
 
-        {filtered.length > 0 && (
+        {paginationProps.totalRows > 0 && (
           <div className="border-t border-slate-100 pb-[env(safe-area-inset-bottom)]">
-            <TablePagination {...pagination.paginationProps} rowLabel={rowLabel} />
+            <TablePagination {...paginationProps} rowLabel={rowLabel} />
           </div>
         )}
       </div>

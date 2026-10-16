@@ -10,6 +10,7 @@ import {
   bulkReassignJobIdParamSchema,
   bulkReassignLeadsSchema,
   createLeadSchema,
+  distinctCampaignsQuerySchema,
   editLeadSchema,
   leadAnalyticsStatsQuerySchema,
   leadIdParamSchema,
@@ -33,6 +34,7 @@ import {
   getBulkDeleteStatusHandler,
   getBulkImportStatusHandler,
   getBulkReassignStatusHandler,
+  getDistinctCampaignsHandler,
   getLeadAnalyticsStatsHandler,
   getLeadHandler,
   getLeadStatsHandler,
@@ -73,6 +75,9 @@ leadsRouter.get("/report-stats", validate({ query: leadStatsQuerySchema }), asyn
 // role-gate reasoning as the others above; a Manager's call naturally
 // returns exactly themself + direct reports via scopeForCaller.
 leadsRouter.get("/manager-report-stats", validate({ query: managerReportStatsQuerySchema }), asyncHandler(getManagerReportStatsHandler));
+// LeadDrillDownPanel's Campaign filter dropdown — distinct campaign names
+// for the caller's own scope, same no-extra-role-gate reasoning as above.
+leadsRouter.get("/campaigns", validate({ query: distinctCampaignsQuerySchema }), asyncHandler(getDistinctCampaignsHandler));
 leadsRouter.get("/:id", validate({ params: leadIdParamSchema }), asyncHandler(getLeadHandler));
 // Uploading leads (single entry or Data Calling's bulk Excel) is for admins
 // and managers only — agents work leads, they don't add them. Managers can

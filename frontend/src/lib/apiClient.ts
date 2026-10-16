@@ -274,11 +274,14 @@ export interface LeadListFilters {
   status?: string[];
   assignedAgentId?: string[];
   campaign?: string[];
+  propertyId?: string[];
   dateFrom?: string;
   dateTo?: string;
   search?: string;
   /** Leave out Data Calling ("Bulk Upload") leads. */
   excludeBulkUpload?: boolean;
+  /** Live-clock SLA check — see leads.repository.ts's buildLeadWhereClause. */
+  missedOnly?: boolean;
 }
 
 function buildLeadFilterParams(filters: LeadListFilters): URLSearchParams {
@@ -286,10 +289,12 @@ function buildLeadFilterParams(filters: LeadListFilters): URLSearchParams {
   filters.status?.forEach(s => params.append("status", s));
   filters.assignedAgentId?.forEach(a => params.append("assignedAgentId", a));
   filters.campaign?.forEach(c => params.append("campaign", c));
+  filters.propertyId?.forEach(p => params.append("propertyId", p));
   if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
   if (filters.dateTo) params.set("dateTo", filters.dateTo);
   if (filters.search) params.set("search", filters.search);
   if (filters.excludeBulkUpload) params.set("excludeBulkUpload", "true");
+  if (filters.missedOnly) params.set("missedOnly", "true");
   return params;
 }
 
@@ -327,6 +332,14 @@ export function apiGetLeadStats(filters: LeadListFilters = {}): Promise<LeadSumm
   const params = buildLeadFilterParams(filters);
   const qs = params.toString();
   return request<LeadSummaryStats>(`/api/v1/leads/stats${qs ? `?${qs}` : ""}`);
+}
+
+// LeadDrillDownPanel's Campaign filter dropdown — distinct campaign names
+// for the same scope/filters as whatever the panel is currently showing.
+export function apiGetDistinctCampaigns(filters: LeadListFilters = {}): Promise<string[]> {
+  const params = buildLeadFilterParams(filters);
+  const qs = params.toString();
+  return request<string[]>(`/api/v1/leads/campaigns${qs ? `?${qs}` : ""}`);
 }
 
 // Leads Analytics tab's own filter set (LeadDashboard.tsx) — Property
@@ -1062,6 +1075,12 @@ export interface FollowupListFilters {
   // "Just the follow-ups for these leads" — e.g. a drill-down table's
   // next-call-date column, without paging through every follow-up.
   leadId?: string[];
+  // "Just this one agent's follow-ups" — e.g. a report's Missed Follow-ups
+  // drill-down. Plain YYYY-MM-DD bounds on scheduled_at, same as dateFrom/
+  // dateTo elsewhere.
+  assignedToId?: string[];
+  dateFrom?: string;
+  dateTo?: string;
 }
 
 export interface FollowupsPageResult {
@@ -1080,6 +1099,9 @@ export async function apiListFollowupsPage(
   const params = new URLSearchParams();
   filters.status?.forEach(s => params.append("status", s));
   filters.leadId?.forEach(id => params.append("leadId", id));
+  filters.assignedToId?.forEach(id => params.append("assignedToId", id));
+  if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
+  if (filters.dateTo) params.set("dateTo", filters.dateTo);
   params.set("page", String(page));
   params.set("pageSize", String(pageSize));
   const { data, meta } = await requestWithMeta<ApiFollowupRow>(`/api/v1/followups?${params.toString()}`);
@@ -1581,6 +1603,86 @@ export function apiGetCampaignLeadStats(dateFrom?: string, dateTo?: string): Pro
   if (dateTo) params.set("dateTo", dateTo);
   const qs = params.toString();
   return request<CampaignLeadStats[]>(`/api/v1/ad-spend/campaign-lead-stats${qs ? `?${qs}` : ""}`);
+}
+
+export interface CampaignDailyStat {
+  campaign: string;
+  day: string;
+  spend: number;
+  totalLeads: number;
+  qualifiedLeads: number;
+  siteVisitLeads: number;
+  followUpLeads: number;
+  callBackLeads: number;
+  campaignStatus: "Active" | "Stopped" | null;
+}
+// Per (campaign, day) spend + lead-category counts + each campaign's
+// current Active/Inactive status — backs the Campaigns page's Analytics
+// trend chart, Type/Status breakdown card, and Active Campaigns stat card
+// + drill-down. Omit both dates for "All Time".
+export function apiGetCampaignDailyStats(dateFrom?: string, dateTo?: string): Promise<CampaignDailyStat[]> {
+  const params = new URLSearchParams();
+  if (dateFrom) params.set("dateFrom", dateFrom);
+  if (dateTo) params.set("dateTo", dateTo);
+  const qs = params.toString();
+  return request<CampaignDailyStat[]>(`/api/v1/ad-spend/campaign-daily-stats${qs ? `?${qs}` : ""}`);
+}
+
+export interface CampaignStatusBreakdownRow {
+  id: string;
+  date: string;
+  campaign: string;
+  platform: string;
+  totalLeads: number;
+  newLead: number;
+  callBack: number;
+  followUps: number;
+  siteVisits: number;
+  eoi: number;
+  booked: number;
+  dead: number;
+  rnr: number;
+  lowBudget: number;
+}
+export interface CampaignStatusBreakdownResult {
+  rows: CampaignStatusBreakdownRow[];
+  page: number;
+  pageSize: number;
+  totalCount: number;
+  totalPages: number;
+}
+// Campaigns page's "Status" tab — real server pagination. dateFrom/dateTo
+// are REQUIRED here (unlike every other ad-spend endpoint's optional "All
+// Time") — ad_spend_records has no retention job and grows forever, so an
+// unbounded fetch isn't safe for this one tab. Pick a real range, don't
+// pass undefined for either date.
+export function apiGetCampaignStatusBreakdown(
+  page: number,
+  pageSize: number,
+  dateFrom: string,
+  dateTo: string,
+  campaign?: string[]
+): Promise<CampaignStatusBreakdownResult> {
+  const params = new URLSearchParams();
+  params.set("page", String(page));
+  params.set("pageSize", String(pageSize));
+  params.set("dateFrom", dateFrom);
+  params.set("dateTo", dateTo);
+  campaign?.forEach(c => params.append("campaign", c));
+  return request<CampaignStatusBreakdownResult>(`/api/v1/ad-spend/campaign-status-breakdown?${params.toString()}`);
+}
+
+export interface AdLevelLeadStat {
+  adId: string;
+  qualifiedLeads: number;
+  syncedLeads: number;
+}
+// Per-ad (Meta only) qualified/synced lead counts for Campaign Deep Dive —
+// deliberately all-time, no date params, same as the page's existing
+// behavior for this number. A missing ad id here means zero, same
+// sparse-lookup convention as every other per-X endpoint this session.
+export function apiGetAdLevelLeadStats(): Promise<AdLevelLeadStat[]> {
+  return request<AdLevelLeadStat[]>("/api/v1/ad-spend/ad-level-lead-stats");
 }
 
 export interface MarketingReportStats {

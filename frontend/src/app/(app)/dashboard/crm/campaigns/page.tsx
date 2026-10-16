@@ -3,7 +3,7 @@
 import React, { useState, useRef, useMemo, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useApp, Lead, AdSpendRecord } from "@/context/AppContext";
+import { useApp, Lead, AdSpendRecord, FollowupCall, mapApiLeadToFrontendLead, mapApiFollowupToFrontend } from "@/context/AppContext";
 import { computeCPL } from "@/lib/reportMetrics";
 import { WhatsAppIcon, CallIcon, PlatformLabel, platformFromText } from "@/components/icons/ContactIcons";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
@@ -42,12 +42,28 @@ import {
 import { formatNextFollowup, nextFollowupFor } from "@/lib/followups";
 import NextCallCell from "@/components/crm/NextCallCell";
 import { maskPhone, maskEmail } from "@/lib/maskPII";
-import { apiGetCampaignLeadStats, type CampaignLeadStats } from "@/lib/apiClient";
+import {
+  apiGetCampaignLeadStats, type CampaignLeadStats,
+  apiGetCampaignDailyStats, type CampaignDailyStat,
+  apiGetLeadStats, type LeadListFilters,
+  apiGetCampaignStatusBreakdown, type CampaignStatusBreakdownRow, type CampaignStatusBreakdownResult,
+  apiGetAdLevelLeadStats, type AdLevelLeadStat,
+  apiListLeadsPage, apiListFollowupsPage
+} from "@/lib/apiClient";
+import { useServerLeadList } from "@/lib/useServerLeadList";
+import type { LeadSummaryStats } from "@/lib/leadSummaryStats";
 
 // Same icon URLs the admin leads page uses for these platforms (LeadDashboard.tsx).
 const PLATFORM_ICON_URL: Partial<Record<CampaignItem["platform"], string>> = {
   Meta: "https://img.icons8.com/?size=100&id=wA5rN96FVDtq&format=png&color=000000",
   Google: "https://img.icons8.com/?size=100&id=4hR4Ih04Je2t&format=png&color=000000"
+};
+
+const normalizePlatform = (raw: string): CampaignItem["platform"] => {
+  const p = raw.toLowerCase();
+  if (p.includes("google")) return "Google";
+  if (p.includes("meta") || p.includes("facebook")) return "Meta";
+  return "Other";
 };
 
 function PlatformIcon({ platform }: { platform: CampaignItem["platform"] }) {
@@ -162,7 +178,7 @@ const STATUS_DEFAULT_VISIBLE_COLUMNS: Record<StatusColumnKey, boolean> = {
 };
 
 export default function AdminCampaignsPage() {
-  const { leads, adSpendRecords, adLevelSpendRecords, followupCalls, refetchAdLevelSpend, triggerAdSpendSync, isDataLoading, activeRole } = useApp();
+  const { adSpendRecords, adLevelSpendRecords, refetchAdLevelSpend, triggerAdSpendSync, isDataLoading, activeRole } = useApp();
   const isAdmin = activeRole === "ADMIN";
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -192,57 +208,12 @@ export default function AdminCampaignsPage() {
 
   // Stat card drill-down — clicking a summary card shows the underlying
   // leads it counted, same "open the respective card" pattern as the CRM
-  // Dashboard page.
+  // Dashboard page. Real pagination (useServerLeadList, for the 4 lead
+  // categories) and the small client-side "Active Campaigns" table's own
+  // page state are both defined further below, once their inputs exist.
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const [drillSearchQuery, setDrillSearchQuery] = useState("");
-  const [drillPage, setDrillPage] = useState(1);
-  const [drillRowsPerPage, setDrillRowsPerPage] = useState(8);
   // toggleCategory (opens/closes the drill-down) is defined further below —
   // it's independent of the chart's own category dropdown.
-
-  // Same scroll-spy + synced-pagination pattern used on the admin Leads
-  // table: rows render continuously in a capped-height scroll container,
-  // scrolling past a page boundary advances drillPage, and the pagination
-  // arrows scroll that page's first row back to the top.
-  const drillScrollRef = useRef<HTMLDivElement>(null);
-  const drillPageRowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
-  const drillProgrammaticScroll = useRef(false);
-
-  // Scrolls with the shared page <main> now (one scroll plane per screen —
-  // see APP_UIUX_AUDIT.md), not this table's own boxed container. See
-  // PendingLeadsTable.tsx's identical conversion for the full rationale.
-  useEffect(() => {
-    const main = drillScrollRef.current?.closest("main");
-    if (!main) return;
-    const handleScroll = () => {
-      if (drillProgrammaticScroll.current) return;
-      const mainTop = main.getBoundingClientRect().top;
-      let current = 1;
-      for (let i = 0; i < drillPageRowRefs.current.length; i++) {
-        const row = drillPageRowRefs.current[i];
-        if (row && row.getBoundingClientRect().top - mainTop <= 4) {
-          current = i + 1;
-        }
-      }
-      setDrillPage(prev => (prev !== current ? current : prev));
-    };
-    main.addEventListener("scroll", handleScroll, { passive: true });
-    return () => main.removeEventListener("scroll", handleScroll);
-  }, []);
-
-  const goToDrillPage = (page: number, totalPages: number) => {
-    const clamped = Math.max(1, Math.min(totalPages, page));
-    setDrillPage(clamped);
-    const row = drillPageRowRefs.current[clamped - 1];
-    const main = drillScrollRef.current?.closest("main");
-    if (!row || !main) return;
-    drillProgrammaticScroll.current = true;
-    const top = clamped === 1 ? 0 : main.scrollTop + row.getBoundingClientRect().top - main.getBoundingClientRect().top;
-    main.scrollTo({ top });
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => { drillProgrammaticScroll.current = false; });
-    });
-  };
 
   // Table Filters & Search
   const today = new Date();
@@ -426,14 +397,31 @@ export default function AdminCampaignsPage() {
     [allTimeLeadStats]
   );
 
+  // Per (campaign, day) spend + lead-category counts + each campaign's
+  // current Active/Inactive status — replaces categoryLeadsInRange's old
+  // per-lead iteration for the Analytics chart, the Type/Status breakdown
+  // card, and the Active Campaigns category, none of which have any other
+  // server source for "this lead's campaign is currently Active."
+  const [campaignDailyStats, setCampaignDailyStats] = useState<CampaignDailyStat[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    const { dateFrom, dateTo } = campaignServerDateBounds();
+    apiGetCampaignDailyStats(dateFrom, dateTo)
+      .then(result => { if (!cancelled) setCampaignDailyStats(result); })
+      .catch(() => { /* leave the previous numbers showing on a transient failure */ });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateRange, appliedCustomRange]);
+
   // The real, Date-Range-scoped campaigns list — each campaign's own
   // totalLeads is the sum of its real per-day leads (see
   // buildCampaignsList) within the selected range. Drives the Campaigns
   // tab table (each campaign's own row), Active Campaigns, the Campaign
   // Type/Status breakdown's Spend column, Deep Dive, and CSV export. The
-  // top summary bar's own Total Leads card does NOT use this — it counts
-  // real individual Lead records directly (categoryLeadsInRange), same as
-  // the CRM Dashboard and admin Leads page, so all three agree.
+  // top summary bar's own Total Leads card does NOT use this — it comes
+  // from GET /leads/stats (leadsStats below), same endpoint the CRM
+  // Dashboard and admin Leads page use for their own Total Leads card, so
+  // all three agree.
   const campaignsListResult = useMemo(
     () => buildCampaignsList(adSpendRecords.filter(recordInSelectedRange), scopedLeadStatsMap),
     [adSpendRecords, scopedLeadStatsMap, appliedCustomRange, dateRange, today]
@@ -452,6 +440,25 @@ export default function AdminCampaignsPage() {
   const platformReportedLeadsTotal = campaignFilterActive
     ? campaignsList.filter(c => inSelectedCampaigns(c.name)).reduce((sum, c) => sum + c.platformReportedLeads, 0)
     : campaignsListResult.platformReportedTotal;
+
+  // The 7-bucket stat shape every other admin page's "Total Leads"/"Follow
+  // Ups"/"Call Backs" cards already use (GET /leads/stats) — covers Total
+  // Leads/Follow Ups/Call Backs directly, and Site Visits as the sum of
+  // its own siteVisitScheduled+siteVisitDone. "Qualified Leads" isn't one
+  // of these 7 buckets (it's a 6-status combined bucket including EOI/
+  // Booked, which this endpoint doesn't track) — that one sums
+  // campaignDailyStats' qualifiedLeads instead (see summaryMetrics below).
+  const ZERO_LEAD_SUMMARY: LeadSummaryStats = { totalLeads: 0, newLeads: 0, rnr: 0, callBacks: 0, followUps: 0, siteVisitScheduled: 0, siteVisitDone: 0 };
+  const [leadsStats, setLeadsStats] = useState<LeadSummaryStats>(ZERO_LEAD_SUMMARY);
+  useEffect(() => {
+    let cancelled = false;
+    const filters: LeadListFilters = { ...campaignServerDateBounds(), campaign: campaignFilterActive ? campaignFilters : undefined };
+    apiGetLeadStats(filters)
+      .then(result => { if (!cancelled) setLeadsStats(result); })
+      .catch(() => { /* leave the previous numbers showing on a transient failure */ });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateRange, appliedCustomRange, campaignFilterActive, campaignFilters]);
 
   // Same real campaigns, but always all-time — a campaign's status
   // (Active/Pause/Stopped) and platform are snapshot properties of the
@@ -475,74 +482,56 @@ export default function AdminCampaignsPage() {
     return map;
   }, [campaignsListAllTime]);
 
-  // Each lead-based stat card's real underlying lead list — same predicates
-  // the counts below use, so clicking a card always drills into exactly
-  // what it counted, mirroring the CRM Dashboard's drill-down.
-  //
-  // "Total Leads" is every real lead, full stop — same definition the CRM
-  // Dashboard and the admin Leads page use for their own "Total Leads"
-  // cards (scopedLeads.filter(dateInRange...).length). It used to be
-  // restricted to leads with a campaign/source (an "ad-attributed leads"
-  // concept), which is why this page's Total Leads never matched the same
-  // field on the other two admin CRM pages for the same Date Range — same
-  // label, three different real numbers. All three now count the exact
-  // same thing: every real Lead record within the selected range.
-  const categoryLeads: Record<string, Lead[]> = useMemo(() => {
-    return {
-      // Real leads whose own campaign is currently Active — same
-      // campaignsList status the "Active Campaigns" card counts campaigns
-      // from, just applied per-lead so the chart has a real per-day trend
-      // for it too (the drill-down table still lists campaigns, not these).
-      "Active Campaigns": leads.filter(l => {
-        const c = campaignByName[(l.campaign || l.source || "").toLowerCase()];
-        return !!c && c.status === "Active";
-      }),
-      "Total Leads": leads,
-      "Qualified Leads": leads.filter(l => QUALIFIED_LEAD_STATUSES.includes(l.status)),
-      "Site Visits": leads.filter(l => SITE_VISIT_LEAD_STATUSES.includes(l.status)),
-      // Split into two cards, same as the CRM Dashboard/admin Leads page —
-      // those show Follow Ups and Call Backs separately (Follow-ups vs
-      // Call Back are different real statuses), so this page did too until
-      // it combined them into one number that couldn't match either card.
-      "Follow Ups": leads.filter(l => l.status === "Followup"),
-      "Call Backs": leads.filter(l => l.status === "Call Back")
-    };
-  }, [leads, campaignByName]);
+  // campaignDailyStats, narrowed to the page's own Campaigns-tab filter —
+  // same "which campaigns are even considered" role inSelectedCampaigns
+  // always played, just applied to server rows instead of per-lead.
+  const campaignDailyStatsFiltered = useMemo(
+    () => campaignFilterActive ? campaignDailyStats.filter(r => selectedCampaignNames.has(r.campaign.toLowerCase())) : campaignDailyStats,
+    [campaignDailyStats, campaignFilterActive, selectedCampaignNames]
+  );
 
-  // Every category's real leads, additionally narrowed to the selected Date
-  // Range — used only by the top summary bar and its drill-downs, so the
-  // bar actually responds to Date Range (Today/This Week/etc.) instead of
-  // always showing the same all-time numbers. categoryLeads itself stays
-  // unscoped because the Analytics chart needs its full multi-day history
-  // to draw a trend regardless of which Date Range bucket is selected.
-  const categoryLeadsInRange = useMemo(() => {
-    const out: Record<string, Lead[]> = {};
-    Object.entries(categoryLeads).forEach(([key, list]) => {
-      out[key] = list.filter(l => leadInSelectedRange(l) && inSelectedCampaigns(l.campaign || l.source));
-    });
+  // Status-code DB bucket for each category's drill-down (matches the
+  // backend's own QUALIFIED_CODES/SITE_VISIT_CODES exactly, see
+  // ad-spend.routes.ts) — undefined means "every lead," for Total Leads.
+  const CATEGORY_STATUS_CODES: Record<string, string[] | undefined> = {
+    "Total Leads": undefined,
+    "Qualified Leads": ["CALL_BACK", "FOLLOWUP", "EOI", "SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE", "BOOKED"],
+    "Site Visits": ["SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE"],
+    "Follow Ups": ["FOLLOWUP"],
+    "Call Backs": ["CALL_BACK"]
+  };
+  // Each lead-based stat card's own filters for its drill-down panel
+  // (LeadDrillDownPanel-style baseFilters, see useServerLeadList below) —
+  // "Active Campaigns" drills into campaigns instead (activeCampaignsDrill).
+  const categoryBaseFilters: Record<string, LeadListFilters> = useMemo(() => {
+    const shared: LeadListFilters = { ...campaignServerDateBounds(), campaign: campaignFilterActive ? campaignFilters : undefined };
+    const out: Record<string, LeadListFilters> = {};
+    Object.entries(CATEGORY_STATUS_CODES).forEach(([key, status]) => { out[key] = { ...shared, status }; });
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [categoryLeads, dateRange, appliedCustomRange, today, campaignFilterActive, selectedCampaignNames]);
+  }, [dateRange, appliedCustomRange, campaignFilterActive, campaignFilters]);
 
   // Aggregate Metrics for Top Summary Card.
   //
-  // Total Leads/Qualified Leads/Site Visits/Follow Ups/Call Backs all come from
-  // categoryLeadsInRange — real individual Lead records, same Date Range,
-  // same predicates the CRM Dashboard and admin Leads page use for their
-  // own same-named cards, so this page's numbers can't drift from theirs.
-  // Active Campaigns is a real count of campaigns with that status within
-  // the range, from the Date-Range-scoped campaignsList.
+  // Total Leads/Follow Ups/Call Backs/Site Visits come from GET /leads/stats
+  // (leadsStats above) — the same server endpoint/shape the CRM Dashboard
+  // and admin Leads page already use for their own same-named cards, so
+  // this page's numbers can't drift from theirs. Qualified Leads isn't one
+  // of that endpoint's 7 buckets (it's a 6-status combined bucket
+  // including EOI/Booked) — summed from campaignDailyStatsFiltered instead.
+  // Active Campaigns is unchanged — a real count of campaigns with that
+  // status within the range, from the Date-Range-scoped campaignsList.
   const summaryMetrics = useMemo(() => {
     return {
       activeCampaigns: campaignsList.filter(c => c.status === "Active" && inSelectedCampaigns(c.name)).length,
-      totalLeads: categoryLeadsInRange["Total Leads"].length,
-      qualifiedLeads: categoryLeadsInRange["Qualified Leads"].length,
-      siteVisits: categoryLeadsInRange["Site Visits"].length,
-      followUps: categoryLeadsInRange["Follow Ups"].length,
-      callBacks: categoryLeadsInRange["Call Backs"].length
+      totalLeads: leadsStats.totalLeads,
+      qualifiedLeads: campaignDailyStatsFiltered.reduce((sum, r) => sum + r.qualifiedLeads, 0),
+      siteVisits: leadsStats.siteVisitScheduled + leadsStats.siteVisitDone,
+      followUps: leadsStats.followUps,
+      callBacks: leadsStats.callBacks
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [campaignsList, categoryLeadsInRange, campaignFilterActive, selectedCampaignNames]);
+  }, [campaignsList, leadsStats, campaignDailyStatsFiltered, campaignFilterActive, selectedCampaignNames]);
 
   // "Active Campaigns" drills into campaigns, not leads — it's a count of
   // campaigns (matching the summary card's own unit), not a leads list.
@@ -552,6 +541,30 @@ export default function AdminCampaignsPage() {
     () => campaignsList.filter(c => c.status === "Active" && inSelectedCampaigns(c.name)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [campaignsList, campaignFilterActive, selectedCampaignNames]
+  );
+
+  // "Active Campaigns" drill-down table — small (campaign count, not lead
+  // count), stays simple client-side search/pagination, no server fetch.
+  const [campaignsDrillSearch, setCampaignsDrillSearch] = useState("");
+  const [campaignsDrillPage, setCampaignsDrillPage] = useState(1);
+  const [campaignsDrillRowsPerPage, setCampaignsDrillRowsPerPage] = useState(8);
+  const shownCampaigns = useMemo(() => {
+    const q = campaignsDrillSearch.trim().toLowerCase();
+    return q ? activeCampaignsDrill.filter(c => c.name.toLowerCase().includes(q)) : activeCampaignsDrill;
+  }, [activeCampaignsDrill, campaignsDrillSearch]);
+  const campaignsDrillTotalPages = Math.max(1, Math.ceil(shownCampaigns.length / campaignsDrillRowsPerPage));
+  const campaignsDrillCurrentPage = Math.min(campaignsDrillPage, campaignsDrillTotalPages);
+  const shownCampaignsPage = shownCampaigns.slice((campaignsDrillCurrentPage - 1) * campaignsDrillRowsPerPage, campaignsDrillCurrentPage * campaignsDrillRowsPerPage);
+
+  // The other four categories (Total/Qualified/Site Visit/Follow Ups/Call
+  // Backs) drill into real leads — real server pagination via
+  // useServerLeadList, only fetching while one of those is actually open
+  // (never "Active Campaigns" or nothing selected).
+  const isLeadCategoryOpen = !!selectedCategory && selectedCategory !== "Active Campaigns";
+  const categoryDrillList = useServerLeadList(
+    isLeadCategoryOpen ? categoryBaseFilters[selectedCategory] : {},
+    8,
+    isLeadCategoryOpen
   );
 
   const formatCurrency = (n: number) => `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -564,7 +577,10 @@ export default function AdminCampaignsPage() {
     const sorted = [...l.logs].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
     return sorted[0].message;
   };
-  const nextCallDateFor = (leadId: string) => nextFollowupFor(leadId, followupCalls);
+  // Generic now — the two real call sites (Qualified Leads drill-down's
+  // table and CSV export) each fetch just the follow-ups they need
+  // instead of closing over the bulk followupCalls array.
+  const nextCallDateFor = (leadId: string, followups: FollowupCall[]) => nextFollowupFor(leadId, followups);
 
   // ---- Campaigns Analytics tab ----------------------------------------
 
@@ -589,8 +605,9 @@ export default function AdminCampaignsPage() {
   // chart always reflects whichever number the admin just looked at.
   const toggleCategory = (label: string) => {
     setSelectedCategory(prev => (prev === label ? null : label));
-    setDrillSearchQuery("");
-    setDrillPage(1);
+    setCampaignsDrillSearch("");
+    setCampaignsDrillPage(1);
+    categoryDrillList.setSearch("");
     if ((CHART_CATEGORIES as readonly string[]).includes(label)) {
       setChartCategory(label as ChartCategory);
     }
@@ -606,15 +623,13 @@ export default function AdminCampaignsPage() {
   const toggleChartType = (type: string) => setSelectedChartTypes(prev => ({ ...prev, [type]: !isTypeChecked(type) }));
 
   // Spend sums campaignsList[].spend (real per-campaign ad spend, same
-  // Date-Range-scoped list the Campaigns tab table uses). Leads classifies
-  // every real lead in categoryLeadsInRange["Total Leads"] — the exact
-  // same list the top summary bar's Total Leads card counts — by its own
-  // campaign's platform/status, so this card's grand total always equals
-  // that card's number, whichever grouping dimension is active. A lead
-  // with no campaign/source, or one that doesn't match a known campaign,
-  // still gets counted (as "Other"/"Unmatched") rather than silently
-  // dropped — dropping it would make the totals disagree depending on
-  // grouping. Every real platform/status ever seen (campaignsListAllTime)
+  // Date-Range-scoped list the Campaigns tab table uses). Leads sums
+  // campaignDailyStatsFiltered's per-campaign totalLeads, classified by
+  // each row's own campaign platform/status via campaignByName, plus a
+  // single "Other"/"Unmatched" remainder for leads matching no known
+  // ad-spend campaign at all — so this card's grand total always equals
+  // the top summary bar's Total Leads card, whichever grouping dimension
+  // is active. Every real platform/status ever seen (campaignsListAllTime)
   // is seeded into the map first so a type doesn't disappear from the
   // checkboxes just because it had no activity in the currently selected
   // Date Range — it shows ₹0/0 leads instead, which also keeps the
@@ -635,18 +650,33 @@ export default function AdminCampaignsPage() {
       // this (usually larger) count, not the smaller synced count below.
       map[key].platformLeads += c.platformReportedLeads;
     });
-    (categoryLeadsInRange["Total Leads"] || []).forEach(l => {
-      const campaign = campaignByName[(l.campaign || l.source || "").toLowerCase()];
-      const key = typeGroupBy === "Platform"
-        ? (campaign ? campaign.platform : (platformFromText(l.source || l.campaign) || "Other"))
-        : (campaign ? campaign.status : "Unmatched");
+    // Leads matched to a known (has ad-spend) campaign — classified via
+    // campaignByName, same as before, just reading campaignDailyStats'
+    // per-campaign totals instead of iterating individual leads.
+    let matchedTotal = 0;
+    campaignDailyStatsFiltered.forEach(r => {
+      const campaign = campaignByName[r.campaign.toLowerCase()];
+      const key = typeGroupBy === "Platform" ? (campaign ? campaign.platform : "Other") : (campaign ? campaign.status : "Unmatched");
       if (!map[key]) map[key] = { spend: 0, leads: 0, platformLeads: 0 };
-      map[key].leads += 1;
+      map[key].leads += r.totalLeads;
+      matchedTotal += r.totalLeads;
     });
+    // Leads with no campaign/source matching any known ad-spend campaign at
+    // all (organic/direct/manual-entry) — folded into "Other"/"Unmatched"
+    // as a single remainder so this card's grand total still equals the
+    // Total Leads card above (summaryMetrics.totalLeads), same invariant
+    // the old per-lead version kept, just without a per-lead platform guess
+    // for this one edge-case bucket.
+    const unmatched = Math.max(0, summaryMetrics.totalLeads - matchedTotal);
+    if (unmatched > 0) {
+      const key = typeGroupBy === "Platform" ? "Other" : "Unmatched";
+      if (!map[key]) map[key] = { spend: 0, leads: 0, platformLeads: 0 };
+      map[key].leads += unmatched;
+    }
     return Object.entries(map)
       .map(([type, v]) => ({ type, spend: v.spend, leads: v.leads, platformLeads: v.platformLeads }))
       .sort((a, b) => b.spend - a.spend);
-  }, [campaignsList, campaignsListAllTime, categoryLeadsInRange, campaignByName, typeGroupBy]);
+  }, [campaignsList, campaignsListAllTime, campaignDailyStatsFiltered, campaignByName, typeGroupBy, summaryMetrics.totalLeads]);
 
   const typeBreakdownTotal = typeBreakdown.filter(t => isTypeChecked(t.type)).reduce((acc, t) => acc + t.spend, 0);
   const typeBreakdownLeadsTotal = typeBreakdown.filter(t => isTypeChecked(t.type)).reduce((acc, t) => acc + t.leads, 0);
@@ -674,27 +704,33 @@ export default function AdminCampaignsPage() {
       byDate[r.date].spend += r.spend;
     });
 
-    // Real per-day lead counts for whichever category was last clicked —
-    // the exact same Date-Range-scoped list (categoryLeadsInRange) the top
-    // summary bar and breakdown card count, classified the same way (a
-    // lead with no matched campaign still counts, under "Other"/
-    // "Unmatched", never silently dropped) — so the chart's line always
-    // adds up to the same grand total those show.
-    (categoryLeadsInRange[chartCategory] || []).forEach(l => {
-      const campaign = campaignByName[(l.campaign || l.source || "").toLowerCase()];
+    // Real per-day lead counts for whichever category was last clicked,
+    // from campaignDailyStatsFiltered (per-campaign, per-day server rows)
+    // classified the same way as before via campaignByName.
+    // ponytail: a lead matching no known ad-spend campaign at all
+    // (organic/direct/manual-entry) has no per-day home in this endpoint,
+    // so it's left out of this chart's "Other"/"Unmatched" line — the
+    // stat cards above (summaryMetrics/typeBreakdown) still include it in
+    // their totals via the GET /leads/stats-backed remainder, this is
+    // chart-only. Add a per-day unmatched-leads endpoint if that line's
+    // precision ever actually matters.
+    const categoryField: Partial<Record<ChartCategory, "totalLeads" | "qualifiedLeads" | "siteVisitLeads" | "followUpLeads" | "callBackLeads">> = {
+      "Total Leads": "totalLeads", "Qualified Leads": "qualifiedLeads", "Site Visits": "siteVisitLeads",
+      "Follow Ups": "followUpLeads", "Call Backs": "callBackLeads"
+    };
+    campaignDailyStatsFiltered.forEach(r => {
+      if (chartCategory === "Active Campaigns" && r.campaignStatus !== "Active") return;
+      const campaign = campaignByName[r.campaign.toLowerCase()];
       if (typeGroupBy === "Platform") {
-        const platform = campaign ? campaign.platform : (platformFromText(l.source || l.campaign) || "Other");
+        const platform = campaign ? campaign.platform : "Other";
         if (!includedPlatforms.has(platform)) return;
       } else {
         const status = campaign ? campaign.status : "Unmatched";
         if (!includedStatuses.has(status)) return;
       }
-      if (!l.createdAtStr) return;
-      const d = new Date(l.createdAtStr);
-      if (isNaN(d.getTime())) return;
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-      if (!byDate[key]) byDate[key] = { spend: 0, leads: 0 };
-      byDate[key].leads += 1;
+      const count = chartCategory === "Active Campaigns" ? r.totalLeads : r[categoryField[chartCategory]!];
+      if (!byDate[r.day]) byDate[r.day] = { spend: 0, leads: 0 };
+      byDate[r.day].leads += count;
     });
 
     return Object.keys(byDate).sort().map(date => {
@@ -704,7 +740,7 @@ export default function AdminCampaignsPage() {
         : `${d.toLocaleDateString("en-GB", { day: "2-digit" })} ${d.toLocaleDateString("en-GB", { month: "short" })}, ${d.getFullYear()}`;
       return { date, label, spend: byDate[date].spend, leads: byDate[date].leads };
     });
-  }, [adSpendRecords, campaignByName, categoryLeadsInRange, chartCategory, typeGroupBy, selectedChartTypes, typeBreakdown, dateRange, appliedCustomRange, today]);
+  }, [adSpendRecords, campaignByName, campaignDailyStatsFiltered, chartCategory, typeGroupBy, selectedChartTypes, typeBreakdown, dateRange, appliedCustomRange, today]);
 
   const chartSpendAverage = chartData.length === 0 ? 0 : chartData.reduce((acc, c) => acc + c.spend, 0) / chartData.length;
   const chartLeadsAverage = chartData.length === 0 ? 0 : chartData.reduce((acc, c) => acc + c.leads, 0) / chartData.length;
@@ -865,51 +901,93 @@ export default function AdminCampaignsPage() {
     return out;
   }, [adLevelSpendRecords]);
 
-  // Real Qualified Leads / real total leads (for CPL) for one specific ad —
-  // matches leads.metaAdId, same real per-lead field already used for
-  // Qualified Leads per campaign, just scoped to a single ad instead of a
-  // whole campaign's worth of leads. Google leads carry no per-lead ad
-  // attribution at all (Sheets-import pipeline, not a webhook), so this
-  // correctly — not a bug — always returns 0 for a Google ad's real id,
-  // same honest gap already documented on Lead.metaAdId.
-  const qualifiedLeadsForAd = (adId: string): number =>
-    leads.filter(l => l.metaAdId === adId && QUALIFIED_LEAD_STATUSES.includes(l.status)).length;
+  // Real Qualified Leads / real synced leads (for CPL) per ad, from the
+  // server (GET /ad-spend/ad-level-lead-stats) instead of scanning the
+  // bulk leads array — deliberately all-time, matching this number's
+  // existing behavior. Google leads carry no per-lead ad attribution at
+  // all (Sheets-import pipeline, not a webhook), so a Google ad's id
+  // correctly — not a bug — is never a key here, same honest gap already
+  // documented on Lead.metaAdId.
+  const [adLevelLeadStats, setAdLevelLeadStats] = useState<AdLevelLeadStat[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    apiGetAdLevelLeadStats()
+      .then(result => { if (!cancelled) setAdLevelLeadStats(result); })
+      .catch(() => { /* leave the previous numbers showing on a transient failure */ });
+    return () => { cancelled = true; };
+  }, []);
+  const adLevelLeadStatsMap = useMemo(() => new Map(adLevelLeadStats.map(s => [s.adId, s])), [adLevelLeadStats]);
+  const qualifiedLeadsForAd = (adId: string): number => adLevelLeadStatsMap.get(adId)?.qualifiedLeads ?? 0;
   const cplForAd = (ad: DeepDiveAdRow): number => {
-    const syncedLeads = leads.filter(l => l.metaAdId === ad.adId).length;
+    const syncedLeads = adLevelLeadStatsMap.get(ad.adId)?.syncedLeads ?? 0;
     const totalLeads = Math.max(ad.platformReportedLeads, syncedLeads);
     return totalLeads > 0 ? ad.spend / totalLeads : 0;
   };
 
   // Qualified Leads drill-down page — the real leads behind a Deep Dive
-  // row's Qualified Leads count.
-  const [qualifiedLeadsSearchQuery, setQualifiedLeadsSearchQuery] = useState("");
-  const qualifiedLeadsDrillList = useMemo(() => {
-    if (!analyticsDrillView || analyticsDrillView.type !== "qualifiedLeads") return [];
-    const campaignName = analyticsDrillView.campaign.name.toLowerCase();
-    const q = qualifiedLeadsSearchQuery.trim().toLowerCase();
-    return leads.filter(l =>
-      (l.campaign || l.source)?.toLowerCase() === campaignName
-      && QUALIFIED_LEAD_STATUSES.includes(l.status)
-      && (!q || l.name.toLowerCase().includes(q))
-    );
-  }, [analyticsDrillView, leads, qualifiedLeadsSearchQuery]);
+  // row's Qualified Leads count. Real server pagination/search
+  // (useServerLeadList) instead of a client-filtered bulk array — a
+  // single capped fetch would risk undercounting a campaign with >500
+  // qualified leads ever (this has no date bound, same as the Deep Dive
+  // number it drills into).
+  const QUALIFIED_DB_CODES = ["CALL_BACK", "FOLLOWUP", "EOI", "SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE", "BOOKED"];
+  const isQualifiedLeadsDrillOpen = analyticsDrillView?.type === "qualifiedLeads";
+  const qualifiedLeadsBaseFilters: LeadListFilters = isQualifiedLeadsDrillOpen
+    ? { campaign: [analyticsDrillView!.campaign.name], status: QUALIFIED_DB_CODES }
+    : {};
+  const qualifiedLeadsList = useServerLeadList(qualifiedLeadsBaseFilters, 25, isQualifiedLeadsDrillOpen);
 
-  const exportQualifiedLeadsCsv = () => {
-    const rows = [
-      ["Lead Name", "Phone", "Email", "Status", "Assigned To", "Date", "Notes", "Next Call Date", "Campaign"],
-      ...qualifiedLeadsDrillList.map(l => [
-        l.name, isAdmin ? l.phone : maskPhone(l.phone), isAdmin ? l.email : maskEmail(l.email || ""), l.status, l.assignedAgent,
-        l.createdAtStr || "—", latestLogMessage(l), formatNextFollowup(nextCallDateFor(l.id)), l.campaign || l.source || "—"
-      ])
-    ];
-    const csv = rows.map(r => r.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "qualified-leads.csv";
-    link.click();
-    URL.revokeObjectURL(url);
+  // Next-call-date for just the current page's leads (not the whole
+  // company's follow-up table) — same pattern LeadDrillDownPanel uses.
+  const [qualifiedLeadsPageFollowups, setQualifiedLeadsPageFollowups] = useState<FollowupCall[]>([]);
+  const qualifiedLeadsPageIds = qualifiedLeadsList.rows.map(l => l.id).join(",");
+  useEffect(() => {
+    if (!qualifiedLeadsPageIds) { setQualifiedLeadsPageFollowups([]); return; }
+    let cancelled = false;
+    apiListFollowupsPage(1, 500, { leadId: qualifiedLeadsPageIds.split(",") })
+      .then(({ rows }) => { if (!cancelled) setQualifiedLeadsPageFollowups(rows.map(mapApiFollowupToFrontend)); })
+      .catch(() => { if (!cancelled) setQualifiedLeadsPageFollowups([]); });
+    return () => { cancelled = true; };
+  }, [qualifiedLeadsPageIds]);
+
+  // CSV export needs every matching row, not just the current page — loop-
+  // fetch every page (bounded by this one campaign's qualified leads,
+  // never "all leads"/"all campaigns", same bridge pattern apiListAllLeads
+  // already uses) rather than a second, unpaginated endpoint.
+  const [exportingQualifiedLeadsCsv, setExportingQualifiedLeadsCsv] = useState(false);
+  const exportQualifiedLeadsCsv = async () => {
+    if (!analyticsDrillView || exportingQualifiedLeadsCsv) return;
+    setExportingQualifiedLeadsCsv(true);
+    try {
+      const all: Lead[] = [];
+      let page = 1;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const result = await apiListLeadsPage(page, 500, { ...qualifiedLeadsBaseFilters, search: qualifiedLeadsList.search || undefined });
+        all.push(...result.rows.map(mapApiLeadToFrontendLead));
+        if (page >= result.totalPages) break;
+        page += 1;
+      }
+      const { rows: followupRows } = await apiListFollowupsPage(1, 500, { leadId: all.map(l => l.id) });
+      const exportFollowups = followupRows.map(mapApiFollowupToFrontend);
+      const rows = [
+        ["Lead Name", "Phone", "Email", "Status", "Assigned To", "Date", "Notes", "Next Call Date", "Campaign"],
+        ...all.map(l => [
+          l.name, isAdmin ? l.phone : maskPhone(l.phone), isAdmin ? l.email : maskEmail(l.email || ""), l.status, l.assignedAgent,
+          l.createdAtStr || "—", latestLogMessage(l), formatNextFollowup(nextCallDateFor(l.id, exportFollowups)), l.campaign || l.source || "—"
+        ])
+      ];
+      const csv = rows.map(r => r.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "qualified-leads.csv";
+      link.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setExportingQualifiedLeadsCsv(false);
+    }
   };
 
   const [expandedProperties, setExpandedProperties] = useState<Set<string>>(new Set());
@@ -953,80 +1031,96 @@ export default function AdminCampaignsPage() {
     }).sort((a, b) => b.spend - a.spend);
   }, [campaignsList, breakdownCampaignFilters]);
 
-  // "Status" tab: one row per real (campaign, date) pair — i.e. per real
-  // AdSpendRecord — broken down by real Lead pipeline status, not campaign
-  // Active/Pause/Stopped status. Total Leads is the platform-reported
-  // leadsGenerated for that day; the status columns count actual matching
-  // Lead records, so they needn't sum to Total Leads (a lead's current
-  // status can differ from what the platform originally reported, and some
-  // leads land in statuses not broken out here).
-  const statusDateBreakdown = useMemo(() => {
-    const filteredRecords = breakdownCampaignFilters.length === 0
-      ? adSpendRecords
-      : adSpendRecords.filter(r => breakdownCampaignFilters.includes(r.accountName));
+  // "Status" tab: one row per real (campaign, date) pair — now from
+  // GET /ad-spend/campaign-status-breakdown, real server pagination,
+  // instead of mapping every ad_spend_records row against the bulk leads
+  // array on every render. That table has no retention job and grows
+  // forever, so this endpoint requires a real date range — "All Time"
+  // falls back to the last 12 months here specifically (capped, flagged
+  // below) rather than being sent as an unbounded request.
+  const statusBreakdownDateBounds = (): { dateFrom: string; dateTo: string; capped: boolean } => {
+    const bounds = campaignServerDateBounds();
+    if (bounds.dateFrom && bounds.dateTo) return { dateFrom: bounds.dateFrom, dateTo: bounds.dateTo, capped: false };
+    const toYMD = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const twelveMonthsAgo = new Date(today.getFullYear(), today.getMonth() - 12, today.getDate());
+    return { dateFrom: toYMD(twelveMonthsAgo), dateTo: toYMD(today), capped: true };
+  };
+  const { dateFrom: statusDateFrom, dateTo: statusDateTo, capped: statusBreakdownCapped } = statusBreakdownDateBounds();
 
-    return filteredRecords.map(rec => {
-      const dayLeads = leads.filter(l =>
-        (l.campaign || l.source)?.toLowerCase() === rec.accountName.toLowerCase()
-        && l.createdAtStr && toIsoDate(new Date(l.createdAtStr)) === rec.date
-      );
-      const countStatus = (statuses: string[]) => dayLeads.filter(l => statuses.includes(l.status)).length;
-      const d = new Date(rec.date);
-      const dateLabel = isNaN(d.getTime())
-        ? rec.date
-        : d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-      return {
-        id: rec.id,
-        date: rec.date,
-        dateLabel,
-        campaign: rec.accountName,
-        platform: rec.platform,
-        totalLeads: rec.leadsGenerated,
-        newLead: countStatus(["New Lead"]),
-        callBack: countStatus(["Call Back"]),
-        followUps: countStatus(["Followup"]),
-        siteVisits: countStatus(SITE_VISIT_LEAD_STATUSES),
-        eoi: countStatus(["EOI"]),
-        booked: countStatus(BOOKING_LEAD_STATUSES),
-        dead: countStatus(["Dead Lead"]),
-        rnr: countStatus(["RNR"]),
-        lowBudget: countStatus(["Low Budget"])
-      };
-    }).sort((a, b) => b.date.localeCompare(a.date));
-  }, [adSpendRecords, leads, breakdownCampaignFilters]);
+  const [statusBreakdownPage, setStatusBreakdownPage] = useState(1);
+  const [statusBreakdownRowsPerPage, setStatusBreakdownRowsPerPage] = useState(10);
+  const [statusBreakdownResult, setStatusBreakdownResult] = useState<CampaignStatusBreakdownResult>({ rows: [], page: 1, pageSize: 10, totalCount: 0, totalPages: 1 });
+  const [statusBreakdownLoading, setStatusBreakdownLoading] = useState(false);
+  useEffect(() => { setStatusBreakdownPage(1); }, [breakdownCampaignFilters, statusDateFrom, statusDateTo, breakdownTab]);
+  useEffect(() => {
+    if (breakdownTab !== "Status") return;
+    let cancelled = false;
+    setStatusBreakdownLoading(true);
+    apiGetCampaignStatusBreakdown(statusBreakdownPage, statusBreakdownRowsPerPage, statusDateFrom, statusDateTo, breakdownCampaignFilters.length > 0 ? breakdownCampaignFilters : undefined)
+      .then(result => { if (!cancelled) setStatusBreakdownResult(result); })
+      .catch(() => { /* leave the previous numbers showing on a transient failure */ })
+      .finally(() => { if (!cancelled) setStatusBreakdownLoading(false); });
+    return () => { cancelled = true; };
+  }, [breakdownTab, statusBreakdownPage, statusBreakdownRowsPerPage, statusDateFrom, statusDateTo, breakdownCampaignFilters]);
+  const statusDateBreakdown = useMemo(() => statusBreakdownResult.rows.map(row => {
+    const d = new Date(row.date);
+    const dateLabel = isNaN(d.getTime()) ? row.date : d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+    return { ...row, dateLabel };
+  }), [statusBreakdownResult.rows]);
 
-  const exportBreakdownCsv = () => {
-    const rows = breakdownTab === "Property"
-      ? [["Property", "Campaigns", "Source", "Total Leads", "Qualified Leads", "CPL", "QCPL", "Spend"],
-          ...propertyBreakdown.map(r => [r.property, r.campaigns.length, r.platforms.join("/"), r.totalLeads, r.qualifiedLeads, r.cpl.toFixed(2), r.qcpl.toFixed(2), r.spend.toFixed(2)])]
-      : [["Date", "Campaign", "Total Leads", "Call Back", "Follow ups", "Site Visits", "Dead", "RNR", "Low Budget"],
-          ...statusDateBreakdown.map(r => [r.dateLabel, r.campaign, r.totalLeads, r.callBack, r.followUps, r.siteVisits, r.dead, r.rnr, r.lowBudget])];
+  const [exportingBreakdownCsv, setExportingBreakdownCsv] = useState(false);
+  const exportBreakdownCsv = async () => {
+    if (exportingBreakdownCsv) return;
+    if (breakdownTab === "Property") {
+      const rows = [["Property", "Campaigns", "Source", "Total Leads", "Qualified Leads", "CPL", "QCPL", "Spend"],
+        ...propertyBreakdown.map(r => [r.property, r.campaigns.length, r.platforms.join("/"), r.totalLeads, r.qualifiedLeads, r.cpl.toFixed(2), r.qcpl.toFixed(2), r.spend.toFixed(2)])];
+      downloadCsv(rows, "campaigns-property-breakdown.csv");
+      return;
+    }
+    // Status tab's export needs every matching (campaign, day) row for the
+    // active date range, not just the current page — loop-fetch every page
+    // (now genuinely bounded, since dateFrom/dateTo are mandatory here)
+    // instead of a second, unpaginated endpoint.
+    setExportingBreakdownCsv(true);
+    try {
+      const all: CampaignStatusBreakdownRow[] = [];
+      let page = 1;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const result = await apiGetCampaignStatusBreakdown(page, 500, statusDateFrom, statusDateTo, breakdownCampaignFilters.length > 0 ? breakdownCampaignFilters : undefined);
+        all.push(...result.rows);
+        if (page >= result.totalPages) break;
+        page += 1;
+      }
+      const rows = [["Date", "Campaign", "Total Leads", "Call Back", "Follow ups", "Site Visits", "Dead", "RNR", "Low Budget"],
+        ...all.map(r => [r.date, r.campaign, r.totalLeads, r.callBack, r.followUps, r.siteVisits, r.dead, r.rnr, r.lowBudget])];
+      downloadCsv(rows, "campaigns-status-breakdown.csv");
+    } finally {
+      setExportingBreakdownCsv(false);
+    }
+  };
+  function downloadCsv(rows: (string | number)[][], filename: string) {
     const csv = rows.map(r => r.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `campaigns-${breakdownTab.toLowerCase()}-breakdown.csv`;
+    link.download = filename;
     link.click();
     URL.revokeObjectURL(url);
-  };
+  }
 
-  // Client-side pagination for the Analytics tab's tables (shared CRM
-  // footer). Each jumps back to page 1 when its own filters/search or the
+  // Client-side pagination for the Analytics tab's Property table (the
+  // Status tab now has real server pagination, see statusBreakdownResult
+  // above). Jumps back to page 1 when its own filters/search or the
   // page's Date Range change.
   const dateRangeResetKey = JSON.stringify([dateRange, appliedCustomRange]);
   const breakdownResetKey = JSON.stringify([breakdownCampaignFilters, dateRange, appliedCustomRange]);
   const propertyPagination = usePagination(propertyBreakdown, 10, breakdownResetKey);
-  const statusPagination = usePagination(statusDateBreakdown, 10, breakdownResetKey);
   const deepDivePagination = usePagination(
     deepDiveCampaigns,
     10,
     JSON.stringify([deepDiveSearchQuery, deepDiveSourceFilters, dateRangeResetKey])
-  );
-  const qualifiedLeadsPagination = usePagination(
-    qualifiedLeadsDrillList,
-    25,
-    JSON.stringify([analyticsDrillView?.campaign.id, qualifiedLeadsSearchQuery])
   );
 
   // Filtered table rows. By default only Active campaigns (by their overall
@@ -1164,24 +1258,13 @@ export default function AdminCampaignsPage() {
           {selectedCategory && (() => {
             // "Active Campaigns" is the one card that's a count of campaigns
             // rather than leads, so it's the only one that drills into the
-            // campaign table. Total Leads/Qualified Leads/Site Visits/Follow
-            // Ups all drill into the real, individual leads behind that
-            // number (pure lead details — Name/Phone/Status/Campaign),
-            // pulled from categoryLeads regardless of how the summary
-            // card's own number is computed.
+            // campaign table (small, client-side). Total Leads/Qualified
+            // Leads/Site Visits/Follow Ups/Call Backs all drill into the
+            // real, individual leads behind that number via
+            // categoryDrillList (real server pagination/search — a single
+            // capped fetch here would silently undercount a big category).
             const isCampaignsTable = selectedCategory === "Active Campaigns";
-            const q = drillSearchQuery.trim().toLowerCase();
-            const shownCampaigns = isCampaignsTable
-              ? activeCampaignsDrill.filter(c => !q || c.name.toLowerCase().includes(q))
-              : [];
-            const shownLeads = !isCampaignsTable
-              ? (categoryLeadsInRange[selectedCategory] || []).filter(l =>
-                  !q || l.name.toLowerCase().includes(q) || l.phone.includes(q) || (l.campaign || l.source || "").toLowerCase().includes(q)
-                )
-              : [];
-            const shownCount = isCampaignsTable ? shownCampaigns.length : shownLeads.length;
-            const totalPages = Math.max(1, Math.ceil(shownCount / drillRowsPerPage));
-            const currentPage = Math.min(drillPage, totalPages);
+            const shownCount = isCampaignsTable ? shownCampaigns.length : categoryDrillList.totalCount;
 
             return (
               <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden animate-fade-in">
@@ -1194,8 +1277,10 @@ export default function AdminCampaignsPage() {
                     <div className="relative w-full max-w-[220px]">
                       <Search className="h-3.5 w-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
                       <input
-                        value={drillSearchQuery}
-                        onChange={(e) => { setDrillSearchQuery(e.target.value); setDrillPage(1); }}
+                        value={isCampaignsTable ? campaignsDrillSearch : categoryDrillList.search}
+                        onChange={(e) => isCampaignsTable
+                          ? (setCampaignsDrillSearch(e.target.value), setCampaignsDrillPage(1))
+                          : categoryDrillList.setSearch(e.target.value)}
                         placeholder={isCampaignsTable ? "Search campaign..." : "Search name, phone, campaign..."}
                         className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-8 pr-2.5 py-1.5 text-xs focus:outline-none focus:border-[#0B1E6E]"
                       />
@@ -1205,7 +1290,7 @@ export default function AdminCampaignsPage() {
                     </button>
                   </div>
                 </div>
-                <div ref={drillScrollRef} className="overflow-x-auto">
+                <div className="overflow-x-auto">
                   {isCampaignsTable ? (
                     <table className="table-fixed w-full text-left border-collapse min-w-[600px]">
                       <colgroup>
@@ -1223,27 +1308,23 @@ export default function AdminCampaignsPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 text-[12px] text-slate-700">
-                        {isDataLoading && shownCampaigns.length === 0 ? (
+                        {isDataLoading && shownCampaignsPage.length === 0 ? (
                           <TableRowsSkeleton rows={6} columns={4} />
-                        ) : shownCampaigns.length === 0 ? (
+                        ) : shownCampaignsPage.length === 0 ? (
                           <tr>
                             <td colSpan={4} className="px-4 py-6 text-center text-slate-400 italic">
                               No campaigns found.
                             </td>
                           </tr>
                         ) : (
-                          (drillPageRowRefs.current = [], shownCampaigns.map((c, idx) => (
-                            <tr
-                              key={c.id}
-                              ref={idx % drillRowsPerPage === 0 ? (el) => { drillPageRowRefs.current[Math.floor(idx / drillRowsPerPage)] = el; } : undefined}
-                              className="hover:bg-slate-50/50 transition-colors"
-                            >
+                          shownCampaignsPage.map((c) => (
+                            <tr key={c.id} className="hover:bg-slate-50/50 transition-colors">
                               <td className="px-4 py-2.5 font-semibold text-slate-900 [overflow-wrap:anywhere]">{c.name}</td>
                               <td className="px-4 py-2.5">{c.totalLeads}</td>
                               <td className="px-4 py-2.5">{c.qualifiedLeads}</td>
                               <td className="px-4 py-2.5">{c.siteVisit}</td>
                             </tr>
-                          )))
+                          ))
                         )}
                       </tbody>
                     </table>
@@ -1264,52 +1345,40 @@ export default function AdminCampaignsPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 text-[12px] text-slate-700">
-                        {isDataLoading && shownLeads.length === 0 ? (
+                        {categoryDrillList.loading && categoryDrillList.rows.length === 0 ? (
                           <TableRowsSkeleton rows={6} columns={4} />
-                        ) : shownLeads.length === 0 ? (
+                        ) : categoryDrillList.totalCount === 0 ? (
                           <tr>
                             <td colSpan={4} className="px-4 py-6 text-center text-slate-400 italic">
                               No leads found for this category.
                             </td>
                           </tr>
                         ) : (
-                          (drillPageRowRefs.current = [], shownLeads.map((l, idx) => (
-                            <tr
-                              key={l.id}
-                              ref={idx % drillRowsPerPage === 0 ? (el) => { drillPageRowRefs.current[Math.floor(idx / drillRowsPerPage)] = el; } : undefined}
-                              className="hover:bg-slate-50/50 transition-colors"
-                            >
+                          categoryDrillList.rows.map((l) => (
+                            <tr key={l.id} className="hover:bg-slate-50/50 transition-colors">
                               <td className="px-4 py-2.5 font-semibold text-slate-900 [overflow-wrap:anywhere]">{l.name}</td>
                               <td className="px-4 py-2.5 font-mono [overflow-wrap:anywhere]">{isAdmin ? l.phone : maskPhone(l.phone)}</td>
                               <td className="px-4 py-2.5">{l.status}</td>
                               <td className="px-4 py-2.5 [overflow-wrap:anywhere]">{l.campaign || l.source || "—"}</td>
                             </tr>
-                          )))
+                          ))
                         )}
                       </tbody>
                     </table>
                   )}
                 </div>
                 <TablePagination
-                  totalRows={shownCount}
-                  page={currentPage}
-                  rowsPerPage={drillRowsPerPage}
+                  {...(isCampaignsTable
+                    ? {
+                        totalRows: shownCampaigns.length,
+                        page: campaignsDrillCurrentPage,
+                        rowsPerPage: campaignsDrillRowsPerPage,
+                        onPageChange: setCampaignsDrillPage,
+                        onRowsPerPageChange: (n: number) => { setCampaignsDrillRowsPerPage(n); setCampaignsDrillPage(1); }
+                      }
+                    : categoryDrillList.paginationProps)}
                   rowsPerPageOptions={[8, 25, 50, 100]}
                   rowLabel={isCampaignsTable ? "Campaign" : "Lead"}
-                  onPageChange={(p) => goToDrillPage(p, totalPages)}
-                  onRowsPerPageChange={(n) => {
-                    drillProgrammaticScroll.current = true;
-                    setDrillRowsPerPage(n);
-                    setDrillPage(1);
-                    const main = drillScrollRef.current?.closest("main");
-                    const el = drillScrollRef.current;
-                    if (main && el) {
-                      main.scrollTo({ top: main.scrollTop + el.getBoundingClientRect().top - main.getBoundingClientRect().top });
-                    }
-                    requestAnimationFrame(() => {
-                      requestAnimationFrame(() => { drillProgrammaticScroll.current = false; });
-                    });
-                  }}
                 />
               </div>
             );
@@ -1334,14 +1403,14 @@ export default function AdminCampaignsPage() {
                 <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5 border-b border-slate-200/80">
                   <h3 className="text-sm font-bold text-slate-900">
                     Qualified Leads
-                    <span className="text-slate-400 font-medium ml-1.5">({qualifiedLeadsDrillList.length}) — {analyticsDrillView.campaign.name}</span>
+                    <span className="text-slate-400 font-medium ml-1.5">({qualifiedLeadsList.totalCount}) — {analyticsDrillView.campaign.name}</span>
                   </h3>
                   <div className="flex items-center gap-2.5">
                     <div className="relative w-full max-w-[200px]">
                       <Search className="h-3.5 w-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
                       <input
-                        value={qualifiedLeadsSearchQuery}
-                        onChange={(e) => setQualifiedLeadsSearchQuery(e.target.value)}
+                        value={qualifiedLeadsList.search}
+                        onChange={(e) => qualifiedLeadsList.setSearch(e.target.value)}
                         placeholder="Search lead name..."
                         className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-8 pr-2.5 py-1.5 text-xs focus:outline-none focus:border-[#0B1E6E]"
                       />
@@ -1349,8 +1418,9 @@ export default function AdminCampaignsPage() {
                     <button
                       type="button"
                       onClick={exportQualifiedLeadsCsv}
+                      disabled={exportingQualifiedLeadsCsv}
                       title="Download CSV"
-                      className="inline-flex items-center justify-center h-9 w-9 border border-slate-300/80 rounded-xl hover:bg-slate-50 transition-colors"
+                      className="inline-flex items-center justify-center h-9 w-9 border border-slate-300/80 rounded-xl hover:bg-slate-50 transition-colors disabled:opacity-50"
                     >
                       <Download className="h-4 w-4 text-blue-600" />
                     </button>
@@ -1381,14 +1451,14 @@ export default function AdminCampaignsPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-[12px] font-medium text-slate-700">
-                      {isDataLoading && qualifiedLeadsDrillList.length === 0 ? (
+                      {qualifiedLeadsList.loading && qualifiedLeadsList.rows.length === 0 ? (
                         <TableRowsSkeleton rows={6} columns={8} />
-                      ) : qualifiedLeadsDrillList.length === 0 ? (
+                      ) : qualifiedLeadsList.totalCount === 0 ? (
                         <tr>
                           <td colSpan={8} className="px-4 py-8 text-center text-slate-400 italic">No qualified leads found for this campaign.</td>
                         </tr>
                       ) : (
-                        qualifiedLeadsPagination.pageRows.map(l => (
+                        qualifiedLeadsList.rows.map(l => (
                           <tr key={l.id} className="hover:bg-slate-50/50 transition-colors">
                             <td className="px-4 py-3 text-slate-900 font-semibold [overflow-wrap:anywhere]">{l.name}</td>
                             <td className="px-4 py-3 [overflow-wrap:anywhere]" title={isAdmin ? l.email : undefined}>{l.email ? (isAdmin ? l.email : maskEmail(l.email)) : "—"}</td>
@@ -1396,7 +1466,7 @@ export default function AdminCampaignsPage() {
                             <td className="px-4 py-3 [overflow-wrap:anywhere]">{l.assignedAgent || "—"}</td>
                             <td className="px-4 py-3">{l.createdAtStr || "—"}</td>
                             <td className="px-4 py-3"><div className="line-clamp-3 [overflow-wrap:anywhere]" title={latestLogMessage(l)}>{latestLogMessage(l)}</div></td>
-                            <td className="px-4 py-3"><NextCallCell next={nextCallDateFor(l.id)} /></td>
+                            <td className="px-4 py-3"><NextCallCell next={nextCallDateFor(l.id, qualifiedLeadsPageFollowups)} /></td>
                             <td className="px-4 py-3 [overflow-wrap:anywhere]">{l.campaign || l.source || "—"}</td>
                           </tr>
                         ))
@@ -1404,7 +1474,7 @@ export default function AdminCampaignsPage() {
                     </tbody>
                   </table>
                 </div>
-                <TablePagination {...qualifiedLeadsPagination.paginationProps} rowLabel="Lead" />
+                <TablePagination {...qualifiedLeadsList.paginationProps} rowLabel="Lead" />
               </div>
             )}
           </div>
@@ -1576,11 +1646,17 @@ export default function AdminCampaignsPage() {
                 <button
                   type="button"
                   onClick={exportBreakdownCsv}
+                  disabled={exportingBreakdownCsv}
                   title="Download CSV"
-                  className="inline-flex items-center justify-center h-9 w-9 border border-slate-300/80 rounded-xl hover:bg-slate-50 transition-colors"
+                  className="inline-flex items-center justify-center h-9 w-9 border border-slate-300/80 rounded-xl hover:bg-slate-50 transition-colors disabled:opacity-50"
                 >
                   <Download className="h-4 w-4 text-blue-600" />
                 </button>
+                {breakdownTab === "Status" && statusBreakdownCapped && (
+                  <span className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 whitespace-nowrap">
+                    Showing the last 12 months — pick a range to see more
+                  </span>
+                )}
                 <DateRangePicker
                   value={appliedCustomRange}
                   onChange={handleDateRangeChange}
@@ -1762,19 +1838,19 @@ export default function AdminCampaignsPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-[12px] font-medium text-slate-700">
-                      {isDataLoading && statusDateBreakdown.length === 0 ? (
+                      {statusBreakdownLoading && statusDateBreakdown.length === 0 ? (
                         <TableRowsSkeleton rows={6} columns={STATUS_COLUMNS.filter(c => statusVisibleColumns[c.key]).length || 1} />
-                      ) : statusDateBreakdown.length === 0 ? (
+                      ) : statusBreakdownResult.totalCount === 0 ? (
                         <tr>
                           <td colSpan={STATUS_COLUMNS.filter(c => statusVisibleColumns[c.key]).length || 1} className="px-4 py-8 text-center text-slate-400 italic">No ad-spend data yet.</td>
                         </tr>
                       ) : (
-                        statusPagination.pageRows.map(row => (
+                        statusDateBreakdown.map(row => (
                           <tr key={row.id} className="hover:bg-slate-50/50 transition-colors">
                             {statusVisibleColumns.date && <td className="px-4 py-3 text-slate-700 whitespace-nowrap">{row.dateLabel}</td>}
                             {statusVisibleColumns.campaign && <td className="px-4 py-3 text-slate-900 font-semibold [overflow-wrap:anywhere]">{row.campaign}</td>}
                             {statusVisibleColumns.totalLeads && <td className="px-4 py-3">{row.totalLeads}</td>}
-                            {statusVisibleColumns.source && <td className="px-4 py-3"><PlatformIcon platform={row.platform} /></td>}
+                            {statusVisibleColumns.source && <td className="px-4 py-3"><PlatformIcon platform={normalizePlatform(row.platform)} /></td>}
                             {statusVisibleColumns.newLead && <td className="px-4 py-3">{row.newLead}</td>}
                             {statusVisibleColumns.callBack && <td className="px-4 py-3">{row.callBack}</td>}
                             {statusVisibleColumns.followUps && <td className="px-4 py-3">{row.followUps}</td>}
@@ -1797,7 +1873,14 @@ export default function AdminCampaignsPage() {
             {breakdownTab === "Property" ? (
               <TablePagination {...propertyPagination.paginationProps} rowLabel="Property" />
             ) : (
-              <TablePagination {...statusPagination.paginationProps} rowLabel="Row" />
+              <TablePagination
+                totalRows={statusBreakdownResult.totalCount}
+                page={statusBreakdownPage}
+                rowsPerPage={statusBreakdownRowsPerPage}
+                onPageChange={setStatusBreakdownPage}
+                onRowsPerPageChange={(n) => { setStatusBreakdownRowsPerPage(n); setStatusBreakdownPage(1); }}
+                rowLabel="Row"
+              />
             )}
           </div>
 
@@ -2029,7 +2112,7 @@ export default function AdminCampaignsPage() {
                                       </colgroup>
                                       <tbody className="divide-y divide-slate-100">
                                         {adRows.map(ad => {
-                                          const syncedLeads = leads.filter(l => l.metaAdId === ad.adId).length;
+                                          const syncedLeads = adLevelLeadStatsMap.get(ad.adId)?.syncedLeads ?? 0;
                                           return (
                                             <tr key={ad.adId}>
                                               <td className="px-4 py-2.5" />

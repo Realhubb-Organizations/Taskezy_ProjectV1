@@ -41,10 +41,12 @@ export async function listLeads(caller: AccessTokenPayload, filter: {
   status?: string[];
   assignedAgentId?: string[];
   campaign?: string[];
+  propertyId?: string[];
   dateFrom?: string;
   dateTo?: string;
   search?: string;
   excludeBulkUpload?: boolean;
+  missedOnly?: boolean;
 }) {
   const scopedToAgentIds = await scopeForCaller(caller);
   const { rows, totalCount } = await repo.findMany({
@@ -53,10 +55,13 @@ export async function listLeads(caller: AccessTokenPayload, filter: {
     statusCodes: filter.status,
     assignedAgentId: filter.assignedAgentId,
     campaign: filter.campaign,
+    propertyId: filter.propertyId,
     dateFrom: filter.dateFrom,
     dateTo: filter.dateTo,
     search: filter.search,
     excludeBulkUpload: filter.excludeBulkUpload,
+    missedOnly: filter.missedOnly,
+    slaMinutes: filter.missedOnly ? REPORT_SLA_MINUTES : undefined,
     scopedToAgentIds
   });
   return {
@@ -111,20 +116,25 @@ export async function getLeadStats(caller: AccessTokenPayload, filter: {
   status?: string[];
   assignedAgentId?: string[];
   campaign?: string[];
+  propertyId?: string[];
   dateFrom?: string;
   dateTo?: string;
   search?: string;
   excludeBulkUpload?: boolean;
+  missedOnly?: boolean;
 }): Promise<LeadSummaryStats> {
   const scopedToAgentIds = await scopeForCaller(caller);
   const grouped = await repo.getStats({
     statusCodes: filter.status,
     assignedAgentId: filter.assignedAgentId,
     campaign: filter.campaign,
+    propertyId: filter.propertyId,
     dateFrom: filter.dateFrom,
     dateTo: filter.dateTo,
     search: filter.search,
     excludeBulkUpload: filter.excludeBulkUpload,
+    missedOnly: filter.missedOnly,
+    slaMinutes: filter.missedOnly ? REPORT_SLA_MINUTES : undefined,
     scopedToAgentIds
   });
 
@@ -141,6 +151,35 @@ export async function getLeadStats(caller: AccessTokenPayload, filter: {
     siteVisitScheduled: countFor(SITE_VISIT_SCHEDULED_CODE),
     siteVisitDone: countFor(SITE_VISIT_DONE_CODE)
   };
+}
+
+/**
+ * Distinct campaign names for a drill-down panel's Campaign filter dropdown
+ * — same filter shape as getLeadStats (minus search, which has no bearing
+ * on "what campaigns exist"), so the dropdown's options reflect the same
+ * category/date-range scope the panel is already showing.
+ */
+export async function getDistinctCampaigns(caller: AccessTokenPayload, filter: {
+  status?: string[];
+  assignedAgentId?: string[];
+  propertyId?: string[];
+  dateFrom?: string;
+  dateTo?: string;
+  excludeBulkUpload?: boolean;
+  missedOnly?: boolean;
+}): Promise<string[]> {
+  const scopedToAgentIds = await scopeForCaller(caller);
+  return repo.getDistinctCampaigns({
+    statusCodes: filter.status,
+    assignedAgentId: filter.assignedAgentId,
+    propertyId: filter.propertyId,
+    dateFrom: filter.dateFrom,
+    dateTo: filter.dateTo,
+    excludeBulkUpload: filter.excludeBulkUpload,
+    missedOnly: filter.missedOnly,
+    slaMinutes: filter.missedOnly ? REPORT_SLA_MINUTES : undefined,
+    scopedToAgentIds
+  });
 }
 
 // Mirrors LeadDashboard.tsx's UNQUALIFIED_STATUSES/SITE_VISIT_STATUSES —

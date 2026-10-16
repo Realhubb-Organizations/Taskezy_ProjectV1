@@ -41,7 +41,14 @@ export const listLeadsQuerySchema = z.object({
   search: z.string().trim().max(200).optional(),
   // "true" leaves out Data Calling leads (source "Bulk Upload"), which only
   // show on the Data Calling page until they're qualified.
-  excludeBulkUpload: z.enum(["true", "false"]).optional().transform(v => v === "true")
+  excludeBulkUpload: z.enum(["true", "false"]).optional().transform(v => v === "true"),
+  // Already supported by buildLeadWhereClause/findMany (used by the Leads
+  // Analytics tab's own aggregate) — just not previously exposed here.
+  propertyId: uuidToArray,
+  // Live-clock SLA check (same predicate getAgentReportStats already counts
+  // with), not a stored column — "true" keeps only leads not yet responded
+  // to within SLA_MINUTES, or responded to later than that.
+  missedOnly: z.enum(["true", "false"]).optional().transform(v => v === "true")
 });
 
 // Same filter shape as listLeadsQuerySchema (status/assignedAgentId/campaign/
@@ -49,6 +56,11 @@ export const listLeadsQuerySchema = z.object({
 // aggregate — a caller can pass the exact same filter query params to both
 // `GET /` and `GET /stats` and get consistent, filter-matching results.
 export const leadStatsQuerySchema = listLeadsQuerySchema.omit({ page: true, pageSize: true });
+
+// Drill-down panel's Campaign filter dropdown — same filter shape as
+// leadStatsQuerySchema minus search/campaign (irrelevant to "what campaigns
+// exist for this scope").
+export const distinctCampaignsQuerySchema = leadStatsQuerySchema.omit({ search: true, campaign: true });
 
 // Leads Analytics tab's own filter set (Property/Campaign/Date Range) —
 // deliberately NOT listLeadsQuerySchema.omit(...) like leadStatsQuerySchema

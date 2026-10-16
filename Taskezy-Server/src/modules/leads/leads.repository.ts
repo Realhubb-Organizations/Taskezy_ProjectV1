@@ -75,6 +75,10 @@ export interface LeadFilterConditions {
   excludeBulkUpload?: boolean;
   /** When set (a sales Member or Manager caller — see leads.service.ts's scopeForCaller), results are hard-restricted to these agent ids: just the caller for a Member, the caller plus their direct reports for a Manager. Always ANDed with assignedAgentId, never overridden by it — this is a security boundary, the client's own filter choice is not allowed to widen it. */
   scopedToAgentIds?: string[];
+  /** Live-clock SLA check — same predicate getAgentReportStats's missed_leads FILTER already uses, applied as a row filter instead of a conditional count. Requires slaMinutes below when true. */
+  missedOnly?: boolean;
+  /** Required when missedOnly is true — reuse leads.service.ts's REPORT_SLA_MINUTES, don't invent a second source of truth. */
+  slaMinutes?: number;
 }
 
 export interface LeadListFilter extends LeadFilterConditions {
@@ -141,6 +145,15 @@ function buildLeadWhereClause(filter: LeadFilterConditions): { whereClause: stri
   if (filter.search) {
     params.push(`%${filter.search}%`);
     conditions.push(`(l.name ILIKE $${params.length} OR l.phone ILIKE $${params.length})`);
+  }
+
+  if (filter.missedOnly) {
+    params.push(filter.slaMinutes);
+    const slaParam = params.length;
+    conditions.push(`l.assigned_at IS NOT NULL AND (
+      (l.first_response_at IS NOT NULL AND EXTRACT(EPOCH FROM (l.first_response_at - l.assigned_at)) / 60 > $${slaParam}::numeric)
+      OR (l.first_response_at IS NULL AND EXTRACT(EPOCH FROM (now() - l.assigned_at)) / 60 > $${slaParam}::numeric)
+    )`);
   }
 
   return { whereClause: conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "", params };
@@ -212,6 +225,22 @@ export async function getStats(filter: LeadFilterConditions): Promise<StatusCode
     params
   );
   return rows;
+}
+
+/**
+ * Distinct campaign names for a drill-down panel's Campaign filter dropdown
+ * — same COALESCE(campaign, source) key buildLeadWhereClause's own campaign
+ * filter already matches against, scoped by whatever filter the caller
+ * passes (same scopedToAgentIds boundary as every other leads query).
+ */
+export async function getDistinctCampaigns(filter: LeadFilterConditions): Promise<string[]> {
+  const { whereClause, params } = buildLeadWhereClause(filter);
+  const conditions = whereClause ? `${whereClause} AND COALESCE(l.campaign, l.source) IS NOT NULL` : `WHERE COALESCE(l.campaign, l.source) IS NOT NULL`;
+  const { rows } = await query<{ campaign: string }>(
+    `SELECT DISTINCT COALESCE(l.campaign, l.source) AS campaign FROM leads l ${conditions} ORDER BY 1`,
+    params
+  );
+  return rows.map(r => r.campaign);
 }
 
 export interface AgentAnalyticsRow {
