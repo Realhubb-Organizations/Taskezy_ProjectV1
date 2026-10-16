@@ -1062,6 +1062,12 @@ export interface FollowupListFilters {
   // "Just the follow-ups for these leads" — e.g. a drill-down table's
   // next-call-date column, without paging through every follow-up.
   leadId?: string[];
+  // "Just this one agent's follow-ups" — e.g. a report's Missed Follow-ups
+  // drill-down. Plain YYYY-MM-DD bounds on scheduled_at, same as dateFrom/
+  // dateTo elsewhere.
+  assignedToId?: string[];
+  dateFrom?: string;
+  dateTo?: string;
 }
 
 export interface FollowupsPageResult {
@@ -1080,6 +1086,9 @@ export async function apiListFollowupsPage(
   const params = new URLSearchParams();
   filters.status?.forEach(s => params.append("status", s));
   filters.leadId?.forEach(id => params.append("leadId", id));
+  filters.assignedToId?.forEach(id => params.append("assignedToId", id));
+  if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
+  if (filters.dateTo) params.set("dateTo", filters.dateTo);
   params.set("page", String(page));
   params.set("pageSize", String(pageSize));
   const { data, meta } = await requestWithMeta<ApiFollowupRow>(`/api/v1/followups?${params.toString()}`);

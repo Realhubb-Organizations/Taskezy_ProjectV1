@@ -67,7 +67,18 @@ const listFollowupsQuerySchema = z.object({
   // (e.g. for a next-call-date column) instead of paging through every
   // follow-up in the company — same uuidToArray pattern leads.schema.ts's
   // assignedAgentId already uses.
-  leadId: uuidToArray
+  leadId: uuidToArray,
+  // Lets a report fetch "just this one agent's follow-ups" (e.g. the
+  // Missed Follow-ups drill-down) — ANDed with scopedAssigneeIdsForCaller
+  // below, same AND-only boundary as every other scoped endpoint, so this
+  // can never widen what the caller is actually allowed to see.
+  assignedToId: uuidToArray,
+  // Same plain-date-string bounds getMissedFollowupCount already uses on
+  // this same column (no BUSINESS_TIMEZONE conversion, unlike leads'
+  // created_at) — kept identical on purpose, so a row-level fetch here can
+  // never disagree with that count for the same date range.
+  dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateFrom must be YYYY-MM-DD").optional(),
+  dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateTo must be YYYY-MM-DD").optional()
 });
 
 // Mirrors leads.service.ts's scopeForCaller rule: a Member only ever sees
@@ -80,8 +91,9 @@ followupsRouter.get(
   "/",
   validate({ query: listFollowupsQuerySchema }),
   asyncHandler(async (req, res) => {
-    const { page, pageSize, status, leadId } = req.query as unknown as {
+    const { page, pageSize, status, leadId, assignedToId, dateFrom, dateTo } = req.query as unknown as {
       page: number; pageSize: number; status?: ("MISSED" | "UPCOMING" | "COMPLETED")[]; leadId?: string[];
+      assignedToId?: string[]; dateFrom?: string; dateTo?: string;
     };
     const scopedAssigneeIds = await scopedAssigneeIdsForCaller(req.user!);
 
@@ -94,6 +106,18 @@ followupsRouter.get(
     if (leadId && leadId.length > 0) {
       params.push(leadId);
       conditions.push(`fc.lead_id = ANY($${params.length}::uuid[])`);
+    }
+    if (assignedToId && assignedToId.length > 0) {
+      params.push(assignedToId);
+      conditions.push(`fc.assigned_to_id = ANY($${params.length}::uuid[])`);
+    }
+    if (dateFrom) {
+      params.push(dateFrom);
+      conditions.push(`fc.scheduled_at >= $${params.length}::date`);
+    }
+    if (dateTo) {
+      params.push(dateTo);
+      conditions.push(`fc.scheduled_at < ($${params.length}::date + 1)`);
     }
     if (status && status.length > 0) {
       if (status.length === 1) {

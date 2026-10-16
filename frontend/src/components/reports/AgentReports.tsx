@@ -1,11 +1,11 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useApp, LeadStatus } from "@/context/AppContext";
+import { useApp, LeadStatus, FollowupCall, mapApiFollowupToFrontend } from "@/context/AppContext";
 import { isLeadAssignableUser } from "@/lib/leadAssignment";
 import { useDialog } from "@/components/ui/DialogProvider";
 import { maskPhone } from "@/lib/maskPII";
-import { apiGetAgentReportStats, type AgentReportStats } from "@/lib/apiClient";
+import { apiGetAgentReportStats, apiListFollowupsPage, type AgentReportStats } from "@/lib/apiClient";
 import { AlertTriangle, ArrowRight, CheckSquare, Clock, DollarSign, Info, MapPin, Phone, TrendingUp, Users, RefreshCw } from "lucide-react";
 import { DateRange } from "./DateRangeFilter";
 import MetricDetailModal, { MetricDetailRow } from "./MetricDetailModal";
@@ -13,7 +13,6 @@ import LeadDetailDrawer from "@/components/crm/LeadDetailDrawer";
 import { statusBadgeClasses } from "@/lib/leadStatusMapping";
 import {
   filterLeadsByRange,
-  filterFollowupsByRange,
   computeROIMultiple,
   agentFunnelLeads,
   getMissedInfo,
@@ -25,11 +24,10 @@ import { LineSkeleton, TableRowsSkeleton, CardListSkeleton } from "@/components/
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
 
 export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
-  const { leads, followupCalls, users, currentUser, activeRole, reassignLead, updateLeadStatus, isDataLoading } = useApp();
+  const { leads, users, currentUser, activeRole, reassignLead, updateLeadStatus, isDataLoading } = useApp();
   const { toast, prompt: promptDialog } = useDialog();
 
   const rangeLeads = useMemo(() => filterLeadsByRange(leads, dateRange.from, dateRange.to), [leads, dateRange]);
-  const rangeFollowups = useMemo(() => filterFollowupsByRange(followupCalls, dateRange.from, dateRange.to), [followupCalls, dateRange]);
 
   // Real reporting-line lookup (see Settings → Manage Users → "Reports To"),
   // not the old hardcoded name-string SALES_HIERARCHY table.
@@ -73,19 +71,34 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
     return Array.from(names).sort();
   }, [agentNames, managerNames]);
 
-  // agentLeads/agentFollowups (and the missedLeads/missedFollowups arrays
-  // below) still feed every KPI card's drill-down popup and the tabbed
-  // missed-items tables further down this page, which need real rows, not
-  // just counts — only the numbers displayed on the cards themselves come
-  // from the server now (see leads.service.ts's getAgentReportStats).
+  // agentLeads (and the missedLeads array below) still feed every lead-
+  // based KPI card's drill-down popup, which need real rows, not just
+  // counts — only the numbers displayed on the cards themselves come from
+  // the server now (see leads.service.ts's getAgentReportStats).
   const agentLeads = rangeLeads.filter(l => l.assignedAgent === activeAgent);
   const missedLeads = agentLeads
     .map(l => ({ lead: l, info: getMissedInfo(l) }))
     .filter(x => x.info.missed);
-  const agentFollowups = rangeFollowups.filter(f => f.assignedTo === activeAgent);
-  const missedFollowups = agentFollowups.filter(f => f.status === "Missed");
 
   const activeAgentId = users.find(u => u.name === activeAgent)?.id;
+
+  // Missed Follow-ups' rows, fetched directly for this one agent + date
+  // range instead of scanning the bulk followupCalls array — followup_calls
+  // is a much smaller table than leads (a handful of open calls per agent,
+  // not thousands), so one page is enough in practice.
+  // ponytail: capped at 500 (the server's max page size) rather than real
+  // pagination — revisit if a single agent's missed-follow-up count in one
+  // range ever realistically approaches that.
+  const [missedFollowups, setMissedFollowups] = useState<FollowupCall[]>([]);
+  useEffect(() => {
+    if (!activeAgentId) { setMissedFollowups([]); return; }
+    let cancelled = false;
+    apiListFollowupsPage(1, 500, { status: ["MISSED"], assignedToId: [activeAgentId], dateFrom: dateRange.from, dateTo: dateRange.to })
+      .then(result => { if (!cancelled) setMissedFollowups(result.rows.map(mapApiFollowupToFrontend)); })
+      .catch(() => { if (!cancelled) setMissedFollowups([]); });
+    return () => { cancelled = true; };
+  }, [activeAgentId, dateRange.from, dateRange.to]);
+
   const ZERO_REPORT_STATS: AgentReportStats = {
     assigned: 0, contacted: 0, qualified: 0, siteVisits: 0, bookingValue: 0, bookingCount: 0,
     allocatedSpend: 0, missedLeads: 0, missedFollowups: 0
