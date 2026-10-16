@@ -726,9 +726,6 @@ export default function LeadDashboard() {
     return d.getMonth() === refNow.getMonth() && d.getFullYear() === refNow.getFullYear();
   };
 
-  const adminDateInRange = (dateStr: string | undefined, range: typeof adminDateRange, refNow: Date): boolean =>
-    dateInRange(dateStr, range, refNow, adminCustomRange);
-
   const adminSortedLogs = (l: Lead) => [...(l.logs || [])].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
   const adminFormatDateTime = (iso: string | undefined): string => {
     if (!iso) return "—";
@@ -738,18 +735,10 @@ export default function LeadDashboard() {
   };
   const adminNextCallDateFor = (leadId: string) => nextFollowupFor(leadId, followupCalls);
 
-  // The Campaigns quick-filter (adminCampaignFilter) narrows these same 7
-  // stat cards down to whichever campaign(s) are selected.
-  const adminCampaignScopedLeads = adminCampaignFilter.length === 0
-    ? scopedLeads
-    : scopedLeads.filter(l => !!l.campaign && adminCampaignFilter.includes(l.campaign));
-
-  const adminRangeLeads = adminCampaignScopedLeads.filter(l => adminDateInRange(l.createdAtStr, adminDateRange, today));
   // Real counts from the server (same filters as the table itself), not a
   // computation over the full in-memory array — see the serverStats fetch
-  // effect above. adminRangeLeads/adminCampaignScopedLeads stay exactly as
-  // they were purely for the admin drill-down panel below (adminDrillMetric),
-  // which still needs real lead rows to display, not just a count.
+  // effect above. The admin drill-down panel below (adminDrillMetric) now
+  // fetches its own rows from the server too (adminDrillBaseFilters).
   const adminStats: LeadSummaryStats = serverStats ?? {
     totalLeads: 0, newLeads: 0, rnr: 0, callBacks: 0, followUps: 0, siteVisitScheduled: 0, siteVisitDone: 0
   };
@@ -764,14 +753,16 @@ export default function LeadDashboard() {
     { key: "sitevisit_done", label: "Site Visit Done", value: adminStats.siteVisitDone, color: "text-[#015814]" }
   ];
 
-  const adminMetricPredicate: Record<string, (l: Lead) => boolean> = {
-    total: () => true,
-    new: (l) => l.status === "New Lead",
-    rnr: (l) => l.status === "RNR",
-    callbacks: (l) => l.status === "Call Back",
-    followups: (l) => l.status === "Followup",
-    sitevisit_sched: (l) => l.status === "Site Visit Scheduled",
-    sitevisit_done: (l) => l.status === "Site Visit Done"
+  // Admin drill-down panel's own filters — same status codes/date-range/
+  // campaign the server-side stats above are grouped from (ADMIN_METRIC_TO_
+  // STATUS, already used for the non-admin quick-filter), so the panel
+  // always matches whichever card was clicked.
+  const adminDrillBaseFilters: LeadListFilters = {
+    ...adminServerDateBounds(),
+    status: adminDrillMetric && adminDrillMetric !== "total"
+      ? (() => { const code = frontendStatusToDbCode(ADMIN_METRIC_TO_STATUS[adminDrillMetric]); return code ? [code] : undefined; })()
+      : undefined,
+    campaign: adminCampaignFilter.length > 0 ? adminCampaignFilter : undefined
   };
 
   const adminCampaignsList = Array.from(new Set(scopedLeads.map(l => l.campaign).filter(Boolean))) as string[];
@@ -1278,7 +1269,7 @@ export default function LeadDashboard() {
             {isAdmin && (
               <LeadDrillDownPanel
                 title={adminStatCards.find(s => s.key === adminDrillMetric)?.label ?? null}
-                leads={adminDrillMetric ? adminRangeLeads.filter(adminMetricPredicate[adminDrillMetric]) : []}
+                baseFilters={adminDrillBaseFilters}
                 onClose={() => setAdminDrillMetric(null)}
               />
             )}

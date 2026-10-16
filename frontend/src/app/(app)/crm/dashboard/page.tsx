@@ -156,19 +156,18 @@ export default function CrmDashboardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dateRange, customRange]);
 
-  // Each card's real underlying lead list for the drill-down panel — same
-  // per-status predicates the server-side stats above group by, so a
-  // clicked card's drill-down always matches its own count (both read the
-  // same status field; this part just can't move off the bulk array until
-  // the drill-down panel itself has a paginated-by-status fetch of its own).
-  const categoryLeads: Record<string, Lead[]> = {
-    "Total Leads": rangeLeads,
-    "New Leads": rangeLeads.filter(l => l.status === "New Lead"),
-    "RNR": rangeLeads.filter(l => l.status === "RNR"),
-    "Call Backs": rangeLeads.filter(l => l.status === "Call Back"),
-    "Follow Ups": rangeLeads.filter(l => l.status === "Followup"),
-    "Site Visit Scheduled": rangeLeads.filter(l => l.status === "Site Visit Scheduled"),
-    "Site Visit Done": rangeLeads.filter(l => l.status === "Site Visit Done")
+  // Each card's own filters for the drill-down panel — same per-status DB
+  // codes the server-side stats above group by, so a clicked card's
+  // drill-down always matches its own count (both hit the same endpoint,
+  // GET /leads, which the server-scoped stats are grouped from too).
+  const categoryFilters: Record<string, LeadListFilters> = {
+    "Total Leads": { ...serverDateBounds() },
+    "New Leads": { status: ["NEW_LEAD"], ...serverDateBounds() },
+    "RNR": { status: ["RNR"], ...serverDateBounds() },
+    "Call Backs": { status: ["CALL_BACK"], ...serverDateBounds() },
+    "Follow Ups": { status: ["FOLLOWUP"], ...serverDateBounds() },
+    "Site Visit Scheduled": { status: ["SITE_VISIT_SCHEDULED"], ...serverDateBounds() },
+    "Site Visit Done": { status: ["SITE_VISIT_DONE"], ...serverDateBounds() }
   };
 
   const statCards: { label: string; value: number; color: string }[] = [
@@ -312,7 +311,7 @@ export default function CrmDashboardPage() {
 
       <LeadDrillDownPanel
         title={selectedCategory}
-        leads={selectedCategory ? categoryLeads[selectedCategory] : []}
+        baseFilters={selectedCategory ? categoryFilters[selectedCategory] : {}}
         onClose={() => setSelectedCategory(null)}
       />
 
