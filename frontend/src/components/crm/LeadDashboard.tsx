@@ -3,12 +3,12 @@
 import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useApp, Lead, LeadStatus, mapApiLeadToFrontendLead } from "@/context/AppContext";
+import { useApp, Lead, LeadStatus, FollowupCall, mapApiLeadToFrontendLead, mapApiFollowupToFrontend } from "@/context/AppContext";
 import { useDialog } from "@/components/ui/DialogProvider";
 import { Sliders, Sparkles, Plus, Check, ChevronDown, Search, X, Minus, Download, RotateCcw, Users, Trash2, AlertTriangle } from "lucide-react";
 import { STATUS_OPTIONS, PICKABLE_STATUS_OPTIONS, frontendStatusToDbCode } from "@/lib/leadStatusMapping";
 import { type LeadSummaryStats } from "@/lib/leadSummaryStats";
-import { apiListLeadsPage, apiGetLead, apiGetLeadStats, apiGetLeadAnalyticsStats, apiDeleteLead, apiBulkDeleteLeads, apiBulkReassignLeads, type LeadListFilters, type AgentAnalyticsStats } from "@/lib/apiClient";
+import { apiListLeadsPage, apiGetLead, apiGetLeadStats, apiGetLeadAnalyticsStats, apiGetDistinctCampaigns, apiListFollowupsPage, apiDeleteLead, apiBulkDeleteLeads, apiBulkReassignLeads, type LeadListFilters, type AgentAnalyticsStats } from "@/lib/apiClient";
 import { useServerLeadList } from "@/lib/useServerLeadList";
 import { WhatsAppIcon, CallIcon, PlatformLabel } from "@/components/icons/ContactIcons";
 import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/callTrigger";
@@ -122,7 +122,6 @@ export default function LeadDashboard() {
     currentUser,
     properties,
     users,
-    followupCalls,
     reassignLead,
     isDataLoading,
     leadsChangedSignal,
@@ -601,6 +600,20 @@ export default function LeadDashboard() {
     paginationProps: analyticsDrilldownPaginationProps
   } = useServerLeadList(analyticsDrilldown?.baseFilters ?? {}, 8);
 
+  // Real next-scheduled-call date for the Analytics drill-down's current
+  // page only, fetched by lead id — not the whole company's follow-up
+  // table (same pattern as data-calling/page.tsx and LeadDrillDownPanel.tsx).
+  const [analyticsDrillPageFollowups, setAnalyticsDrillPageFollowups] = useState<FollowupCall[]>([]);
+  const analyticsDrillPageLeadIds = analyticsDrilldownRows.map(l => l.id).join(",");
+  useEffect(() => {
+    if (!analyticsDrillPageLeadIds) { setAnalyticsDrillPageFollowups([]); return; }
+    let cancelled = false;
+    apiListFollowupsPage(1, 500, { leadId: analyticsDrillPageLeadIds.split(",") })
+      .then(({ rows }) => { if (!cancelled) setAnalyticsDrillPageFollowups(rows.map(mapApiFollowupToFrontend)); })
+      .catch(() => { if (!cancelled) setAnalyticsDrillPageFollowups([]); });
+    return () => { cancelled = true; };
+  }, [analyticsDrillPageLeadIds]);
+
   const QUALIFIED_STATUS_OPTIONS = STATUS_OPTIONS.filter(s => !UNQUALIFIED_STATUSES.includes(s));
 
   // Manager/Member actually work this table by calling/WhatsApping leads
@@ -661,7 +674,6 @@ export default function LeadDashboard() {
     if (isNaN(d.getTime())) return iso;
     return d.toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
   };
-  const adminNextCallDateFor = (leadId: string) => nextFollowupFor(leadId, followupCalls);
 
   // Real counts from the server (same filters as the table itself), not a
   // computation over the full in-memory array — see the serverStats fetch
@@ -693,19 +705,32 @@ export default function LeadDashboard() {
     campaign: adminCampaignFilter.length > 0 ? adminCampaignFilter : undefined
   };
 
-  const adminCampaignsList = Array.from(new Set(scopedLeads.map(l => l.campaign).filter(Boolean))) as string[];
+  // Real distinct campaign names (server-scoped the same way scopedLeads
+  // was client-side) — shared by this tab's own Campaigns dropdown and the
+  // Analytics tab's identical one below, fetched once instead of scanning
+  // the bulk leads array twice.
+  const [distinctCampaigns, setDistinctCampaigns] = useState<string[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    apiGetDistinctCampaigns({})
+      .then(result => { if (!cancelled) setDistinctCampaigns(result); })
+      .catch(() => { if (!cancelled) setDistinctCampaigns([]); });
+    return () => { cancelled = true; };
+  }, []);
+  const adminCampaignsList = distinctCampaigns;
   // "Unassigned" (leads nobody owns yet) lives here, not under Status.
   const UNASSIGNED_OPTION = "Unassigned";
-  const adminAssignedOptions = [UNASSIGNED_OPTION, ...Array.from(new Set(scopedLeads.map(l => l.assignedAgent).filter(Boolean)))];
+  const adminAssignedOptions = [UNASSIGNED_OPTION, ...agentsList];
 
   // Same ad-source keyword classification used by the Meta/Google sub-account
   // breakdown above (source="Meta Ads"/"Google Ads") — reused here to split
   // the real campaign list by platform for the grouped Campaigns dropdown.
+  // Used to also check the matching lead's own `source` field for a second
+  // signal, but that required scanning the bulk leads array for a lookup —
+  // name-only keyword matching only, now that leads aren't loaded in bulk.
   const classifyCampaignPlatform = (campaign: string): "Meta" | "Google" | "Other" => {
-    const lead = scopedLeads.find(l => l.campaign === campaign);
-    const haystack = `${lead?.source || ""} ${campaign}`;
-    if (/meta|facebook|instagram/i.test(haystack)) return "Meta";
-    if (/google/i.test(haystack)) return "Google";
+    if (/meta|facebook|instagram/i.test(campaign)) return "Meta";
+    if (/google/i.test(campaign)) return "Google";
     return "Other";
   };
   // Grouped (Meta → Google → Other) options for the Campaigns dropdowns.
@@ -723,6 +748,21 @@ export default function LeadDashboard() {
   const adminFilteredLeads = serverLeads;
   const adminTotalPages = Math.max(1, Math.ceil(serverTotalCount / adminRowsPerPage));
   const adminCurrentPage = Math.min(adminPage, adminTotalPages);
+
+  // Real next-scheduled-call date for just this table's current page, by
+  // lead id — not the whole company's follow-up table (same pattern as
+  // data-calling/page.tsx and LeadDrillDownPanel.tsx).
+  const [adminPageFollowups, setAdminPageFollowups] = useState<FollowupCall[]>([]);
+  const adminPageLeadIds = adminFilteredLeads.map(l => l.id).join(",");
+  useEffect(() => {
+    if (!adminPageLeadIds) { setAdminPageFollowups([]); return; }
+    let cancelled = false;
+    apiListFollowupsPage(1, 500, { leadId: adminPageLeadIds.split(",") })
+      .then(({ rows }) => { if (!cancelled) setAdminPageFollowups(rows.map(mapApiFollowupToFrontend)); })
+      .catch(() => { if (!cancelled) setAdminPageFollowups([]); });
+    return () => { cancelled = true; };
+  }, [adminPageLeadIds]);
+  const adminNextCallDateFor = (leadId: string) => nextFollowupFor(leadId, adminPageFollowups);
 
   // ---- Bulk Assign / Reshuffle (Admin + Manager) ----
   // "Assign" appears once the selection holds an unassigned lead, "Reshuffle"
@@ -893,8 +933,12 @@ export default function LeadDashboard() {
     adminScrollRef.current?.scrollTo(0, 0);
   };
 
-  const analyticsPropertiesList = Array.from(new Set(scopedLeads.map(l => l.property).filter(Boolean))) as string[];
-  const analyticsCampaignsList = Array.from(new Set(scopedLeads.map(l => l.campaign).filter(Boolean))) as string[];
+  // Same already-loaded properties list used for Bulk Upload, and the same
+  // distinctCampaigns fetch the Leads tab's own Campaigns dropdown uses —
+  // minor semantic shift from "properties/campaigns with >=1 lead" to "all
+  // properties"/"all known campaigns," acceptable for a filter dropdown.
+  const analyticsPropertiesList = propertiesList;
+  const analyticsCampaignsList = distinctCampaigns;
   // Same Meta/Google grouping as the Leads tab's own Campaigns dropdown
   // (groupCampaignOptions, defined above), reused here rather than
   // re-implemented.
@@ -2045,7 +2089,7 @@ export default function LeadDashboard() {
                                 <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]" title={l.assignedAgent || "Unassigned"}>{l.assignedAgent || "Unassigned"}</td>
                                 <td className="px-4 py-3 text-slate-500 align-top"><DateTimeLines {...dateTimeParts(l.createdAtStr)} /></td>
                                 <td className="px-4 py-3 text-slate-600 align-top"><LeadNoteCell lead={l} onSaved={handleNoteSaved} /></td>
-                                <td className="px-4 py-3 text-slate-500 align-top"><NextCallCell next={adminNextCallDateFor(l.id)} /></td>
+                                <td className="px-4 py-3 text-slate-500 align-top"><NextCallCell next={nextFollowupFor(l.id, analyticsDrillPageFollowups)} /></td>
                                 <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]" title={l.campaign || "—"}>
                               {l.campaign ? <PlatformLabel text={l.campaign} classifyBy={l.source || l.campaign} wrap /> : "—"}
                             </td>
