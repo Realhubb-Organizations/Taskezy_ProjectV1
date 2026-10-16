@@ -284,6 +284,8 @@ adSpendRouter.get(
 
     params.push(BUSINESS_TIMEZONE);
     const tzParam = params.length;
+    params.push(SITE_VISIT_CODES);
+    const siteVisitParam = params.length;
     params.push(pageSize, (page - 1) * pageSize);
     const { rows } = await query<{
       id: string; date: string; campaign: string; platform: string; total_leads: number;
@@ -294,7 +296,7 @@ adSpendRouter.get(
               count(*) FILTER (WHERE l.status_code = 'NEW_LEAD') AS new_lead,
               count(*) FILTER (WHERE l.status_code = 'CALL_BACK') AS call_back,
               count(*) FILTER (WHERE l.status_code = 'FOLLOWUP') AS follow_ups,
-              count(*) FILTER (WHERE l.status_code = ANY($${tzParam + 1}::text[])) AS site_visits,
+              count(*) FILTER (WHERE l.status_code = ANY($${siteVisitParam}::text[])) AS site_visits,
               count(*) FILTER (WHERE l.status_code = 'EOI') AS eoi,
               count(*) FILTER (WHERE l.status_code = 'BOOKED') AS booked,
               count(*) FILTER (WHERE l.status_code = 'DEAD_LEAD') AS dead,
@@ -306,8 +308,8 @@ adSpendRouter.get(
        ${whereClause}
        GROUP BY a.id, a.spend_date, a.account_name, a.platform, a.leads_generated
        ORDER BY a.spend_date DESC
-       LIMIT $${tzParam + 2} OFFSET $${tzParam + 3}`,
-      [...params, SITE_VISIT_CODES]
+       LIMIT $${siteVisitParam + 1} OFFSET $${siteVisitParam + 2}`,
+      params
     );
 
     const totalCount = Number(countResult.rows[0]?.count ?? 0);
