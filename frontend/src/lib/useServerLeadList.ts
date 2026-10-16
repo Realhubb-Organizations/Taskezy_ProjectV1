@@ -14,7 +14,12 @@ import { DEFAULT_ROWS_PER_PAGE_OPTIONS } from "@/components/ui/TablePagination";
  * page-size cap). Built on the same GET /leads apiListLeadsPage already
  * uses for LeadDashboard.tsx's main table.
  */
-export function useServerLeadList(filters: LeadListFilters, initialRowsPerPage = DEFAULT_ROWS_PER_PAGE_OPTIONS[0]) {
+export function useServerLeadList(
+  filters: LeadListFilters,
+  initialRowsPerPage = DEFAULT_ROWS_PER_PAGE_OPTIONS[0],
+  /** False skips the fetch entirely (e.g. a lazily-opened KPI popup whose tab isn't the current one) — rows/totalCount just stay empty, no request fires. */
+  enabled = true
+) {
   const [page, setPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(initialRowsPerPage);
   const [search, setSearch] = useState("");
@@ -35,6 +40,7 @@ export function useServerLeadList(filters: LeadListFilters, initialRowsPerPage =
   useEffect(() => { setPage(1); }, [filtersKey, debouncedSearch]);
 
   useEffect(() => {
+    if (!enabled) { setRows([]); setTotalCount(0); setLoading(false); return; }
     let cancelled = false;
     setLoading(true);
     apiListLeadsPage(page, rowsPerPage, { ...filters, search: debouncedSearch || undefined })
@@ -47,7 +53,7 @@ export function useServerLeadList(filters: LeadListFilters, initialRowsPerPage =
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filtersKey, debouncedSearch, page, rowsPerPage]);
+  }, [filtersKey, debouncedSearch, page, rowsPerPage, enabled]);
 
   return {
     rows,

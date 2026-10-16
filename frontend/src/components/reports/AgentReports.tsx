@@ -1,20 +1,20 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useApp, LeadStatus, FollowupCall, mapApiFollowupToFrontend } from "@/context/AppContext";
+import { useApp, Lead, LeadStatus, FollowupCall, mapApiFollowupToFrontend, mapApiLeadToFrontendLead } from "@/context/AppContext";
 import { isLeadAssignableUser } from "@/lib/leadAssignment";
 import { useDialog } from "@/components/ui/DialogProvider";
 import { maskPhone } from "@/lib/maskPII";
-import { apiGetAgentReportStats, apiListFollowupsPage, type AgentReportStats } from "@/lib/apiClient";
+import { apiGetAgentReportStats, apiListFollowupsPage, apiGetLead, type AgentReportStats, type LeadListFilters } from "@/lib/apiClient";
+import { useServerLeadList } from "@/lib/useServerLeadList";
 import { AlertTriangle, ArrowRight, CheckSquare, Clock, DollarSign, Info, MapPin, Phone, TrendingUp, Users, RefreshCw } from "lucide-react";
 import { DateRange } from "./DateRangeFilter";
 import MetricDetailModal, { MetricDetailRow } from "./MetricDetailModal";
 import LeadDetailDrawer from "@/components/crm/LeadDetailDrawer";
-import { statusBadgeClasses } from "@/lib/leadStatusMapping";
+import { statusBadgeClasses, FRONTEND_STATUS_TO_DB_CODE } from "@/lib/leadStatusMapping";
 import {
   filterLeadsByRange,
   computeROIMultiple,
-  agentFunnelLeads,
   getMissedInfo,
   formatCurrency,
   formatMinutes,
@@ -22,6 +22,15 @@ import {
 } from "@/lib/reportMetrics";
 import { LineSkeleton, TableRowsSkeleton, CardListSkeleton } from "@/components/ui/Skeletons";
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
+
+// Status-code buckets for the funnel KPI popups — must exactly match
+// getAgentReportStats's own SQL bucket definitions (confirmed identical,
+// code-for-code, during Phase 6e's exploration) so a drill-down's row
+// count can never disagree with the headline number above it.
+const ALL_DB_CODES = Object.values(FRONTEND_STATUS_TO_DB_CODE);
+const CONTACTED_CODES = ALL_DB_CODES.filter(c => c !== "NEW_LEAD");
+const QUALIFIED_CODES = ["CALL_BACK", "FOLLOWUP", "EOI", "SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE", "BOOKED"];
+const SITE_VISIT_CODES = ["SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE"];
 
 export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
   const { leads, users, currentUser, activeRole, reassignLead, updateLeadStatus, isDataLoading } = useApp();
@@ -70,15 +79,6 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
     const names = new Set<string>([...agentNames, ...Array.from(managerNames)]);
     return Array.from(names).sort();
   }, [agentNames, managerNames]);
-
-  // agentLeads (and the missedLeads array below) still feed every lead-
-  // based KPI card's drill-down popup, which need real rows, not just
-  // counts — only the numbers displayed on the cards themselves come from
-  // the server now (see leads.service.ts's getAgentReportStats).
-  const agentLeads = rangeLeads.filter(l => l.assignedAgent === activeAgent);
-  const missedLeads = agentLeads
-    .map(l => ({ lead: l, info: getMissedInfo(l) }))
-    .filter(x => x.info.missed);
 
   const activeAgentId = users.find(u => u.name === activeAgent)?.id;
 
@@ -145,6 +145,61 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
   type KpiKey = (typeof kpiCards)[number]["key"];
   const [openKpi, setOpenKpi] = useState<KpiKey | null>(null);
   const [drawerLeadId, setDrawerLeadId] = useState<string | null>(null);
+
+  // Missed Leads — real rows from the server (missedOnly reuses
+  // getAgentReportStats's own live-clock predicate), scoped to this one
+  // agent + date range. Always enabled (not just while its KPI popup is
+  // open): also feeds the always-visible Missed Leads tab table below.
+  const missedLeadsFilters: LeadListFilters = { assignedAgentId: activeAgentId ? [activeAgentId] : [], dateFrom: dateRange.from, dateTo: dateRange.to, missedOnly: true };
+  const missedLeadsList = useServerLeadList(missedLeadsFilters, 10, !!activeAgentId);
+
+  // The other four KPI popups (Assigned/Contacted/Qualified/Site Visits)
+  // share one hook instance — its filters switch to whichever tab is open,
+  // and it only fetches while one of those four is actually open (openKpi
+  // is agent-login-only to begin with, so this never runs for Admin/Manager
+  // viewing someone else's report).
+  const FUNNEL_STATUS_CODES: Partial<Record<string, string[]>> = { contacted: CONTACTED_CODES, qualified: QUALIFIED_CODES, siteVisits: SITE_VISIT_CODES };
+  const isFunnelKpi = openKpi === "assigned" || openKpi === "contacted" || openKpi === "qualified" || openKpi === "siteVisits";
+  const funnelKpiFilters: LeadListFilters = {
+    assignedAgentId: activeAgentId ? [activeAgentId] : [],
+    dateFrom: dateRange.from,
+    dateTo: dateRange.to,
+    status: openKpi ? FUNNEL_STATUS_CODES[openKpi] : undefined
+  };
+  const funnelKpiList = useServerLeadList(funnelKpiFilters, 10, isFunnelKpi && !!activeAgentId);
+
+  // Missed Follow-ups' modal search/pagination — GET /followups has no
+  // search param, so this stays a client-side filter over the already-
+  // fetched (capped-at-500) missedFollowups array, same as before, just
+  // now owned here instead of inside the modal itself.
+  const [followupsModalSearch, setFollowupsModalSearch] = useState("");
+  const followupsModalFiltered = useMemo(() => {
+    const q = followupsModalSearch.trim().toLowerCase();
+    return q ? missedFollowups.filter(f => `${f.leadName} ${f.phone} ${f.type}`.toLowerCase().includes(q)) : missedFollowups;
+  }, [missedFollowups, followupsModalSearch]);
+  const followupsModalPagination = usePagination(followupsModalFiltered, 10, `${openKpi}`);
+
+  // Modal search resets whenever the open KPI tab changes — same as the
+  // old MetricDetailModal's own internal reset-on-[open,title] behavior.
+  useEffect(() => {
+    missedLeadsList.setSearch("");
+    funnelKpiList.setSearch("");
+    setFollowupsModalSearch("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openKpi]);
+
+  // Single lead, fetched by id for the drawer — not a scan of the bulk
+  // leads array, same small pattern as Phase 6a.
+  const [drawerLead, setDrawerLead] = useState<Lead | null>(null);
+  useEffect(() => {
+    if (!drawerLeadId) { setDrawerLead(null); return; }
+    let cancelled = false;
+    apiGetLead(drawerLeadId)
+      .then(row => { if (!cancelled) setDrawerLead(mapApiLeadToFrontendLead(row)); })
+      .catch(() => { if (!cancelled) setDrawerLead(null); });
+    return () => { cancelled = true; };
+  }, [drawerLeadId]);
+
   const fmtDate = (iso?: string) =>
     iso ? new Date(iso).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—";
   const leadCell = (name: string, phone: string) => (
@@ -158,23 +213,24 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
   );
   const kpiDetail = useMemo((): { columns: string[]; rows: MetricDetailRow[]; empty: string; rowLabel: string } | null => {
     if (!openKpi) return null;
-    const funnelLists = agentFunnelLeads(agentLeads);
     if (openKpi === "missedLeads") {
       return {
         columns: ["Lead", "Property", "Assigned At", "Wait Time"],
-        rows: missedLeads.map(({ lead, info }) => ({
-          key: lead.id,
-          leadId: lead.id,
-          searchText: `${lead.name} ${lead.phone} ${lead.property || ""} ${lead.status}`.toLowerCase(),
-          cells: [
-            leadCell(lead.name, lead.phone),
-            lead.property || "—",
-            <span key="a" className="font-mono">{fmtDate(lead.assignedAt)}</span>,
-            info.responseMinutes === undefined
-              ? <span key="w" className="font-bold text-red-600">Still waiting</span>
-              : <span key="w" className="font-bold text-red-600">{formatMinutes(info.responseMinutes)}</span>
-          ]
-        })),
+        rows: missedLeadsList.rows.map(lead => {
+          const info = getMissedInfo(lead);
+          return {
+            key: lead.id,
+            leadId: lead.id,
+            cells: [
+              leadCell(lead.name, lead.phone),
+              lead.property || "—",
+              <span key="a" className="font-mono">{fmtDate(lead.assignedAt)}</span>,
+              info.responseMinutes === undefined
+                ? <span key="w" className="font-bold text-red-600">Still waiting</span>
+                : <span key="w" className="font-bold text-red-600">{formatMinutes(info.responseMinutes)}</span>
+            ]
+          };
+        }),
         empty: "No missed leads in this date range.",
         rowLabel: "Lead"
       };
@@ -182,13 +238,12 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
     if (openKpi === "missedFollowups") {
       return {
         columns: ["Lead", "Type", "Scheduled", "Overdue By"],
-        rows: missedFollowups.map(f => {
+        rows: followupsModalPagination.pageRows.map(f => {
           const missedAt = f.dueNotifiedAt ? new Date(f.dueNotifiedAt).getTime() + 10 * 60000 : new Date(`${f.date}T00:00:00`).getTime();
           const overdue = Math.round((Date.now() - missedAt) / 60000);
           return {
             key: f.id,
-            leadId: f.leadId && leads.some(l => l.id === f.leadId) ? f.leadId : undefined,
-            searchText: `${f.leadName} ${f.phone} ${f.type}`.toLowerCase(),
+            leadId: f.leadId,
             cells: [
               leadCell(f.leadName, f.phone),
               f.type,
@@ -201,16 +256,14 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
         rowLabel: "Follow-up"
       };
     }
-    const list = funnelLists[openKpi];
     const lastActivity = openKpi === "contacted";
     return {
       columns: ["Lead", "Property", "Status", lastActivity ? "Last Activity" : "Assigned At"],
-      rows: list.map(l => {
+      rows: funnelKpiList.rows.map(l => {
         const latest = l.logs.length > 0 ? l.logs[l.logs.length - 1] : undefined;
         return {
           key: l.id,
           leadId: l.id,
-          searchText: `${l.name} ${l.phone} ${l.property || ""} ${l.status}`.toLowerCase(),
           cells: [
             leadCell(l.name, l.phone),
             l.property || "—",
@@ -223,9 +276,8 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
       rowLabel: "Lead"
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [openKpi, agentLeads, missedLeads, missedFollowups, leads]);
+  }, [openKpi, missedLeadsList.rows, followupsModalPagination.pageRows, funnelKpiList.rows]);
   const openKpiCard = kpiCards.find(c => c.key === openKpi);
-  const drawerLead = drawerLeadId ? leads.find(l => l.id === drawerLeadId) || null : null;
 
   // Same Booking guard as the Leads page: booking needs a real deal value.
   const handleDrawerStatusChange = async (leadId: string, status: LeadStatus) => {
@@ -247,10 +299,11 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
     }
   };
 
-  // Both detail tables jump back to page 1 when the agent or date range changes.
+  // Missed Follow-ups' always-visible tab table jumps back to page 1 when
+  // the agent or date range changes (Missed Leads' tab table resets on its
+  // own, via missedLeadsList's own filters-changed effect).
   const detailResetKey = JSON.stringify([activeAgent, dateRange]);
   const agentListPagination = usePagination(agentNames, 10, JSON.stringify(dateRange));
-  const missedLeadsPagination = usePagination(missedLeads, 10, detailResetKey);
   const missedFollowupsPagination = usePagination(missedFollowups, 10, detailResetKey);
 
   const handleReassign = async (leadId: string, leadName: string) => {
@@ -520,16 +573,17 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {isDataLoading && missedLeads.length === 0 ? (
+                      {missedLeadsList.loading && missedLeadsList.rows.length === 0 ? (
                         <TableRowsSkeleton rows={6} columns={activeRole === "ADMIN" ? 7 : 6} />
-                      ) : missedLeads.length === 0 ? (
+                      ) : missedLeadsList.totalCount === 0 ? (
                         <tr>
                           <td colSpan={activeRole === "ADMIN" ? 7 : 6} className="p-6 text-center text-slate-400 italic font-semibold">
                             No missed leads for {activeAgent} in this date range.
                           </td>
                         </tr>
                       ) : (
-                        missedLeadsPagination.pageRows.map(({ lead, info }) => {
+                        missedLeadsList.rows.map(lead => {
+                          const info = getMissedInfo(lead);
                           const latestLog = lead.logs.length > 0 ? lead.logs[lead.logs.length - 1] : undefined;
                           // "Missed" fires SLA_MINUTES after assignment — this is how
                           // far past that deadline the logged activity (or "now", if
@@ -588,7 +642,7 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                       )}
                     </tbody>
                   </table>
-                  <TablePagination {...missedLeadsPagination.paginationProps} rowLabel="Missed Lead" />
+                  <TablePagination {...missedLeadsList.paginationProps} rowLabel="Missed Lead" />
                 </div>
                 )}
                 {missedTab === "followups" && (
@@ -665,6 +719,10 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
           subtitle={`${activeAgent} · ${dateRange.from.split("-").reverse().join("-")} to ${dateRange.to.split("-").reverse().join("-")}`}
           columns={kpiDetail.columns}
           rows={kpiDetail.rows}
+          loading={openKpi === "missedLeads" ? missedLeadsList.loading : openKpi === "missedFollowups" ? false : funnelKpiList.loading}
+          search={openKpi === "missedLeads" ? missedLeadsList.search : openKpi === "missedFollowups" ? followupsModalSearch : funnelKpiList.search}
+          onSearchChange={openKpi === "missedLeads" ? missedLeadsList.setSearch : openKpi === "missedFollowups" ? setFollowupsModalSearch : funnelKpiList.setSearch}
+          paginationProps={openKpi === "missedLeads" ? missedLeadsList.paginationProps : openKpi === "missedFollowups" ? followupsModalPagination.paginationProps : funnelKpiList.paginationProps}
           emptyText={kpiDetail.empty}
           rowLabel={kpiDetail.rowLabel}
           onRowClick={setDrawerLeadId}
