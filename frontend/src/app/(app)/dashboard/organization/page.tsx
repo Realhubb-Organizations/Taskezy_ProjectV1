@@ -1,13 +1,19 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useApp } from "@/context/AppContext";
+import { apiGetLeadStats } from "@/lib/apiClient";
 import { Building, MapPin, Phone, Users, Landmark, FileText, CheckCircle, HelpCircle } from "lucide-react";
 import { LineSkeleton } from "@/components/ui/Skeletons";
 
 export default function OrganizationPage() {
-  const { users, properties, leads, isDataLoading } = useApp();
+  const { users, properties, isDataLoading } = useApp();
   const [activeTab, setActiveTab] = useState("Organization Details");
+
+  const [totalLeads, setTotalLeads] = useState<number | null>(null);
+  useEffect(() => {
+    apiGetLeadStats().then(stats => setTotalLeads(stats.totalLeads)).catch(() => {});
+  }, []);
 
   // No real subscription-billing/receipts data model exists yet (checkout/provisioning
   // only track seats + a paid/unpaid flag, not a payment history ledger) — shown
@@ -40,7 +46,7 @@ export default function OrganizationPage() {
           </div>
           <div className="text-center px-4 py-2 border-r border-slate-200">
             <span className="block text-slate-400 text-[10px] uppercase font-bold">Active Leads</span>
-            {isDataLoading ? <LineSkeleton width={30} height={16} /> : <span className="text-base font-black text-slate-850">{leads.length}</span>}
+            {totalLeads === null ? <LineSkeleton width={30} height={16} /> : <span className="text-base font-black text-slate-850">{totalLeads}</span>}
           </div>
           <div className="text-center px-4 py-2">
             <span className="block text-slate-400 text-[10px] uppercase font-bold">Properties</span>

@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
-import { useApp, Lead } from "@/context/AppContext";
+import { useApp, Lead, mapApiLeadToFrontendLead } from "@/context/AppContext";
 import { useDialog } from "@/components/ui/DialogProvider";
 import AddLeadModal from "@/components/crm/AddLeadModal";
 import LeadDrillDownPanel, { LeadQuickViewDrawer, useLeadStatusChange } from "@/components/crm/LeadDrillDownPanel";
@@ -10,7 +10,7 @@ import TeamTasksTable, { TeamTaskTab } from "@/components/dashboard/TeamTasksTab
 import TaskInsightsCharts from "@/components/dashboard/TaskInsightsCharts";
 import SalesPendingTasksTable from "@/components/dashboard/SalesPendingTasksTable";
 import { type LeadSummaryStats } from "@/lib/leadSummaryStats";
-import { apiGetLeadStats, type LeadListFilters } from "@/lib/apiClient";
+import { apiGetLeadStats, apiGetLead, type LeadListFilters } from "@/lib/apiClient";
 import { canUploadLeads, uploadAssignableUsers } from "@/lib/leadAssignment";
 import { ChevronDown, Plus, CheckCircle } from "lucide-react";
 import { LineSkeleton } from "@/components/ui/Skeletons";
@@ -181,11 +181,9 @@ export default function CrmDashboardPage() {
   ];
 
   // Pending Follow ups/Call Backs rows only carry a summary shape
-  // (PendingRow), not the full Lead the quick-view needs — look the real
-  // record up by id from the same `leads` list everything else here reads.
+  // (PendingRow), not the full Lead the quick-view needs — fetch it by id.
   const openQuickView = (leadId: string) => {
-    const found = leads.find(l => l.id === leadId);
-    if (found) setQuickViewLead(found);
+    apiGetLead(leadId).then(row => setQuickViewLead(mapApiLeadToFrontendLead(row))).catch(() => {});
   };
 
   // Used by the sales Pending Tasks table's row status editor — same
