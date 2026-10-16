@@ -162,6 +162,210 @@ adSpendRouter.get(
   })
 );
 
+/**
+ * Per (campaign, day) rows — spend + lead counts by category, plus each
+ * campaign's current Active/Inactive status — backs the Campaigns page's
+ * Analytics trend chart, its Type/Status breakdown card, and the "Active
+ * Campaigns" stat card + drill-down (none of those have any other server
+ * source for "this lead's campaign is currently Active"). Bounded by
+ * TIME × campaign-count, not lead-count, so unlike a per-lead drill-down
+ * this doesn't need row-level pagination — it feeds a chart/card, not a
+ * table users page through. FULL OUTER JOIN so a day with leads but no
+ * ad-spend row (or vice versa) still shows up, same reasoning
+ * campaign-lead-stats' daily_union already uses.
+ */
+adSpendRouter.get(
+  "/campaign-daily-stats",
+  validate({ query: campaignLeadStatsQuerySchema }),
+  asyncHandler(async (req, res) => {
+    const { dateFrom, dateTo } = req.query as unknown as { dateFrom?: string; dateTo?: string };
+    const { rows } = await query<{
+      campaign_name: string; day: string; spend: string;
+      total_leads: string; qualified_leads: string; site_visit_leads: string;
+      follow_up_leads: string; call_back_leads: string; campaign_status: string | null;
+    }>(
+      `WITH platform_daily AS (
+         SELECT a.account_name AS campaign_name, a.spend_date AS day, SUM(a.spend) AS spend, SUM(a.leads_generated) AS platform_leads
+         FROM ad_spend_records a
+         WHERE ($1::date IS NULL OR a.spend_date >= $1::date)
+           AND ($2::date IS NULL OR a.spend_date <= $2::date)
+         GROUP BY a.account_name, a.spend_date
+       ),
+       known_campaigns AS (
+         SELECT DISTINCT campaign_name FROM platform_daily
+       ),
+       campaign_status AS (
+         SELECT a.account_name AS campaign_name, MAX(COALESCE(mc.status, gc.status)) AS status
+         FROM ad_spend_records a
+         LEFT JOIN meta_campaigns mc ON mc.id = a.meta_campaign_id
+         LEFT JOIN google_ads_campaigns gc ON gc.id = a.google_campaign_id
+         GROUP BY a.account_name
+       ),
+       leads_daily AS (
+         SELECT k.campaign_name, (l.created_at AT TIME ZONE $3)::date AS day,
+                count(*) AS total,
+                count(*) FILTER (WHERE l.status_code = ANY($4::text[])) AS qualified,
+                count(*) FILTER (WHERE l.status_code = ANY($5::text[])) AS site_visit,
+                count(*) FILTER (WHERE l.status_code = 'FOLLOWUP') AS follow_up,
+                count(*) FILTER (WHERE l.status_code = 'CALL_BACK') AS call_back
+         FROM leads l
+         JOIN known_campaigns k ON LOWER(COALESCE(l.campaign, l.source)) = LOWER(k.campaign_name)
+         WHERE ($1::date IS NULL OR (l.created_at AT TIME ZONE $3)::date >= $1::date)
+           AND ($2::date IS NULL OR (l.created_at AT TIME ZONE $3)::date <= $2::date)
+         GROUP BY k.campaign_name, (l.created_at AT TIME ZONE $3)::date
+       )
+       SELECT COALESCE(p.campaign_name, ld.campaign_name) AS campaign_name,
+              COALESCE(p.day, ld.day) AS day,
+              COALESCE(p.spend, 0) AS spend,
+              COALESCE(ld.total, 0) AS total_leads,
+              COALESCE(ld.qualified, 0) AS qualified_leads,
+              COALESCE(ld.site_visit, 0) AS site_visit_leads,
+              COALESCE(ld.follow_up, 0) AS follow_up_leads,
+              COALESCE(ld.call_back, 0) AS call_back_leads,
+              cs.status AS campaign_status
+       FROM platform_daily p
+       FULL OUTER JOIN leads_daily ld ON ld.campaign_name = p.campaign_name AND ld.day = p.day
+       LEFT JOIN campaign_status cs ON cs.campaign_name = COALESCE(p.campaign_name, ld.campaign_name)
+       ORDER BY day`,
+      [dateFrom ?? null, dateTo ?? null, BUSINESS_TIMEZONE, QUALIFIED_CODES, SITE_VISIT_CODES]
+    );
+    sendOk(res, rows.map(r => ({
+      campaign: r.campaign_name,
+      day: r.day,
+      spend: Number(r.spend),
+      totalLeads: Number(r.total_leads),
+      qualifiedLeads: Number(r.qualified_leads),
+      siteVisitLeads: Number(r.site_visit_leads),
+      followUpLeads: Number(r.follow_up_leads),
+      callBackLeads: Number(r.call_back_leads),
+      campaignStatus: r.campaign_status === "INACTIVE" ? "Stopped" : r.campaign_status === "ACTIVE" ? "Active" : null
+    })));
+  })
+);
+
+const campaignStatusBreakdownQuerySchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().positive().max(500).default(10),
+  // Required, not optional — unlike campaign-lead-stats' "All Time" default,
+  // ad_spend_records has no retention/pruning job and grows forever (one row
+  // per active campaign per day, synced every 6h), so an unbounded fetch
+  // here is not safe. The frontend is responsible for always sending a real
+  // range (e.g. defaulting to the last 12 months instead of offering "All
+  // Time" on this one tab) rather than this endpoint silently truncating.
+  dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateFrom must be YYYY-MM-DD"),
+  dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateTo must be YYYY-MM-DD"),
+  campaign: z.union([z.string(), z.array(z.string())]).optional().transform(v => v === undefined ? undefined : (Array.isArray(v) ? v : [v]))
+});
+
+/**
+ * Campaigns page's "Status" tab — one row per real (campaign, day)
+ * ad_spend_records row, broken out by real Lead pipeline status (matched by
+ * exact campaign+day, same join campaign-lead-stats uses elsewhere) — real
+ * server pagination, since this table's CSV export used to pull the whole
+ * all-time history every time (see campaignStatusBreakdownQuerySchema's
+ * comment on why a date range is mandatory here specifically).
+ */
+adSpendRouter.get(
+  "/campaign-status-breakdown",
+  validate({ query: campaignStatusBreakdownQuerySchema }),
+  asyncHandler(async (req, res) => {
+    const { page, pageSize, dateFrom, dateTo, campaign } = req.query as unknown as {
+      page: number; pageSize: number; dateFrom: string; dateTo: string; campaign?: string[];
+    };
+    const conditions = [`a.spend_date >= $1::date`, `a.spend_date <= $2::date`];
+    const params: unknown[] = [dateFrom, dateTo];
+    if (campaign && campaign.length > 0) {
+      params.push(campaign);
+      conditions.push(`a.account_name = ANY($${params.length}::text[])`);
+    }
+    const whereClause = `WHERE ${conditions.join(" AND ")}`;
+
+    const countResult = await query<{ count: string }>(`SELECT count(*) FROM ad_spend_records a ${whereClause}`, params);
+
+    params.push(BUSINESS_TIMEZONE);
+    const tzParam = params.length;
+    params.push(pageSize, (page - 1) * pageSize);
+    const { rows } = await query<{
+      id: string; date: string; campaign: string; platform: string; total_leads: number;
+      new_lead: string; call_back: string; follow_ups: string; site_visits: string;
+      eoi: string; booked: string; dead: string; rnr: string; low_budget: string;
+    }>(
+      `SELECT a.id, a.spend_date AS date, a.account_name AS campaign, a.platform, a.leads_generated AS total_leads,
+              count(*) FILTER (WHERE l.status_code = 'NEW_LEAD') AS new_lead,
+              count(*) FILTER (WHERE l.status_code = 'CALL_BACK') AS call_back,
+              count(*) FILTER (WHERE l.status_code = 'FOLLOWUP') AS follow_ups,
+              count(*) FILTER (WHERE l.status_code = ANY($${tzParam + 1}::text[])) AS site_visits,
+              count(*) FILTER (WHERE l.status_code = 'EOI') AS eoi,
+              count(*) FILTER (WHERE l.status_code = 'BOOKED') AS booked,
+              count(*) FILTER (WHERE l.status_code = 'DEAD_LEAD') AS dead,
+              count(*) FILTER (WHERE l.status_code = 'RNR') AS rnr,
+              count(*) FILTER (WHERE l.status_code = 'LOW_BUDGET') AS low_budget
+       FROM ad_spend_records a
+       LEFT JOIN leads l ON LOWER(COALESCE(l.campaign, l.source)) = LOWER(a.account_name)
+                         AND (l.created_at AT TIME ZONE $${tzParam})::date = a.spend_date
+       ${whereClause}
+       GROUP BY a.id, a.spend_date, a.account_name, a.platform, a.leads_generated
+       ORDER BY a.spend_date DESC
+       LIMIT $${tzParam + 2} OFFSET $${tzParam + 3}`,
+      [...params, SITE_VISIT_CODES]
+    );
+
+    const totalCount = Number(countResult.rows[0]?.count ?? 0);
+    sendOk(res, {
+      rows: rows.map(r => ({
+        id: r.id,
+        date: r.date,
+        campaign: r.campaign,
+        platform: r.platform,
+        totalLeads: r.total_leads,
+        newLead: Number(r.new_lead),
+        callBack: Number(r.call_back),
+        followUps: Number(r.follow_ups),
+        siteVisits: Number(r.site_visits),
+        eoi: Number(r.eoi),
+        booked: Number(r.booked),
+        dead: Number(r.dead),
+        rnr: Number(r.rnr),
+        lowBudget: Number(r.low_budget)
+      })),
+      page,
+      pageSize,
+      totalCount,
+      totalPages: Math.max(1, Math.ceil(totalCount / pageSize))
+    });
+  })
+);
+
+/**
+ * Per-ad (leads.meta_ad_id, joined directly onto meta_ads.id — no
+ * intermediate table) qualified/synced lead counts, for Campaign Deep
+ * Dive's per-ad-set numbers. Deliberately all-time, no date param — same
+ * as the frontend's existing behavior for this one number, bounded by ad
+ * count (dozens), not lead or day count, so no pagination risk here either.
+ * Google leads carry no per-lead ad attribution, so this is Meta-only —
+ * the frontend already treats a missing ad id here as zero, same as every
+ * other sparse server lookup this session (byCampaign/byProperty, etc.).
+ */
+adSpendRouter.get(
+  "/ad-level-lead-stats",
+  asyncHandler(async (_req, res) => {
+    const { rows } = await query<{ ad_id: string; qualified_leads: string; synced_leads: string }>(
+      `SELECT l.meta_ad_id AS ad_id,
+              count(*) FILTER (WHERE l.status_code = ANY($1::text[])) AS qualified_leads,
+              count(*) AS synced_leads
+       FROM leads l
+       WHERE l.meta_ad_id IS NOT NULL
+       GROUP BY l.meta_ad_id`,
+      [QUALIFIED_CODES]
+    );
+    sendOk(res, rows.map(r => ({
+      adId: r.ad_id,
+      qualifiedLeads: Number(r.qualified_leads),
+      syncedLeads: Number(r.synced_leads)
+    })));
+  })
+);
+
 // Mirrors frontend/src/lib/reportMetrics.ts's BUYER_STATUSES/
 // NON_BUYER_STATUSES/VISIT_OR_MEETING_STATUSES (DB codes, not display
 // labels) — BUYER_CODES is the same set leads.service.ts's
