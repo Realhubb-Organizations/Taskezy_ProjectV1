@@ -3,7 +3,7 @@
 import React, { useState, useRef, useMemo, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useApp, Lead, AdSpendRecord } from "@/context/AppContext";
+import { useApp, Lead, AdSpendRecord, mapApiLeadToFrontendLead } from "@/context/AppContext";
 import { computeCPL } from "@/lib/reportMetrics";
 import { WhatsAppIcon, CallIcon, PlatformLabel, platformFromText } from "@/components/icons/ContactIcons";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
@@ -47,7 +47,8 @@ import {
   apiGetCampaignDailyStats, type CampaignDailyStat,
   apiGetLeadStats, type LeadListFilters,
   apiGetCampaignStatusBreakdown, type CampaignStatusBreakdownRow,
-  apiGetAdLevelLeadStats, type AdLevelLeadStat
+  apiGetAdLevelLeadStats, type AdLevelLeadStat,
+  apiListLeadsPage
 } from "@/lib/apiClient";
 import { useServerLeadList } from "@/lib/useServerLeadList";
 import type { LeadSummaryStats } from "@/lib/leadSummaryStats";
@@ -890,51 +891,78 @@ export default function AdminCampaignsPage() {
     return out;
   }, [adLevelSpendRecords]);
 
-  // Real Qualified Leads / real total leads (for CPL) for one specific ad —
-  // matches leads.metaAdId, same real per-lead field already used for
-  // Qualified Leads per campaign, just scoped to a single ad instead of a
-  // whole campaign's worth of leads. Google leads carry no per-lead ad
-  // attribution at all (Sheets-import pipeline, not a webhook), so this
-  // correctly — not a bug — always returns 0 for a Google ad's real id,
-  // same honest gap already documented on Lead.metaAdId.
-  const qualifiedLeadsForAd = (adId: string): number =>
-    leads.filter(l => l.metaAdId === adId && QUALIFIED_LEAD_STATUSES.includes(l.status)).length;
+  // Real Qualified Leads / real synced leads (for CPL) per ad, from the
+  // server (GET /ad-spend/ad-level-lead-stats) instead of scanning the
+  // bulk leads array — deliberately all-time, matching this number's
+  // existing behavior. Google leads carry no per-lead ad attribution at
+  // all (Sheets-import pipeline, not a webhook), so a Google ad's id
+  // correctly — not a bug — is never a key here, same honest gap already
+  // documented on Lead.metaAdId.
+  const [adLevelLeadStats, setAdLevelLeadStats] = useState<AdLevelLeadStat[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    apiGetAdLevelLeadStats()
+      .then(result => { if (!cancelled) setAdLevelLeadStats(result); })
+      .catch(() => { /* leave the previous numbers showing on a transient failure */ });
+    return () => { cancelled = true; };
+  }, []);
+  const adLevelLeadStatsMap = useMemo(() => new Map(adLevelLeadStats.map(s => [s.adId, s])), [adLevelLeadStats]);
+  const qualifiedLeadsForAd = (adId: string): number => adLevelLeadStatsMap.get(adId)?.qualifiedLeads ?? 0;
   const cplForAd = (ad: DeepDiveAdRow): number => {
-    const syncedLeads = leads.filter(l => l.metaAdId === ad.adId).length;
+    const syncedLeads = adLevelLeadStatsMap.get(ad.adId)?.syncedLeads ?? 0;
     const totalLeads = Math.max(ad.platformReportedLeads, syncedLeads);
     return totalLeads > 0 ? ad.spend / totalLeads : 0;
   };
 
   // Qualified Leads drill-down page — the real leads behind a Deep Dive
-  // row's Qualified Leads count.
-  const [qualifiedLeadsSearchQuery, setQualifiedLeadsSearchQuery] = useState("");
-  const qualifiedLeadsDrillList = useMemo(() => {
-    if (!analyticsDrillView || analyticsDrillView.type !== "qualifiedLeads") return [];
-    const campaignName = analyticsDrillView.campaign.name.toLowerCase();
-    const q = qualifiedLeadsSearchQuery.trim().toLowerCase();
-    return leads.filter(l =>
-      (l.campaign || l.source)?.toLowerCase() === campaignName
-      && QUALIFIED_LEAD_STATUSES.includes(l.status)
-      && (!q || l.name.toLowerCase().includes(q))
-    );
-  }, [analyticsDrillView, leads, qualifiedLeadsSearchQuery]);
+  // row's Qualified Leads count. Real server pagination/search
+  // (useServerLeadList) instead of a client-filtered bulk array — a
+  // single capped fetch would risk undercounting a campaign with >500
+  // qualified leads ever (this has no date bound, same as the Deep Dive
+  // number it drills into).
+  const QUALIFIED_DB_CODES = ["CALL_BACK", "FOLLOWUP", "EOI", "SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE", "BOOKED"];
+  const isQualifiedLeadsDrillOpen = analyticsDrillView?.type === "qualifiedLeads";
+  const qualifiedLeadsBaseFilters: LeadListFilters = isQualifiedLeadsDrillOpen
+    ? { campaign: [analyticsDrillView!.campaign.name], status: QUALIFIED_DB_CODES }
+    : {};
+  const qualifiedLeadsList = useServerLeadList(qualifiedLeadsBaseFilters, 25, isQualifiedLeadsDrillOpen);
 
-  const exportQualifiedLeadsCsv = () => {
-    const rows = [
-      ["Lead Name", "Phone", "Email", "Status", "Assigned To", "Date", "Notes", "Next Call Date", "Campaign"],
-      ...qualifiedLeadsDrillList.map(l => [
-        l.name, isAdmin ? l.phone : maskPhone(l.phone), isAdmin ? l.email : maskEmail(l.email || ""), l.status, l.assignedAgent,
-        l.createdAtStr || "—", latestLogMessage(l), formatNextFollowup(nextCallDateFor(l.id)), l.campaign || l.source || "—"
-      ])
-    ];
-    const csv = rows.map(r => r.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "qualified-leads.csv";
-    link.click();
-    URL.revokeObjectURL(url);
+  // CSV export needs every matching row, not just the current page — loop-
+  // fetch every page (bounded by this one campaign's qualified leads,
+  // never "all leads"/"all campaigns", same bridge pattern apiListAllLeads
+  // already uses) rather than a second, unpaginated endpoint.
+  const [exportingQualifiedLeadsCsv, setExportingQualifiedLeadsCsv] = useState(false);
+  const exportQualifiedLeadsCsv = async () => {
+    if (!analyticsDrillView || exportingQualifiedLeadsCsv) return;
+    setExportingQualifiedLeadsCsv(true);
+    try {
+      const all: Lead[] = [];
+      let page = 1;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const result = await apiListLeadsPage(page, 500, { ...qualifiedLeadsBaseFilters, search: qualifiedLeadsList.search || undefined });
+        all.push(...result.rows.map(mapApiLeadToFrontendLead));
+        if (page >= result.totalPages) break;
+        page += 1;
+      }
+      const rows = [
+        ["Lead Name", "Phone", "Email", "Status", "Assigned To", "Date", "Notes", "Next Call Date", "Campaign"],
+        ...all.map(l => [
+          l.name, isAdmin ? l.phone : maskPhone(l.phone), isAdmin ? l.email : maskEmail(l.email || ""), l.status, l.assignedAgent,
+          l.createdAtStr || "—", latestLogMessage(l), formatNextFollowup(nextCallDateFor(l.id)), l.campaign || l.source || "—"
+        ])
+      ];
+      const csv = rows.map(r => r.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "qualified-leads.csv";
+      link.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setExportingQualifiedLeadsCsv(false);
+    }
   };
 
   const [expandedProperties, setExpandedProperties] = useState<Set<string>>(new Set());
@@ -1047,11 +1075,6 @@ export default function AdminCampaignsPage() {
     deepDiveCampaigns,
     10,
     JSON.stringify([deepDiveSearchQuery, deepDiveSourceFilters, dateRangeResetKey])
-  );
-  const qualifiedLeadsPagination = usePagination(
-    qualifiedLeadsDrillList,
-    25,
-    JSON.stringify([analyticsDrillView?.campaign.id, qualifiedLeadsSearchQuery])
   );
 
   // Filtered table rows. By default only Active campaigns (by their overall
@@ -1334,14 +1357,14 @@ export default function AdminCampaignsPage() {
                 <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5 border-b border-slate-200/80">
                   <h3 className="text-sm font-bold text-slate-900">
                     Qualified Leads
-                    <span className="text-slate-400 font-medium ml-1.5">({qualifiedLeadsDrillList.length}) — {analyticsDrillView.campaign.name}</span>
+                    <span className="text-slate-400 font-medium ml-1.5">({qualifiedLeadsList.totalCount}) — {analyticsDrillView.campaign.name}</span>
                   </h3>
                   <div className="flex items-center gap-2.5">
                     <div className="relative w-full max-w-[200px]">
                       <Search className="h-3.5 w-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
                       <input
-                        value={qualifiedLeadsSearchQuery}
-                        onChange={(e) => setQualifiedLeadsSearchQuery(e.target.value)}
+                        value={qualifiedLeadsList.search}
+                        onChange={(e) => qualifiedLeadsList.setSearch(e.target.value)}
                         placeholder="Search lead name..."
                         className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-8 pr-2.5 py-1.5 text-xs focus:outline-none focus:border-[#0B1E6E]"
                       />
@@ -1349,8 +1372,9 @@ export default function AdminCampaignsPage() {
                     <button
                       type="button"
                       onClick={exportQualifiedLeadsCsv}
+                      disabled={exportingQualifiedLeadsCsv}
                       title="Download CSV"
-                      className="inline-flex items-center justify-center h-9 w-9 border border-slate-300/80 rounded-xl hover:bg-slate-50 transition-colors"
+                      className="inline-flex items-center justify-center h-9 w-9 border border-slate-300/80 rounded-xl hover:bg-slate-50 transition-colors disabled:opacity-50"
                     >
                       <Download className="h-4 w-4 text-blue-600" />
                     </button>
@@ -1381,14 +1405,14 @@ export default function AdminCampaignsPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-[12px] font-medium text-slate-700">
-                      {isDataLoading && qualifiedLeadsDrillList.length === 0 ? (
+                      {qualifiedLeadsList.loading && qualifiedLeadsList.rows.length === 0 ? (
                         <TableRowsSkeleton rows={6} columns={8} />
-                      ) : qualifiedLeadsDrillList.length === 0 ? (
+                      ) : qualifiedLeadsList.totalCount === 0 ? (
                         <tr>
                           <td colSpan={8} className="px-4 py-8 text-center text-slate-400 italic">No qualified leads found for this campaign.</td>
                         </tr>
                       ) : (
-                        qualifiedLeadsPagination.pageRows.map(l => (
+                        qualifiedLeadsList.rows.map(l => (
                           <tr key={l.id} className="hover:bg-slate-50/50 transition-colors">
                             <td className="px-4 py-3 text-slate-900 font-semibold [overflow-wrap:anywhere]">{l.name}</td>
                             <td className="px-4 py-3 [overflow-wrap:anywhere]" title={isAdmin ? l.email : undefined}>{l.email ? (isAdmin ? l.email : maskEmail(l.email)) : "—"}</td>
@@ -1404,7 +1428,7 @@ export default function AdminCampaignsPage() {
                     </tbody>
                   </table>
                 </div>
-                <TablePagination {...qualifiedLeadsPagination.paginationProps} rowLabel="Lead" />
+                <TablePagination {...qualifiedLeadsList.paginationProps} rowLabel="Lead" />
               </div>
             )}
           </div>
