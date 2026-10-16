@@ -3,7 +3,7 @@
 import React, { useState, useRef, useMemo, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useApp, Lead, AdSpendRecord, mapApiLeadToFrontendLead } from "@/context/AppContext";
+import { useApp, Lead, AdSpendRecord, FollowupCall, mapApiLeadToFrontendLead, mapApiFollowupToFrontend } from "@/context/AppContext";
 import { computeCPL } from "@/lib/reportMetrics";
 import { WhatsAppIcon, CallIcon, PlatformLabel, platformFromText } from "@/components/icons/ContactIcons";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
@@ -46,9 +46,9 @@ import {
   apiGetCampaignLeadStats, type CampaignLeadStats,
   apiGetCampaignDailyStats, type CampaignDailyStat,
   apiGetLeadStats, type LeadListFilters,
-  apiGetCampaignStatusBreakdown, type CampaignStatusBreakdownRow,
+  apiGetCampaignStatusBreakdown, type CampaignStatusBreakdownRow, type CampaignStatusBreakdownResult,
   apiGetAdLevelLeadStats, type AdLevelLeadStat,
-  apiListLeadsPage
+  apiListLeadsPage, apiListFollowupsPage
 } from "@/lib/apiClient";
 import { useServerLeadList } from "@/lib/useServerLeadList";
 import type { LeadSummaryStats } from "@/lib/leadSummaryStats";
@@ -57,6 +57,13 @@ import type { LeadSummaryStats } from "@/lib/leadSummaryStats";
 const PLATFORM_ICON_URL: Partial<Record<CampaignItem["platform"], string>> = {
   Meta: "https://img.icons8.com/?size=100&id=wA5rN96FVDtq&format=png&color=000000",
   Google: "https://img.icons8.com/?size=100&id=4hR4Ih04Je2t&format=png&color=000000"
+};
+
+const normalizePlatform = (raw: string): CampaignItem["platform"] => {
+  const p = raw.toLowerCase();
+  if (p.includes("google")) return "Google";
+  if (p.includes("meta") || p.includes("facebook")) return "Meta";
+  return "Other";
 };
 
 function PlatformIcon({ platform }: { platform: CampaignItem["platform"] }) {
@@ -171,7 +178,7 @@ const STATUS_DEFAULT_VISIBLE_COLUMNS: Record<StatusColumnKey, boolean> = {
 };
 
 export default function AdminCampaignsPage() {
-  const { leads, adSpendRecords, adLevelSpendRecords, followupCalls, refetchAdLevelSpend, triggerAdSpendSync, isDataLoading, activeRole } = useApp();
+  const { adSpendRecords, adLevelSpendRecords, refetchAdLevelSpend, triggerAdSpendSync, isDataLoading, activeRole } = useApp();
   const isAdmin = activeRole === "ADMIN";
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -570,7 +577,10 @@ export default function AdminCampaignsPage() {
     const sorted = [...l.logs].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
     return sorted[0].message;
   };
-  const nextCallDateFor = (leadId: string) => nextFollowupFor(leadId, followupCalls);
+  // Generic now — the two real call sites (Qualified Leads drill-down's
+  // table and CSV export) each fetch just the follow-ups they need
+  // instead of closing over the bulk followupCalls array.
+  const nextCallDateFor = (leadId: string, followups: FollowupCall[]) => nextFollowupFor(leadId, followups);
 
   // ---- Campaigns Analytics tab ----------------------------------------
 
@@ -927,6 +937,19 @@ export default function AdminCampaignsPage() {
     : {};
   const qualifiedLeadsList = useServerLeadList(qualifiedLeadsBaseFilters, 25, isQualifiedLeadsDrillOpen);
 
+  // Next-call-date for just the current page's leads (not the whole
+  // company's follow-up table) — same pattern LeadDrillDownPanel uses.
+  const [qualifiedLeadsPageFollowups, setQualifiedLeadsPageFollowups] = useState<FollowupCall[]>([]);
+  const qualifiedLeadsPageIds = qualifiedLeadsList.rows.map(l => l.id).join(",");
+  useEffect(() => {
+    if (!qualifiedLeadsPageIds) { setQualifiedLeadsPageFollowups([]); return; }
+    let cancelled = false;
+    apiListFollowupsPage(1, 500, { leadId: qualifiedLeadsPageIds.split(",") })
+      .then(({ rows }) => { if (!cancelled) setQualifiedLeadsPageFollowups(rows.map(mapApiFollowupToFrontend)); })
+      .catch(() => { if (!cancelled) setQualifiedLeadsPageFollowups([]); });
+    return () => { cancelled = true; };
+  }, [qualifiedLeadsPageIds]);
+
   // CSV export needs every matching row, not just the current page — loop-
   // fetch every page (bounded by this one campaign's qualified leads,
   // never "all leads"/"all campaigns", same bridge pattern apiListAllLeads
@@ -945,11 +968,13 @@ export default function AdminCampaignsPage() {
         if (page >= result.totalPages) break;
         page += 1;
       }
+      const { rows: followupRows } = await apiListFollowupsPage(1, 500, { leadId: all.map(l => l.id) });
+      const exportFollowups = followupRows.map(mapApiFollowupToFrontend);
       const rows = [
         ["Lead Name", "Phone", "Email", "Status", "Assigned To", "Date", "Notes", "Next Call Date", "Campaign"],
         ...all.map(l => [
           l.name, isAdmin ? l.phone : maskPhone(l.phone), isAdmin ? l.email : maskEmail(l.email || ""), l.status, l.assignedAgent,
-          l.createdAtStr || "—", latestLogMessage(l), formatNextFollowup(nextCallDateFor(l.id)), l.campaign || l.source || "—"
+          l.createdAtStr || "—", latestLogMessage(l), formatNextFollowup(nextCallDateFor(l.id, exportFollowups)), l.campaign || l.source || "—"
         ])
       ];
       const csv = rows.map(r => r.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
@@ -1006,71 +1031,92 @@ export default function AdminCampaignsPage() {
     }).sort((a, b) => b.spend - a.spend);
   }, [campaignsList, breakdownCampaignFilters]);
 
-  // "Status" tab: one row per real (campaign, date) pair — i.e. per real
-  // AdSpendRecord — broken down by real Lead pipeline status, not campaign
-  // Active/Pause/Stopped status. Total Leads is the platform-reported
-  // leadsGenerated for that day; the status columns count actual matching
-  // Lead records, so they needn't sum to Total Leads (a lead's current
-  // status can differ from what the platform originally reported, and some
-  // leads land in statuses not broken out here).
-  const statusDateBreakdown = useMemo(() => {
-    const filteredRecords = breakdownCampaignFilters.length === 0
-      ? adSpendRecords
-      : adSpendRecords.filter(r => breakdownCampaignFilters.includes(r.accountName));
+  // "Status" tab: one row per real (campaign, date) pair — now from
+  // GET /ad-spend/campaign-status-breakdown, real server pagination,
+  // instead of mapping every ad_spend_records row against the bulk leads
+  // array on every render. That table has no retention job and grows
+  // forever, so this endpoint requires a real date range — "All Time"
+  // falls back to the last 12 months here specifically (capped, flagged
+  // below) rather than being sent as an unbounded request.
+  const statusBreakdownDateBounds = (): { dateFrom: string; dateTo: string; capped: boolean } => {
+    const bounds = campaignServerDateBounds();
+    if (bounds.dateFrom && bounds.dateTo) return { dateFrom: bounds.dateFrom, dateTo: bounds.dateTo, capped: false };
+    const toYMD = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const twelveMonthsAgo = new Date(today.getFullYear(), today.getMonth() - 12, today.getDate());
+    return { dateFrom: toYMD(twelveMonthsAgo), dateTo: toYMD(today), capped: true };
+  };
+  const { dateFrom: statusDateFrom, dateTo: statusDateTo, capped: statusBreakdownCapped } = statusBreakdownDateBounds();
 
-    return filteredRecords.map(rec => {
-      const dayLeads = leads.filter(l =>
-        (l.campaign || l.source)?.toLowerCase() === rec.accountName.toLowerCase()
-        && l.createdAtStr && toIsoDate(new Date(l.createdAtStr)) === rec.date
-      );
-      const countStatus = (statuses: string[]) => dayLeads.filter(l => statuses.includes(l.status)).length;
-      const d = new Date(rec.date);
-      const dateLabel = isNaN(d.getTime())
-        ? rec.date
-        : d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-      return {
-        id: rec.id,
-        date: rec.date,
-        dateLabel,
-        campaign: rec.accountName,
-        platform: rec.platform,
-        totalLeads: rec.leadsGenerated,
-        newLead: countStatus(["New Lead"]),
-        callBack: countStatus(["Call Back"]),
-        followUps: countStatus(["Followup"]),
-        siteVisits: countStatus(SITE_VISIT_LEAD_STATUSES),
-        eoi: countStatus(["EOI"]),
-        booked: countStatus(BOOKING_LEAD_STATUSES),
-        dead: countStatus(["Dead Lead"]),
-        rnr: countStatus(["RNR"]),
-        lowBudget: countStatus(["Low Budget"])
-      };
-    }).sort((a, b) => b.date.localeCompare(a.date));
-  }, [adSpendRecords, leads, breakdownCampaignFilters]);
+  const [statusBreakdownPage, setStatusBreakdownPage] = useState(1);
+  const [statusBreakdownRowsPerPage, setStatusBreakdownRowsPerPage] = useState(10);
+  const [statusBreakdownResult, setStatusBreakdownResult] = useState<CampaignStatusBreakdownResult>({ rows: [], page: 1, pageSize: 10, totalCount: 0, totalPages: 1 });
+  const [statusBreakdownLoading, setStatusBreakdownLoading] = useState(false);
+  useEffect(() => { setStatusBreakdownPage(1); }, [breakdownCampaignFilters, statusDateFrom, statusDateTo, breakdownTab]);
+  useEffect(() => {
+    if (breakdownTab !== "Status") return;
+    let cancelled = false;
+    setStatusBreakdownLoading(true);
+    apiGetCampaignStatusBreakdown(statusBreakdownPage, statusBreakdownRowsPerPage, statusDateFrom, statusDateTo, breakdownCampaignFilters.length > 0 ? breakdownCampaignFilters : undefined)
+      .then(result => { if (!cancelled) setStatusBreakdownResult(result); })
+      .catch(() => { /* leave the previous numbers showing on a transient failure */ })
+      .finally(() => { if (!cancelled) setStatusBreakdownLoading(false); });
+    return () => { cancelled = true; };
+  }, [breakdownTab, statusBreakdownPage, statusBreakdownRowsPerPage, statusDateFrom, statusDateTo, breakdownCampaignFilters]);
+  const statusDateBreakdown = useMemo(() => statusBreakdownResult.rows.map(row => {
+    const d = new Date(row.date);
+    const dateLabel = isNaN(d.getTime()) ? row.date : d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+    return { ...row, dateLabel };
+  }), [statusBreakdownResult.rows]);
 
-  const exportBreakdownCsv = () => {
-    const rows = breakdownTab === "Property"
-      ? [["Property", "Campaigns", "Source", "Total Leads", "Qualified Leads", "CPL", "QCPL", "Spend"],
-          ...propertyBreakdown.map(r => [r.property, r.campaigns.length, r.platforms.join("/"), r.totalLeads, r.qualifiedLeads, r.cpl.toFixed(2), r.qcpl.toFixed(2), r.spend.toFixed(2)])]
-      : [["Date", "Campaign", "Total Leads", "Call Back", "Follow ups", "Site Visits", "Dead", "RNR", "Low Budget"],
-          ...statusDateBreakdown.map(r => [r.dateLabel, r.campaign, r.totalLeads, r.callBack, r.followUps, r.siteVisits, r.dead, r.rnr, r.lowBudget])];
+  const [exportingBreakdownCsv, setExportingBreakdownCsv] = useState(false);
+  const exportBreakdownCsv = async () => {
+    if (exportingBreakdownCsv) return;
+    if (breakdownTab === "Property") {
+      const rows = [["Property", "Campaigns", "Source", "Total Leads", "Qualified Leads", "CPL", "QCPL", "Spend"],
+        ...propertyBreakdown.map(r => [r.property, r.campaigns.length, r.platforms.join("/"), r.totalLeads, r.qualifiedLeads, r.cpl.toFixed(2), r.qcpl.toFixed(2), r.spend.toFixed(2)])];
+      downloadCsv(rows, "campaigns-property-breakdown.csv");
+      return;
+    }
+    // Status tab's export needs every matching (campaign, day) row for the
+    // active date range, not just the current page — loop-fetch every page
+    // (now genuinely bounded, since dateFrom/dateTo are mandatory here)
+    // instead of a second, unpaginated endpoint.
+    setExportingBreakdownCsv(true);
+    try {
+      const all: CampaignStatusBreakdownRow[] = [];
+      let page = 1;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const result = await apiGetCampaignStatusBreakdown(page, 500, statusDateFrom, statusDateTo, breakdownCampaignFilters.length > 0 ? breakdownCampaignFilters : undefined);
+        all.push(...result.rows);
+        if (page >= result.totalPages) break;
+        page += 1;
+      }
+      const rows = [["Date", "Campaign", "Total Leads", "Call Back", "Follow ups", "Site Visits", "Dead", "RNR", "Low Budget"],
+        ...all.map(r => [r.date, r.campaign, r.totalLeads, r.callBack, r.followUps, r.siteVisits, r.dead, r.rnr, r.lowBudget])];
+      downloadCsv(rows, "campaigns-status-breakdown.csv");
+    } finally {
+      setExportingBreakdownCsv(false);
+    }
+  };
+  function downloadCsv(rows: (string | number)[][], filename: string) {
     const csv = rows.map(r => r.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `campaigns-${breakdownTab.toLowerCase()}-breakdown.csv`;
+    link.download = filename;
     link.click();
     URL.revokeObjectURL(url);
-  };
+  }
 
-  // Client-side pagination for the Analytics tab's tables (shared CRM
-  // footer). Each jumps back to page 1 when its own filters/search or the
+  // Client-side pagination for the Analytics tab's Property table (the
+  // Status tab now has real server pagination, see statusBreakdownResult
+  // above). Jumps back to page 1 when its own filters/search or the
   // page's Date Range change.
   const dateRangeResetKey = JSON.stringify([dateRange, appliedCustomRange]);
   const breakdownResetKey = JSON.stringify([breakdownCampaignFilters, dateRange, appliedCustomRange]);
   const propertyPagination = usePagination(propertyBreakdown, 10, breakdownResetKey);
-  const statusPagination = usePagination(statusDateBreakdown, 10, breakdownResetKey);
   const deepDivePagination = usePagination(
     deepDiveCampaigns,
     10,
@@ -1420,7 +1466,7 @@ export default function AdminCampaignsPage() {
                             <td className="px-4 py-3 [overflow-wrap:anywhere]">{l.assignedAgent || "—"}</td>
                             <td className="px-4 py-3">{l.createdAtStr || "—"}</td>
                             <td className="px-4 py-3"><div className="line-clamp-3 [overflow-wrap:anywhere]" title={latestLogMessage(l)}>{latestLogMessage(l)}</div></td>
-                            <td className="px-4 py-3"><NextCallCell next={nextCallDateFor(l.id)} /></td>
+                            <td className="px-4 py-3"><NextCallCell next={nextCallDateFor(l.id, qualifiedLeadsPageFollowups)} /></td>
                             <td className="px-4 py-3 [overflow-wrap:anywhere]">{l.campaign || l.source || "—"}</td>
                           </tr>
                         ))
@@ -1600,11 +1646,17 @@ export default function AdminCampaignsPage() {
                 <button
                   type="button"
                   onClick={exportBreakdownCsv}
+                  disabled={exportingBreakdownCsv}
                   title="Download CSV"
-                  className="inline-flex items-center justify-center h-9 w-9 border border-slate-300/80 rounded-xl hover:bg-slate-50 transition-colors"
+                  className="inline-flex items-center justify-center h-9 w-9 border border-slate-300/80 rounded-xl hover:bg-slate-50 transition-colors disabled:opacity-50"
                 >
                   <Download className="h-4 w-4 text-blue-600" />
                 </button>
+                {breakdownTab === "Status" && statusBreakdownCapped && (
+                  <span className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 whitespace-nowrap">
+                    Showing the last 12 months — pick a range to see more
+                  </span>
+                )}
                 <DateRangePicker
                   value={appliedCustomRange}
                   onChange={handleDateRangeChange}
@@ -1786,19 +1838,19 @@ export default function AdminCampaignsPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-[12px] font-medium text-slate-700">
-                      {isDataLoading && statusDateBreakdown.length === 0 ? (
+                      {statusBreakdownLoading && statusDateBreakdown.length === 0 ? (
                         <TableRowsSkeleton rows={6} columns={STATUS_COLUMNS.filter(c => statusVisibleColumns[c.key]).length || 1} />
-                      ) : statusDateBreakdown.length === 0 ? (
+                      ) : statusBreakdownResult.totalCount === 0 ? (
                         <tr>
                           <td colSpan={STATUS_COLUMNS.filter(c => statusVisibleColumns[c.key]).length || 1} className="px-4 py-8 text-center text-slate-400 italic">No ad-spend data yet.</td>
                         </tr>
                       ) : (
-                        statusPagination.pageRows.map(row => (
+                        statusDateBreakdown.map(row => (
                           <tr key={row.id} className="hover:bg-slate-50/50 transition-colors">
                             {statusVisibleColumns.date && <td className="px-4 py-3 text-slate-700 whitespace-nowrap">{row.dateLabel}</td>}
                             {statusVisibleColumns.campaign && <td className="px-4 py-3 text-slate-900 font-semibold [overflow-wrap:anywhere]">{row.campaign}</td>}
                             {statusVisibleColumns.totalLeads && <td className="px-4 py-3">{row.totalLeads}</td>}
-                            {statusVisibleColumns.source && <td className="px-4 py-3"><PlatformIcon platform={row.platform} /></td>}
+                            {statusVisibleColumns.source && <td className="px-4 py-3"><PlatformIcon platform={normalizePlatform(row.platform)} /></td>}
                             {statusVisibleColumns.newLead && <td className="px-4 py-3">{row.newLead}</td>}
                             {statusVisibleColumns.callBack && <td className="px-4 py-3">{row.callBack}</td>}
                             {statusVisibleColumns.followUps && <td className="px-4 py-3">{row.followUps}</td>}
@@ -1821,7 +1873,14 @@ export default function AdminCampaignsPage() {
             {breakdownTab === "Property" ? (
               <TablePagination {...propertyPagination.paginationProps} rowLabel="Property" />
             ) : (
-              <TablePagination {...statusPagination.paginationProps} rowLabel="Row" />
+              <TablePagination
+                totalRows={statusBreakdownResult.totalCount}
+                page={statusBreakdownPage}
+                rowsPerPage={statusBreakdownRowsPerPage}
+                onPageChange={setStatusBreakdownPage}
+                onRowsPerPageChange={(n) => { setStatusBreakdownRowsPerPage(n); setStatusBreakdownPage(1); }}
+                rowLabel="Row"
+              />
             )}
           </div>
 
@@ -2053,7 +2112,7 @@ export default function AdminCampaignsPage() {
                                       </colgroup>
                                       <tbody className="divide-y divide-slate-100">
                                         {adRows.map(ad => {
-                                          const syncedLeads = leads.filter(l => l.metaAdId === ad.adId).length;
+                                          const syncedLeads = adLevelLeadStatsMap.get(ad.adId)?.syncedLeads ?? 0;
                                           return (
                                             <tr key={ad.adId}>
                                               <td className="px-4 py-2.5" />
