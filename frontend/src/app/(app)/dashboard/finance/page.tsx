@@ -9,7 +9,7 @@ import MonthCalendar from "@/components/calendar/MonthCalendar";
 import AddCalendarEventModal from "@/components/calendar/AddCalendarEventModal";
 import { LineSkeleton, TableRowsSkeleton, CardListSkeleton } from "@/components/ui/Skeletons";
 import TablePagination from "@/components/ui/TablePagination";
-import { apiListInvoicesPage, apiListReimbursementsPage } from "@/lib/apiClient";
+import { apiListInvoicesPage, apiListReimbursementsPage, apiListLeadsPage, type ApiLeadRow } from "@/lib/apiClient";
 import {
   CreditCard,
   DollarSign,
@@ -163,6 +163,28 @@ export default function FinancePage() {
   const [leadId, setLeadId] = useState("");
   const [newInvoiceError, setNewInvoiceError] = useState("");
 
+  // Searchable lead picker — the full lead list is too big for a plain
+  // <select> (and is no longer loaded in bulk anyway), so this hits
+  // GET /leads?search= as the admin types instead.
+  const [leadSearchQuery, setLeadSearchQuery] = useState("");
+  const [leadSearchResults, setLeadSearchResults] = useState<ApiLeadRow[]>([]);
+  const [leadSearchOpen, setLeadSearchOpen] = useState(false);
+  useEffect(() => {
+    if (!leadSearchOpen || leadSearchQuery.trim().length < 2) { setLeadSearchResults([]); return; }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      apiListLeadsPage(1, 20, { search: leadSearchQuery.trim() })
+        .then(result => { if (!cancelled) setLeadSearchResults(result.rows); })
+        .catch(() => { if (!cancelled) setLeadSearchResults([]); });
+    }, 300);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [leadSearchQuery, leadSearchOpen]);
+  const selectLeadResult = (l: ApiLeadRow) => {
+    setLeadId(l.id);
+    setLeadSearchQuery(`${l.name} — ${activeRole === "ADMIN" ? l.phone : maskPhone(l.phone)}`);
+    setLeadSearchOpen(false);
+  };
+
   // Calendar tab state
   const todayStr0 = todayIso();
   const [selectedCalDate, setSelectedCalDate] = useState<string>(todayStr0);
@@ -188,6 +210,8 @@ export default function FinancePage() {
     setBaseAmount("");
     setProjectName("");
     setLeadId("");
+    setLeadSearchQuery("");
+    setLeadSearchResults([]);
     // A brand-new invoice is the newest row (ORDER BY created_at DESC) so it
     // lands on page 1 — the overlay in displayedInvoices only re-syncs rows
     // already present on the currently-fetched page, so a genuinely new row
@@ -782,19 +806,32 @@ export default function FinancePage() {
                 <p className="text-[10px] text-red-600 font-bold bg-red-50 border border-red-150 rounded-lg px-3 py-2">{newInvoiceError}</p>
               )}
 
-              <div>
+              <div className="relative">
                 <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Lead</label>
-                <select
+                <input
+                  type="text"
                   required
-                  value={leadId}
-                  onChange={(e) => setLeadId(e.target.value)}
+                  value={leadSearchQuery}
+                  onChange={(e) => { setLeadId(""); setLeadSearchQuery(e.target.value); setLeadSearchOpen(true); }}
+                  onFocus={() => setLeadSearchOpen(true)}
+                  onBlur={() => setTimeout(() => setLeadSearchOpen(false), 150)}
+                  placeholder="Search by name or phone…"
                   className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none"
-                >
-                  <option value="">Select the lead this invoice is for…</option>
-                  {leads.map(l => (
-                    <option key={l.id} value={l.id}>{l.name} — {activeRole === "ADMIN" ? l.phone : maskPhone(l.phone)}</option>
-                  ))}
-                </select>
+                />
+                {leadSearchOpen && leadSearchResults.length > 0 && (
+                  <div className="absolute z-50 mt-1 w-full max-h-48 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg">
+                    {leadSearchResults.map(l => (
+                      <button
+                        key={l.id}
+                        type="button"
+                        onClick={() => selectLeadResult(l)}
+                        className="w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 [overflow-wrap:anywhere]"
+                      >
+                        {l.name} — {activeRole === "ADMIN" ? l.phone : maskPhone(l.phone)}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div>
