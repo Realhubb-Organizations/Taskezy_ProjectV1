@@ -5,7 +5,7 @@ import { useApp, Lead, LeadStatus, FollowupCall, mapApiFollowupToFrontend, mapAp
 import { isLeadAssignableUser } from "@/lib/leadAssignment";
 import { useDialog } from "@/components/ui/DialogProvider";
 import { maskPhone } from "@/lib/maskPII";
-import { apiGetAgentReportStats, apiListFollowupsPage, apiGetLead, type AgentReportStats, type LeadListFilters } from "@/lib/apiClient";
+import { apiGetAgentReportStats, apiGetManagerReportStats, apiListFollowupsPage, apiGetLead, type AgentReportStats, type ManagerReportAgentStats, type LeadListFilters } from "@/lib/apiClient";
 import { useServerLeadList } from "@/lib/useServerLeadList";
 import { AlertTriangle, ArrowRight, CheckSquare, Clock, DollarSign, Info, MapPin, Phone, TrendingUp, Users, RefreshCw } from "lucide-react";
 import { DateRange } from "./DateRangeFilter";
@@ -13,7 +13,6 @@ import MetricDetailModal, { MetricDetailRow } from "./MetricDetailModal";
 import LeadDetailDrawer from "@/components/crm/LeadDetailDrawer";
 import { statusBadgeClasses, FRONTEND_STATUS_TO_DB_CODE } from "@/lib/leadStatusMapping";
 import {
-  filterLeadsByRange,
   computeROIMultiple,
   getMissedInfo,
   formatCurrency,
@@ -33,10 +32,21 @@ const QUALIFIED_CODES = ["CALL_BACK", "FOLLOWUP", "EOI", "SITE_VISIT_SCHEDULED",
 const SITE_VISIT_CODES = ["SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE"];
 
 export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
-  const { leads, users, currentUser, activeRole, reassignLead, updateLeadStatus, isDataLoading } = useApp();
+  const { users, currentUser, activeRole, reassignLead, updateLeadStatus, isDataLoading } = useApp();
   const { toast, prompt: promptDialog } = useDialog();
 
-  const rangeLeads = useMemo(() => filterLeadsByRange(leads, dateRange.from, dateRange.to), [leads, dateRange]);
+  // Roster + per-person lead counts come from one grouped-by-agent fetch
+  // (one row per agent with >=1 lead in range) instead of scanning the
+  // bulk leads array.
+  const [managerReportStats, setManagerReportStats] = useState<ManagerReportAgentStats[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    apiGetManagerReportStats(dateRange.from, dateRange.to)
+      .then(result => { if (!cancelled) setManagerReportStats(result); })
+      .catch(() => { /* leave the previous roster/counts showing on a transient failure */ });
+    return () => { cancelled = true; };
+  }, [dateRange.from, dateRange.to]);
+  const managerStatsByAgentId = useMemo(() => new Map(managerReportStats.map(r => [r.assignedAgentId, r])), [managerReportStats]);
 
   // Real reporting-line lookup (see Settings → Manage Users → "Reports To"),
   // not the old hardcoded name-string SALES_HIERARCHY table.
@@ -52,9 +62,12 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
   // this used to list every agent in the company to every viewer regardless
   // of role, letting a Member browse other agents' names/reports.
   const agentNames = useMemo(() => {
+    const statsAgentNames = managerReportStats
+      .map(r => users.find(u => u.id === r.assignedAgentId)?.name)
+      .filter((n): n is string => !!n);
     const allNames = new Set<string>([
       ...users.filter(u => u.role_type !== "Manager" && isLeadAssignableUser(u)).map(u => u.name),
-      ...rangeLeads.map(l => l.assignedAgent)
+      ...statsAgentNames
     ]);
     managerNames.forEach(m => allNames.delete(m));
     // Sales agents only: Finance/Admin users never appear here or as a
@@ -68,7 +81,7 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
       return all.filter(name => users.find(u => u.name === name)?.managerId === currentUser.id);
     }
     return all.includes(currentUser.name) ? [currentUser.name] : [currentUser.name];
-  }, [users, managerNames, rangeLeads, activeRole, currentUser]);
+  }, [users, managerNames, managerReportStats, activeRole, currentUser]);
 
   const isScopedToSelf = activeRole !== "ADMIN" && currentUser?.role_type !== "Manager";
 
@@ -355,7 +368,8 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                 <p className="text-[11px] text-slate-400 italic px-1">No agents with lead activity in range.</p>
               ) : (
                 agentListPagination.pageRows.map(name => {
-                  const count = rangeLeads.filter(l => l.assignedAgent === name).length;
+                  const agentId = users.find(u => u.name === name)?.id;
+                  const count = agentId ? (managerStatsByAgentId.get(agentId)?.leadsCount ?? 0) : 0;
                   const isManagedBy = reportsToByName.get(name);
                   return (
                     <button
