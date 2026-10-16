@@ -10,6 +10,7 @@ import ManagerReports from "@/components/reports/ManagerReports";
 import AgentReports from "@/components/reports/AgentReports";
 import { todayIso, toIsoDate } from "@/components/ui/DateRangePicker";
 import { maskPhone, maskEmail } from "@/lib/maskPII";
+import { apiListAllLeads } from "@/lib/apiClient";
 
 const MAIN_TABS = [
   { key: "marketing", label: "Marketing Reports", icon: Megaphone },
@@ -28,7 +29,7 @@ function daysAgo(n: number): string {
 }
 
 function ReportsPageContent() {
-  const { leads, currentUser, activeRole, isDataLoading, dataLoadError, triggerManualRefresh } = useApp();
+  const { currentUser, activeRole, isDataLoading, dataLoadError, triggerManualRefresh } = useApp();
   const router = useRouter();
   const searchParams = useSearchParams();
   const isAdmin = activeRole === "ADMIN";
@@ -49,21 +50,33 @@ function ReportsPageContent() {
     router.push(`/dashboard/reports?tab=${tabKey}`);
   };
 
-  const handleExportCSV = () => {
-    let csvContent = "data:text/csv;charset=utf-8,";
-    csvContent += "ID,Name,Phone,Email,Status,Assigned Agent,Property,Assigned At,First Response At\n";
-    leads.forEach(l => {
-      const phone = isAdmin ? l.phone : maskPhone(l.phone);
-      const email = isAdmin ? l.email : maskEmail(l.email);
-      csvContent += `"${l.id}","${l.name}","${phone}","${email}","${l.status}","${l.assignedAgent}","${l.property || "N/A"}","${l.assignedAt || ""}","${l.firstResponseAt || ""}"\n`;
-    });
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `taskezy_leads_report_${Date.now()}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const [exportingCSV, setExportingCSV] = useState(false);
+  const handleExportCSV = async () => {
+    if (exportingCSV) return;
+    setExportingCSV(true);
+    try {
+      // Every matching lead, unfiltered/company-wide — same as before this
+      // button moved off the bulk array; the on-screen Date Range picker is
+      // cosmetic to this export, not a filter (a pre-existing gap, not this
+      // migration's job to fix).
+      const leads = await apiListAllLeads();
+      let csvContent = "data:text/csv;charset=utf-8,";
+      csvContent += "ID,Name,Phone,Email,Status,Assigned Agent,Property,Assigned At,First Response At\n";
+      leads.forEach(l => {
+        const phone = isAdmin ? l.phone : maskPhone(l.phone);
+        const email = isAdmin ? (l.email || "") : maskEmail(l.email || "");
+        csvContent += `"${l.id}","${l.name}","${phone}","${email}","${l.status_label}","${l.assigned_agent_name}","${l.property_name || "N/A"}","${l.assigned_at || ""}","${l.first_response_at || ""}"\n`;
+      });
+      const encodedUri = encodeURI(csvContent);
+      const link = document.createElement("a");
+      link.setAttribute("href", encodedUri);
+      link.setAttribute("download", `taskezy_leads_report_${Date.now()}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } finally {
+      setExportingCSV(false);
+    }
   };
 
   return (
@@ -94,10 +107,11 @@ function ReportsPageContent() {
         {isAdmin && (
           <button
             onClick={handleExportCSV}
-            className="inline-flex items-center justify-center gap-2 h-9 px-3.5 bg-[#0B1E6E] hover:bg-[#081650] text-white rounded-xl text-xs font-bold transition-all shadow-md shrink-0"
+            disabled={exportingCSV}
+            className="inline-flex items-center justify-center gap-2 h-9 px-3.5 bg-[#0B1E6E] hover:bg-[#081650] text-white rounded-xl text-xs font-bold transition-all shadow-md shrink-0 disabled:opacity-60 disabled:cursor-not-allowed"
           >
             <Download className="h-4 w-4" />
-            Export Leads CSV
+            {exportingCSV ? "Exporting…" : "Export Leads CSV"}
           </button>
         )}
         </div>
