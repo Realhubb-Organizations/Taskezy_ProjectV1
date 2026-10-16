@@ -8,7 +8,8 @@ import { useDialog } from "@/components/ui/DialogProvider";
 import { Sliders, Sparkles, Plus, Check, ChevronDown, Search, X, Minus, Download, RotateCcw, Users, Trash2, AlertTriangle } from "lucide-react";
 import { STATUS_OPTIONS, PICKABLE_STATUS_OPTIONS, frontendStatusToDbCode } from "@/lib/leadStatusMapping";
 import { type LeadSummaryStats } from "@/lib/leadSummaryStats";
-import { apiListLeadsPage, apiGetLeadStats, apiGetLeadAnalyticsStats, apiDeleteLead, apiBulkDeleteLeads, apiBulkReassignLeads, type LeadListFilters, type AgentAnalyticsStats } from "@/lib/apiClient";
+import { apiListLeadsPage, apiGetLead, apiGetLeadStats, apiGetLeadAnalyticsStats, apiDeleteLead, apiBulkDeleteLeads, apiBulkReassignLeads, type LeadListFilters, type AgentAnalyticsStats } from "@/lib/apiClient";
+import { useServerLeadList } from "@/lib/useServerLeadList";
 import { WhatsAppIcon, CallIcon, PlatformLabel } from "@/components/icons/ContactIcons";
 import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/callTrigger";
 import { LineSkeleton, TableRowsSkeleton } from "@/components/ui/Skeletons";
@@ -139,14 +140,16 @@ export default function LeadDashboard() {
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [successMsg, setSuccessMsg] = useState("");
 
-  // Deep-link support: notifications route here with ?openLead=<id> to jump straight to a lead
+  // Deep-link support: notifications route here with ?openLead=<id> to jump
+  // straight to a lead — fetched directly by id (a 404 means deleted or no
+  // longer visible to this user, same silent-no-op as before) instead of
+  // scanning the bulk leads array.
   useEffect(() => {
     const openLeadId = searchParams.get("openLead");
     if (openLeadId) {
-      const found = leads.find(l => l.id === openLeadId);
-      if (found) {
-        setSelectedLead(found);
-      }
+      apiGetLead(openLeadId)
+        .then(row => setSelectedLead(mapApiLeadToFrontendLead(row)))
+        .catch(() => { /* not found / not visible to this user — no-op, same as before */ });
       router.replace("/dashboard/crm");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -408,11 +411,10 @@ export default function LeadDashboard() {
   }, [adminSearch]);
 
   // Plain YYYY-MM-DD bounds for whichever date-range preset is active —
-  // mirrors the boundary logic dateInRange already uses for the old
-  // client-side filter, just emitting dates instead of a predicate, since
-  // the server does the actual comparison now. Shared by the admin Leads
-  // tab's own date range and the Analytics tab's (see
-  // analyticsServerDateBounds below) — same preset semantics, different state.
+  // the server does the actual comparison, this just emits the dates.
+  // Shared by the admin Leads tab's own date range and the Analytics tab's
+  // (called directly with analyticsDateRange/analyticsCustomRange below) —
+  // same preset semantics, different state.
   const dateRangeToServerBounds = (
     range: "today" | "yesterday" | "week" | "month" | "all" | "custom",
     customRange: { start: string; end: string } | null,
@@ -564,74 +566,40 @@ export default function LeadDashboard() {
   // for the qualified/unqualified/site-visit columns, which real statuses
   // make up that category (statusScope === null means no status filter —
   // "all" leads for that scope).
-  const [analyticsDrilldown, setAnalyticsDrilldown] = useState<{ title: string; leads: Lead[] } | null>(null);
-  const [drilldownSearch, setDrilldownSearch] = useState("");
+  // Real server rows for the clicked manager/agent's number (status codes +
+  // the Analytics toolbar's own date/property/campaign/member filters) —
+  // discrete page-by-page pagination (same pattern as LeadDrillDownPanel),
+  // not the old continuous scroll-spy, which needed every row mounted at
+  // once and risked undercounting a busy agent/team's real total.
+  const [analyticsDrilldown, setAnalyticsDrilldown] = useState<{ title: string; baseFilters: LeadListFilters } | null>(null);
   const [drilldownSearchOpen, setDrilldownSearchOpen] = useState(false);
-  const [drilldownPage, setDrilldownPage] = useState(1);
-  const [drilldownRowsPerPage, setDrilldownRowsPerPage] = useState(8);
-
-  // Same scroll-spy + synced-pagination pattern as the admin Leads table:
-  // rows render continuously in a capped-height scroll container, scrolling
-  // past a page boundary advances drilldownPage, and the pagination arrows
-  // scroll that page's first row back to the top — the two stay in sync in
-  // both directions.
-  const drilldownScrollRef = useRef<HTMLDivElement>(null);
-  const drilldownPageRowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
-  const drilldownProgrammaticScroll = useRef(false);
 
   const openAnalyticsDrilldown = (assignedNames: string[], statusScope: LeadStatus[] | null, title: string) => {
-    const matched = analyticsScopedLeads.filter(l =>
-      assignedNames.includes(l.assignedAgent) && (!statusScope || statusScope.includes(l.status))
-    );
-    setAnalyticsDrilldown({ title, leads: matched });
-    setDrilldownSearch("");
-    setDrilldownSearchOpen(false);
-    setDrilldownPage(1);
-  };
-
-  const analyticsDrilldownFilteredLeads = analyticsDrilldown
-    ? analyticsDrilldown.leads.filter(l =>
-        !drilldownSearch || l.name.toLowerCase().includes(drilldownSearch.toLowerCase()) || l.phone.includes(drilldownSearch)
-      )
-    : [];
-  const drilldownTotalPages = Math.max(1, Math.ceil(analyticsDrilldownFilteredLeads.length / drilldownRowsPerPage));
-  const drilldownCurrentPage = Math.min(drilldownPage, drilldownTotalPages);
-
-  // Scrolls with the shared page <main> now (one scroll plane per screen —
-  // see APP_UIUX_AUDIT.md), not this table's own boxed container. See
-  // PendingLeadsTable.tsx's identical conversion for the full rationale.
-  useEffect(() => {
-    const main = drilldownScrollRef.current?.closest("main");
-    if (!main) return;
-    const handleScroll = () => {
-      if (drilldownProgrammaticScroll.current) return;
-      const mainTop = main.getBoundingClientRect().top;
-      let current = 1;
-      for (let i = 0; i < drilldownPageRowRefs.current.length; i++) {
-        const row = drilldownPageRowRefs.current[i];
-        if (row && row.getBoundingClientRect().top - mainTop <= 4) {
-          current = i + 1;
-        }
+    const effectiveNames = analyticsMemberFilter.length > 0 ? assignedNames.filter(n => analyticsMemberFilter.includes(n)) : assignedNames;
+    const assignedAgentId = users.filter(u => effectiveNames.includes(u.name)).map(u => u.id);
+    const propertyId = properties.filter(p => analyticsPropertyFilter.includes(p.name)).map(p => p.id);
+    const status = statusScope ? statusScope.map(s => frontendStatusToDbCode(s)).filter((c): c is string => !!c) : undefined;
+    setAnalyticsDrilldown({
+      title,
+      baseFilters: {
+        assignedAgentId,
+        propertyId: propertyId.length > 0 ? propertyId : undefined,
+        campaign: analyticsCampaignFilter.length > 0 ? analyticsCampaignFilter : undefined,
+        status,
+        ...dateRangeToServerBounds(analyticsDateRange, analyticsCustomRange, today)
       }
-      setDrilldownPage(prev => (prev !== current ? current : prev));
-    };
-    main.addEventListener("scroll", handleScroll, { passive: true });
-    return () => main.removeEventListener("scroll", handleScroll);
-  }, []);
-
-  const goToDrilldownPage = (page: number) => {
-    const clamped = Math.max(1, Math.min(drilldownTotalPages, page));
-    setDrilldownPage(clamped);
-    const row = drilldownPageRowRefs.current[clamped - 1];
-    const main = drilldownScrollRef.current?.closest("main");
-    if (!row || !main) return;
-    drilldownProgrammaticScroll.current = true;
-    const top = clamped === 1 ? 0 : main.scrollTop + row.getBoundingClientRect().top - main.getBoundingClientRect().top;
-    main.scrollTo({ top });
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => { drilldownProgrammaticScroll.current = false; });
     });
+    setDrilldownSearchOpen(false);
   };
+
+  const {
+    rows: analyticsDrilldownRows,
+    totalCount: analyticsDrilldownTotal,
+    loading: analyticsDrilldownLoading,
+    search: drilldownSearch,
+    setSearch: setDrilldownSearch,
+    paginationProps: analyticsDrilldownPaginationProps
+  } = useServerLeadList(analyticsDrilldown?.baseFilters ?? {}, 8);
 
   const QUALIFIED_STATUS_OPTIONS = STATUS_OPTIONS.filter(s => !UNQUALIFIED_STATUSES.includes(s));
 
@@ -685,46 +653,6 @@ export default function LeadDashboard() {
     { value: "month", label: "This Month" },
     { value: "all", label: "All Time" }
   ];
-
-  // Shared by both the Leads tab's date filter and the Leads Analytics tab's
-  // own independent date filter — each passes its own customRange so the two
-  // tabs' date pickers stay fully decoupled while sharing one implementation.
-  const dateInRange = (
-    dateStr: string | undefined,
-    range: "today" | "yesterday" | "week" | "month" | "all" | "custom",
-    refNow: Date,
-    customRange: { start: string; end: string } | null
-  ): boolean => {
-    if (!dateStr) return false;
-    const d = new Date(dateStr);
-    if (isNaN(d.getTime())) return false;
-    if (range === "all") return true;
-    const startOfToday = new Date(refNow.getFullYear(), refNow.getMonth(), refNow.getDate());
-    if (range === "today") return d.toDateString() === refNow.toDateString();
-    if (range === "yesterday") {
-      const y = new Date(startOfToday);
-      y.setDate(y.getDate() - 1);
-      return d.toDateString() === y.toDateString();
-    }
-    if (range === "week") {
-      const weekAgo = new Date(startOfToday);
-      weekAgo.setDate(weekAgo.getDate() - 6);
-      return d >= weekAgo;
-    }
-    if (range === "custom") {
-      if (!customRange) return false;
-      let start = new Date(customRange.start);
-      let end = new Date(customRange.end);
-      // The picker UI already blocks picking an End Date before Start, but
-      // swap defensively in case an older/invalid range is still stored —
-      // an inverted pair should still show "the selected date range's
-      // leads", not silently go empty.
-      if (start > end) [start, end] = [end, start];
-      end.setHours(23, 59, 59, 999);
-      return d >= start && d <= end;
-    }
-    return d.getMonth() === refNow.getMonth() && d.getFullYear() === refNow.getFullYear();
-  };
 
   const adminSortedLogs = (l: Lead) => [...(l.logs || [])].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
   const adminFormatDateTime = (iso: string | undefined): string => {
@@ -965,17 +893,6 @@ export default function LeadDashboard() {
     adminScrollRef.current?.scrollTo(0, 0);
   };
 
-  // Leads Analytics tab's own filtered lead set — independent of the Leads
-  // tab's filters, driven by its own toolbar (date range, Member, Property,
-  // Campaigns).
-  const analyticsScopedLeads = scopedLeads.filter(l => {
-    const matchesMember = analyticsMemberFilter.length === 0 || analyticsMemberFilter.includes(l.assignedAgent);
-    const matchesProperty = analyticsPropertyFilter.length === 0 || (!!l.property && analyticsPropertyFilter.includes(l.property));
-    const matchesCampaign = analyticsCampaignFilter.length === 0 || (!!l.campaign && analyticsCampaignFilter.includes(l.campaign));
-    const matchesDate = dateInRange(l.createdAtStr, analyticsDateRange, today, analyticsCustomRange);
-    return matchesMember && matchesProperty && matchesCampaign && matchesDate;
-  });
-
   const analyticsPropertiesList = Array.from(new Set(scopedLeads.map(l => l.property).filter(Boolean))) as string[];
   const analyticsCampaignsList = Array.from(new Set(scopedLeads.map(l => l.campaign).filter(Boolean))) as string[];
   // Same Meta/Google grouping as the Leads tab's own Campaigns dropdown
@@ -983,14 +900,10 @@ export default function LeadDashboard() {
   // re-implemented.
   const analyticsCampaignOptions = groupCampaignOptions(analyticsCampaignsList);
 
-  // Per-agent counts now come from the server (GET /leads/analytics-stats —
-  // see leads.service.ts's getLeadAnalyticsStats) instead of scanning
-  // analyticsScopedLeads, which stays around only for the drill-down panel
-  // below (still bulk-array-based for now — see the server-side-aggregates
-  // plan for when that changes too). Property/Campaign/Date filters are
-  // sent to the server; Member stays a client-side pass over this small
-  // per-agent array, same "which rows are even considered" role it always
-  // played, just no longer over raw leads.
+  // Per-agent counts come from the server (GET /leads/analytics-stats —
+  // see leads.service.ts's getLeadAnalyticsStats), not a scan over the bulk
+  // leads array. Property/Campaign/Date filters are sent to the server;
+  // Member stays a client-side pass over this small per-agent array.
   const [analyticsStats, setAnalyticsStats] = useState<AgentAnalyticsStats[]>([]);
   useEffect(() => {
     let cancelled = false;
@@ -2053,11 +1966,11 @@ export default function LeadDashboard() {
                       <X className="h-4 w-4" />
                     </button>
                   </div>
-                  {analyticsDrilldownFilteredLeads.length === 0 ? (
+                  {analyticsDrilldownTotal === 0 && !analyticsDrilldownLoading ? (
                     <p className="text-xs text-slate-400 italic p-6">No leads match this view.</p>
                   ) : (
                     <>
-                      <div ref={drilldownScrollRef} className="overflow-x-auto">
+                      <div className="overflow-x-auto">
                         <table className="w-full text-left text-xs border-collapse table-fixed min-w-[1200px]">
                           <colgroup>
                             <col />
@@ -2077,7 +1990,7 @@ export default function LeadDashboard() {
                                     <input
                                       autoFocus
                                       value={drilldownSearch}
-                                      onChange={(e) => { setDrilldownSearch(e.target.value); setDrilldownPage(1); }}
+                                      onChange={(e) => setDrilldownSearch(e.target.value)}
                                       onBlur={() => { if (!drilldownSearch) setDrilldownSearchOpen(false); }}
                                       placeholder="Search name or phone..."
                                       className="min-w-0 flex-1 bg-white border border-brand-400 rounded-md px-1.5 py-1 text-[11px] font-normal focus:outline-none"
@@ -2110,14 +2023,11 @@ export default function LeadDashboard() {
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
-                            {isDataLoading && analyticsDrilldownFilteredLeads.length === 0 ? (
+                            {analyticsDrilldownLoading && analyticsDrilldownRows.length === 0 ? (
                               <TableRowsSkeleton rows={6} columns={8} />
-                            ) : (drilldownPageRowRefs.current = [], analyticsDrilldownFilteredLeads.map((l, idx) => (
-                              <tr
-                                key={l.id}
-                                ref={idx % drilldownRowsPerPage === 0 ? (el) => { drilldownPageRowRefs.current[Math.floor(idx / drilldownRowsPerPage)] = el; } : undefined}
-                                className="hover:bg-slate-50/60 transition-colors"
-                              >
+                            ) : (
+                              analyticsDrilldownRows.map((l) => (
+                              <tr key={l.id} className="hover:bg-slate-50/60 transition-colors">
                                 <td className="px-4 py-3 align-top overflow-hidden">
                                   <button
                                     onClick={() => setSelectedLead(l)}
@@ -2140,29 +2050,14 @@ export default function LeadDashboard() {
                               {l.campaign ? <PlatformLabel text={l.campaign} classifyBy={l.source || l.campaign} wrap /> : "—"}
                             </td>
                               </tr>
-                            )))}
+                              ))
+                            )}
                           </tbody>
                         </table>
                       </div>
 
                       <TablePagination
-                        totalRows={analyticsDrilldownFilteredLeads.length}
-                        page={drilldownCurrentPage}
-                        rowsPerPage={drilldownRowsPerPage}
-                        onPageChange={goToDrilldownPage}
-                        onRowsPerPageChange={(n) => {
-                          drilldownProgrammaticScroll.current = true;
-                          setDrilldownRowsPerPage(n);
-                          setDrilldownPage(1);
-                          const main = drilldownScrollRef.current?.closest("main");
-                          const el = drilldownScrollRef.current;
-                          if (main && el) {
-                            main.scrollTo({ top: main.scrollTop + el.getBoundingClientRect().top - main.getBoundingClientRect().top });
-                          }
-                          requestAnimationFrame(() => {
-                            requestAnimationFrame(() => { drilldownProgrammaticScroll.current = false; });
-                          });
-                        }}
+                        {...analyticsDrilldownPaginationProps}
                         rowsPerPageOptions={[8, 25, 50, 100]}
                         rowLabel="Lead"
                       />
