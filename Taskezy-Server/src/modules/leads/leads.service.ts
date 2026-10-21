@@ -420,6 +420,7 @@ export interface BulkImportLeadsInput {
   propertyId?: string;
   agentIds?: string[];
   leads: BulkImportLeadRow[];
+  actor: { userId: string; name: string };
 }
 
 export interface BulkImportSkippedRow {
@@ -475,7 +476,7 @@ const BULK_IMPORT_CHUNK_SIZE = 1000;
  * request handler before the import is queued, since the queued worker
  * runs bulkImportLeads without a caller.
  */
-export async function assertBulkImportAllowed(caller: AccessTokenPayload, input: BulkImportLeadsInput): Promise<void> {
+export async function assertBulkImportAllowed(caller: AccessTokenPayload, input: Omit<BulkImportLeadsInput, "actor">): Promise<void> {
   if (caller.role === "ADMIN" || input.assignmentMode !== "AGENT") return;
   for (const agentId of input.agentIds ?? []) await assertUploadAssigneeAllowed(caller, agentId);
 }
@@ -592,12 +593,27 @@ export async function bulkImportLeads(input: BulkImportLeadsInput): Promise<Bulk
         system: "CRM",
         category: "NEW_LEAD",
         title: "New Bulk Leads",
-        message: `${count} new lead${count > 1 ? "s" : ""} assigned to you from "${input.subSource}".`,
+        message: `${count} bulk data calling lead${count > 1 ? "s" : ""} assigned to you by ${input.actor.name}.`,
         recipientUserId: agentId,
         link: "/dashboard/crm/data-calling"
       })
     )
   );
+
+  // One completion summary to whoever ran the upload — this was missing
+  // entirely before; the admin had no confirmation beyond the upload
+  // modal's own progress UI closing.
+  await createNotification({
+    system: "CRM",
+    category: "GENERAL",
+    title: "Bulk Upload Complete",
+    message:
+      `${created} lead${created === 1 ? "" : "s"} uploaded successfully.` +
+      (duplicates > 0 ? ` ${duplicates} duplicate${duplicates === 1 ? "" : "s"}.` : "") +
+      (skipped.length > 0 ? ` ${skipped.length} failed.` : ""),
+    recipientUserId: input.actor.userId,
+    link: "/dashboard/crm/data-calling"
+  });
 
   return { created, duplicates, skipped };
 }

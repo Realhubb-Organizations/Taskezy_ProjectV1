@@ -1360,6 +1360,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [leadsChangedSignal, setLeadsChangedSignal] = useState(0);
   const leadsChangedQueueRef = useRef<Set<string>>(new Set());
   const leadsChangedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Debounces just the SOUND for a burst of "notification" events (e.g. a
+  // bulk import's per-agent summaries arriving close together) to one play,
+  // not one per event — the notification list itself still updates live,
+  // unthrottled, per event below.
+  const pendingSoundRef = useRef<{ category: string; system: string } | null>(null);
+  const notificationSoundTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Bumped only by triggerManualRefresh (pull-to-refresh) — distinct from
   // leadsChangedSignal, which is specifically about live lead-changed SSE
   // events. Any page with its own server-paginated fetch (Call Log,
@@ -1453,7 +1459,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const row = JSON.parse((event as MessageEvent).data) as ApiNotificationRow;
         const notif = mapApiNotificationToFrontend(row);
         setNotifications(prev => (prev.some(n => n.id === notif.id) ? prev : [notif, ...prev]));
-        playNotificationSound(notif.category, notif.system);
+
+        // Debounced — see pendingSoundRef above. "Latest wins" if different
+        // notification types land in the same burst.
+        pendingSoundRef.current = { category: notif.category, system: notif.system };
+        if (notificationSoundTimerRef.current) clearTimeout(notificationSoundTimerRef.current);
+        notificationSoundTimerRef.current = setTimeout(() => {
+          if (pendingSoundRef.current) playNotificationSound(pendingSoundRef.current.category, pendingSoundRef.current.system);
+          pendingSoundRef.current = null;
+        }, 600);
 
         // The notification itself was real-time, but until now nothing made the
         // CRM's actual leads list (table, KPI counts) catch up — a new Meta
