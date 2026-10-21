@@ -655,7 +655,7 @@ export default function DataCallingPage() {
 
   // ---- Admin delete (single from the row's trash icon, bulk from the
   // toolbar) — same archive-then-delete endpoints as the Leads page ----
-  const [deleteTarget, setDeleteTarget] = useState<{ ids: string[]; name?: string } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ ids: string[]; name?: string; isAll?: boolean } | null>(null);
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
   const closeDeleteDialog = () => { if (!deleteSubmitting) { setDeleteTarget(null); setDeleteError(""); } };
@@ -1334,6 +1334,25 @@ export default function DataCallingPage() {
                 >
                   <Trash2 className="h-4 w-4 text-red-600" />
                   Delete ({selectedIds.size})
+                </button>
+              )}
+              {activeTab === "DataCalling" && isAdmin && selectedIds.size > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedIds(new Set())}
+                  className="inline-flex items-center justify-center gap-2 h-9 bg-white border border-slate-300/80 rounded-xl px-3.5 text-xs text-slate-700 font-bold hover:bg-slate-50 shadow-2xs transition-colors"
+                >
+                  Clear all
+                </button>
+              )}
+              {activeTab === "DataCalling" && isAdmin && filteredLeads.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => { setDeleteError(""); setDeleteTarget({ ids: filteredLeads.map(l => l.id), isAll: true }); }}
+                  className="inline-flex items-center justify-center gap-2 h-9 bg-white border border-slate-300/80 rounded-xl px-3.5 text-xs text-red-600 font-bold hover:bg-red-50 shadow-2xs transition-colors"
+                >
+                  <Trash2 className="h-4 w-4 text-red-600" />
+                  Delete All ({filteredLeads.length})
                 </button>
               )}
               <DateRangePicker
@@ -2116,7 +2135,9 @@ export default function DataCallingPage() {
               <p className="text-sm text-slate-700">
                 {deleteTarget.ids.length === 1
                   ? `Permanently delete ${deleteTarget.name ? `"${deleteTarget.name}"` : "this lead"}? This cannot be undone.`
-                  : `Permanently delete ${deleteTarget.ids.length} selected leads? This cannot be undone.`}
+                  : deleteTarget.isAll
+                    ? `Permanently delete all ${deleteTarget.ids.length} leads currently shown? This cannot be undone.`
+                    : `Permanently delete ${deleteTarget.ids.length} selected leads? This cannot be undone.`}
               </p>
               {deleteTarget.ids.length > 1 && (
                 <p className="text-[11px] text-slate-400">Leads with invoices cannot be deleted and will be skipped.</p>

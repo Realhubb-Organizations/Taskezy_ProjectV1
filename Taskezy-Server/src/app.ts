@@ -60,6 +60,10 @@ export function createApp(): Express {
   // body-parser skips re-parsing a body it's already parsed, so registering
   // this first and the tighter one after doesn't double-parse or conflict.
   app.use("/api/v1/leads/bulk-import", express.json({ limit: "25mb" }));
+  // Bulk-delete can now carry up to 50,000 lead ids ("Delete all" on Data
+  // Calling) — ~2mb as JSON, over the 1mb app-wide limit below. Same
+  // scoped-override reasoning as bulk-import just above.
+  app.use("/api/v1/leads/bulk-delete", express.json({ limit: "5mb" }));
   app.use(
     express.json({
       limit: "1mb", // bounded body size — cheap DoS mitigation

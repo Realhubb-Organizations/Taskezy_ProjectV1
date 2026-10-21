@@ -822,6 +822,69 @@ export async function archiveAndRemove(id: string, actor: { userId: string; name
   });
 }
 
+export interface ArchiveAndRemoveChunkResult {
+  deleted: string[];
+  notFound: string[];
+  blocked: { id: string; reason: string }[];
+}
+
+/**
+ * Batched version of archiveAndRemove for bulk delete — same archive-then-
+ * delete guarantee, but one chunk (not one lead) per transaction and one
+ * set-based query per step instead of 4 queries × N leads.
+ *
+ * A lead with an invoice can't be deleted (FK restrict) — archiveAndRemove
+ * catches that per-row via a thrown exception, which a single batched
+ * DELETE can't offer (one bad row fails the whole statement). This instead
+ * excludes blocked ids from the chunk up front via one query, so the rest
+ * of the chunk is unaffected — same per-lead isolation guarantee, just
+ * resolved before the delete instead of after.
+ */
+export async function archiveAndRemoveChunk(ids: string[], actor: { userId: string; name: string }): Promise<ArchiveAndRemoveChunkResult> {
+  if (ids.length === 0) return { deleted: [], notFound: [], blocked: [] };
+
+  return withTransaction(async (client) => {
+    const { rows: blockedRows } = await client.query<{ lead_id: string }>(
+      `SELECT DISTINCT lead_id FROM invoices WHERE lead_id = ANY($1::uuid[])`,
+      [ids]
+    );
+    const blockedIds = new Set(blockedRows.map(r => r.lead_id));
+    const blocked = blockedRows.map(r => ({ id: r.lead_id, reason: "Has an associated invoice; delete the invoice first" }));
+    const candidateIds = ids.filter(id => !blockedIds.has(id));
+    if (candidateIds.length === 0) return { deleted: [], notFound: ids.filter(id => !blockedIds.has(id)), blocked };
+
+    const { rows: leadRows } = await client.query<{ id: string; lead: unknown }>(
+      `SELECT l.id, to_jsonb(l) AS lead FROM leads l WHERE l.id = ANY($1::uuid[]) FOR UPDATE`,
+      [candidateIds]
+    );
+    const foundIds = leadRows.map(r => r.id);
+    const notFound = candidateIds.filter(id => !foundIds.includes(id));
+    if (foundIds.length === 0) return { deleted: [], notFound, blocked };
+
+    const { rows: logRows } = await client.query<{ lead_id: string; logs: unknown }>(
+      `SELECT lg.lead_id, coalesce(jsonb_agg(to_jsonb(lg) ORDER BY lg.created_at), '[]'::jsonb) AS logs
+       FROM lead_logs lg WHERE lg.lead_id = ANY($1::uuid[]) GROUP BY lg.lead_id`,
+      [foundIds]
+    );
+    const logsByLeadId = new Map(logRows.map(r => [r.lead_id, r.logs]));
+
+    const leadSnapshots = leadRows.map(r => JSON.stringify(r.lead));
+    const logSnapshots = leadRows.map(r => JSON.stringify(logsByLeadId.get(r.id) ?? []));
+    const deletedByUserIds = leadRows.map(() => actor.userId);
+    const deletedByNames = leadRows.map(() => actor.name);
+
+    await client.query(
+      `INSERT INTO lead_deletion_archive (lead_id, lead_snapshot, logs_snapshot, deleted_by_user_id, deleted_by_name_snapshot)
+       SELECT * FROM unnest($1::uuid[], $2::jsonb[], $3::jsonb[], $4::uuid[], $5::text[])`,
+      [foundIds, leadSnapshots, logSnapshots, deletedByUserIds, deletedByNames]
+    );
+
+    await client.query(`DELETE FROM leads WHERE id = ANY($1::uuid[])`, [foundIds]);
+
+    return { deleted: foundIds, notFound, blocked };
+  });
+}
+
 export async function setKycVerified(id: string): Promise<boolean> {
   const { rowCount } = await pool.query(`UPDATE leads SET kyc_verified = true WHERE id = $1`, [id]);
   return (rowCount ?? 0) > 0;
