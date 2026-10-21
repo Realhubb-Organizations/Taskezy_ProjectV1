@@ -1260,6 +1260,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     apiGetMe()
       .then((apiUser) => {
         const mapped = mapApiUserToFrontendUser(apiUser);
+        // A temporary-password session left without setting a new password
+        // (closed tab, reload, Back): the reset form needs the password they
+        // typed, which is gone now, so sign them out and let them log in again.
+        if (mapped.passwordStatus === "TEMPORARY") {
+          apiLogout().catch(() => {});
+          setAuthLoading(false);
+          return;
+        }
         setCurrentUser(mapped);
         setActiveRole(mapped.role);
         setActiveSystem(getDefaultSystem(mapped));
@@ -1681,8 +1689,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // took several seconds. The dashboard can render the moment identity
       // is known and hydrate as this resolves in the background instead of
       // blocking navigation on it (see isDataLoading above).
-      loadAllRealData(mapped.role);
-      setShowLoginSplash(true);
+      // A temporary password gets nothing but the reset form until it's
+      // replaced (the API refuses these calls anyway) — changeOwnPassword
+      // loads the data afterwards.
+      if (mapped.passwordStatus !== "TEMPORARY") {
+        loadAllRealData(mapped.role);
+        setShowLoginSplash(true);
+      }
       return { user: mapped };
     } catch (err) {
       // A 401/403 from the API means the credentials really are wrong. A
@@ -1746,6 +1759,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const changeOwnPassword = async (currentPassword: string, newPassword: string): Promise<{ success: boolean; error?: string }> => {
     try {
       await apiChangePassword(currentPassword, newPassword);
+      // Leaving the forced reset: the data load skipped at login runs now.
+      if (currentUser?.passwordStatus === "TEMPORARY") loadAllRealData(currentUser.role);
       setCurrentUserPasswordActive();
       return { success: true };
     } catch (err) {

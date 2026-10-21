@@ -8,6 +8,8 @@ export interface AccessTokenPayload {
   role: string;
   department: string | null;
   roleType: string | null;
+  /** Set while the user still has to replace their temporary password — requireAuth then blocks everything except /me, /logout and /password. */
+  mustResetPassword?: boolean;
 }
 
 export function signAccessToken(payload: AccessTokenPayload): string {
