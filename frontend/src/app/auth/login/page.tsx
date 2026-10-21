@@ -28,7 +28,7 @@ const slides = [
 
 export default function LoginPage() {
   const router = useRouter();
-  const { loginWithTempPassword, loginWithGoogle, currentUser, changeOwnPassword } = useApp();
+  const { loginWithTempPassword, loginWithGoogle, currentUser, changeOwnPassword, logout } = useApp();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -70,6 +70,13 @@ export default function LoginPage() {
   // single time the OS reclaimed the app in the background.
   useEffect(() => {
     if (!currentUser || isResetRequired) return;
+    // Temporary password but no reset form showing (it only appears right
+    // after typing the password here): never forward into the app — sign
+    // out so they log in again and get the reset form.
+    if (currentUser.passwordStatus === "TEMPORARY") {
+      logout();
+      return;
+    }
     let dest = "/home";
     try {
       const saved = window.localStorage.getItem("lastRoute");
@@ -78,7 +85,7 @@ export default function LoginPage() {
       // Private browsing / storage disabled — falls back to /home, same as before this existed.
     }
     router.replace(dest);
-  }, [currentUser, isResetRequired, router]);
+  }, [currentUser, isResetRequired, router, logout]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();

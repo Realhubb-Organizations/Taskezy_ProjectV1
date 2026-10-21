@@ -59,6 +59,11 @@ export async function meHandler(req: Request, res: Response): Promise<void> {
 
 export async function changePasswordHandler(req: Request, res: Response): Promise<void> {
   const { currentPassword, newPassword } = req.body;
-  await authService.changePassword(req.user!.sub, currentPassword, newPassword);
-  sendOk(res, { passwordChanged: true });
+  const tokens = await authService.changePassword(req.user!.sub, currentPassword, newPassword);
+  // Swap the session over to the new token pair (see changePassword) and
+  // retire the old refresh token so it can't mint another flagged token.
+  const oldRefreshToken = req.cookies?.[REFRESH_COOKIE_NAME];
+  if (oldRefreshToken) await authService.logout(oldRefreshToken);
+  setRefreshCookie(res, tokens.refreshToken);
+  sendOk(res, { passwordChanged: true, accessToken: tokens.accessToken });
 }

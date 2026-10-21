@@ -241,6 +241,16 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     }
   }, [authLoading, currentUser, router]);
 
+  // Still on a temporary password (e.g. pressed Back on the "set a new
+  // password" screen): no app pages until it's replaced — sign out and send
+  // them back to log in again.
+  const mustResetPassword = currentUser?.passwordStatus === "TEMPORARY";
+  useEffect(() => {
+    if (!mustResetPassword) return;
+    logout();
+    router.replace("/auth/login");
+  }, [mustResetPassword, logout, router]);
+
   // Registers this phone for push notifications once logged in, so leads,
   // reminders and missed-SLA alerts still arrive while the app is closed or
   // the phone is locked. No-op outside the native app.
@@ -282,7 +292,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!currentUser) {
+  if (!currentUser || mustResetPassword) {
     return null; // redirect above is in flight
   }
 

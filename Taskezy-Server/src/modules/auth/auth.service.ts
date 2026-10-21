@@ -50,7 +50,8 @@ async function issueTokenPair(
     name: `${user.first_name}${user.last_name ? " " + user.last_name : ""}`,
     role: user.role,
     department: user.department,
-    roleType: user.role_type
+    roleType: user.role_type,
+    ...(user.must_reset_password ? { mustResetPassword: true } : {})
   });
   const refreshToken = generateRefreshToken();
 
@@ -159,9 +160,18 @@ export async function loginWithGoogle(credential: string): Promise<AuthResult> {
     logger.info({ userId: best.id }, "Google sign-in: linked Google account to user");
   }
 
+  // Google already proved who they are, so the temporary-password reset is
+  // dropped for good — otherwise a later page reload (refresh reads the flag
+  // from the DB) would lock this Google session behind a reset form that
+  // needs a password they never typed.
+  if (best.must_reset_password) {
+    await query(`UPDATE users SET must_reset_password = false WHERE id = $1`, [best.id]);
+  }
+
   const { google_sub: _googleSub, match: _match, ...user } = best;
-  const { accessToken, refreshToken } = await issueTokenPair(user);
-  return { accessToken, refreshToken, user: { ...stripPasswordHash(user), must_reset_password: false } };
+  const signedIn = { ...user, must_reset_password: false };
+  const { accessToken, refreshToken } = await issueTokenPair(signedIn);
+  return { accessToken, refreshToken, user: stripPasswordHash(signedIn) };
 }
 
 // How long after a token's rotation a reuse of that same (now-revoked)
@@ -267,16 +277,15 @@ export async function logout(refreshToken: string): Promise<void> {
 // password), so this re-verifies that current password rather than trusting
 // the access token alone — the same "prove you know the old one" requirement
 // any password-change form has. Clears must_reset_password so the gate
-// doesn't reappear on next login.
+// doesn't reappear on next login. Returns a fresh token pair: the caller's
+// current access token may still carry mustResetPassword, which requireAuth
+// would keep refusing until it expired.
 export async function changePassword(
   userId: string,
   currentPassword: string,
   newPassword: string
-): Promise<void> {
-  const { rows } = await query<{ password_hash: string }>(
-    `SELECT password_hash FROM users WHERE id = $1`,
-    [userId]
-  );
+): Promise<{ accessToken: string; refreshToken: string }> {
+  const { rows } = await query<UserRow>(`SELECT ${USER_COLUMNS} FROM users WHERE id = $1`, [userId]);
   const user = rows[0];
   if (!user) throw ApiError.notFound("User not found");
 
@@ -288,6 +297,7 @@ export async function changePassword(
     passwordHash,
     userId
   ]);
+  return issueTokenPair({ ...user, must_reset_password: false });
 }
 
 export async function getProfile(userId: string): Promise<Omit<UserRow, "password_hash">> {
