@@ -11,7 +11,8 @@ import {
   ApiMetaConnection,
   apiListGoogleAdsAccounts,
   ApiGoogleAdsAccount,
-  apiListUsersPage
+  apiListUsersPage,
+  apiAnnounceToEveryone
 } from "@/lib/apiClient";
 import { isNotificationSoundMuted, setNotificationSoundMuted } from "@/lib/notificationSound";
 import {
@@ -171,6 +172,25 @@ export default function SettingsPage() {
     const next = !soundMuted;
     setNotificationSoundMuted(next);
     setSoundMuted(next);
+  };
+
+  // Admin-only broadcast — one message to every Admin/Manager/Member's
+  // notification bell (Activity tab), via POST /notifications/announce.
+  const [announceMessage, setAnnounceMessage] = useState("");
+  const [announceSubmitting, setAnnounceSubmitting] = useState(false);
+  const handleAnnounce = async () => {
+    const message = announceMessage.trim();
+    if (!message || announceSubmitting) return;
+    setAnnounceSubmitting(true);
+    try {
+      await apiAnnounceToEveryone(message);
+      setAnnounceMessage("");
+      toast("Announcement sent to everyone.", "success");
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Could not send the announcement. Please try again.", "error");
+    } finally {
+      setAnnounceSubmitting(false);
+    }
   };
 
   const handleRequestIntegration = () => {
@@ -1634,14 +1654,54 @@ export default function SettingsPage() {
               </div>
               <button
                 type="button"
+                role="switch"
+                aria-checked={!soundMuted}
+                aria-label="Notification Sounds"
                 onClick={handleToggleSoundMuted}
-                className={`relative shrink-0 h-6 w-11 rounded-full transition-colors ${!soundMuted ? "bg-[#0B1E6E]" : "bg-slate-300"}`}
+                className={`relative shrink-0 h-7 w-12 rounded-full transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#0B1E6E] ${
+                  !soundMuted ? "bg-[#0B1E6E]" : "bg-slate-300"
+                }`}
               >
-                <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${!soundMuted ? "translate-x-5" : "translate-x-0.5"}`} />
+                <span
+                  className={`absolute top-0.5 left-0.5 h-6 w-6 rounded-full bg-white shadow-md ring-1 ring-black/5 transition-transform duration-200 ease-in-out ${
+                    !soundMuted ? "translate-x-5" : "translate-x-0"
+                  }`}
+                />
               </button>
             </div>
             <p className="text-[11px] text-slate-400 italic">More preferences will land here as they&apos;re built.</p>
           </div>
+
+          {activeRole === "ADMIN" && (
+            <div className="glass-card p-6 rounded-2xl space-y-4">
+              <div className="flex items-center gap-2">
+                <Megaphone className="h-4 w-4 text-brand-600" />
+                <h3 className="text-sm font-extrabold text-slate-800">Announce to Everyone</h3>
+              </div>
+              <p className="text-[11px] text-slate-500">
+                Sends one message to every Admin, Manager, and Member — it shows up live in their notification bell&apos;s Activity tab.
+              </p>
+              <textarea
+                value={announceMessage}
+                onChange={(e) => setAnnounceMessage(e.target.value)}
+                maxLength={2000}
+                rows={3}
+                placeholder="Write an announcement for the whole team…"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#0B1E6E]/20 resize-none"
+              />
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={handleAnnounce}
+                  disabled={!announceMessage.trim() || announceSubmitting}
+                  className="inline-flex items-center gap-2 h-9 px-4 bg-[#0B1E6E] hover:bg-[#081650] text-white rounded-xl text-xs font-bold transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Megaphone className="h-3.5 w-3.5" />
+                  {announceSubmitting ? "Sending…" : "Announce"}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

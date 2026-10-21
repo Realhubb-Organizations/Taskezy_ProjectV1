@@ -1471,6 +1471,16 @@ export function apiMarkAllNotificationsRead(system?: "CRM" | "HRMS" | "FINANCE" 
   return request<{ read: boolean }>(`/api/v1/notifications/read-all${query}`, { method: "PATCH" });
 }
 
+// Admin-only: broadcasts one notification to every Admin/Manager/Member,
+// landing in their Activity tab live (GET /notifications already treats a
+// broadcast row as visible to everyone).
+export function apiAnnounceToEveryone(message: string): Promise<{ sent: boolean }> {
+  return request<{ sent: boolean }>("/api/v1/notifications/announce", {
+    method: "POST",
+    body: JSON.stringify({ message })
+  });
+}
+
 // Deletes only the caller's own notifications (optionally one system) — the drawer's "Clear all".
 export function apiClearNotifications(system?: "CRM" | "HRMS" | "FINANCE" | "ADMIN"): Promise<{ deleted: number }> {
   const query = system ? `?system=${system}` : "";
