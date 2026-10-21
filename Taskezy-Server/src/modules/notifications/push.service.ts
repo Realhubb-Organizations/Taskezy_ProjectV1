@@ -25,8 +25,7 @@ function resolvePushChannelId(category: string, system: string): string {
   return "activity";
 }
 
-/** Sends a push to every registered device of a user. Never throws; failures are logged and swallowed. */
-export async function sendPushToUser(userId: string, payload: PushPayload): Promise<void> {
+async function sendPushToTokenRows(rows: { token: string }[], payload: PushPayload): Promise<void> {
   const b64 = env.FIREBASE_SERVICE_ACCOUNT_B64;
   if (!b64) {
     if (!warnedDisabled) {
@@ -35,16 +34,14 @@ export async function sendPushToUser(userId: string, payload: PushPayload): Prom
     }
     return;
   }
+  if (rows.length === 0) return;
 
   try {
     if (getApps().length === 0) {
       initializeApp({ credential: cert(JSON.parse(Buffer.from(b64, "base64").toString("utf8"))) });
     }
 
-    const { rows } = await query<{ token: string }>(`SELECT token FROM user_devices WHERE user_id = $1`, [userId]);
-    if (rows.length === 0) return;
     const tokens = rows.map((r) => r.token);
-
     const res = await getMessaging().sendEachForMulticast({
       tokens,
       notification: { title: payload.title, body: payload.body },
@@ -63,4 +60,16 @@ export async function sendPushToUser(userId: string, payload: PushPayload): Prom
     // Deliberately log only the error name/code: parse and SDK errors can echo key or token fragments.
     logger.error({ errName: (err as Error)?.name, code: (err as { code?: string })?.code }, "Push send failed");
   }
+}
+
+/** Sends a push to every registered device of a user. Never throws; failures are logged and swallowed. */
+export async function sendPushToUser(userId: string, payload: PushPayload): Promise<void> {
+  const { rows } = await query<{ token: string }>(`SELECT token FROM user_devices WHERE user_id = $1`, [userId]);
+  await sendPushToTokenRows(rows, payload);
+}
+
+/** Sends a push to every registered device of every user (the Admin "Announce" feature). Never throws. */
+export async function sendPushToAllUsers(payload: PushPayload): Promise<void> {
+  const { rows } = await query<{ token: string }>(`SELECT token FROM user_devices`);
+  await sendPushToTokenRows(rows, payload);
 }

@@ -90,7 +90,10 @@ export async function editLeadHandler(req: Request, res: Response): Promise<void
 export async function bulkImportLeadsHandler(req: Request, res: Response): Promise<void> {
   // Checked here, before queueing — the worker runs without a caller.
   await leadsService.assertBulkImportAllowed(req.user!, req.body);
-  const jobId = await boss.send(BULK_IMPORT_LEADS_QUEUE, req.body);
+  const jobId = await boss.send(BULK_IMPORT_LEADS_QUEUE, {
+    ...req.body,
+    actor: { userId: req.user!.sub, name: req.user!.name }
+  });
   if (!jobId) throw ApiError.internal("Could not queue the import — try again.");
   sendOk(res, { jobId }, 202);
 }

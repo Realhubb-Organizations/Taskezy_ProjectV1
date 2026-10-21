@@ -1,12 +1,12 @@
 import { Router } from "express";
 import { z } from "zod";
-import { requireAuth } from "../../middleware/auth";
+import { requireAuth, requireRole } from "../../middleware/auth";
 import { validate } from "../../middleware/validate";
 import { asyncHandler } from "../../utils/asyncHandler";
 import { sendOk, sendPaginated } from "../../utils/apiResponse";
 import { ApiError } from "../../utils/ApiError";
 import { pool, query } from "../../db/pool";
-import { INFORMATIONAL_SQL, tryDeleteNotifications } from "./notifications.service";
+import { INFORMATIONAL_SQL, tryDeleteNotifications, createNotification } from "./notifications.service";
 import { consumeTicket, issueTicket } from "../../utils/sseTickets";
 import { subscribe } from "../../utils/sseHub";
 
@@ -249,5 +249,28 @@ notificationsRouter.delete(
       params
     );
     sendOk(res, { deleted: rowCount ?? 0 });
+  })
+);
+
+const announceSchema = z.object({
+  message: z.string().min(1).max(2000)
+});
+
+// Admin-only company-wide announcement — one broadcast row (recipient_user_id
+// NULL, already handled by every read/live-delivery path above) instead of
+// looping a notification per user.
+notificationsRouter.post(
+  "/announce",
+  requireRole("ADMIN"),
+  validate({ body: announceSchema }),
+  asyncHandler(async (req, res) => {
+    await createNotification({
+      system: "CRM",
+      category: "GENERAL",
+      title: `Announcement from ${req.user!.name}`,
+      message: req.body.message,
+      recipientUserId: null
+    });
+    sendOk(res, { sent: true });
   })
 );

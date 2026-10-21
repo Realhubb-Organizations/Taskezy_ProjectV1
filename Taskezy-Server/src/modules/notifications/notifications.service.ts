@@ -1,19 +1,20 @@
 import { pool } from "../../db/pool";
 import { logger } from "../../utils/logger";
-import { publishToUser } from "../../utils/sseHub";
-import { sendPushToUser } from "./push.service";
+import { publishToUser, publishToAll } from "../../utils/sseHub";
+import { sendPushToUser, sendPushToAllUsers } from "./push.service";
 
 export interface CreateNotificationInput {
   system: "CRM" | "HRMS" | "FINANCE" | "ADMIN";
   category: "NEW_LEAD" | "REMINDER" | "REGULARIZATION" | "ATTENDANCE" | "LEAVE" | "INVOICE" | "CLAIM" | "KYC" | "GENERAL" | "REASSIGNMENT" | "MISSED_SLA";
   title: string;
   message: string;
-  recipientUserId: string;
+  /** null = broadcast to every user (recipient_user_id IS NULL — see DATA_DICTIONARY.md), used by the Admin "Announce" feature. */
+  recipientUserId: string | null;
   leadId?: string;
   link?: string;
 }
 
-/** Inserts a notification row and, if the recipient has an open SSE stream, pushes it live. */
+/** Inserts a notification row and pushes it live — to one recipient, or to everyone if recipientUserId is null. */
 export async function createNotification(input: CreateNotificationInput): Promise<void> {
   const { rows } = await pool.query(
     `INSERT INTO notifications (system, category, title, message, recipient_user_id, lead_id, link)
@@ -21,16 +22,20 @@ export async function createNotification(input: CreateNotificationInput): Promis
      RETURNING id, system, category, title, message, read, lead_id, link, created_at`,
     [input.system, input.category, input.title, input.message, input.recipientUserId, input.leadId ?? null, input.link ?? null]
   );
-  publishToUser(input.recipientUserId, "notification", rows[0]);
+  const pushPayload = {
+    title: input.title,
+    body: input.message,
+    link: input.link ?? null,
+    notificationId: rows[0].id,
+    category: input.category,
+    system: input.system
+  };
   if (input.recipientUserId) {
-    sendPushToUser(input.recipientUserId, {
-      title: input.title,
-      body: input.message,
-      link: input.link ?? null,
-      notificationId: rows[0].id,
-      category: input.category,
-      system: input.system
-    }).catch(() => {});
+    publishToUser(input.recipientUserId, "notification", rows[0]);
+    sendPushToUser(input.recipientUserId, pushPayload).catch(() => {});
+  } else {
+    publishToAll("notification", rows[0]);
+    sendPushToAllUsers(pushPayload).catch(() => {});
   }
 }
 
