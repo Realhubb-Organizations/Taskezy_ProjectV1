@@ -692,11 +692,15 @@ export function apiResetUserPassword(userId: string, newPassword: string): Promi
 // Self-service password change for the currently logged-in user (e.g. the
 // forced-reset screen) — distinct from apiResetUserPassword above, which is
 // admin-acting-on-another-user and doesn't require the current password.
-export function apiChangePassword(currentPassword: string, newPassword: string): Promise<{ passwordChanged: boolean }> {
-  return request<{ passwordChanged: boolean }>("/api/v1/auth/password", {
+// The server answers with a fresh access token (the old one may still be
+// flagged as "must reset password", which the API refuses) — switch to it.
+export async function apiChangePassword(currentPassword: string, newPassword: string): Promise<{ passwordChanged: boolean }> {
+  const data = await request<{ passwordChanged: boolean; accessToken?: string }>("/api/v1/auth/password", {
     method: "PATCH",
     body: JSON.stringify({ currentPassword, newPassword })
   });
+  if (data.accessToken) setAccessToken(data.accessToken);
+  return { passwordChanged: data.passwordChanged };
 }
 
 /** Leads a user still holds (the delete dialog asks who gets them when > 0) and who reports to them. */

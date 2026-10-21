@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { requireAuth } from "../../middleware/auth";
+import { requireAuthAllowPasswordReset } from "../../middleware/auth";
 import { authRateLimiter, googleAuthRateLimiter, refreshRateLimiter } from "../../middleware/rateLimiter";
 import { asyncHandler } from "../../utils/asyncHandler";
 import { validate } from "../../middleware/validate";
@@ -11,11 +11,11 @@ export const authRouter = Router();
 authRouter.post("/login", authRateLimiter, validate({ body: loginSchema }), asyncHandler(loginHandler));
 authRouter.post("/google", googleAuthRateLimiter, validate({ body: googleLoginSchema }), asyncHandler(googleLoginHandler));
 authRouter.post("/refresh", refreshRateLimiter, asyncHandler(refreshHandler));
-authRouter.post("/logout", requireAuth, asyncHandler(logoutHandler));
-authRouter.get("/me", requireAuth, asyncHandler(meHandler));
+authRouter.post("/logout", requireAuthAllowPasswordReset, asyncHandler(logoutHandler));
+authRouter.get("/me", requireAuthAllowPasswordReset, asyncHandler(meHandler));
 authRouter.patch(
   "/password",
-  requireAuth,
+  requireAuthAllowPasswordReset,
   validate({ body: changePasswordSchema }),
   asyncHandler(changePasswordHandler)
 );

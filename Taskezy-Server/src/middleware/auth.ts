@@ -13,19 +13,37 @@ declare global {
   }
 }
 
-/** Requires a valid access token; attaches the decoded payload to req.user. */
-export function requireAuth(req: Request, _res: Response, next: NextFunction): void {
+function readAccessToken(req: Request): AccessTokenPayload {
   const header = req.headers.authorization;
   if (!header?.startsWith("Bearer ")) {
     throw ApiError.unauthorized();
   }
   const token = header.slice("Bearer ".length);
   try {
-    req.user = verifyAccessToken(token);
-    next();
+    return verifyAccessToken(token);
   } catch {
     throw ApiError.unauthorized("Invalid or expired access token");
   }
+}
+
+/**
+ * Requires a valid access token; attaches the decoded payload to req.user.
+ * A session that still has to replace its temporary password is refused
+ * here — the reset screen is not the only thing standing between it and
+ * the data.
+ */
+export function requireAuth(req: Request, _res: Response, next: NextFunction): void {
+  req.user = readAccessToken(req);
+  if (req.user.mustResetPassword) {
+    throw ApiError.forbidden("Please set a new password before continuing.");
+  }
+  next();
+}
+
+/** requireAuth minus the temporary-password block — only for /auth/me, /auth/logout and /auth/password. */
+export function requireAuthAllowPasswordReset(req: Request, _res: Response, next: NextFunction): void {
+  req.user = readAccessToken(req);
+  next();
 }
 
 /** Restricts a route to specific roles — mirrors the frontend's Role type (ADMIN/FINANCE/AGENT). */
