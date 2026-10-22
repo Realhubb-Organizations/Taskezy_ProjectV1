@@ -59,6 +59,14 @@ const envSchema = z.object({
   // Only Google accounts from this Workspace domain may sign in.
   GOOGLE_SIGNIN_ALLOWED_DOMAIN: z.string().min(1).default("realhubb.in"),
 
+  // Outgoing email (login OTP codes) through Google Workspace SMTP.
+  // SMTP_PASS is the mailbox's 16-letter Google *App password* (no spaces),
+  // never its normal login password. Unset = email sending is switched off.
+  SMTP_HOST: z.string().min(1).default("smtp.gmail.com"),
+  SMTP_PORT: z.coerce.number().int().positive().default(465),
+  SMTP_USER: z.string().email().optional(),
+  SMTP_PASS: z.string().min(1).optional(),
+
   // IANA timezone that defines the business calendar day (attendance dates,
   // "today" in reports and alerts). The servers and database run in UTC.
   BUSINESS_TIMEZONE: z

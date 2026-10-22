@@ -40,6 +40,16 @@ export const authRateLimiter = rateLimit({
 // /auth/google — there's no password to guess (Google signs the token), so
 // this is a backstop against a looping client. Keyed by IP since the body
 // carries no email; only failed attempts count, like /login.
+// Email OTP verify/resend (per IP). Each code also allows only 5 tries and
+// 3 resends on its own (loginOtp.ts) — this caps spraying across challenges.
+export const loginOtpRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: { code: "RATE_LIMITED", message: "Too many attempts, please try again later" } }
+});
+
 export const googleAuthRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 30,
