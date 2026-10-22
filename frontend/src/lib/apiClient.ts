@@ -214,6 +214,9 @@ export interface ApiLeadRow {
   notes: string | null;
   notes_updated_at: string | null;
   notes_updated_by_name: string | null;
+  // Which admin ran the bulk upload (migration 036) — null for every other
+  // ingestion path, and for leads uploaded before this column existed.
+  uploaded_by_name: string | null;
   reassigned_at: string | null;
   property_id: string | null;
   property_name: string | null;

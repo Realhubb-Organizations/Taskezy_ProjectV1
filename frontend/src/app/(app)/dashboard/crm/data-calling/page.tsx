@@ -65,7 +65,7 @@ function isUnassignedLead(l: Lead): boolean {
 // cells honestly render "—" rather than a fabricated number when shown.
 type DataCallingColumnKey =
   | "property" | "date" | "qualifiedLeads" | "dataCallSource" | "unqualifiedLeads"
-  | "cpl" | "assignedTo" | "usageCount" | "notes" | "qualifiedPercent" | "actions" | "qualificationStatus";
+  | "cpl" | "assignedTo" | "usageCount" | "notes" | "qualifiedPercent" | "actions" | "qualificationStatus" | "uploadedBy";
 
 const DATA_CALLING_COLUMNS: { key: DataCallingColumnKey; label: string }[] = [
   { key: "property", label: "Property" },
@@ -79,13 +79,14 @@ const DATA_CALLING_COLUMNS: { key: DataCallingColumnKey; label: string }[] = [
   { key: "notes", label: "Notes" },
   { key: "qualifiedPercent", label: "Qualified %age" },
   { key: "actions", label: "Actions" },
-  { key: "qualificationStatus", label: "Qualification Status" }
+  { key: "qualificationStatus", label: "Sub-status" },
+  { key: "uploadedBy", label: "Uploaded By" }
 ];
 
 const DATA_CALLING_DEFAULT_VISIBLE_COLUMNS: Record<DataCallingColumnKey, boolean> = {
   property: true, date: true, qualifiedLeads: false, dataCallSource: false, unqualifiedLeads: false,
   cpl: false, assignedTo: true, usageCount: false, notes: true, qualifiedPercent: false, actions: false,
-  qualificationStatus: true
+  qualificationStatus: true, uploadedBy: true
 };
 
 // The Analytics tab's Source Performance table's extra togglable columns —
@@ -1626,6 +1627,7 @@ export default function DataCallingPage() {
                   <col />
                   {visibleColumns.property && <col />}
                   {visibleColumns.dataCallSource && <col />}
+                  {visibleColumns.uploadedBy && <col />}
                   {visibleColumns.usageCount && <col />}
                   {visibleColumns.qualifiedLeads && <col />}
                   {visibleColumns.unqualifiedLeads && <col />}
@@ -1724,6 +1726,7 @@ export default function DataCallingPage() {
                         />
                       </th>
                     )}
+                    {visibleColumns.uploadedBy && <th className="px-4 py-3 whitespace-nowrap">Uploaded By</th>}
                     {visibleColumns.usageCount && <th className="px-4 py-3 whitespace-nowrap">Usage Count</th>}
                     {visibleColumns.qualifiedLeads && <th className="px-4 py-3 whitespace-nowrap">Qualified Leads</th>}
                     {visibleColumns.unqualifiedLeads && <th className="px-4 py-3 whitespace-nowrap">Unqualified Leads</th>}
@@ -1855,6 +1858,7 @@ export default function DataCallingPage() {
                         <td className="px-4 py-3.5"><NextCallCell next={nextCallDateFor(l.id)} /></td>
                         {visibleColumns.property && <td className="px-4 py-3.5 [overflow-wrap:anywhere]">{l.property || "—"}</td>}
                         {visibleColumns.dataCallSource && <td className="px-4 py-3.5 [overflow-wrap:anywhere]">{l.subSource || l.source || "—"}</td>}
+                        {visibleColumns.uploadedBy && <td className="px-4 py-3.5 [overflow-wrap:anywhere]">{l.uploadedByName || "—"}</td>}
                         {visibleColumns.usageCount && <td className="px-4 py-3.5">{l.logs ? l.logs.length : 0}</td>}
                         {visibleColumns.qualifiedLeads && <td className="px-4 py-3.5 text-slate-300" title="Not applicable — this is a per-lead row, not an aggregate">—</td>}
                         {visibleColumns.unqualifiedLeads && <td className="px-4 py-3.5 text-slate-300" title="Not applicable — this is a per-lead row, not an aggregate">—</td>}

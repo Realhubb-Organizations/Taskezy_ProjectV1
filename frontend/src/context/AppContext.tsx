@@ -217,6 +217,7 @@ export interface Lead {
   logs: LeadLog[];
   source?: string;
   subSource?: string; // free-text batch label from bulk upload (e.g. "Kashmiri Data") — lets that batch be filtered/reassigned/reshuffled as a group. undefined for every other ingestion path.
+  uploadedByName?: string; // which admin ran the bulk upload (migration 036) — undefined for every other ingestion path, and for leads uploaded before this column existed.
   // Data Calling's own, independent field (migration 030) — Connected/
   // Called/Not Reachable/Wrong Number, completely separate from `status`
   // above. undefined until the lead has been called at least once.
@@ -734,6 +735,7 @@ export function mapApiLeadToFrontendLead(row: ApiLeadRow): Lead {
     logs: row.logs.map(l => ({ message: l.message, timestamp: l.timestamp, user: l.user })),
     source: row.source || undefined,
     subSource: row.sub_source || undefined,
+    uploadedByName: row.uploaded_by_name || undefined,
     callStatus:
       row.call_status === "Connected" || row.call_status === "Called" || row.call_status === "Not Reachable" || row.call_status === "Wrong Number"
         ? row.call_status

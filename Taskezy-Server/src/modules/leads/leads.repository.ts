@@ -47,6 +47,10 @@ export interface LeadListRow {
   // reassigned, and reshuffled as a group later. null for every other
   // ingestion path (Meta, sheet import, manual Add Lead).
   sub_source: string | null;
+  // Which admin ran the bulk upload (migration 036) — null for every
+  // other ingestion path, and for leads uploaded before this column
+  // existed (no audit trail to recover that retroactively).
+  uploaded_by_name: string | null;
   // Data Calling's own, independent field (migration 030) — Connected /
   // Called / Not Reachable / Wrong Number, completely separate from
   // status_code. null until the lead has been called at least once.
@@ -167,6 +171,7 @@ const LIST_SELECT = `
     COALESCE(pu.first_name || COALESCE(' ' || pu.last_name, ''), l.previous_agent_name) AS previous_agent_name, l.reassigned_at,
     l.notes, l.notes_updated_at,
     nu.first_name || COALESCE(' ' || nu.last_name, '') AS notes_updated_by_name,
+    bu.first_name || COALESCE(' ' || bu.last_name, '') AS uploaded_by_name,
     l.property_id, p.name AS property_name,
     l.assigned_at, l.first_response_at, l.created_at,
     l.source, l.sub_source, l.call_status, l.call_sub_status, l.campaign, l.meta_page_name, l.meta_form_id, l.meta_ad_id,
@@ -180,6 +185,7 @@ const LIST_SELECT = `
   JOIN users u ON u.id = l.assigned_agent_id
   LEFT JOIN users pu ON pu.id = l.previous_agent_id
   LEFT JOIN users nu ON nu.id = l.notes_updated_by
+  LEFT JOIN users bu ON bu.id = l.uploaded_by_user_id
   JOIN lead_statuses ls ON ls.code = l.status_code
   LEFT JOIN properties p ON p.id = l.property_id
 `;
@@ -551,7 +557,7 @@ export interface BulkCreateLeadRow {
  */
 export async function createBulkLeadsChunk(
   rows: BulkCreateLeadRow[],
-  common: { source: string; subSource: string; propertyId: string | null }
+  common: { source: string; subSource: string; propertyId: string | null; uploadedByUserId: string }
 ): Promise<Set<string>> {
   if (rows.length === 0) return new Set();
   const names = rows.map(r => r.name);
@@ -560,12 +566,12 @@ export async function createBulkLeadsChunk(
   const statusCodes = rows.map(r => r.statusCode);
 
   const { rows: inserted } = await pool.query<{ phone: string }>(
-    `INSERT INTO leads (name, phone, source, sub_source, property_id, assigned_agent_id, status_code, assigned_at)
-     SELECT n, p, $1, $2, $3, a, s, now()
+    `INSERT INTO leads (name, phone, source, sub_source, property_id, assigned_agent_id, status_code, assigned_at, uploaded_by_user_id)
+     SELECT n, p, $1, $2, $3, a, s, now(), $8
      FROM unnest($4::text[], $5::text[], $6::uuid[], $7::text[]) AS t(n, p, a, s)
      ON CONFLICT (phone) DO NOTHING
      RETURNING phone`,
-    [common.source, common.subSource, common.propertyId, names, phones, agentIds, statusCodes]
+    [common.source, common.subSource, common.propertyId, names, phones, agentIds, statusCodes, common.uploadedByUserId]
   );
   return new Set(inserted.map(r => r.phone));
 }
