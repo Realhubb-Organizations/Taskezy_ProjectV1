@@ -10,6 +10,7 @@ import {
   refreshTokenExpiryDate,
   signAccessToken
 } from "../../utils/tokens";
+import * as loginOtp from "./loginOtp";
 
 interface UserRow {
   id: string;
@@ -67,7 +68,18 @@ async function issueTokenPair(
   return { accessToken, refreshToken };
 }
 
-export async function login(email: string, password: string): Promise<AuthResult> {
+// A correct password either signs in straight away (trusted device, or email
+// OTP switched off) or starts an email OTP challenge — see loginOtp.ts.
+export type LoginOutcome =
+  | { otpRequired: false; auth: AuthResult }
+  | { otpRequired: true; challengeId: string; maskedEmail: string };
+
+export async function login(
+  email: string,
+  password: string,
+  trustedDeviceToken: string | undefined,
+  userAgent: string | undefined
+): Promise<LoginOutcome> {
   // Case-insensitive — email addresses aren't case-sensitive in practice,
   // and an admin typing "Neha@..." at user-creation time while Neha logs in
   // with "neha@..." shouldn't produce a login failure.
@@ -89,8 +101,34 @@ export async function login(email: string, password: string): Promise<AuthResult
     throw ApiError.unauthorized("Invalid email or password");
   }
 
+  if (loginOtp.isLoginOtpEnabled() && !(await loginOtp.isTrustedDevice(user.id, trustedDeviceToken))) {
+    const challengeId = await loginOtp.startChallenge(user, userAgent);
+    return { otpRequired: true, challengeId, maskedEmail: loginOtp.maskEmail(user.email) };
+  }
+
   const { accessToken, refreshToken } = await issueTokenPair(user);
-  return { accessToken, refreshToken, user: stripPasswordHash(user) };
+  return { otpRequired: false, auth: { accessToken, refreshToken, user: stripPasswordHash(user) } };
+}
+
+/**
+ * Second half of a password login: the emailed code was right. Optionally
+ * trusts this device for 30 days (returns the token for its cookie).
+ */
+export async function completeOtpLogin(
+  challengeId: string,
+  code: string,
+  trustThisDevice: boolean,
+  userAgent: string | undefined
+): Promise<{ auth: AuthResult; trustedDeviceToken: string | null }> {
+  const userId = await loginOtp.verifyChallenge(challengeId, code);
+  const { rows } = await query<UserRow>(`SELECT ${USER_COLUMNS} FROM users WHERE id = $1`, [userId]);
+  const user = rows[0];
+  // Deactivated in the minutes between password and code.
+  if (!user || user.status !== "ACTIVE") throw ApiError.unauthorized("Invalid email or password");
+
+  const { accessToken, refreshToken } = await issueTokenPair(user);
+  const trustedDeviceToken = trustThisDevice ? await loginOtp.trustDevice(user.id, userAgent) : null;
+  return { auth: { accessToken, refreshToken, user: stripPasswordHash(user) }, trustedDeviceToken };
 }
 
 // "Sign in with Google". The browser (Google Identity Services) hands us a
