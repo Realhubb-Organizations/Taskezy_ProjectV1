@@ -4,6 +4,8 @@ import React, { createContext, useContext, useState, useEffect, useMemo, useRef 
 import { parseIndianPrice } from "@/lib/validation";
 import {
   apiLogin,
+  apiVerifyLoginOtp,
+  apiResendLoginOtp,
   apiGoogleLogin,
   apiLogout,
   apiGetMe,
@@ -604,10 +606,19 @@ interface AppActions {
   // failure, CORS, or a 5xx — e.g. mid-deploy restart), so the login screen
   // can show an accurate message for each instead of blaming the password
   // for either a server outage or simply having tried too many times.
+  // otp: the password was right but this device isn't trusted yet — a code
+  // was emailed; finish with verifyLoginOtp.
   loginWithTempPassword: (
     email: string,
     pass: string
-  ) => Promise<{ user: User } | { user: null; errorType: "invalid_credentials" | "rate_limited" | "network" }>;
+  ) => Promise<
+    | { user: User }
+    | { user: null; otp: { challengeId: string; maskedEmail: string } }
+    | { user: null; otp?: undefined; errorType: "invalid_credentials" | "rate_limited" | "network" }
+  >;
+  /** Second step of password login. On failure, `error` is the server's message ("Incorrect code. 4 attempts left."). */
+  verifyLoginOtp: (challengeId: string, code: string, trustDevice: boolean) => Promise<{ user: User } | { user: null; error: string }>;
+  resendLoginOtp: (challengeId: string) => Promise<{ error?: string }>;
   /** "Sign in with Google" — on failure, `error` is the server's own message (e.g. wrong domain, no account). */
   loginWithGoogle: (credential: string) => Promise<{ user: User } | { user: null; error: string }>;
   logout: () => void;
@@ -1692,30 +1703,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Login handler
-  const loginWithTempPassword = async (
-    email: string,
-    pass: string
-  ): Promise<{ user: User } | { user: null; errorType: "invalid_credentials" | "rate_limited" | "network" }> => {
+  // Shared by password login (with or without the emailed code) once the
+  // server has issued a session.
+  const startPasswordSession = (apiUser: ApiUser): User => {
+    const mapped = mapApiUserToFrontendUser(apiUser);
+    setCurrentUser(mapped);
+    setActiveRole(mapped.role);
+    setActiveSystem(getDefaultSystem(mapped));
+    // Deliberately not awaited — the actual login (auth check + issuing a
+    // token) is fast; it was this full fetch of every domain (leads,
+    // users, properties, invoices, ...) that made "login" feel like it
+    // took several seconds. The dashboard can render the moment identity
+    // is known and hydrate as this resolves in the background instead of
+    // blocking navigation on it (see isDataLoading above).
+    // A temporary password gets nothing but the reset form until it's
+    // replaced (the API refuses these calls anyway) — changeOwnPassword
+    // loads the data afterwards.
+    if (mapped.passwordStatus !== "TEMPORARY") {
+      loadAllRealData(mapped.role);
+      setShowLoginSplash(true);
+    }
+    return mapped;
+  };
+
+  const loginWithTempPassword: AppActions["loginWithTempPassword"] = async (email, pass) => {
     try {
-      const apiUser = await apiLogin(email, pass);
-      const mapped = mapApiUserToFrontendUser(apiUser);
-      setCurrentUser(mapped);
-      setActiveRole(mapped.role);
-      setActiveSystem(getDefaultSystem(mapped));
-      // Deliberately not awaited — the actual login (auth check + issuing a
-      // token) is fast; it was this full fetch of every domain (leads,
-      // users, properties, invoices, ...) that made "login" feel like it
-      // took several seconds. The dashboard can render the moment identity
-      // is known and hydrate as this resolves in the background instead of
-      // blocking navigation on it (see isDataLoading above).
-      // A temporary password gets nothing but the reset form until it's
-      // replaced (the API refuses these calls anyway) — changeOwnPassword
-      // loads the data afterwards.
-      if (mapped.passwordStatus !== "TEMPORARY") {
-        loadAllRealData(mapped.role);
-        setShowLoginSplash(true);
+      const result = await apiLogin(email, pass);
+      if (result.otpRequired) {
+        return { user: null, otp: { challengeId: result.challengeId, maskedEmail: result.maskedEmail } };
       }
-      return { user: mapped };
+      return { user: startPasswordSession(result.user) };
     } catch (err) {
       // A 401/403 from the API means the credentials really are wrong. A
       // 429 means the login endpoint's own rate limiter (10 attempts/15min)
@@ -1735,6 +1752,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       const errorType = isBadCredentials ? "invalid_credentials" : isRateLimited ? "rate_limited" : "network";
       return { user: null, errorType };
+    }
+  };
+
+  const verifyLoginOtp: AppActions["verifyLoginOtp"] = async (challengeId, code, trustDevice) => {
+    try {
+      return { user: startPasswordSession(await apiVerifyLoginOtp(challengeId, code, trustDevice)) };
+    } catch (err) {
+      // 4xx messages are written for the user ("Incorrect code. 4 attempts left.").
+      if (err instanceof ApiRequestError && err.status < 500) return { user: null, error: err.message };
+      return { user: null, error: "We couldn't reach the server. Please check your connection and try again." };
+    }
+  };
+
+  const resendLoginOtp: AppActions["resendLoginOtp"] = async (challengeId) => {
+    try {
+      await apiResendLoginOtp(challengeId);
+      return {};
+    } catch (err) {
+      if (err instanceof ApiRequestError) return { error: err.message };
+      return { error: "We couldn't reach the server. Please check your connection and try again." };
     }
   };
 
@@ -2629,6 +2666,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setCurrentUserPasswordActive,
         changeOwnPassword,
         loginWithTempPassword,
+        verifyLoginOtp,
+        resendLoginOtp,
         loginWithGoogle,
         logout,
         switchUserRole,
