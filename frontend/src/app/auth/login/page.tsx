@@ -28,7 +28,7 @@ const slides = [
 
 export default function LoginPage() {
   const router = useRouter();
-  const { loginWithTempPassword, loginWithGoogle, currentUser, changeOwnPassword, logout } = useApp();
+  const { loginWithTempPassword, verifyLoginOtp, resendLoginOtp, loginWithGoogle, currentUser, changeOwnPassword, logout } = useApp();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -40,6 +40,21 @@ export default function LoginPage() {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [resetError, setResetError] = useState("");
+
+  // Email OTP step: shown after a correct password on a device that isn't
+  // trusted yet (the server emailed a 6-digit code).
+  const [otpChallenge, setOtpChallenge] = useState<{ challengeId: string; maskedEmail: string } | null>(null);
+  const [otpCode, setOtpCode] = useState("");
+  const [trustDevice, setTrustDevice] = useState(true);
+  const [otpError, setOtpError] = useState("");
+  const [otpNotice, setOtpNotice] = useState("");
+  const [resendWait, setResendWait] = useState(0);
+
+  useEffect(() => {
+    if (resendWait <= 0) return;
+    const t = setTimeout(() => setResendWait(w => w - 1), 1000);
+    return () => clearTimeout(t);
+  }, [resendWait]);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isShowingSplash, setIsShowingSplash] = useState(false);
@@ -98,6 +113,14 @@ export default function LoginPage() {
 
     setIsSubmitting(true);
     const result = await loginWithTempPassword(email, password).finally(() => setIsSubmitting(false));
+    if (!result.user && result.otp) {
+      setOtpChallenge(result.otp);
+      setOtpCode("");
+      setOtpError("");
+      setOtpNotice("");
+      setResendWait(30);
+      return;
+    }
     if (!result.user) {
       const messages: Record<typeof result.errorType, string> = {
         network: "We couldn't reach the server. Please check your connection and try again in a moment.",
@@ -107,13 +130,80 @@ export default function LoginPage() {
       setError(messages[result.errorType]);
       return;
     }
-    const user = result.user;
+    afterPasswordLogin(result.user);
+  };
 
+  const afterPasswordLogin = (user: { passwordStatus: string }) => {
     if (user.passwordStatus === "TEMPORARY") {
       setIsResetRequired(true);
     } else {
       router.push("/home");
     }
+  };
+
+  // Keeps only digits, so a paste like "Code: 123 456" still works.
+  const cleanCode = (raw: string) => raw.replace(/\D/g, "").slice(0, 6);
+
+  const submitOtp = async (code: string) => {
+    if (!otpChallenge || isSubmitting) return;
+    if (code.length !== 6) {
+      setOtpError("Enter the 6-digit code from the email.");
+      return;
+    }
+    setOtpError("");
+    setOtpNotice("");
+    setIsSubmitting(true);
+    const result = await verifyLoginOtp(otpChallenge.challengeId, code, trustDevice).finally(() => setIsSubmitting(false));
+    if (!result.user) {
+      setOtpError(result.error);
+      setOtpCode("");
+      return;
+    }
+    setOtpChallenge(null);
+    afterPasswordLogin(result.user);
+  };
+
+  const handleOtpChange = (raw: string) => {
+    const code = cleanCode(raw);
+    setOtpCode(code);
+    if (code.length === 6) submitOtp(code);
+  };
+
+  // Reading the clipboard can be refused (browser permission, older
+  // WebViews) — then long-press / Ctrl+V in the box still works.
+  const pasteOtp = async () => {
+    try {
+      const code = cleanCode(await navigator.clipboard.readText());
+      if (code.length !== 6) {
+        setOtpError("No 6-digit code found on the clipboard. Copy the code from the email first.");
+        return;
+      }
+      handleOtpChange(code);
+    } catch {
+      setOtpError("Couldn't read the clipboard. Long-press (or Ctrl+V) in the box to paste the code.");
+    }
+  };
+
+  const handleResendOtp = async () => {
+    if (!otpChallenge || resendWait > 0) return;
+    setOtpError("");
+    setOtpNotice("");
+    const result = await resendLoginOtp(otpChallenge.challengeId);
+    if (result.error) {
+      setOtpError(result.error);
+      return;
+    }
+    setOtpCode("");
+    setOtpNotice(`A new code was sent to ${otpChallenge.maskedEmail}.`);
+    setResendWait(30);
+  };
+
+  const leaveOtp = () => {
+    setOtpChallenge(null);
+    setOtpCode("");
+    setOtpError("");
+    setOtpNotice("");
+    setPassword("");
   };
 
   // Decided after mount: isGoogleSignInAvailable() checks for the native
@@ -250,7 +340,81 @@ export default function LoginPage() {
             </div>
           </div>
 
-          {!isResetRequired ? (
+          {!isResetRequired && otpChallenge ? (
+            /* Email OTP — second step of password login */
+            <div className="border border-gray-300 rounded-lg p-8 sm:p-12 bg-white shadow-sm space-y-7">
+              <div>
+                <h1 className="text-xl xl:text-2xl font-bold text-gray-900 tracking-tight">Enter verification code</h1>
+                <p className="text-xs xl:text-sm text-gray-500 mt-1 font-light">
+                  We sent a 6-digit code to {otpChallenge.maskedEmail}
+                </p>
+              </div>
+
+              {otpError && (
+                <div className="flex gap-2 p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-600">
+                  <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                  <span>{otpError}</span>
+                </div>
+              )}
+              {otpNotice && !otpError && <p className="text-xs text-gray-500">{otpNotice}</p>}
+
+              <form onSubmit={(e) => { e.preventDefault(); submitOtp(otpCode); }} className="space-y-5">
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label htmlFor="otp-code" className="block text-xs font-semibold text-gray-700">
+                      Code <span className="text-red-500">*</span>
+                    </label>
+                    <button type="button" onClick={pasteOtp} disabled={isSubmitting} className="py-2.5 sm:py-0 text-xs text-blue-500 hover:underline font-normal">
+                      Paste
+                    </button>
+                  </div>
+                  <input
+                    id="otp-code"
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    autoFocus
+                    value={otpCode}
+                    onChange={(e) => handleOtpChange(e.target.value)}
+                    placeholder="6-digit code"
+                    maxLength={12}
+                    className="w-full px-3.5 py-2.5 border border-gray-300 rounded-md text-base sm:text-xs placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+
+                <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={trustDevice}
+                    onChange={(e) => setTrustDevice(e.target.checked)}
+                    className="h-3.5 w-3.5 rounded border-gray-300"
+                  />
+                  Trust this device for 30 days
+                </label>
+
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="w-full min-h-11 sm:min-h-0 bg-[#0B1E6E] hover:bg-[#081650] disabled:opacity-60 text-white font-medium py-2.5 rounded-md text-sm transition-colors mt-8 shadow-sm"
+                >
+                  {isSubmitting ? "Verifying..." : "Continue"}
+                </button>
+
+                <div className="flex items-center justify-between text-xs">
+                  <button type="button" onClick={leaveOtp} className="py-2.5 sm:py-0 text-blue-500 hover:underline font-normal">
+                    Back to sign in
+                  </button>
+                  {resendWait > 0 ? (
+                    <span className="py-2.5 sm:py-0 text-gray-400">Resend code in {resendWait}s</span>
+                  ) : (
+                    <button type="button" onClick={handleResendOtp} className="py-2.5 sm:py-0 text-blue-500 hover:underline font-normal">
+                      Resend code
+                    </button>
+                  )}
+                </div>
+              </form>
+            </div>
+          ) : !isResetRequired ? (
             /* Login Form Container with precise border box */
             <div className="border border-gray-300 rounded-lg p-8 sm:p-12 bg-white shadow-sm space-y-7">
 

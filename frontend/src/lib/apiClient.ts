@@ -159,13 +159,36 @@ export interface ApiUser {
   must_reset_password: boolean;
 }
 
-export async function apiLogin(email: string, password: string): Promise<ApiUser> {
-  const data = await request<{ accessToken: string; user: ApiUser }>("/api/v1/auth/login", {
+// A correct password either signs in, or — on a device that isn't trusted
+// yet — the server emails a 6-digit code and answers otpRequired; the code
+// then goes to apiVerifyLoginOtp.
+export type ApiLoginResult =
+  | { otpRequired: false; user: ApiUser }
+  | { otpRequired: true; challengeId: string; maskedEmail: string };
+
+export async function apiLogin(email: string, password: string): Promise<ApiLoginResult> {
+  const data = await request<
+    { otpRequired: true; challengeId: string; email: string } | { otpRequired?: false; accessToken: string; user: ApiUser }
+  >("/api/v1/auth/login", {
     method: "POST",
     body: JSON.stringify({ email, password })
   });
+  if (data.otpRequired) return { otpRequired: true, challengeId: data.challengeId, maskedEmail: data.email };
+  setAccessToken(data.accessToken);
+  return { otpRequired: false, user: data.user };
+}
+
+export async function apiVerifyLoginOtp(challengeId: string, code: string, trustDevice: boolean): Promise<ApiUser> {
+  const data = await request<{ accessToken: string; user: ApiUser }>("/api/v1/auth/login/verify-otp", {
+    method: "POST",
+    body: JSON.stringify({ challengeId, code, trustDevice })
+  });
   setAccessToken(data.accessToken);
   return data.user;
+}
+
+export async function apiResendLoginOtp(challengeId: string): Promise<void> {
+  await request("/api/v1/auth/login/resend-otp", { method: "POST", body: JSON.stringify({ challengeId }) });
 }
 
 // "Sign in with Google": sends the ID token Google gave the browser; the
