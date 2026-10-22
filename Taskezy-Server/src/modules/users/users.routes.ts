@@ -8,7 +8,7 @@ import { AccessTokenPayload } from "../../utils/tokens";
 import { hashPassword } from "../../utils/password";
 import { createUserSchema, deleteUserSchema, editUserSchema, listUsersQuerySchema, resetPasswordSchema, userIdParamSchema, updateOwnEodReportTimeSchema } from "./users.schema";
 import * as repo from "./users.repository";
-import { withTransaction } from "../../db/pool";
+import { pool, withTransaction } from "../../db/pool";
 import * as leadsRepo from "../leads/leads.repository";
 import * as leadsService from "../leads/leads.service";
 import { broadcastLeadChanged } from "../leads/leads.realtime";
@@ -188,6 +188,22 @@ usersRouter.get(
       // Team members whose "Reports to" will be cleared (admin re-assigns it after).
       reportNames: await repo.findDirectReportNames(req.params.id)
     });
+  })
+);
+
+// Admin-only — Settings > Manage Users' per-user registered-device list
+// (push-notification devices, same table push.service.ts reads from).
+usersRouter.get(
+  "/:id/devices",
+  requireRole("ADMIN"),
+  validate({ params: userIdParamSchema }),
+  asyncHandler(async (req, res) => {
+    const { rows } = await pool.query<{ device_name: string | null; platform: string; created_at: string; last_seen_at: string }>(
+      `SELECT device_name, platform, created_at, last_seen_at
+       FROM user_devices WHERE user_id = $1 ORDER BY last_seen_at DESC`,
+      [req.params.id]
+    );
+    sendOk(res, rows);
   })
 );
 

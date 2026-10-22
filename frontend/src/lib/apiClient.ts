@@ -1435,12 +1435,24 @@ export function apiGetNotificationCounts(): Promise<NotificationCounts> {
 }
 
 // Phone push tokens, for notifications while the app is closed or locked.
-export function apiRegisterDevice(token: string, platform: "android" | "ios" = "android"): Promise<{ registered: boolean }> {
-  return request<{ registered: boolean }>("/api/v1/devices", { method: "POST", body: JSON.stringify({ token, platform }) });
+export function apiRegisterDevice(token: string, platform: "android" | "ios" = "android", deviceName?: string): Promise<{ registered: boolean }> {
+  return request<{ registered: boolean }>("/api/v1/devices", { method: "POST", body: JSON.stringify({ token, platform, deviceName }) });
 }
 
 export function apiRemoveDevice(token: string): Promise<{ removed: boolean }> {
   return request<{ removed: boolean }>(`/api/v1/devices/${encodeURIComponent(token)}`, { method: "DELETE" });
+}
+
+// Admin-only — Settings > Manage Users' per-user registered-device list.
+export interface ApiUserDevice {
+  device_name: string | null;
+  platform: string;
+  created_at: string;
+  last_seen_at: string;
+}
+
+export function apiListUserDevices(userId: string): Promise<ApiUserDevice[]> {
+  return request<ApiUserDevice[]>(`/api/v1/users/${userId}/devices`);
 }
 
 // Real server-side pagination for NotificationBell's dropdown — each of its

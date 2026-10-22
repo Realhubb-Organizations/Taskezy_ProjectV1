@@ -12,7 +12,9 @@ import {
   apiListGoogleAdsAccounts,
   ApiGoogleAdsAccount,
   apiListUsersPage,
-  apiAnnounceToEveryone
+  apiAnnounceToEveryone,
+  apiListUserDevices,
+  type ApiUserDevice
 } from "@/lib/apiClient";
 import { isNotificationSoundMuted, setNotificationSoundMuted } from "@/lib/notificationSound";
 import {
@@ -20,6 +22,7 @@ import {
   Plus,
   X,
   Edit,
+  Smartphone,
   Eye,
   EyeOff,
   CheckCircle,
@@ -546,6 +549,25 @@ export default function SettingsPage() {
     map.forEach(list => list.sort((a, b) => a.name.localeCompare(b.name)));
     return map;
   }, [users]);
+
+  // Each user's registered (push-notification) devices — fetched lazily on
+  // first expand, cached per user after that rather than re-fetched on
+  // every toggle. Web-only users (never opened the native app) correctly
+  // come back empty, not an error.
+  const [expandedDevicesUserId, setExpandedDevicesUserId] = useState<string | null>(null);
+  const [userDevicesCache, setUserDevicesCache] = useState<Record<string, ApiUserDevice[]>>({});
+  const [loadingDevicesUserId, setLoadingDevicesUserId] = useState<string | null>(null);
+  const toggleDevicesExpand = (userId: string) => {
+    const next = expandedDevicesUserId === userId ? null : userId;
+    setExpandedDevicesUserId(next);
+    if (next && !userDevicesCache[next]) {
+      setLoadingDevicesUserId(next);
+      apiListUserDevices(next)
+        .then(devices => setUserDevicesCache(prev => ({ ...prev, [next]: devices })))
+        .catch(() => setUserDevicesCache(prev => ({ ...prev, [next]: [] })))
+        .finally(() => setLoadingDevicesUserId(null));
+    }
+  };
 
   useEffect(() => {
     if (activeTab !== "Manage Users") return;
@@ -1582,6 +1604,20 @@ export default function SettingsPage() {
                       </div>
 
                       <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                        {activeRole === "ADMIN" && (
+                          <button
+                            onClick={() => toggleDevicesExpand(user.id)}
+                            aria-expanded={expandedDevicesUserId === user.id}
+                            className={`p-2 rounded-lg border transition-colors ${
+                              expandedDevicesUserId === user.id
+                                ? "text-[#0B1E6E] bg-[#F4F6FC] border-[#0B1E6E]/40"
+                                : "text-slate-500 hover:text-brand-700 hover:bg-slate-50 border-slate-200"
+                            }`}
+                            title="Registered devices"
+                          >
+                            <Smartphone className="h-4 w-4" />
+                          </button>
+                        )}
                         {user.role !== "ADMIN" || activeRole === "ADMIN" ? (
                           <button
                             onClick={() => handleEditClick(user)}
@@ -1593,6 +1629,38 @@ export default function SettingsPage() {
                         ) : null}
                       </div>
                     </div>
+
+                    {/* Devices dropdown — same slide-open pattern as the Team
+                        dropdown below; fetched lazily by toggleDevicesExpand. */}
+                    {activeRole === "ADMIN" && (
+                      <div className={`grid transition-[grid-template-rows] duration-300 ease-out ${expandedDevicesUserId === user.id ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
+                        <div className="overflow-hidden">
+                          <div className="border-t border-slate-100 bg-slate-50/70 px-4 py-3">
+                            {loadingDevicesUserId === user.id ? (
+                              <p className="text-[11px] text-slate-400 italic py-1">Loading devices…</p>
+                            ) : (userDevicesCache[user.id]?.length ?? 0) === 0 ? (
+                              <p className="text-[11px] text-slate-400 italic py-1">No registered devices for {user.name} yet.</p>
+                            ) : (
+                              <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                                {userDevicesCache[user.id]!.map((d, i) => (
+                                  <li key={i} className="flex items-center gap-2.5 min-w-0 bg-white border border-slate-200 rounded-xl px-3 py-2">
+                                    <div className="h-7 w-7 rounded-full bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-700 shrink-0">
+                                      <Smartphone className="h-3.5 w-3.5" />
+                                    </div>
+                                    <div className="min-w-0">
+                                      <p className="text-xs font-bold text-slate-800 truncate">{d.device_name || "Unknown device"}</p>
+                                      <p className="text-[10px] text-slate-500 truncate">
+                                        {d.platform} · active {new Date(d.last_seen_at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                                      </p>
+                                    </div>
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
                     {/* Team dropdown — slides open by animating the grid row from 0fr to 1fr */}
                     {showTeam && (
