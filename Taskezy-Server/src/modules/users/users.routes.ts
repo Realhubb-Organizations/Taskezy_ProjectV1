@@ -193,10 +193,11 @@ usersRouter.get(
 
 // Admin-only — Settings > Manage Users' per-user registered-device list.
 // Two real sources, merged: user_devices (native app, push-token
-// registrations) and trusted_devices (web — only browsers the user
-// actually checked "trust this device" for during password+OTP login;
-// a plain login that never checked that box leaves no record, by the
-// user's own explicit choice not to build broader login-session tracking).
+// registrations) and login_history (every web login, password or Google,
+// regardless of whether "trust this device" was ever checked — grouped by
+// device_label so repeated logins from the same browser collapse into one
+// row with a real first-seen/last-active pair, same shape user_devices
+// already has).
 usersRouter.get(
   "/:id/devices",
   requireRole("ADMIN"),
@@ -206,8 +207,9 @@ usersRouter.get(
       `SELECT device_name, platform, created_at, last_seen_at, 'app' AS source
        FROM user_devices WHERE user_id = $1
        UNION ALL
-       SELECT device_label AS device_name, 'web' AS platform, created_at, last_used_at AS last_seen_at, 'web' AS source
-       FROM trusted_devices WHERE user_id = $1 AND expires_at > now()
+       SELECT device_label AS device_name, 'web' AS platform, min(created_at) AS created_at, max(created_at) AS last_seen_at, 'web' AS source
+       FROM login_history WHERE user_id = $1
+       GROUP BY device_label
        ORDER BY last_seen_at DESC`,
       [req.params.id]
     );
