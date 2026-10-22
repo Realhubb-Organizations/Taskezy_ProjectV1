@@ -65,15 +65,35 @@ callLogRouter.post(
       return;
     }
 
-    const userIds = entries.map(() => req.user!.sub);
     // Normalize for lead-matching (see the GET endpoint below), same as
     // every other external phone-number ingest point in this codebase —
-    // but a landline or malformed number must still be stored, just
-    // unnormalized, rather than dropped from the sync.
-    const phoneNumbers = entries.map(e => normalizeIndianMobile(e.phoneNumber) ?? e.phoneNumber.trim());
-    const callTypes = entries.map(e => e.callType);
-    const callDates = entries.map(e => e.callDate);
-    const durations = entries.map(e => e.durationSeconds);
+    // but a landline or malformed number can never match a lead anyway, so
+    // it's filtered out below along with every other non-lead number.
+    const normalized = entries.map(e => normalizeIndianMobile(e.phoneNumber) ?? e.phoneNumber.trim());
+
+    // Privacy: a device's call history is personal data for every number
+    // that isn't an actual CRM lead — this app has no business persisting
+    // (or ever showing an admin/manager) someone's personal calls, so only
+    // lead-matching numbers get stored at all.
+    const { rows: matchedLeadPhones } = await pool.query<{ phone: string }>(
+      `SELECT DISTINCT phone FROM leads WHERE phone = ANY($1::text[])`,
+      [[...new Set(normalized)]]
+    );
+    const matchedPhones = new Set(matchedLeadPhones.map(r => r.phone));
+    const matched = entries
+      .map((e, i) => ({ entry: e, phone: normalized[i] }))
+      .filter(({ phone }) => matchedPhones.has(phone));
+
+    if (matched.length === 0) {
+      sendOk(res, { received: entries.length, inserted: 0 }, 201);
+      return;
+    }
+
+    const userIds = matched.map(() => req.user!.sub);
+    const phoneNumbers = matched.map(m => m.phone);
+    const callTypes = matched.map(m => m.entry.callType);
+    const callDates = matched.map(m => m.entry.callDate);
+    const durations = matched.map(m => m.entry.durationSeconds);
 
     // Same unnest-backed multi-row INSERT pattern as leads.repository.ts's
     // createBulkLeadsChunk — one round trip for the whole batch instead of
@@ -102,11 +122,15 @@ const listCallLogQuerySchema = z.object({
 
 // leads.phone is already stored normalized to a bare 10-digit mobile (see
 // normalizeIndianMobile's own comment in leads.repository.ts), and
-// device_call_log.phone_number is normalized the same way at insert time
-// above — so a plain equality join is enough to link a call to a lead by
-// phone number, no live re-normalization needed on every query. A number
-// that couldn't be normalized (landline/malformed) just won't match any
-// lead, which is correct: those were never going to match anyway.
+// device_call_log.phone_number is normalized the same way at insert time —
+// so a plain equality join is enough to link a call to a lead by phone
+// number, no live re-normalization needed on every query.
+//
+// INNER join, deliberately: the sync endpoint above only ever stores
+// lead-matching numbers now (privacy — a device's personal call history for
+// non-lead numbers has no business being shown to an admin/manager), so
+// every remaining row should already have a match. The inner join is a
+// defense-in-depth filter for anything that slipped in before that change.
 const LIST_SELECT = `
   SELECT
     dcl.id,
@@ -120,7 +144,7 @@ const LIST_SELECT = `
     dcl.duration_seconds
   FROM device_call_log dcl
   JOIN users u ON u.id = dcl.user_id
-  LEFT JOIN leads l ON l.phone = dcl.phone_number
+  JOIN leads l ON l.phone = dcl.phone_number
 `;
 
 callLogRouter.get(
@@ -152,7 +176,10 @@ callLogRouter.get(
     }
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
-    const countResult = await query<{ count: string }>(`SELECT count(*) FROM device_call_log dcl ${whereClause}`, params);
+    const countResult = await query<{ count: string }>(
+      `SELECT count(*) FROM device_call_log dcl JOIN leads l ON l.phone = dcl.phone_number ${whereClause}`,
+      params
+    );
     const totalCount = Number(countResult.rows[0]?.count ?? 0);
 
     const offset = (page - 1) * pageSize;

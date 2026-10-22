@@ -8,7 +8,7 @@ import { AccessTokenPayload } from "../../utils/tokens";
 import { hashPassword } from "../../utils/password";
 import { createUserSchema, deleteUserSchema, editUserSchema, listUsersQuerySchema, resetPasswordSchema, userIdParamSchema, updateOwnEodReportTimeSchema } from "./users.schema";
 import * as repo from "./users.repository";
-import { withTransaction } from "../../db/pool";
+import { pool, withTransaction } from "../../db/pool";
 import * as leadsRepo from "../leads/leads.repository";
 import * as leadsService from "../leads/leads.service";
 import { broadcastLeadChanged } from "../leads/leads.realtime";
@@ -188,6 +188,32 @@ usersRouter.get(
       // Team members whose "Reports to" will be cleared (admin re-assigns it after).
       reportNames: await repo.findDirectReportNames(req.params.id)
     });
+  })
+);
+
+// Admin-only — Settings > Manage Users' per-user registered-device list.
+// Two real sources, merged: user_devices (native app, push-token
+// registrations) and login_history (every web login, password or Google,
+// regardless of whether "trust this device" was ever checked — grouped by
+// device_label so repeated logins from the same browser collapse into one
+// row with a real first-seen/last-active pair, same shape user_devices
+// already has).
+usersRouter.get(
+  "/:id/devices",
+  requireRole("ADMIN"),
+  validate({ params: userIdParamSchema }),
+  asyncHandler(async (req, res) => {
+    const { rows } = await pool.query<{ device_name: string | null; platform: string; created_at: string; last_seen_at: string; source: "app" | "web" }>(
+      `SELECT device_name, platform, created_at, last_seen_at, 'app' AS source
+       FROM user_devices WHERE user_id = $1
+       UNION ALL
+       SELECT device_label AS device_name, 'web' AS platform, min(created_at) AS created_at, max(created_at) AS last_seen_at, 'web' AS source
+       FROM login_history WHERE user_id = $1
+       GROUP BY device_label
+       ORDER BY last_seen_at DESC`,
+      [req.params.id]
+    );
+    sendOk(res, rows);
   })
 );
 

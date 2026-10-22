@@ -14,7 +14,8 @@ const tokenSchema = z.string().min(1).max(4096);
 
 const registerSchema = z.object({
   token: tokenSchema,
-  platform: z.enum(["android", "ios"]).default("android")
+  platform: z.enum(["android", "ios"]).default("android"),
+  deviceName: z.string().max(200).optional()
 });
 
 // A token belongs to whichever user registered it last (e.g. shared phone),
@@ -23,15 +24,16 @@ devicesRouter.post(
   "/",
   validate({ body: registerSchema }),
   asyncHandler(async (req, res) => {
-    const { token, platform } = req.body as z.infer<typeof registerSchema>;
+    const { token, platform, deviceName } = req.body as z.infer<typeof registerSchema>;
     await query(
-      `INSERT INTO user_devices (user_id, token, platform, last_seen_at)
-       VALUES ($1, $2, $3, now())
+      `INSERT INTO user_devices (user_id, token, platform, device_name, last_seen_at)
+       VALUES ($1, $2, $3, $4, now())
        ON CONFLICT (token) DO UPDATE SET
          user_id = EXCLUDED.user_id,
          platform = EXCLUDED.platform,
+         device_name = EXCLUDED.device_name,
          last_seen_at = now()`,
-      [req.user!.sub, token, platform]
+      [req.user!.sub, token, platform, deviceName ?? null]
     );
     sendOk(res, { registered: true }, 201);
   })

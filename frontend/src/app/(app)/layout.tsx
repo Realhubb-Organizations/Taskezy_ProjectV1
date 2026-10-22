@@ -6,6 +6,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Capacitor } from "@capacitor/core";
 import { PushNotifications } from "@capacitor/push-notifications";
+import { Device } from "@capacitor/device";
 import { useApp, SystemType, CRM_ONLY_MODE } from "@/context/AppContext";
 import { apiRegisterDevice, apiRemoveDevice } from "@/lib/apiClient";
 import NotificationBell from "@/components/dashboard/NotificationBell";
@@ -259,7 +260,13 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     const handles: Promise<{ remove: () => Promise<void> }>[] = [];
     handles.push(PushNotifications.addListener("registration", (token) => {
       pushTokenRef.current = token.value;
-      apiRegisterDevice(token.value, "android").catch(() => {});
+      // Best-effort — a real device name is a nicety for Settings' per-user
+      // device list, not required for push delivery itself, so a failure
+      // here still registers the token with no name rather than failing.
+      Device.getInfo()
+        .then((info) => `${info.manufacturer} ${info.model}`.trim())
+        .catch(() => undefined)
+        .then((deviceName) => apiRegisterDevice(token.value, "android", deviceName).catch(() => {}));
     }));
     handles.push(PushNotifications.addListener("registrationError", (err) => {
       console.warn("Push registration failed:", err);

@@ -68,6 +68,17 @@ async function issueTokenPair(
   return { accessToken, refreshToken };
 }
 
+// Every successful login, regardless of method or whether the device was
+// ever "trusted" — Settings > Manage Users' device list reads this.
+// Best-effort: a failure here must never block an otherwise-successful
+// login.
+async function recordLogin(userId: string, method: "PASSWORD" | "GOOGLE", userAgent: string | undefined): Promise<void> {
+  await query(
+    `INSERT INTO login_history (user_id, device_label, method) VALUES ($1, $2, $3)`,
+    [userId, loginOtp.describeDevice(userAgent), method]
+  ).catch(err => logger.error({ err, userId }, "Could not record login history"));
+}
+
 // A correct password either signs in straight away (trusted device, or email
 // OTP switched off) or starts an email OTP challenge — see loginOtp.ts.
 export type LoginOutcome =
@@ -107,6 +118,7 @@ export async function login(
   }
 
   const { accessToken, refreshToken } = await issueTokenPair(user);
+  await recordLogin(user.id, "PASSWORD", userAgent);
   return { otpRequired: false, auth: { accessToken, refreshToken, user: stripPasswordHash(user) } };
 }
 
@@ -128,6 +140,7 @@ export async function completeOtpLogin(
 
   const { accessToken, refreshToken } = await issueTokenPair(user);
   const trustedDeviceToken = trustThisDevice ? await loginOtp.trustDevice(user.id, userAgent) : null;
+  await recordLogin(user.id, "PASSWORD", userAgent);
   return { auth: { accessToken, refreshToken, user: stripPasswordHash(user) }, trustedDeviceToken };
 }
 
@@ -144,7 +157,7 @@ const googleClient = new OAuth2Client();
 
 const USER_COLUMNS = `id, first_name, last_name, email, role, department, role_type, designation, status, password_hash, must_reset_password`;
 
-export async function loginWithGoogle(credential: string): Promise<AuthResult> {
+export async function loginWithGoogle(credential: string, userAgent: string | undefined): Promise<AuthResult> {
   if (!env.GOOGLE_SIGNIN_CLIENT_ID) {
     throw ApiError.badRequest("Google sign-in is not set up yet.");
   }
@@ -209,6 +222,7 @@ export async function loginWithGoogle(credential: string): Promise<AuthResult> {
   const { google_sub: _googleSub, match: _match, ...user } = best;
   const signedIn = { ...user, must_reset_password: false };
   const { accessToken, refreshToken } = await issueTokenPair(signedIn);
+  await recordLogin(signedIn.id, "GOOGLE", userAgent);
   return { accessToken, refreshToken, user: stripPasswordHash(signedIn) };
 }
 

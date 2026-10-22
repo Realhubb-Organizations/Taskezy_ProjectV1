@@ -64,7 +64,7 @@ export async function resendLoginOtpHandler(req: Request, res: Response): Promis
 
 // Same response and refresh cookie as a password login.
 export async function googleLoginHandler(req: Request, res: Response): Promise<void> {
-  const result = await authService.loginWithGoogle(req.body.credential);
+  const result = await authService.loginWithGoogle(req.body.credential, req.get("user-agent"));
   setRefreshCookie(res, result.refreshToken);
   sendOk(res, { accessToken: result.accessToken, user: result.user });
 }
