@@ -150,7 +150,7 @@ function buildLeadWhereClause(filter: LeadFilterConditions): { whereClause: stri
   if (filter.missedOnly) {
     params.push(filter.slaMinutes);
     const slaParam = params.length;
-    conditions.push(`l.assigned_at IS NOT NULL AND (
+    conditions.push(`l.source <> 'Bulk Upload' AND l.assigned_at IS NOT NULL AND (
       (l.first_response_at IS NOT NULL AND EXTRACT(EPOCH FROM (l.first_response_at - l.assigned_at)) / 60 > $${slaParam}::numeric)
       OR (l.first_response_at IS NULL AND EXTRACT(EPOCH FROM (now() - l.assigned_at)) / 60 > $${slaParam}::numeric)
     )`);
@@ -346,7 +346,7 @@ export async function getAgentReportStats(
             count(*) FILTER (WHERE l.status_code = 'BOOKED') AS booking_count,
             COALESCE(SUM(c.spend_per_lead), 0) AS allocated_spend,
             count(*) FILTER (
-              WHERE l.assigned_at IS NOT NULL AND (
+              WHERE l.source <> 'Bulk Upload' AND l.assigned_at IS NOT NULL AND (
                 (l.first_response_at IS NOT NULL AND EXTRACT(EPOCH FROM (l.first_response_at - l.assigned_at)) / 60 > $${slaParam}::numeric)
                 OR (l.first_response_at IS NULL AND EXTRACT(EPOCH FROM (now() - l.assigned_at)) / 60 > $${slaParam}::numeric)
               )
@@ -471,7 +471,7 @@ export async function getManagerReportStatsByAgent(
             COALESCE(SUM(c.spend_per_lead), 0) AS spend,
             COALESCE(SUM(l.deal_value) FILTER (WHERE l.status_code = 'BOOKED'), 0) AS booking_value,
             count(*) FILTER (
-              WHERE l.assigned_at IS NOT NULL AND (
+              WHERE l.source <> 'Bulk Upload' AND l.assigned_at IS NOT NULL AND (
                 (l.first_response_at IS NOT NULL AND EXTRACT(EPOCH FROM (l.first_response_at - l.assigned_at)) / 60 > $${slaParam}::numeric)
                 OR (l.first_response_at IS NULL AND EXTRACT(EPOCH FROM (now() - l.assigned_at)) / 60 > $${slaParam}::numeric)
               )

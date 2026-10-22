@@ -42,6 +42,7 @@ async function notifyMissedLeads(): Promise<void> {
        AND l.assigned_at IS NOT NULL
        AND l.assigned_at <= now() - interval '${SLA_MINUTES} minutes'
        AND l.missed_notified_at IS NULL
+       AND l.source <> 'Bulk Upload'
      RETURNING l.id, l.name, l.assigned_agent_id,
                u.first_name || COALESCE(' ' || u.last_name, '') AS agent_name,
                u.manager_id`

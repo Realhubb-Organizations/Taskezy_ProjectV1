@@ -126,7 +126,7 @@ export interface MissedInfo {
 
 // A lead is "missed" when no status update occurred within the 20-minute SLA window after assignment
 export function getMissedInfo(lead: Lead): MissedInfo {
-  if (!lead.assignedAt) return { missed: false };
+  if (!lead.assignedAt || lead.source === "Bulk Upload") return { missed: false };
   const assignedTime = new Date(lead.assignedAt).getTime();
   if (lead.firstResponseAt) {
     const responseMinutes = (new Date(lead.firstResponseAt).getTime() - assignedTime) / 60000;
