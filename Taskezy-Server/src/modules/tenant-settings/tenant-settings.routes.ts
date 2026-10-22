@@ -27,7 +27,8 @@ const updateSchema = z.object({
   geofenceRadiusMeters: z.number().int().positive().optional(),
   halfDayThresholdHours: z.number().positive().max(24).optional(),
   gstRate: z.number().min(0).max(100).optional(),
-  invoiceDueDays: z.number().int().positive().optional()
+  invoiceDueDays: z.number().int().positive().optional(),
+  eodReportTime: z.string().regex(/^\d{2}:\d{2}$/, "eodReportTime must be HH:mm").optional()
 });
 
 // Admin-only — these drive real business rules (geofence enforcement,
@@ -44,7 +45,8 @@ tenantSettingsRouter.patch(
       geofence_radius_meters: req.body.geofenceRadiusMeters,
       half_day_threshold_hours: req.body.halfDayThresholdHours,
       gst_rate: req.body.gstRate,
-      invoice_due_days: req.body.invoiceDueDays
+      invoice_due_days: req.body.invoiceDueDays,
+      eod_report_time: req.body.eodReportTime
     };
     const entries = Object.entries(fields).filter(([, v]) => v !== undefined);
     if (entries.length > 0) {

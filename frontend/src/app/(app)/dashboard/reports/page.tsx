@@ -2,15 +2,16 @@
 
 import React, { Suspense, useState } from "react";
 import { useApp } from "@/context/AppContext";
+import { useDialog } from "@/components/ui/DialogProvider";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Download, Megaphone, Users, UserCog, AlertTriangle } from "lucide-react";
+import { Download, Megaphone, Users, UserCog, AlertTriangle, Clock } from "lucide-react";
 import DateRangeFilter, { DateRange } from "@/components/reports/DateRangeFilter";
 import MarketingReports from "@/components/reports/MarketingReports";
 import ManagerReports from "@/components/reports/ManagerReports";
 import AgentReports from "@/components/reports/AgentReports";
 import { todayIso, toIsoDate } from "@/components/ui/DateRangePicker";
 import { maskPhone, maskEmail } from "@/lib/maskPII";
-import { apiListAllLeads } from "@/lib/apiClient";
+import { apiListAllLeads, apiUpdateMyEodReportTime } from "@/lib/apiClient";
 
 const MAIN_TABS = [
   { key: "marketing", label: "Marketing Reports", icon: Megaphone },
@@ -29,10 +30,12 @@ function daysAgo(n: number): string {
 }
 
 function ReportsPageContent() {
-  const { currentUser, activeRole, isDataLoading, dataLoadError, triggerManualRefresh } = useApp();
+  const { currentUser, activeRole, isDataLoading, dataLoadError, triggerManualRefresh, tenantSettings, updateTenantSettings } = useApp();
+  const { toast } = useDialog();
   const router = useRouter();
   const searchParams = useSearchParams();
   const isAdmin = activeRole === "ADMIN";
+  const isManager = !isAdmin && currentUser?.role_type === "Manager";
 
   // Marketing spend/CPL/campaign data and other managers' team performance
   // aren't a Manager's or Member's concern — hide both tabs entirely for
@@ -79,6 +82,39 @@ function ReportsPageContent() {
     }
   };
 
+  // Admin's company-wide default EOD report time (Sales Agent Reports tab) —
+  // bound to tenantSettings, same read/save pattern as every other
+  // tenant-settings field elsewhere in the app.
+  const [eodTimeInput, setEodTimeInput] = useState("");
+  const [savingEodTime, setSavingEodTime] = useState(false);
+  const handleSaveEodTime = async () => {
+    if (!eodTimeInput || savingEodTime) return;
+    setSavingEodTime(true);
+    const result = await updateTenantSettings({ eodReportTime: eodTimeInput });
+    setSavingEodTime(false);
+    if (result.success) toast("Company default EOD report time saved.", "success");
+    else toast(result.error || "Could not save the EOD report time. Please try again.", "error");
+  };
+
+  // Manager's own override for their team's EOD time — write-only (no
+  // pre-fill from the current value, keeping this a small, self-contained
+  // control instead of threading a new field through the User model/login
+  // response just to echo it back).
+  const [managerEodTimeInput, setManagerEodTimeInput] = useState("");
+  const [savingManagerEodTime, setSavingManagerEodTime] = useState(false);
+  const handleSaveManagerEodTime = async () => {
+    if (!managerEodTimeInput || savingManagerEodTime) return;
+    setSavingManagerEodTime(true);
+    try {
+      await apiUpdateMyEodReportTime(managerEodTimeInput);
+      toast("Your team's EOD report time saved.", "success");
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Could not save the EOD report time. Please try again.", "error");
+    } finally {
+      setSavingManagerEodTime(false);
+    }
+  };
+
   return (
     <div className="space-y-4 pb-12 animate-fade-in">
       {/* Main section tabs — same segmented pill switcher as the Leads and
@@ -113,6 +149,49 @@ function ReportsPageContent() {
             <Download className="h-4 w-4" />
             {exportingCSV ? "Exporting…" : "Export Leads CSV"}
           </button>
+        )}
+        {/* End of Day report time — Admin sets the company-wide default,
+            Manager sets their own team's override. Only on the Sales Agent
+            Reports tab, since that's what these notifications are about. */}
+        {activeTab === "agent" && isAdmin && (
+          <div className="inline-flex items-center gap-1.5 bg-white border border-slate-300/80 rounded-xl px-3 h-9 shadow-2xs" title="Company-wide default time agents get their 'calls made today' notification">
+            <Clock className="h-3.5 w-3.5 text-slate-500" />
+            <span className="text-[11px] font-bold text-slate-500">EOD Time</span>
+            <input
+              type="time"
+              value={eodTimeInput || tenantSettings?.eodReportTime?.slice(0, 5) || ""}
+              onChange={(e) => setEodTimeInput(e.target.value)}
+              className="text-xs font-semibold text-slate-700 bg-transparent focus:outline-none"
+            />
+            <button
+              type="button"
+              onClick={handleSaveEodTime}
+              disabled={!eodTimeInput || savingEodTime}
+              className="text-[11px] font-bold text-[#0B1E6E] hover:underline disabled:opacity-40 disabled:no-underline"
+            >
+              {savingEodTime ? "Saving…" : "Save"}
+            </button>
+          </div>
+        )}
+        {activeTab === "agent" && isManager && (
+          <div className="inline-flex items-center gap-1.5 bg-white border border-slate-300/80 rounded-xl px-3 h-9 shadow-2xs" title="Your own override for when your team's EOD report arrives — leave unset to use the company default">
+            <Clock className="h-3.5 w-3.5 text-slate-500" />
+            <span className="text-[11px] font-bold text-slate-500">Your Team&apos;s EOD Time</span>
+            <input
+              type="time"
+              value={managerEodTimeInput}
+              onChange={(e) => setManagerEodTimeInput(e.target.value)}
+              className="text-xs font-semibold text-slate-700 bg-transparent focus:outline-none"
+            />
+            <button
+              type="button"
+              onClick={handleSaveManagerEodTime}
+              disabled={!managerEodTimeInput || savingManagerEodTime}
+              className="text-[11px] font-bold text-[#0B1E6E] hover:underline disabled:opacity-40 disabled:no-underline"
+            >
+              {savingManagerEodTime ? "Saving…" : "Save"}
+            </button>
+          </div>
         )}
         </div>
       </div>

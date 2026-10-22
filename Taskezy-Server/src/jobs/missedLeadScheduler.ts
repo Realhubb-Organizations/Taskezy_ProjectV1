@@ -42,6 +42,7 @@ async function notifyMissedLeads(): Promise<void> {
        AND l.assigned_at IS NOT NULL
        AND l.assigned_at <= now() - interval '${SLA_MINUTES} minutes'
        AND l.missed_notified_at IS NULL
+       AND l.source <> 'Bulk Upload'
      RETURNING l.id, l.name, l.assigned_agent_id,
                u.first_name || COALESCE(' ' || u.last_name, '') AS agent_name,
                u.manager_id`
@@ -55,34 +56,69 @@ async function notifyMissedLeads(): Promise<void> {
   // which always notifies every active admin for the same reason.
   const adminIds = await listActiveAdminIds();
 
+  // Grouped by recipient BEFORE any createNotification call — one notification
+  // per recipient per poll cycle, not one per (lead x recipient) pair. Without
+  // this, an agent (or an escalated manager/admin) with 3 leads crossing the
+  // threshold in the same ~60s cycle got 3 separate notifications/pushes;
+  // the frontend's sound debounce only coalesces playback on an already-open
+  // tab, it can't fix 3 separate bell entries or 3 separate OS push popups.
+  const leadsByAgent = new Map<string, MissedLead[]>();
   for (const row of rows) {
+    const list = leadsByAgent.get(row.assigned_agent_id) ?? [];
+    list.push(row);
+    leadsByAgent.set(row.assigned_agent_id, list);
+  }
+
+  const quoteList = (leads: MissedLead[]) => leads.map(l => `"${l.name}"`).join(", ");
+
+  for (const [agentId, leads] of leadsByAgent) {
     await createNotification({
       system: "CRM",
       category: "MISSED_SLA",
-      title: "Lead Missed SLA",
-      message: `"${row.name}" has had no response within ${SLA_MINUTES} minutes of assignment.`,
-      recipientUserId: row.assigned_agent_id,
-      leadId: row.id,
+      title: leads.length === 1 ? "Lead Missed SLA" : `${leads.length} Leads Missed SLA`,
+      message: leads.length === 1
+        ? `"${leads[0].name}" has had no response within ${SLA_MINUTES} minutes of assignment.`
+        : `${leads.length} leads have had no response within ${SLA_MINUTES} minutes of assignment: ${quoteList(leads)}.`,
+      recipientUserId: agentId,
+      leadId: leads.length === 1 ? leads[0].id : undefined,
       link: "/dashboard/crm"
     });
+  }
 
-    // Manager (if any) + every active admin, deduplicated so someone who is
-    // both doesn't get notified twice.
+  // Escalation: manager (if any) + every active admin, per agent, deduplicated
+  // against the agent themselves — grouped the same way, by recipient -> agent
+  // -> their leads this cycle, so one admin notifying 3 different agents'
+  // misses in one cycle still gets just one notification, not three.
+  const escalationByRecipient = new Map<string, Map<string, MissedLead[]>>();
+  for (const [agentId, leads] of leadsByAgent) {
     const escalationRecipients = new Set<string>(adminIds);
-    if (row.manager_id) escalationRecipients.add(row.manager_id);
-    escalationRecipients.delete(row.assigned_agent_id);
+    const managerId = leads[0].manager_id;
+    if (managerId) escalationRecipients.add(managerId);
+    escalationRecipients.delete(agentId);
 
     for (const recipientId of escalationRecipients) {
-      await createNotification({
-        system: "CRM",
-        category: "MISSED_SLA",
-        title: "Team Lead Missed SLA",
-        message: `${row.agent_name} hasn't responded to "${row.name}" within ${SLA_MINUTES} minutes.`,
-        recipientUserId: recipientId,
-        leadId: row.id,
-        link: "/dashboard/reports"
-      });
+      let byAgent = escalationByRecipient.get(recipientId);
+      if (!byAgent) { byAgent = new Map(); escalationByRecipient.set(recipientId, byAgent); }
+      byAgent.set(agentId, leads);
     }
+  }
+
+  for (const [recipientId, byAgent] of escalationByRecipient) {
+    const agentGroups = [...byAgent.values()];
+    const totalLeads = agentGroups.reduce((sum, leads) => sum + leads.length, 0);
+    const parts = agentGroups.map(leads =>
+      leads.length === 1
+        ? `${leads[0].agent_name} hasn't responded to "${leads[0].name}"`
+        : `${leads[0].agent_name} hasn't responded to ${leads.length} leads (${quoteList(leads)})`
+    );
+    await createNotification({
+      system: "CRM",
+      category: "MISSED_SLA",
+      title: totalLeads === 1 ? "Team Lead Missed SLA" : `${totalLeads} Team Leads Missed SLA`,
+      message: `${parts.join("; ")} within ${SLA_MINUTES} minutes.`,
+      recipientUserId: recipientId,
+      link: "/dashboard/reports"
+    });
   }
 
   // Admin also gets a running same-day total whenever it changes — a

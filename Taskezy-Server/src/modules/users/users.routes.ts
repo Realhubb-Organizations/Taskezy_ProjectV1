@@ -6,7 +6,7 @@ import { sendOk, sendPaginated } from "../../utils/apiResponse";
 import { ApiError } from "../../utils/ApiError";
 import { AccessTokenPayload } from "../../utils/tokens";
 import { hashPassword } from "../../utils/password";
-import { createUserSchema, deleteUserSchema, editUserSchema, listUsersQuerySchema, resetPasswordSchema, userIdParamSchema } from "./users.schema";
+import { createUserSchema, deleteUserSchema, editUserSchema, listUsersQuerySchema, resetPasswordSchema, userIdParamSchema, updateOwnEodReportTimeSchema } from "./users.schema";
 import * as repo from "./users.repository";
 import { withTransaction } from "../../db/pool";
 import * as leadsRepo from "../leads/leads.repository";
@@ -265,6 +265,17 @@ usersRouter.delete(
     }
     movedLeadIds.forEach(broadcastLeadChanged);
     sendOk(res, { deleted: true, reassignedLeads: movedLeadIds.length, clearedReports });
+  })
+);
+
+// Self-scoped only (always the caller's own row) — no role check needed,
+// a Manager can only ever touch their own eod_report_time this way.
+usersRouter.patch(
+  "/me/eod-report-time",
+  validate({ body: updateOwnEodReportTimeSchema }),
+  asyncHandler(async (req, res) => {
+    await repo.updateOwnEodReportTime(req.user!.sub, req.body.eodReportTime);
+    sendOk(res, { updated: true });
   })
 );
 
