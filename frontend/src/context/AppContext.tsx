@@ -294,6 +294,8 @@ export interface TenantSettings {
   halfDayThresholdHours: number;
   gstRate: number;
   invoiceDueDays: number;
+  /** Company-wide default End of Day report time, "HH:mm" — a Manager can set their own team's override via apiUpdateMyEodReportTime. */
+  eodReportTime: string;
 }
 
 export type PropertyTeamAssignmentMode = "ALL_MEMBERS" | "CUSTOM_MEMBERS";
@@ -1000,7 +1002,8 @@ function mapApiTenantSettingsToFrontend(row: ApiTenantSettings): TenantSettings 
     geofenceRadiusMeters: row.geofence_radius_meters,
     halfDayThresholdHours: Number(row.half_day_threshold_hours),
     gstRate: Number(row.gst_rate),
-    invoiceDueDays: row.invoice_due_days
+    invoiceDueDays: row.invoice_due_days,
+    eodReportTime: row.eod_report_time
   };
 }
 

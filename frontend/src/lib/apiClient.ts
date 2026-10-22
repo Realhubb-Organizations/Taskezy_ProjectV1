@@ -1808,6 +1808,7 @@ export interface ApiTenantSettings {
   half_day_threshold_hours: string;
   gst_rate: string;
   invoice_due_days: number;
+  eod_report_time: string;
 }
 
 export function apiGetTenantSettings(): Promise<ApiTenantSettings> {
@@ -1821,10 +1822,20 @@ export interface UpdateTenantSettingsInput {
   halfDayThresholdHours?: number;
   gstRate?: number;
   invoiceDueDays?: number;
+  eodReportTime?: string;
 }
 
 export function apiUpdateTenantSettings(input: UpdateTenantSettingsInput): Promise<ApiTenantSettings> {
   return request<ApiTenantSettings>("/api/v1/tenant-settings", { method: "PATCH", body: JSON.stringify(input) });
+}
+
+// A Manager's own override for their team's End of Day report time (Sales
+// Agent Reports tab) — null clears it, reverting to the tenant default.
+export function apiUpdateMyEodReportTime(eodReportTime: string | null): Promise<{ updated: boolean }> {
+  return request<{ updated: boolean }>("/api/v1/users/me/eod-report-time", {
+    method: "PATCH",
+    body: JSON.stringify({ eodReportTime })
+  });
 }
 
 // --- Timesheets (HRMS punch in/out + regularization) ---

@@ -3,6 +3,12 @@ import { optionalIndianMobile, personName } from "../../utils/validation";
 
 export const userIdParamSchema = z.object({ id: z.string().uuid() });
 
+// A Manager's own override for their team's End of Day report time (Sales
+// Agent Reports tab) — null clears it, reverting to the tenant-wide default.
+export const updateOwnEodReportTimeSchema = z.object({
+  eodReportTime: z.string().regex(/^\d{2}:\d{2}$/, "eodReportTime must be HH:mm").nullable()
+});
+
 // Both page/pageSize are optional (unlike leads' listLeadsQuerySchema) so a
 // bare `GET /users` with neither keeps returning the full active-user array
 // exactly as before — every dropdown/name-resolution consumer across the app

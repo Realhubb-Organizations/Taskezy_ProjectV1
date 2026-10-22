@@ -4,6 +4,7 @@ import { pool, checkDatabaseConnection } from "./db/pool";
 import { logger } from "./utils/logger";
 import { startFollowupScheduler } from "./jobs/followupScheduler";
 import { startMissedLeadScheduler } from "./jobs/missedLeadScheduler";
+import { startEodReportScheduler } from "./jobs/eodReportScheduler";
 import { startMetaAdSpendSync } from "./jobs/metaAdSpendSync";
 import { startGoogleAdsSpendSync } from "./jobs/googleAdsSpendSync";
 import { startDataRetentionJob } from "./jobs/dataRetentionJob";
@@ -23,6 +24,7 @@ async function main(): Promise<void> {
 
   startFollowupScheduler();
   startMissedLeadScheduler();
+  startEodReportScheduler();
   startMetaAdSpendSync();
   startGoogleAdsSpendSync();
   startDataRetentionJob();
