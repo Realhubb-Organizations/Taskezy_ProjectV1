@@ -7,12 +7,13 @@ export interface TenantSettingsRow {
   half_day_threshold_hours: string;
   gst_rate: string;
   invoice_due_days: number;
+  eod_report_time: string;
 }
 
 /** The single tenant_settings row — real HRMS/Finance business rules (geofence, half-day threshold, GST rate, invoice due window), previously hardcoded. */
 export async function getTenantSettings(): Promise<TenantSettingsRow> {
   const { rows } = await query<TenantSettingsRow>(
-    `SELECT office_lat, office_lng, geofence_radius_meters, half_day_threshold_hours, gst_rate, invoice_due_days
+    `SELECT office_lat, office_lng, geofence_radius_meters, half_day_threshold_hours, gst_rate, invoice_due_days, eod_report_time
      FROM tenant_settings WHERE id = true`
   );
   return rows[0];

@@ -553,7 +553,8 @@ export async function bulkImportLeads(input: BulkImportLeadsInput): Promise<Bulk
   const common = {
     source: "Bulk Upload",
     subSource: input.subSource,
-    propertyId: input.assignmentMode === "PROPERTY" ? input.propertyId! : null
+    propertyId: input.assignmentMode === "PROPERTY" ? input.propertyId! : null,
+    uploadedByUserId: input.actor.userId
   };
 
   for (let i = 0; i < candidates.length; i += BULK_IMPORT_CHUNK_SIZE) {

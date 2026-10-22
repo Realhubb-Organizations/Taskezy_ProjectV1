@@ -213,6 +213,11 @@ export async function updatePasswordHash(id: string, passwordHash: string): Prom
   await pool.query(`UPDATE users SET password_hash = $1, must_reset_password = true WHERE id = $2`, [passwordHash, id]);
 }
 
+/** A Manager's own override for their team's End of Day report time — null clears it, reverting to the tenant-wide default. Self-scoped only (caller's own id), no role check needed. */
+export async function updateOwnEodReportTime(id: string, eodReportTime: string | null): Promise<void> {
+  await pool.query(`UPDATE users SET eod_report_time = $1 WHERE id = $2`, [eodReportTime, id]);
+}
+
 export async function remove(id: string): Promise<boolean> {
   const { rowCount } = await pool.query(`DELETE FROM users WHERE id = $1`, [id]);
   return (rowCount ?? 0) > 0;
