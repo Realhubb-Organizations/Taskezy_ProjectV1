@@ -1444,11 +1444,14 @@ export function apiRemoveDevice(token: string): Promise<{ removed: boolean }> {
 }
 
 // Admin-only — Settings > Manage Users' per-user registered-device list.
+// source: "app" = native push-registered device, "web" = a browser the
+// user checked "trust this device" for during password+OTP login.
 export interface ApiUserDevice {
   device_name: string | null;
   platform: string;
   created_at: string;
   last_seen_at: string;
+  source: "app" | "web";
 }
 
 export function apiListUserDevices(userId: string): Promise<ApiUserDevice[]> {

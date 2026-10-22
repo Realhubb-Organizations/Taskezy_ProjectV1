@@ -191,16 +191,24 @@ usersRouter.get(
   })
 );
 
-// Admin-only — Settings > Manage Users' per-user registered-device list
-// (push-notification devices, same table push.service.ts reads from).
+// Admin-only — Settings > Manage Users' per-user registered-device list.
+// Two real sources, merged: user_devices (native app, push-token
+// registrations) and trusted_devices (web — only browsers the user
+// actually checked "trust this device" for during password+OTP login;
+// a plain login that never checked that box leaves no record, by the
+// user's own explicit choice not to build broader login-session tracking).
 usersRouter.get(
   "/:id/devices",
   requireRole("ADMIN"),
   validate({ params: userIdParamSchema }),
   asyncHandler(async (req, res) => {
-    const { rows } = await pool.query<{ device_name: string | null; platform: string; created_at: string; last_seen_at: string }>(
-      `SELECT device_name, platform, created_at, last_seen_at
-       FROM user_devices WHERE user_id = $1 ORDER BY last_seen_at DESC`,
+    const { rows } = await pool.query<{ device_name: string | null; platform: string; created_at: string; last_seen_at: string; source: "app" | "web" }>(
+      `SELECT device_name, platform, created_at, last_seen_at, 'app' AS source
+       FROM user_devices WHERE user_id = $1
+       UNION ALL
+       SELECT device_label AS device_name, 'web' AS platform, created_at, last_used_at AS last_seen_at, 'web' AS source
+       FROM trusted_devices WHERE user_id = $1 AND expires_at > now()
+       ORDER BY last_seen_at DESC`,
       [req.params.id]
     );
     sendOk(res, rows);

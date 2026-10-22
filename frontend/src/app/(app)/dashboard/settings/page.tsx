@@ -23,6 +23,7 @@ import {
   X,
   Edit,
   Smartphone,
+  Monitor,
   Eye,
   EyeOff,
   CheckCircle,
@@ -1644,13 +1645,13 @@ export default function SettingsPage() {
                               <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                                 {userDevicesCache[user.id]!.map((d, i) => (
                                   <li key={i} className="flex items-center gap-2.5 min-w-0 bg-white border border-slate-200 rounded-xl px-3 py-2">
-                                    <div className="h-7 w-7 rounded-full bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-700 shrink-0">
-                                      <Smartphone className="h-3.5 w-3.5" />
+                                    <div className={`h-7 w-7 rounded-full border flex items-center justify-center shrink-0 ${d.source === "web" ? "bg-violet-50 border-violet-100 text-violet-700" : "bg-blue-50 border-blue-100 text-blue-700"}`}>
+                                      {d.source === "web" ? <Monitor className="h-3.5 w-3.5" /> : <Smartphone className="h-3.5 w-3.5" />}
                                     </div>
                                     <div className="min-w-0">
                                       <p className="text-xs font-bold text-slate-800 truncate">{d.device_name || "Unknown device"}</p>
                                       <p className="text-[10px] text-slate-500 truncate">
-                                        {d.platform} · active {new Date(d.last_seen_at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                                        {d.source === "web" ? "Web" : d.platform} · active {new Date(d.last_seen_at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
                                       </p>
                                     </div>
                                   </li>
