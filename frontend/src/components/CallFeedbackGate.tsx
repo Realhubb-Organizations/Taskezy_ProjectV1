@@ -9,6 +9,7 @@ import { useApp, LeadStatus, Lead, mapApiLeadToFrontendLead } from "@/context/Ap
 import { apiCreateFollowup, apiUpdateLeadStatus, apiUpdateCallStatus, apiGetLead } from "@/lib/apiClient";
 import { nextStatusOptions, frontendStatusToDbCode } from "@/lib/leadStatusMapping";
 import { CALL_SUB_STATUS_OPTIONS, CallSubStatus, callSubStatusOf } from "@/lib/callSubStatus";
+import { SCHEDULER_REQUIRED_STATUSES } from "@/lib/leadScheduler";
 
 // Full-screen, unclosable overlay — the app stays mounted behind it but
 // nothing in it can be reached (no backdrop-click, no Escape, and the
@@ -30,14 +31,19 @@ import { CALL_SUB_STATUS_OPTIONS, CallSubStatus, callSubStatusOf } from "@/lib/c
 //      Every other lead picks from the real 14-value Lead Status list,
 //      narrowed to what the transition matrix actually allows from its
 //      current status (leadStatusMapping.ts's nextStatusOptions). RNR /
-//      Call Back (regular leads) or Not Reachable (Data Calling leads)
-//      need the next call's date and time; Booked needs the deal value.
+//      Call Back / Followup / Site Visit Scheduled (regular leads, see
+//      leadScheduler.ts's SCHEDULER_REQUIRED_STATUSES) or Not Reachable
+//      (Data Calling leads) need the next call's date and time; Booked
+//      needs the deal value.
 // The status is saved first (and must succeed), then the next call is
 // scheduled, then the attempt is closed — only then does the app unlock.
 
 const CALL_NOT_CONNECTED_REASONS = ["No answer", "Switched off", "Busy", "Wrong number", "Other"];
 const CALL_STATUS_OPTIONS = ["Connected", "Called", "Not Reachable", "Wrong Number"] as const;
-const NEEDS_NEXT_CALL: LeadStatus[] = ["RNR", "Call Back"];
+// Same status list the status-change popup (LeadScheduleModal) gates on —
+// kept in one place (leadScheduler.ts) so this and every other status-
+// change entry point can't drift onto different lists.
+const NEEDS_NEXT_CALL: LeadStatus[] = SCHEDULER_REQUIRED_STATUSES;
 
 const todayIso = () => {
   const d = new Date();

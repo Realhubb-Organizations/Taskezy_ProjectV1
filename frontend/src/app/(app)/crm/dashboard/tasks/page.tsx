@@ -10,6 +10,8 @@ import { useDialog } from "@/components/ui/DialogProvider";
 import SalesPendingTasksTable from "@/components/dashboard/SalesPendingTasksTable";
 import { TAB_BUCKETS, TeamTaskTab } from "@/components/dashboard/TeamTasksTable";
 import LeadDetailDrawer from "@/components/crm/LeadDetailDrawer";
+import LeadScheduleModal from "@/components/crm/LeadScheduleModal";
+import { useLeadStatusScheduler } from "@/lib/leadScheduler";
 import DateRangePicker, { DateRangeValue } from "@/components/ui/DateRangePicker";
 import { PendingTask } from "@/lib/salesPendingTasks";
 
@@ -64,6 +66,11 @@ function AgentTasksView() {
       updateLeadStatus(leadId, status);
     }
   };
+  // RNR/Call Back/Followup/Site Visit Scheduled are gated behind a
+  // blocking popup before handleStatusChange actually runs. Called
+  // unconditionally (before the isSalesMember early return below) since
+  // it's a hook.
+  const pendingTaskScheduler = useLeadStatusScheduler(handleStatusChange);
 
   const isSalesMember = currentUser?.role_type === "Member" && currentUser?.role !== "ADMIN";
   if (currentUser && isSalesMember) {
@@ -97,7 +104,10 @@ function AgentTasksView() {
         pendingTasks={pendingTasks}
         taskFilter={taskFilter}
         onViewLead={(leadId) => { apiGetLead(leadId).then(row => setDrawerLead(mapApiLeadToFrontendLead(row))).catch(() => setDrawerLead(null)); }}
-        onStatusChange={handleStatusChange}
+        onStatusChange={(task, status) => pendingTaskScheduler.requestChange(
+          { id: task.leadId!, name: task.name, phone: task.phone, assignedAgent: task.assignedTo },
+          status
+        )}
         isLoading={isDataLoading}
       />
 
@@ -107,6 +117,16 @@ function AgentTasksView() {
         onClose={() => setDrawerLead(null)}
         onUpdateStatus={handleStatusChange}
       />
+
+      {pendingTaskScheduler.pendingSchedule && (
+        <LeadScheduleModal
+          pending={pendingTaskScheduler.pendingSchedule}
+          submitting={pendingTaskScheduler.submitting}
+          error={pendingTaskScheduler.error}
+          onCancel={pendingTaskScheduler.cancelSchedule}
+          onConfirm={pendingTaskScheduler.confirmSchedule}
+        />
+      )}
     </div>
   );
 }

@@ -22,6 +22,8 @@ import TablePagination, { usePagination } from "@/components/ui/TablePagination"
 import AddLeadModal from "./AddLeadModal";
 import LeadDetailDrawer from "./LeadDetailDrawer";
 import LeadDrillDownPanel from "./LeadDrillDownPanel";
+import LeadScheduleModal from "./LeadScheduleModal";
+import { useLeadStatusScheduler } from "@/lib/leadScheduler";
 import { DateTimeLines, dateTimeParts } from "@/components/ui/DateTimeLines";
 import { nextFollowupFor } from "@/lib/followups";
 import NextCallCell from "./NextCallCell";
@@ -254,6 +256,11 @@ export default function LeadDashboard() {
     setTimeout(() => setSuccessMsg(""), 3000);
   };
 
+  // RNR/Call Back/Followup/Site Visit Scheduled are gated behind a
+  // blocking popup (LeadScheduleModal below) before handleUpdateLeadStatus
+  // actually runs — every other status still commits immediately.
+  const statusScheduler = useLeadStatusScheduler(handleUpdateLeadStatus);
+
   // Per-row Status editor cell — the shared searchable single-select (the
   // full status list runs ~18 options deep). Shared by the main Leads table
   // and the Analytics drilldown table.
@@ -285,7 +292,7 @@ export default function LeadDashboard() {
         variant="inline"
         options={withDeadLeadGate(allOptions, l, isAdmin)}
         value={l.status}
-        onChange={(v) => handleUpdateLeadStatus(l.id, v as LeadStatus)}
+        onChange={(v) => statusScheduler.requestChange(l, v as LeadStatus)}
         searchPlaceholder="Search status..."
         panelWidth={176}
         className="max-w-[110px] text-[11px] text-slate-700"
@@ -2325,6 +2332,19 @@ export default function LeadDashboard() {
           onNoteSaved={handleNoteSaved}
           managerStatusReadOnly
         />
+
+        {/* Scheduler popup for the main table's inline Status dropdown —
+            LeadDetailDrawer has its own, separate instance for its own
+            dropdown. */}
+        {statusScheduler.pendingSchedule && (
+          <LeadScheduleModal
+            pending={statusScheduler.pendingSchedule}
+            submitting={statusScheduler.submitting}
+            error={statusScheduler.error}
+            onCancel={statusScheduler.cancelSchedule}
+            onConfirm={statusScheduler.confirmSchedule}
+          />
+        )}
 
         {/* Filter panel (column visibility) — opened from both the Leads
             tab's own Filter button and the Leads Analytics tab's sliders

@@ -6,6 +6,8 @@ import { useApp, Lead, mapApiLeadToFrontendLead } from "@/context/AppContext";
 import { useDialog } from "@/components/ui/DialogProvider";
 import AddLeadModal from "@/components/crm/AddLeadModal";
 import LeadDrillDownPanel, { LeadQuickViewDrawer, useLeadStatusChange } from "@/components/crm/LeadDrillDownPanel";
+import LeadScheduleModal from "@/components/crm/LeadScheduleModal";
+import { useLeadStatusScheduler } from "@/lib/leadScheduler";
 import TeamTasksTable, { TeamTaskTab } from "@/components/dashboard/TeamTasksTable";
 import TaskInsightsCharts from "@/components/dashboard/TaskInsightsCharts";
 import SalesPendingTasksTable from "@/components/dashboard/SalesPendingTasksTable";
@@ -189,6 +191,9 @@ export default function CrmDashboardPage() {
   // Used by the sales Pending Tasks table's row status editor — same
   // Booking deal-value guard as the drill-down/quick-view status menus.
   const handleDrillStatusChange = useLeadStatusChange();
+  // RNR/Call Back/Followup/Site Visit Scheduled are gated behind a
+  // blocking popup before handleDrillStatusChange actually runs.
+  const pendingTaskScheduler = useLeadStatusScheduler(handleDrillStatusChange);
 
   // Real sales roster + property list, same source the Leads page's Add Lead
   // modal already uses — reused here so "+ Upload Leads" is a real, working
@@ -313,6 +318,16 @@ export default function CrmDashboardPage() {
         onClose={() => setSelectedCategory(null)}
       />
 
+      {pendingTaskScheduler.pendingSchedule && (
+        <LeadScheduleModal
+          pending={pendingTaskScheduler.pendingSchedule}
+          submitting={pendingTaskScheduler.submitting}
+          error={pendingTaskScheduler.error}
+          onCancel={pendingTaskScheduler.cancelSchedule}
+          onConfirm={pendingTaskScheduler.confirmSchedule}
+        />
+      )}
+
       {isSalesMember ? (
         // Sales agent: one color-coded Pending Tasks queue (missed / pending /
         // upcoming) in place of the two per-status tables below. pendingTasks
@@ -321,7 +336,10 @@ export default function CrmDashboardPage() {
         <SalesPendingTasksTable
           pendingTasks={pendingTasks}
           onViewLead={openQuickView}
-          onStatusChange={handleDrillStatusChange}
+          onStatusChange={(task, status) => pendingTaskScheduler.requestChange(
+            { id: task.leadId!, name: task.name, phone: task.phone, assignedAgent: task.assignedTo },
+            status
+          )}
           isLoading={isDataLoading}
         />
       ) : (

@@ -40,7 +40,10 @@ export default function SalesPendingTasksTable({
 }: {
   pendingTasks: ApiPendingTaskRow[];
   onViewLead: (leadId: string) => void;
-  onStatusChange: (leadId: string, status: LeadStatus) => void;
+  // Passes the full task row (not just leadId) — the caller's scheduler
+  // popup (RNR/Call Back/Followup/Site Visit Scheduled) needs the lead's
+  // name/phone to build its notification/calendar event.
+  onStatusChange: (task: PendingTask, status: LeadStatus) => void;
   isLoading?: boolean;
   title?: string;
   subtitle?: string;
@@ -114,7 +117,7 @@ export default function SalesPendingTasksTable({
         variant="inline"
         options={options}
         value={t.status}
-        onChange={(v) => onStatusChange(t.leadId!, v as LeadStatus)}
+        onChange={(v) => onStatusChange(t, v as LeadStatus)}
         searchPlaceholder="Search status..."
         panelWidth={176}
         className="max-w-full text-slate-900"
