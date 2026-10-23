@@ -1,8 +1,9 @@
 "use client";
 
 import React, { useState } from "react";
+import RowActionsMenu from "@/components/ui/RowActionsMenu";
 import { useApp, User, Role } from "@/context/AppContext";
-import { ShieldCheck, Edit, X, AlertTriangle, Eye, EyeOff, CheckCircle, Plus } from "lucide-react";
+import { ShieldCheck, Edit, X, AlertTriangle, Eye, EyeOff, CheckCircle, Plus, Trash2 } from "lucide-react";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
 import { useDialog } from "@/components/ui/DialogProvider";
 import DeleteUserModal from "@/components/dashboard/DeleteUserModal";
@@ -244,24 +245,15 @@ export default function AdminPage() {
                         {user.status || "ACTIVE"}
                       </span>
                     </td>
-                    <td className="p-4 text-right space-x-3">
+                    <td className="p-4 text-right">
                       {user.role !== "ADMIN" ? (
-                        <>
-                          <button
-                            onClick={() => handleEditClick(user)}
-                            className="inline-flex items-center gap-1 text-xs font-bold text-brand-600 hover:text-brand-700 transition-colors"
-                          >
-                            <Edit className="h-3.5 w-3.5" />
-                            Edit
-                          </button>
-                          <button
-                            onClick={() => setDeletingUser({ id: user.id, name: user.name })}
-                            className="inline-flex items-center gap-1 text-xs font-bold text-red-600 hover:text-red-700 transition-colors"
-                          >
-                            <X className="h-3.5 w-3.5" />
-                            Delete
-                          </button>
-                        </>
+                        <RowActionsMenu
+                          label="User actions"
+                          actions={[
+                            { label: "Edit", icon: <Edit className="h-4 w-4 text-slate-500" />, onClick: () => handleEditClick(user) },
+                            { label: "Delete", icon: <Trash2 className="h-4 w-4" />, onClick: () => setDeletingUser({ id: user.id, name: user.name }), danger: true }
+                          ]}
+                        />
                       ) : (
                         <span className="text-slate-400 text-[10px] font-medium">Root Protected</span>
                       )}

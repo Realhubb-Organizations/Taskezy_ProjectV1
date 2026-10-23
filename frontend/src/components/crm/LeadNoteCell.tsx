@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { Pencil } from "lucide-react";
+import { FileText, Pencil } from "lucide-react";
 import { Lead, useApp } from "@/context/AppContext";
 import { useDialog } from "@/components/ui/DialogProvider";
 import { canChangeLeadStatus } from "@/lib/leadAssignment";
@@ -11,9 +11,12 @@ import { canChangeLeadStatus } from "@/lib/leadAssignment";
 // their manager or an admin get the pencil; everyone else sees the note.
 export default function LeadNoteCell({
   lead,
-  onSaved
+  onSaved,
+  compact = false
 }: {
   lead: Lead;
+  /** Phone layout: a document icon + the note text, the whole cell taps to edit. */
+  compact?: boolean;
   /** Called with the saved note so a table holding its own copy of the rows can update. */
   onSaved?: (leadId: string, note: string, updated: Lead | null) => void;
 }) {
@@ -45,6 +48,30 @@ export default function LeadNoteCell({
       setSaving(false);
     }
   };
+
+  if (compact) {
+    const body = (
+      <>
+        <FileText className="h-4 w-4 shrink-0 mt-0.5 text-slate-500" aria-hidden="true" />
+        <span className={`line-clamp-2 [overflow-wrap:anywhere] min-w-0 text-left text-[11px] leading-snug ${lead.notes ? "text-slate-700" : "text-slate-400"}`}>
+          {lead.notes || (canEdit ? "Add note" : "—")}
+        </span>
+      </>
+    );
+    return canEdit ? (
+      <button
+        type="button"
+        onClick={edit}
+        disabled={saving}
+        title={lead.notes ? "Edit note" : "Add note"}
+        className="flex items-start gap-1.5 min-w-0 w-full rounded-md hover:bg-slate-50 disabled:opacity-40"
+      >
+        {body}
+      </button>
+    ) : (
+      <div className="flex items-start gap-1.5 min-w-0" title={lead.notes}>{body}</div>
+    );
+  }
 
   return (
     <div className="flex items-start gap-1.5 min-w-0">

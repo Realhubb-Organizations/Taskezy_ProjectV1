@@ -1,6 +1,7 @@
 "use client";
 
 import React, { Suspense, useEffect, useMemo, useState } from "react";
+import RowActionsMenu from "@/components/ui/RowActionsMenu";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useApp } from "@/context/AppContext";
@@ -12,7 +13,7 @@ import {
   apiListGoogleAdsAccounts,
   ApiGoogleAdsAccount
 } from "@/lib/apiClient";
-import { ChevronRight, CheckCircle, AlertTriangle, Info, Search, ArrowRight, Users, TrendingUp, LayoutGrid, Calendar, RefreshCw, Clock, Zap, Mail, Hash, IndianRupee, ShieldCheck, Edit } from "lucide-react";
+import { ChevronRight, CheckCircle, AlertTriangle, Info, Search, ArrowRight, Users, TrendingUp, LayoutGrid, Calendar, RefreshCw, Clock, Zap, Mail, Hash, IndianRupee, ShieldCheck, Edit, Unplug } from "lucide-react";
 import { LineSkeleton } from "@/components/ui/Skeletons";
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
 import { useDialog } from "@/components/ui/DialogProvider";
@@ -437,7 +438,10 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
                     </td>
                     <td className="px-5 py-3 text-slate-500">{formatDateTime(lastActivityForPage(c))}</td>
                     <td className="px-5 py-3 text-right">
-                      <button onClick={() => handleDisconnectMeta(c.id, c.page_name)} className="text-red-600 hover:text-red-700 font-bold">Disconnect</button>
+                      <RowActionsMenu
+                        label="Page actions"
+                        actions={[{ label: "Disconnect", icon: <Unplug className="h-4 w-4" />, onClick: () => handleDisconnectMeta(c.id, c.page_name), danger: true }]}
+                      />
                     </td>
                   </tr>
                 ))

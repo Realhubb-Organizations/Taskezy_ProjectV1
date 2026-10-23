@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import RowActionsMenu from "@/components/ui/RowActionsMenu";
 import { useApp, mapApiResaleUnitToFrontend, ResaleUnit } from "@/context/AppContext";
 import { useDialog } from "@/components/ui/DialogProvider";
 import { apiListResaleUnitsPage, type ResaleUnitListFilters } from "@/lib/apiClient";
@@ -241,29 +242,19 @@ export default function ResalePage() {
                     <td className="p-4 font-mono font-bold text-brand-700">{u.price}</td>
                     <td className="p-4 text-slate-500 font-semibold">{u.listedBy}</td>
                     <td className="p-4 text-right">
-                      <div className="flex gap-2 justify-end">
-                        <button
-                          onClick={() => handleFindLeads(u)}
-                          className="px-2.5 py-1 rounded bg-brand-50 border border-brand-200 text-[10px] font-bold text-brand-700 hover:bg-[#0B1E6E] hover:text-white transition-all"
-                        >
-                          Find Leads
-                        </button>
-                        {u.contactNumber ? (
-                          <a
-                            href={`tel:${u.contactNumber}`}
-                            className="px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-[10px] font-bold text-slate-700 inline-flex items-center gap-1"
-                          >
-                            <PhoneCall className="h-3 w-3" /> Contact
-                          </a>
-                        ) : (
-                          <span
-                            title="No contact number was saved for this listing"
-                            className="px-2.5 py-1 rounded bg-slate-50 text-[10px] font-bold text-slate-350 inline-flex items-center gap-1 cursor-not-allowed"
-                          >
-                            <PhoneCall className="h-3 w-3" /> No Contact
-                          </span>
-                        )}
-                      </div>
+                      <RowActionsMenu
+                        label="Listing actions"
+                        actions={[
+                          { label: "Find Leads", icon: <Search className="h-4 w-4 text-slate-500" />, onClick: () => handleFindLeads(u) },
+                          {
+                            label: "Contact",
+                            icon: <PhoneCall className="h-4 w-4 text-slate-500" />,
+                            onClick: () => { if (u.contactNumber) window.location.href = `tel:${u.contactNumber}`; },
+                            disabled: !u.contactNumber,
+                            title: u.contactNumber ? undefined : "No contact number was saved for this listing"
+                          }
+                        ]}
+                      />
                     </td>
                   </tr>
                   ))

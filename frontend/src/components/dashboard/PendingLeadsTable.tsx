@@ -1,8 +1,8 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import LeadRowActionsMenu from "@/components/crm/LeadRowActionsMenu";
 import { Search, Copy, Check, X } from "lucide-react";
-import { WhatsAppIcon, CallIcon } from "@/components/icons/ContactIcons";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
 import { SearchableMultiSelect } from "@/components/ui/SearchableDropdown";
 import TablePagination from "@/components/ui/TablePagination";
@@ -269,29 +269,12 @@ export default function PendingLeadsTable({
                   <td className="px-4 py-3 text-slate-600 align-top"><div className="line-clamp-3 [overflow-wrap:anywhere]" title={row.feedback}>{row.feedback}</div></td>
                   <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]" title={row.property}>{row.property}</td>
                   <td className="px-4 py-3 align-top">
-                    <div className="flex items-center justify-end gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => handleWhatsApp(row)}
-                        className="inline-flex items-center justify-center h-10 w-10 sm:h-7 sm:w-7 rounded-lg bg-slate-100 text-slate-700 hover:bg-emerald-50 hover:text-emerald-600 transition-colors shrink-0"
-                        title="WhatsApp"
-                      >
-                        <WhatsAppIcon className="h-3.5 w-3.5" />
-                      </button>
-                      {(() => {
-                        const rowCallAllowed = canTriggerLeadCall(isAdmin) && (isAdmin || !!row.leadId);
-                        return (
-                          <button
-                            type="button"
-                            onClick={() => rowCallAllowed && handleCall(row)}
-                            disabled={!rowCallAllowed}
-                            className="inline-flex items-center justify-center h-10 w-10 sm:h-7 sm:w-7 rounded-lg bg-slate-100 text-slate-700 hover:bg-brand-50 hover:text-brand-700 transition-colors shrink-0 disabled:opacity-30 disabled:hover:bg-slate-100 disabled:hover:text-slate-700"
-                            title={rowCallAllowed ? "Call" : "Calling is only available on the mobile app for your role"}
-                          >
-                            <CallIcon className="h-3.5 w-3.5" />
-                          </button>
-                        );
-                      })()}
+                    <div className="flex items-center justify-end">
+                      <LeadRowActionsMenu
+                        onWhatsApp={() => handleWhatsApp(row)}
+                        onCall={() => handleCall(row)}
+                        callAllowed={canTriggerLeadCall(isAdmin) && (isAdmin || !!row.leadId)}
+                      />
                     </div>
                   </td>
                 </tr>

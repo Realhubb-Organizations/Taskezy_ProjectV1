@@ -10,7 +10,8 @@ import { STATUS_OPTIONS, PICKABLE_STATUS_OPTIONS, frontendStatusToDbCode } from 
 import { type LeadSummaryStats } from "@/lib/leadSummaryStats";
 import { apiListLeadsPage, apiGetLead, apiGetLeadStats, apiGetLeadAnalyticsStats, apiGetDistinctCampaigns, apiListFollowupsPage, apiDeleteLead, apiBulkDeleteLeads, apiBulkReassignLeads, type LeadListFilters, type AgentAnalyticsStats } from "@/lib/apiClient";
 import { useServerLeadList } from "@/lib/useServerLeadList";
-import { WhatsAppIcon, CallIcon, PlatformLabel } from "@/components/icons/ContactIcons";
+import { PlatformLabel } from "@/components/icons/ContactIcons";
+import { isPhoneLayout } from "@/lib/viewport";
 import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/callTrigger";
 import { LineSkeleton, TableRowsSkeleton } from "@/components/ui/Skeletons";
 import Tooltip from "@/components/ui/Tooltip";
@@ -26,6 +27,7 @@ import { DateTimeLines, dateTimeParts } from "@/components/ui/DateTimeLines";
 import { nextFollowupFor } from "@/lib/followups";
 import NextCallCell from "./NextCallCell";
 import LeadNoteCell from "./LeadNoteCell";
+import LeadRowActionsMenu from "./LeadRowActionsMenu";
 import { maskPhone, maskEmail } from "@/lib/maskPII";
 
 // The admin leads table's togglable columns (beyond the always-shown Lead
@@ -34,16 +36,18 @@ import { maskPhone, maskEmail } from "@/lib/maskPII";
 // (no ad-set-level ingestion, no property-match scoring anywhere in the app),
 // so their cells honestly render "—" for every row rather than inventing data.
 type AdminColumnKey =
-  | "date" | "property" | "reassignedTo" | "source" | "leadScore"
+  | "email" | "assignedTo"
+  | "date" | "property" | "reassignedTo" | "source"
   | "status" | "nextCallDate" | "actions" | "adSetName" | "campaign"
   | "notes" | "propertyMatch";
 
 const ADMIN_COLUMNS: { key: AdminColumnKey; label: string; width: number }[] = [
+  { key: "email", label: "Email", width: 180 },
+  { key: "assignedTo", label: "Assigned To", width: 160 },
   { key: "date", label: "Date", width: 130 },
   { key: "property", label: "Property", width: 170 },
   { key: "reassignedTo", label: "Reassign From", width: 160 },
   { key: "source", label: "Source", width: 170 },
-  { key: "leadScore", label: "Lead Score", width: 100 },
   { key: "status", label: "Status", width: 150 },
   { key: "nextCallDate", label: "Next Call Date", width: 130 },
   { key: "actions", label: "Actions", width: 120 },
@@ -54,7 +58,8 @@ const ADMIN_COLUMNS: { key: AdminColumnKey; label: string; width: number }[] = [
 ];
 
 const ADMIN_DEFAULT_VISIBLE_COLUMNS: Record<AdminColumnKey, boolean> = {
-  date: true, property: false, reassignedTo: false, source: false, leadScore: false,
+  email: true, assignedTo: true,
+  date: true, property: false, reassignedTo: false, source: false,
   status: true, nextCallDate: true, actions: false, adSetName: false, campaign: true,
   notes: true, propertyMatch: false
 };
@@ -218,8 +223,12 @@ export default function LeadDashboard() {
   // Real sales roster (agents + managers/TLs), not a hardcoded seed-data
   // snapshot — matches the same department === "SALES" scoping already used
   // for the Properties team-member picker.
+  // A manager only ever deals with themselves and their direct reports, so
+  // every agent picker/filter on this page (Assigned To, analytics Member,
+  // per-agent rows) is limited to that team for them.
   const agentsList = users
     .filter(u => u.department === "SALES" && u.status !== "INACTIVE")
+    .filter(u => !myTeamNames || myTeamNames.has(u.name))
     .map(u => u.name);
 
   const handleUpdateLeadStatus = async (leadId: string, status: LeadStatus) => {
@@ -270,14 +279,10 @@ export default function LeadDashboard() {
   };
 
   const renderStatusCell = (l: Lead) => {
-    // Manager can see but never change a lead's status directly — only an
-    // Admin can; this was already true for this page's LeadDetailDrawer
-    // (managerStatusReadOnly below), now extended to the table row too, so
-    // there's no remaining spot here where a Manager could edit status
-    // outside the drawer's existing lock.
-    // See project_crm_role_based_lead_scoping memory (2026-10-10).
-    if (!canChangeLeadStatus(l, currentUser, users) || isManager) {
-      return <span className="inline-block max-w-[110px] text-[11px] text-slate-700" title={STATUS_LOCKED_HINT}>{l.status}</span>;
+    // Owner, the owner's manager (their team's leads) or an admin — same
+    // rule the server enforces; every change lands in Activity History.
+    if (!canChangeLeadStatus(l, currentUser, users)) {
+      return <span className={phoneLayout ? "inline-block rounded-xl bg-slate-100 px-2 py-1.5 text-[11px] font-semibold text-slate-600" : "inline-block max-w-[110px] text-[11px] text-slate-700"} title={STATUS_LOCKED_HINT}>{l.status}</span>;
     }
     const allOptions = PICKABLE_STATUS_OPTIONS.includes(l.status) ? PICKABLE_STATUS_OPTIONS : [l.status, ...PICKABLE_STATUS_OPTIONS];
     return (
@@ -288,7 +293,7 @@ export default function LeadDashboard() {
         onChange={(v) => handleUpdateLeadStatus(l.id, v as LeadStatus)}
         searchPlaceholder="Search status..."
         panelWidth={176}
-        className="max-w-[110px] text-[11px] text-slate-700"
+        className={phoneLayout ? "max-w-full rounded-xl bg-blue-50 px-2 py-1.5 text-[11px] font-semibold text-blue-600 [&_svg]:h-3 [&_svg]:w-3" : "max-w-[110px] text-[11px] text-slate-700"}
       />
     );
   };
@@ -382,6 +387,8 @@ export default function LeadDashboard() {
   const [adminStatusFilter, setAdminStatusFilter] = useState<string[]>([]);
   const [adminAssignedFilter, setAdminAssignedFilter] = useState<string[]>([]);
   const [adminCampaignFilter, setAdminCampaignFilter] = useState<string[]>([]);
+  // Property column-header filter (by name; sent to the server as ids).
+  const [adminPropertyFilter, setAdminPropertyFilter] = useState<string[]>([]);
   const [adminPage, setAdminPage] = useState(1);
   const [adminRowsPerPage, setAdminRowsPerPage] = useState(100);
 
@@ -474,10 +481,12 @@ export default function LeadDashboard() {
     const assignedAgentIds = adminAssignedFilter
       .map(name => nameToId.get(name))
       .filter((id): id is string => !!id);
+    const propertyIds = properties.filter(p => adminPropertyFilter.includes(p.name)).map(p => p.id);
     return {
       status: statusCodes.size > 0 ? Array.from(statusCodes) : undefined,
       assignedAgentId: assignedAgentIds.length > 0 ? assignedAgentIds : undefined,
       campaign: adminCampaignFilter.length > 0 ? adminCampaignFilter : undefined,
+      propertyId: propertyIds.length > 0 ? propertyIds : undefined,
       dateFrom,
       dateTo,
       search: debouncedAdminSearch || undefined,
@@ -620,9 +629,16 @@ export default function LeadDashboard() {
   // straight from the row, so the Actions column starts visible for them
   // instead of buried behind the Filter panel. Admin's default is
   // untouched. See project_crm_role_based_lead_scoping memory (2026-10-10).
-  const [adminVisibleColumns, setAdminVisibleColumns] = useState<Record<AdminColumnKey, boolean>>(
-    isAdmin ? ADMIN_DEFAULT_VISIBLE_COLUMNS : { ...ADMIN_DEFAULT_VISIBLE_COLUMNS, actions: true }
-  );
+  // Managers also start with the Source column on (logo only — see canSeeSource).
+  // Phones / the app start with just Status, Actions and Notes beside the
+  // lead name (in that order); the Filter panel turns the rest back on.
+  const [adminVisibleColumns, setAdminVisibleColumns] = useState<Record<AdminColumnKey, boolean>>(() => {
+    if (isPhoneLayout()) {
+      const none = Object.fromEntries(ADMIN_COLUMNS.map(c => [c.key, false])) as Record<AdminColumnKey, boolean>;
+      return { ...none, status: true, actions: true, notes: true };
+    }
+    return isAdmin ? ADMIN_DEFAULT_VISIBLE_COLUMNS : { ...ADMIN_DEFAULT_VISIBLE_COLUMNS, actions: true, source: isManager };
+  });
 
   const toggleAdminColumn = (key: AdminColumnKey) => {
     setAdminVisibleColumns(prev => ({ ...prev, [key]: !prev[key] }));
@@ -643,7 +659,13 @@ export default function LeadDashboard() {
   // attribution) — never offered or rendered for Manager/Member, on this
   // list or in the header/cell checks below. See
   // project_crm_role_based_lead_scoping memory (2026-10-09).
-  const adminVisibleColumnList = ADMIN_COLUMNS.filter(c => adminVisibleColumns[c.key] && (isAdmin || !["campaign", "source", "adSetName"].includes(c.key)));
+  // Exception: managers get Source (the platform logo — Meta, Google, or the
+  // Excel icon for Data Calling / bulk uploads), never the campaign name.
+  const canSeeSource = isAdmin || isManager;
+  const [phoneLayout] = useState(isPhoneLayout);
+  // Bulk select is a laptop task; the phone table matches the 4-column design.
+  const showBulkSelect = canBulkAssign && !phoneLayout;
+  const adminVisibleColumnList = ADMIN_COLUMNS.filter(c => adminVisibleColumns[c.key] && (isAdmin || !["campaign", "adSetName"].includes(c.key)) && (c.key !== "source" || canSeeSource));
 
   const [analyticsVisibleColumns, setAnalyticsVisibleColumns] = useState<Record<AnalyticsColumnKey, boolean>>(ANALYTICS_DEFAULT_VISIBLE_COLUMNS);
 
@@ -720,7 +742,8 @@ export default function LeadDashboard() {
   const adminCampaignsList = distinctCampaigns;
   // "Unassigned" (leads nobody owns yet) lives here, not under Status.
   const UNASSIGNED_OPTION = "Unassigned";
-  const adminAssignedOptions = [UNASSIGNED_OPTION, ...agentsList];
+  // Unassigned leads are outside a manager's scope, so they don't get that option.
+  const adminAssignedOptions = isManager ? agentsList : [UNASSIGNED_OPTION, ...agentsList];
 
   // Same ad-source keyword classification used by the Meta/Google sub-account
   // breakdown above (source="Meta Ads"/"Google Ads") — reused here to split
@@ -1319,30 +1342,32 @@ export default function LeadDashboard() {
             <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden">
               <div ref={adminScrollRef} onScroll={handleAdminTableScroll} className="overflow-x-auto">
                 <table
-                  className="w-full text-left border-collapse table-fixed"
-                  style={{ minWidth: (canBulkAssign ? 44 : 0) + (adminVisibleColumns.actions ? (isAdmin ? 140 : 110) : 0) + (3 + adminVisibleColumnList.filter(c => c.key !== "actions").length) * 150 }}
+                  className={`w-full text-left border-collapse table-fixed ${phoneLayout ? "[&_th]:px-2.5 [&_td]:px-2.5 [&_th]:py-3 [&_td]:py-4 [&_th]:whitespace-normal [&_th]:uppercase [&_th]:text-[10px] [&_th]:font-semibold [&_th]:tracking-wider [&_th]:text-slate-500 [&_th_button]:uppercase [&_th_button]:text-[10px] [&_th_button]:font-semibold [&_th_button]:tracking-wider [&_th_button]:text-slate-500 [&_th_svg]:hidden [&_th:not(:first-child)]:border-l [&_td:not(:first-child)]:border-l [&_th]:border-slate-100 [&_td]:border-slate-100 [&_td]:align-middle" : ""}`}
+                  style={phoneLayout && adminVisibleColumnList.length <= 3 ? undefined : { minWidth: (showBulkSelect ? 44 : 0) + (adminVisibleColumns.actions ? 80 : 0) + (1 + adminVisibleColumnList.filter(c => c.key !== "actions").length) * (phoneLayout ? 110 : 150) }}
                 >
                   <colgroup>
                     {/* Bulk-select checkbox (Admin/Manager) */}
-                    {canBulkAssign && <col className="w-[44px]" />}
-                    {/* Lead Name is sticky left on all sizes; Email and Assigned To scroll */}
-                    <col />
-                    <col />
+                    {showBulkSelect && <col className={phoneLayout ? "w-[40px]" : "w-[44px]"} />}
+                    {/* Lead Name is sticky left on all sizes */}
                     <col />
                     {/* Togglable, driven by the Filter panel. Data columns share
                         the remaining width equally; only the icon-only Actions
                         column gets a fixed width to fit its buttons. */}
                     {adminVisibleColumnList.map(c => (
                       c.key === "actions"
-                        ? <col key={c.key} className={isAdmin ? "w-[140px]" : "w-[110px]"} />
-                        : <col key={c.key} />
+                        ? <col key={c.key} className={phoneLayout ? "w-[56px]" : "w-[80px]"} />
+                        : phoneLayout && c.key === "status"
+                          ? <col key={c.key} className="w-[118px]" />
+                          : phoneLayout && c.key === "notes"
+                            ? <col key={c.key} className="w-[80px]" />
+                            : <col key={c.key} />
                     ))}
                   </colgroup>
                   {/* z-30: above the sticky first-column body cells (z-10), so
                       rows scrolling up pass under the header, never over it. */}
                   <thead className="sticky top-0 z-30 bg-white">
                     <tr className="border-b border-slate-200 text-xs font-bold text-slate-800">
-                      {canBulkAssign && (
+                      {showBulkSelect && (
                         <th className="pl-4 pr-1 py-3 whitespace-nowrap sticky left-0 z-20 bg-white">
                           <input
                             type="checkbox"
@@ -1353,14 +1378,17 @@ export default function LeadDashboard() {
                           />
                         </th>
                       )}
-                      <th className={`px-4 py-3 whitespace-nowrap sticky z-20 bg-white transition-shadow ${canBulkAssign ? "left-[44px]" : "left-0"} ${adminScrolledX ? "shadow-[6px_0_8px_-6px_rgba(15,23,42,0.18)]" : ""}`}>
+                      <th className={`px-4 py-3 whitespace-nowrap sticky z-20 bg-white transition-shadow ${showBulkSelect ? "left-[44px]" : "left-0"} ${adminScrolledX ? "shadow-[6px_0_8px_-6px_rgba(15,23,42,0.18)]" : ""}`}>
                         {adminSearchOpen ? (
                           <div className="flex items-center gap-1">
                             <input
                               autoFocus
                               value={adminSearch}
                               onChange={(e) => { setAdminSearch(e.target.value); setAdminPage(1); }}
-                              onBlur={() => { setAdminSearch(""); setAdminSearchOpen(false); }}
+                              // Only an empty box closes on blur — a typed search stays
+                              // (and keeps filtering) while you click rows, pages or scroll;
+                              // ✕ clears it.
+                              onBlur={() => { if (!adminSearch.trim()) setAdminSearchOpen(false); }}
                               placeholder="Search name or phone..."
                               className="min-w-0 flex-1 bg-white border border-brand-400 rounded-md px-1.5 py-1 text-[11px] font-normal focus:outline-none"
                             />
@@ -1375,15 +1403,15 @@ export default function LeadDashboard() {
                           </div>
                         ) : (
                           <div className="flex items-center gap-1.5">
-                            Lead Name
+                            <button type="button" onClick={() => setAdminSearchOpen(true)} className="text-left">Lead Name</button>
                             <button onClick={() => setAdminSearchOpen(true)} className="text-slate-400 hover:text-brand-700" title="Search">
                               <Search className="h-3.5 w-3.5" />
                             </button>
                           </div>
                         )}
                       </th>
-                      <th className="px-4 py-3 whitespace-nowrap">Email</th>
-                      <th className="px-4 py-3 whitespace-nowrap">
+                      {adminVisibleColumns.email && <th className="px-4 py-3 whitespace-nowrap">Email</th>}
+                      {adminVisibleColumns.assignedTo && <th className="px-4 py-3 whitespace-nowrap">
                         <SearchableMultiSelect
                           variant="inline"
                           label="Assigned To"
@@ -1399,14 +1427,25 @@ export default function LeadDashboard() {
                           searchPlaceholder="Search agents..."
                           panelWidth={208}
                         />
-                      </th>
+                      </th>}
 
                       {/* Togglable, in the same order as the Filter panel */}
                       {adminVisibleColumns.date && <th className="px-4 py-3 whitespace-nowrap">Date</th>}
-                      {adminVisibleColumns.property && <th className="px-4 py-3 whitespace-nowrap">Property</th>}
+                      {adminVisibleColumns.property && (
+                        <th className="px-4 py-3 whitespace-nowrap">
+                          <SearchableMultiSelect
+                            variant="inline"
+                            label="Property"
+                            options={propertiesList}
+                            selected={adminPropertyFilter}
+                            onChange={(next) => { setAdminPage(1); setAdminPropertyFilter(next); }}
+                            searchPlaceholder="Search properties..."
+                            panelWidth={240}
+                          />
+                        </th>
+                      )}
                       {adminVisibleColumns.reassignedTo && <th className="px-4 py-3 whitespace-nowrap">Reassign From</th>}
-                      {isAdmin && adminVisibleColumns.source && <th className="px-4 py-3 whitespace-nowrap">Source</th>}
-                      {adminVisibleColumns.leadScore && <th className="px-4 py-3 whitespace-nowrap">Lead Score</th>}
+                      {canSeeSource && adminVisibleColumns.source && <th className="px-4 py-3 whitespace-nowrap">Source</th>}
                       {adminVisibleColumns.status && (
                         <th className="px-4 py-3 whitespace-nowrap">
                           <SearchableMultiSelect
@@ -1421,10 +1460,22 @@ export default function LeadDashboard() {
                         </th>
                       )}
                       {adminVisibleColumns.nextCallDate && <th className="px-4 py-3 whitespace-nowrap">Next Call Date</th>}
-                      {adminVisibleColumns.actions && <th className="px-4 py-3 text-right whitespace-nowrap">Actions</th>}
+                      {adminVisibleColumns.actions && <th className="px-4 py-3 whitespace-nowrap">{phoneLayout ? "Action" : "Actions"}</th>}
                       {isAdmin && adminVisibleColumns.adSetName && <th className="px-4 py-3 whitespace-nowrap">Ad Set Name</th>}
                       {isAdmin && adminVisibleColumns.campaign && (
-                        <th className="px-4 py-3 whitespace-nowrap">Campaign</th>
+                        <th className="px-4 py-3 whitespace-nowrap">
+                          {/* Same filter as the "Campaigns" button above the table. */}
+                          <SearchableMultiSelect
+                            variant="inline"
+                            label="Campaign"
+                            options={adminCampaignOptions}
+                            selected={adminCampaignFilter}
+                            onChange={(next) => { setAdminPage(1); setAdminCampaignFilter(next); }}
+                            searchPlaceholder="Search campaigns..."
+                            renderLabel={(l) => <PlatformLabel text={l} />}
+                            panelWidth={260}
+                          />
+                        </th>
                       )}
                       {adminVisibleColumns.notes && <th className="px-4 py-3 whitespace-nowrap">Notes</th>}
                       {adminVisibleColumns.propertyMatch && <th className="px-4 py-3 whitespace-nowrap">Property Match</th>}
@@ -1432,10 +1483,10 @@ export default function LeadDashboard() {
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-xs">
                     {serverLeadsLoading && adminFilteredLeads.length === 0 ? (
-                      <TableRowsSkeleton rows={8} columns={(canBulkAssign ? 4 : 3) + adminVisibleColumnList.length} />
+                      <TableRowsSkeleton rows={8} columns={(showBulkSelect ? 2 : 1) + adminVisibleColumnList.length} />
                     ) : adminFilteredLeads.length === 0 ? (
                       <tr>
-                        <td colSpan={(canBulkAssign ? 4 : 3) + adminVisibleColumnList.length} className="px-4 py-8 text-center text-slate-400 font-semibold italic">
+                        <td colSpan={(showBulkSelect ? 2 : 1) + adminVisibleColumnList.length} className="px-4 py-8 text-center text-slate-400 font-semibold italic">
                           No leads match the current filters.
                         </td>
                       </tr>
@@ -1446,7 +1497,7 @@ export default function LeadDashboard() {
                           ref={idx % adminRowsPerPage === 0 ? (el) => { adminPageRowRefs.current[Math.floor(idx / adminRowsPerPage)] = el; } : undefined}
                           onClick={(e) => handleLeadRowClick(e, l)}
                           className={`group cursor-pointer transition-colors ${selectedLeads.has(l.id) ? "bg-blue-50" : "hover:bg-slate-50"}`}>
-                          {canBulkAssign && (
+                          {showBulkSelect && (
                             <td className={`pl-4 pr-1 py-3 align-top sticky left-0 z-10 transition-colors ${selectedLeads.has(l.id) ? "bg-blue-50" : "bg-white group-hover:bg-slate-50"}`}>
                               <input
                                 type="checkbox"
@@ -1457,18 +1508,18 @@ export default function LeadDashboard() {
                               />
                             </td>
                           )}
-                          <td className={`px-4 py-3 align-top overflow-hidden sticky z-10 transition-[background-color,box-shadow] ${selectedLeads.has(l.id) ? "bg-blue-50" : "bg-white group-hover:bg-slate-50"} ${canBulkAssign ? "left-[44px]" : "left-0"} ${adminScrolledX ? "shadow-[6px_0_8px_-6px_rgba(15,23,42,0.18)]" : ""}`}>
+                          <td className={`px-4 py-3 align-top overflow-hidden sticky z-10 transition-[background-color,box-shadow] ${selectedLeads.has(l.id) ? "bg-blue-50" : "bg-white group-hover:bg-slate-50"} ${showBulkSelect ? "left-[44px]" : "left-0"} ${adminScrolledX ? "shadow-[6px_0_8px_-6px_rgba(15,23,42,0.18)]" : ""}`}>
                             <button
                               onClick={() => setSelectedLead(l)}
-                              className="font-bold text-[#0B1E6E] hover:underline text-left [overflow-wrap:anywhere] block max-w-full"
+                              className={phoneLayout ? "block max-w-full line-clamp-2 [overflow-wrap:anywhere] text-left text-[12px] font-bold leading-snug text-slate-900" : "font-bold text-[#0B1E6E] hover:underline text-left [overflow-wrap:anywhere] block max-w-full"}
                               title={l.name}
                             >
                               {l.name}
                             </button>
-                            <p className="text-[11px] text-slate-500 font-mono mt-0.5 [overflow-wrap:anywhere]">{isAdmin ? l.phone : maskPhone(l.phone)}</p>
+                            <p className={phoneLayout ? "mt-0.5 truncate font-mono text-[11px] text-slate-500" : "text-[11px] text-slate-500 font-mono mt-0.5 [overflow-wrap:anywhere]"}>{isAdmin ? l.phone : maskPhone(l.phone)}</p>
                           </td>
-                          <td className="px-4 py-3 text-slate-600 align-top [overflow-wrap:anywhere]" title={l.email ? (isAdmin ? l.email : maskEmail(l.email)) : "—"}>{l.email ? (isAdmin ? l.email : maskEmail(l.email)) : "—"}</td>
-                          <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]" title={l.assignedAgent || "Unassigned"}>{l.assignedAgent || "Unassigned"}</td>
+                          {adminVisibleColumns.email && <td className="px-4 py-3 text-slate-600 align-top [overflow-wrap:anywhere]" title={l.email ? (isAdmin ? l.email : maskEmail(l.email)) : "—"}>{l.email ? (isAdmin ? l.email : maskEmail(l.email)) : "—"}</td>}
+                          {adminVisibleColumns.assignedTo && <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]" title={l.assignedAgent || "Unassigned"}>{l.assignedAgent || "Unassigned"}</td>}
 
                           {adminVisibleColumns.date && (
                             <td className="px-4 py-3 text-slate-500 align-top"><DateTimeLines {...dateTimeParts(l.createdAtStr)} /></td>
@@ -1498,13 +1549,10 @@ export default function LeadDashboard() {
                               ) : "—"}
                             </td>
                           )}
-                          {isAdmin && adminVisibleColumns.source && (
+                          {canSeeSource && adminVisibleColumns.source && (
                             <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]" title={l.source || "—"}>
                               <PlatformLabel text={l.source || "—"} iconOnly />
                             </td>
-                          )}
-                          {adminVisibleColumns.leadScore && (
-                            <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]">{l.leadScore != null ? l.leadScore : "—"}</td>
                           )}
                           {adminVisibleColumns.status && (
                             <td className="px-4 py-3 align-top">
@@ -1515,34 +1563,13 @@ export default function LeadDashboard() {
                             <td className="px-4 py-3 text-slate-500 align-top"><NextCallCell next={adminNextCallDateFor(l.id)} /></td>
                           )}
                           {adminVisibleColumns.actions && (
-                            <td className="px-4 py-3 align-top text-right">
-                              <button
-                                type="button"
-                                onClick={() => handleWhatsApp(l)}
-                                className="inline-flex items-center justify-center h-10 w-10 sm:h-7 sm:w-7 rounded-lg bg-slate-100 text-slate-700 hover:bg-emerald-50 hover:text-emerald-600 transition-colors"
-                                title="WhatsApp"
-                              >
-                                <WhatsAppIcon className="h-3.5 w-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => callAllowed && handleCall(l)}
-                                disabled={!callAllowed}
-                                className="inline-flex items-center justify-center h-10 w-10 sm:h-7 sm:w-7 rounded-lg bg-slate-100 text-slate-700 hover:bg-brand-50 hover:text-brand-700 transition-colors ml-1.5 disabled:opacity-30 disabled:hover:bg-slate-100 disabled:hover:text-slate-700"
-                                title={callAllowed ? "Call" : "Calling is only available on the mobile app for your role"}
-                              >
-                                <CallIcon className="h-3.5 w-3.5" />
-                              </button>
-                              {isAdmin && (
-                                <button
-                                  type="button"
-                                  onClick={() => openSingleDelete(l)}
-                                  className="inline-flex items-center justify-center h-10 w-10 sm:h-7 sm:w-7 rounded-lg bg-slate-100 text-red-600 hover:bg-red-50 transition-colors ml-1.5"
-                                  title="Delete lead"
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </button>
-                              )}
+                            <td className="px-4 py-3 align-top">
+                              <LeadRowActionsMenu
+                                onWhatsApp={() => handleWhatsApp(l)}
+                                onCall={() => handleCall(l)}
+                                callAllowed={callAllowed}
+                                onDelete={isAdmin ? () => openSingleDelete(l) : undefined}
+                              />
                             </td>
                           )}
                           {isAdmin && adminVisibleColumns.adSetName && (
@@ -1554,7 +1581,7 @@ export default function LeadDashboard() {
                             </td>
                           )}
                           {adminVisibleColumns.notes && (
-                            <td className="px-4 py-3 text-slate-600 align-top"><LeadNoteCell lead={l} onSaved={handleNoteSaved} /></td>
+                            <td className="px-4 py-3 text-slate-600 align-top"><LeadNoteCell lead={l} onSaved={handleNoteSaved} compact={phoneLayout} /></td>
                           )}
                           {adminVisibleColumns.propertyMatch && (
                             <td className="px-4 py-3 text-slate-400 align-top [overflow-wrap:anywhere] italic" title="Not tracked yet — no property-match scoring implemented">—</td>
@@ -2323,7 +2350,6 @@ export default function LeadDashboard() {
           onUpdateStatus={handleUpdateLeadStatus}
           onReassigned={() => setLeadsRefreshKey(k => k + 1)}
           onNoteSaved={handleNoteSaved}
-          managerStatusReadOnly
         />
 
         {/* Filter panel (column visibility) — opened from both the Leads
@@ -2430,7 +2456,7 @@ export default function LeadDashboard() {
                     </button>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
-                    {ADMIN_COLUMNS.filter(c => c.key !== "campaign" && c.key !== "source" && c.key !== "adSetName").map(c => {
+                    {ADMIN_COLUMNS.filter(c => c.key !== "campaign" && c.key !== "adSetName" && (c.key !== "source" || canSeeSource)).map(c => {
                       const isOn = adminVisibleColumns[c.key];
                       return (
                         <button

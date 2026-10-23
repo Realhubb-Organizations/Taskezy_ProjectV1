@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import RowActionsMenu from "@/components/ui/RowActionsMenu";
 import { useApp, Lead, LeadStatus, FollowupCall, mapApiFollowupToFrontend, mapApiLeadToFrontendLead } from "@/context/AppContext";
 import { isLeadAssignableUser } from "@/lib/leadAssignment";
 import { useDialog } from "@/components/ui/DialogProvider";
@@ -642,12 +643,10 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                               </td>
                               {activeRole === "ADMIN" && (
                                 <td className="px-4 py-3 text-right">
-                                  <button
-                                    onClick={() => handleReassign(lead.id, lead.name)}
-                                    className="inline-flex items-center gap-1 text-[10px] font-bold text-brand-600 hover:text-brand-700"
-                                  >
-                                    <RefreshCw className="h-3 w-3" /> Reassign
-                                  </button>
+                                  <RowActionsMenu
+                                    label="Lead actions"
+                                    actions={[{ label: "Reassign", icon: <RefreshCw className="h-4 w-4 text-slate-500" />, onClick: () => handleReassign(lead.id, lead.name) }]}
+                                  />
                                 </td>
                               )}
                             </tr>
