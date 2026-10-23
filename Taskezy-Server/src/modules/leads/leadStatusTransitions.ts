@@ -1,5 +1,6 @@
 import { query } from "../../db/pool";
 import { ApiError } from "../../utils/ApiError";
+import { BUSINESS_TIMEZONE } from "../../utils/businessDate";
 
 // The 14-value Lead Status list (main Leads page only — Data Calling has
 // its own, separate call_status, see leads.schema.ts). Matches
@@ -31,9 +32,10 @@ const TRANSITIONS: Record<LeadStatusCode, { allowed: LeadStatusCode[]; optional:
     optional: ["CANCELLED", "DIFFERENT_LOCATION"]
   },
   RNR: {
-    // DEAD_LEAD is listed here as "allowed" at the matrix level — the extra
-    // 7-day/3-day-gap gate is enforced separately in assertTransitionAllowed
-    // below, not by omitting it from this list.
+    // DEAD_LEAD is listed here as "allowed" at the matrix level — the
+    // minimum-call-history gate is enforced separately in
+    // assertTransitionAllowed below (applies to every path to DEAD_LEAD,
+    // not just this one), not by omitting it from this list.
     allowed: ["CALL_BACK", "DEAD_LEAD", "FOLLOWUP", "SITE_VISIT_SCHEDULED", "LOW_BUDGET", "OTHER_REQUIREMENT", "BROKER"],
     optional: ["CANCELLED", "DIFFERENT_LOCATION"]
   },
@@ -78,52 +80,33 @@ const TRANSITIONS: Record<LeadStatusCode, { allowed: LeadStatusCode[]; optional:
   }
 };
 
-const RNR_ATTEMPT_SPAN_DAYS = 7;
-const RNR_ATTEMPT_MAX_GAP_DAYS = 3;
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
+// A lead can't be marked Dead Lead until it's been genuinely worked —
+// called on at least this many distinct calendar days over its lifetime.
+// Multiple calls on the same day only count once (an agent dialing the
+// same lead 15 times in one afternoon doesn't satisfy this), so this is a
+// real spread-over-time effort check, not a raw attempt count. Applies to
+// every path to Dead Lead (NEW_LEAD, RNR, CALL_BACK, FOLLOWUP, etc.), not
+// just RNR — replaces the earlier RNR-only 7-day-span/3-day-gap rule.
+const DEAD_LEAD_MIN_CALL_DAYS = 15;
 
 /**
- * RNR -> Dead Lead is only allowed once the lead has had logged call-back
- * attempts (either a real call via the native app's call-feedback gate, or
- * a scheduled callback via the shared follow-up flow — see the "Log
- * Call-Back Attempt" action on the Leads page) spanning at least 7 days
- * since it most recently entered RNR, with no gap over 3 days between any
- * two consecutive attempts. Reuses existing tables (call_attempts,
- * followup_calls) rather than a new one — both already carry a real,
- * per-attempt timestamp.
+ * Counts distinct business-calendar days (BUSINESS_TIMEZONE, so a late-
+ * night call doesn't land on the wrong day) call_attempts has a real phone
+ * call (channel = 'CALL' — WhatsApp doesn't count as "called") logged
+ * against this lead, for its whole lifetime.
  */
-async function assertRnrAttemptHistorySatisfied(leadId: string): Promise<void> {
-  const { rows: rnrEntries } = await query<{ created_at: string }>(
-    `SELECT created_at FROM lead_logs WHERE lead_id = $1 AND message = 'Status changed to "RNR"' ORDER BY created_at DESC LIMIT 1`,
-    [leadId]
+async function assertDeadLeadCallHistorySatisfied(leadId: string): Promise<void> {
+  const { rows } = await query<{ unique_days: string }>(
+    `SELECT count(DISTINCT (created_at AT TIME ZONE $2)::date) AS unique_days
+     FROM call_attempts
+     WHERE lead_id = $1 AND channel = 'CALL'`,
+    [leadId, BUSINESS_TIMEZONE]
   );
-  const rnrSince = rnrEntries[0]?.created_at;
-  if (!rnrSince) {
-    throw ApiError.badRequest('This lead has no record of entering RNR — log at least one call-back attempt before marking it Dead Lead.');
-  }
-
-  const { rows: attempts } = await query<{ created_at: string }>(
-    `SELECT created_at FROM call_attempts WHERE lead_id = $1 AND created_at >= $2
-     UNION ALL
-     SELECT created_at FROM followup_calls WHERE lead_id = $1 AND call_type = 'CALLBACK' AND created_at >= $2
-     ORDER BY created_at ASC`,
-    [leadId, rnrSince]
-  );
-
-  const insufficient = () =>
-    ApiError.badRequest(
-      `Dead Lead isn't available yet — RNR needs at least ${RNR_ATTEMPT_SPAN_DAYS} days of logged call-back attempts, with no gap over ${RNR_ATTEMPT_MAX_GAP_DAYS} days between any two, before this lead can be marked Dead Lead.`
+  const uniqueDays = Number(rows[0]?.unique_days ?? 0);
+  if (uniqueDays < DEAD_LEAD_MIN_CALL_DAYS) {
+    throw ApiError.badRequest(
+      `Dead Lead isn't available yet — this lead has been called on ${uniqueDays} of the required ${DEAD_LEAD_MIN_CALL_DAYS} separate days before it can be marked Dead Lead.`
     );
-
-  if (attempts.length === 0) throw insufficient();
-
-  const times = attempts.map(a => new Date(a.created_at).getTime());
-  const spanDays = (times[times.length - 1] - times[0]) / MS_PER_DAY;
-  if (spanDays < RNR_ATTEMPT_SPAN_DAYS) throw insufficient();
-
-  for (let i = 1; i < times.length; i++) {
-    const gapDays = (times[i] - times[i - 1]) / MS_PER_DAY;
-    if (gapDays > RNR_ATTEMPT_MAX_GAP_DAYS) throw insufficient();
   }
 }
 
@@ -135,8 +118,8 @@ export async function assertTransitionAllowed(fromCode: string, toCode: LeadStat
   if (!rule) return; // fromCode predates migration 030 or is otherwise unrecognized — don't block on a status this matrix doesn't know, the FK/enum elsewhere already guards valid codes going forward
 
   if (rule.allowed.includes(toCode) || rule.optional.includes(toCode)) {
-    if (fromCode === "RNR" && toCode === "DEAD_LEAD") {
-      await assertRnrAttemptHistorySatisfied(leadId);
+    if (toCode === "DEAD_LEAD") {
+      await assertDeadLeadCallHistorySatisfied(leadId);
     }
     return;
   }
