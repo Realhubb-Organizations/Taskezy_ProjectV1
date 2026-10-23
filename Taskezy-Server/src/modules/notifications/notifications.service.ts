@@ -40,13 +40,11 @@ export async function createNotification(input: CreateNotificationInput): Promis
 }
 
 // Lead-linked alerts that stay until someone acts on the lead (a status
-// update), not until they're read. Every other notification is purely
-// informational and is deleted as soon as its recipient reads it.
+// update), not until they're read — deleteLeadActivityNotifications below
+// clears these. Every other notification just gets marked read (read_at
+// set) and stays visible for 48h — see notifications.routes.ts's GET "/"
+// filter and notificationCleanupScheduler.ts for the actual cleanup.
 export const LEAD_ACTIVITY_CATEGORIES = ["REMINDER", "MISSED_SLA", "GENERAL", "REASSIGNMENT", "KYC"] as const;
-
-// SQL condition matching an informational row — the negation of "lead-linked activity alert".
-// category is the notification_category enum in production; compare as text.
-export const INFORMATIONAL_SQL = `NOT (lead_id IS NOT NULL AND category::text = ANY('{${LEAD_ACTIVITY_CATEGORIES.join(",")}}'::text[]))`;
 
 /**
  * Deletes a lead's activity alerts for every recipient (the agent and any
@@ -62,16 +60,5 @@ export async function deleteLeadActivityNotifications(
     await pool.query(`DELETE FROM notifications WHERE lead_id = $1 AND category::text = ANY($2::text[])`, [leadId, categories]);
   } catch (err) {
     logger.warn({ errCode: (err as { code?: string }).code, leadId }, "Could not delete a lead's activity notifications");
-  }
-}
-
-/** Runs a notification DELETE, returning the deleted count, or 0 if it failed (logged, never thrown). */
-export async function tryDeleteNotifications(sql: string, params: unknown[]): Promise<number> {
-  try {
-    const { rowCount } = await pool.query(sql, params);
-    return rowCount ?? 0;
-  } catch (err) {
-    logger.warn({ errCode: (err as { code?: string }).code }, "Could not delete notifications");
-    return 0;
   }
 }
