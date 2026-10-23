@@ -18,9 +18,11 @@ import { apiListFollowupsPage } from "@/lib/apiClient";
 import NextCallCell from "@/components/crm/NextCallCell";
 import { useDialog } from "@/components/ui/DialogProvider";
 import LeadNoteCell from "@/components/crm/LeadNoteCell";
+import LeadRowActionsMenu from "@/components/crm/LeadRowActionsMenu";
+import { isPhoneLayout } from "@/lib/viewport";
 import { apiBulkDeleteLeads, apiBulkReassignLeads, apiDeleteLead } from "@/lib/apiClient";
 import { maskPhone, maskEmail } from "@/lib/maskPII";
-import { WhatsAppIcon, CallIcon } from "@/components/icons/ContactIcons";
+import { ExcelIcon } from "@/components/icons/ContactIcons";
 import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/callTrigger";
 import { CALL_SUB_STATUS_OPTIONS, CallSubStatus, callSubStatusOf, isQualifiedCall, isUnqualifiedCall } from "@/lib/callSubStatus";
 
@@ -64,10 +66,13 @@ function isUnassignedLead(l: Lead): boolean {
 // aggregate concepts that don't have a real per-lead-row meaning, so those
 // cells honestly render "—" rather than a fabricated number when shown.
 type DataCallingColumnKey =
+  | "email" | "nextCallDate"
   | "property" | "date" | "qualifiedLeads" | "dataCallSource" | "unqualifiedLeads"
   | "cpl" | "assignedTo" | "usageCount" | "notes" | "qualifiedPercent" | "actions" | "qualificationStatus" | "uploadedBy";
 
 const DATA_CALLING_COLUMNS: { key: DataCallingColumnKey; label: string }[] = [
+  { key: "email", label: "Email" },
+  { key: "nextCallDate", label: "Next Call Date" },
   { key: "property", label: "Property" },
   { key: "date", label: "Date" },
   { key: "qualifiedLeads", label: "Qualified Leads" },
@@ -84,6 +89,7 @@ const DATA_CALLING_COLUMNS: { key: DataCallingColumnKey; label: string }[] = [
 ];
 
 const DATA_CALLING_DEFAULT_VISIBLE_COLUMNS: Record<DataCallingColumnKey, boolean> = {
+  email: true, nextCallDate: true,
   property: true, date: true, qualifiedLeads: false, dataCallSource: false, unqualifiedLeads: false,
   cpl: false, assignedTo: true, usageCount: false, notes: true, qualifiedPercent: false, actions: false,
   qualificationStatus: true, uploadedBy: true
@@ -189,13 +195,9 @@ export default function DataCallingPage() {
   // agent doesn't need Property/Sub-status cluttering the row by default;
   // Admin/Manager keep today's behavior untouched.
   const isMember = currentUser?.role_type === "Member";
-  // Manager can see but never change a lead's status directly — only an
-  // Admin can; this was already true for this page's LeadDetailDrawer (the
-  // managerStatusReadOnly prop below), now extended to the row Status/
-  // Sub-status dropdowns too, so there's no remaining spot on this page
-  // where a Manager could edit status outside the drawer's existing lock.
-  // See project_crm_role_based_lead_scoping memory (2026-10-10).
-  const canEditLeadStatus = (l: Lead) => canChangeLeadStatus(l, currentUser, users) && currentUser?.role_type !== "Manager";
+  // Owner, the owner's manager (their team's leads) or an admin — same rule
+  // the server enforces; every change is recorded in Activity History.
+  const canEditLeadStatus = (l: Lead) => canChangeLeadStatus(l, currentUser, users);
   const callAllowed = canTriggerLeadCall(isAdmin);
   const handleCall = (lead: Lead) => {
     triggerLeadCall(lead, {
@@ -301,12 +303,17 @@ export default function DataCallingPage() {
   const [analyticsSubSources, setAnalyticsSubSources] = useState<string[]>([]);
 
   const [isAnalyticsFilterOpen, setIsAnalyticsFilterOpen] = useState(false);
-  const [analyticsVisibleColumns, setAnalyticsVisibleColumns] = useState<Record<AnalyticsColumnKey, boolean>>(ANALYTICS_DEFAULT_VISIBLE_COLUMNS);
+  // Cost columns (CPL / QCPL) are admin-only: never offered to or shown for
+  // managers and agents, and "Select All" can't switch them on either.
+  const pickableAnalyticsColumns = isAdmin ? ANALYTICS_COLUMNS : ANALYTICS_COLUMNS.filter(c => c.key !== "cpl" && c.key !== "qcpl");
+  const [analyticsVisibleColumns, setAnalyticsVisibleColumns] = useState<Record<AnalyticsColumnKey, boolean>>(
+    isAdmin ? ANALYTICS_DEFAULT_VISIBLE_COLUMNS : { ...ANALYTICS_DEFAULT_VISIBLE_COLUMNS, cpl: false, qcpl: false }
+  );
   const toggleAnalyticsColumn = (key: AnalyticsColumnKey) => setAnalyticsVisibleColumns(prev => ({ ...prev, [key]: !prev[key] }));
   const toggleSelectAllAnalyticsColumns = () => {
-    const allOn = ANALYTICS_COLUMNS.every(c => analyticsVisibleColumns[c.key]);
+    const allOn = pickableAnalyticsColumns.every(c => analyticsVisibleColumns[c.key]);
     const next: Record<AnalyticsColumnKey, boolean> = { ...analyticsVisibleColumns };
-    ANALYTICS_COLUMNS.forEach(c => { next[c.key] = !allOn; });
+    pickableAnalyticsColumns.forEach(c => { next[c.key] = !allOn; });
     setAnalyticsVisibleColumns(next);
   };
 
@@ -611,13 +618,29 @@ export default function DataCallingPage() {
   );
 
   const [assignedFilters, setAssignedFilters] = useState<string[]>([]);
-  const assignedOptions = useMemo(() => Array.from(new Set(leads.map(l => l.assignedAgent).filter(Boolean))).sort(), [leads]);
+  // Managers: only themselves and their direct reports — for both the
+  // Assigned To filter and the per-row reassign picker that share this list
+  const isTeamManager = currentUser?.role_type === "Manager" && currentUser?.role !== "ADMIN";
+  // (the team roster itself, so it isn't empty before anyone has leads).
+  const assignedOptions = useMemo(() => {
+    if (isTeamManager && currentUser) {
+      const team = users.filter(u => u.managerId === currentUser.id && u.status !== "INACTIVE").map(u => u.name);
+      return Array.from(new Set([currentUser.name, ...team])).sort();
+    }
+    return Array.from(new Set(leads.map(l => l.assignedAgent).filter(Boolean))).sort();
+  }, [leads, isTeamManager, currentUser, users]);
 
   // Data Call Source filter — bulk upload's per-batch sub-source (e.g.
   // "Kashmiri Data") when set, else the ingestion source (Meta, Google Ads
   // Sheet, Bulk Upload, etc.). This is what lets an admin pull up one bulk
   // upload batch to filter → select all → Assign/Reshuffle as a group.
   const [dataCallSourceFilters, setDataCallSourceFilters] = useState<string[]>([]);
+  // Property column-header filter.
+  const [propertyFilters, setPropertyFilters] = useState<string[]>([]);
+  const propertyFilterOptions = useMemo(
+    () => Array.from(new Set(leads.map(l => l.property).filter(Boolean) as string[])).sort(),
+    [leads]
+  );
   const dataCallSourceOptions = useMemo(
     () => Array.from(new Set(leads.map(l => l.subSource || l.source).filter(Boolean) as string[])).sort(),
     [leads]
@@ -629,18 +652,43 @@ export default function DataCallingPage() {
   // visible for them instead of buried behind the Filter panel. Admin's
   // default is untouched — same as every other column here. See
   // project_crm_role_based_lead_scoping memory.
-  const [visibleColumns, setVisibleColumns] = useState<Record<DataCallingColumnKey, boolean>>(
-    isAdmin
-      ? DATA_CALLING_DEFAULT_VISIBLE_COLUMNS
+  // Phones / the app: Lead Name, Status, Actions, Notes only (Actions moves
+  // before Notes there); the Filter panel turns the rest back on.
+  const [phoneLayout] = useState(isPhoneLayout);
+  // Admin's checkbox / row-menu columns are laptop-only; the phone table
+  // matches the 4-column design.
+  const showAdminCols = isAdmin && !phoneLayout;
+  // Columns a role never gets — not offered in the Filter panel and never
+  // shown. Managers keep Data Call Source, but only as the source icon
+  // (see the header/cell below); agents don't get it at all.
+  const hiddenColumnsForRole: DataCallingColumnKey[] = isAdmin
+    ? []
+    : [
+        "cpl", "usageCount", "qualifiedLeads", "unqualifiedLeads", "uploadedBy", "qualifiedPercent",
+        ...(isMember ? (["dataCallSource"] as DataCallingColumnKey[]) : [])
+      ];
+  const [visibleColumns, setVisibleColumns] = useState<Record<DataCallingColumnKey, boolean>>(() => {
+    const withoutHidden = (cols: Record<DataCallingColumnKey, boolean>) => {
+      const next = { ...cols };
+      hiddenColumnsForRole.forEach(k => { next[k] = false; });
+      return next;
+    };
+    if (phoneLayout) {
+      const none = Object.fromEntries(DATA_CALLING_COLUMNS.map(c => [c.key, false])) as Record<DataCallingColumnKey, boolean>;
+      return { ...none, actions: true, notes: true };
+    }
+    return isAdmin
+      ? { ...DATA_CALLING_DEFAULT_VISIBLE_COLUMNS, actions: true }
       : isMember
-        ? { ...DATA_CALLING_DEFAULT_VISIBLE_COLUMNS, actions: true, property: false }
-        : { ...DATA_CALLING_DEFAULT_VISIBLE_COLUMNS, actions: true }
-  );
+        ? withoutHidden({ ...DATA_CALLING_DEFAULT_VISIBLE_COLUMNS, actions: true, property: false })
+        : withoutHidden({ ...DATA_CALLING_DEFAULT_VISIBLE_COLUMNS, actions: true });
+  });
+  const pickableColumns = DATA_CALLING_COLUMNS.filter(c => !hiddenColumnsForRole.includes(c.key));
   const toggleColumn = (key: DataCallingColumnKey) => setVisibleColumns(prev => ({ ...prev, [key]: !prev[key] }));
   const toggleSelectAllColumns = () => {
-    const allOn = DATA_CALLING_COLUMNS.every(c => visibleColumns[c.key]);
+    const allOn = pickableColumns.every(c => visibleColumns[c.key]);
     const next: Record<DataCallingColumnKey, boolean> = { ...visibleColumns };
-    DATA_CALLING_COLUMNS.forEach(c => { next[c.key] = !allOn; });
+    pickableColumns.forEach(c => { next[c.key] = !allOn; });
     setVisibleColumns(next);
   };
 
@@ -901,6 +949,7 @@ export default function DataCallingPage() {
       const matchesStatus = statusFilters.length === 0 || statusFilters.includes(l.callStatus || CALL_STATUS_NONE);
       const matchesAssigned = assignedFilters.length === 0 || assignedFilters.includes(l.assignedAgent);
       const matchesDataCallSource = dataCallSourceFilters.length === 0 || dataCallSourceFilters.includes(l.subSource || l.source || "");
+      const matchesProperty = propertyFilters.length === 0 || propertyFilters.includes(l.property || "");
       const matchesSubStatus = subStatusFilters.length === 0 || subStatusFilters.includes(qualificationStatusOf(l));
       const matchesDate = appliedCustomRange
         ? (() => {
@@ -913,9 +962,9 @@ export default function DataCallingPage() {
             return d >= start && d <= end;
           })()
         : true;
-      return matchesSearch && matchesStatus && matchesAssigned && matchesDataCallSource && matchesSubStatus && matchesDate;
+      return matchesSearch && matchesStatus && matchesAssigned && matchesDataCallSource && matchesProperty && matchesSubStatus && matchesDate;
     });
-  }, [leads, searchQuery, statusFilters, assignedFilters, dataCallSourceFilters, subStatusFilters, appliedCustomRange]);
+  }, [leads, searchQuery, statusFilters, assignedFilters, dataCallSourceFilters, propertyFilters, subStatusFilters, appliedCustomRange]);
 
   const totalPages = Math.max(1, Math.ceil(filteredLeads.length / rowsPerPage));
   const currentPageClamped = Math.min(currentPage, totalPages);
@@ -941,6 +990,21 @@ export default function DataCallingPage() {
   }, [pageLeadIds]);
   const nextCallDateFor = (leadId: string) => nextFollowupFor(leadId, pageFollowups);
 
+  // WhatsApp / Call buttons — rendered right after Status on phones, at the
+  // end of the row elsewhere.
+  // WhatsApp / Call (and Delete for admins) behind one "⋯" — right after
+  // Status on phones, at the end of the row elsewhere.
+  const renderActionsCell = (l: Lead) => (
+    <td className="px-4 py-3.5">
+      <LeadRowActionsMenu
+        onWhatsApp={() => handleWhatsApp(l)}
+        onCall={() => handleCall(l)}
+        callAllowed={callAllowed}
+        onDelete={isAdmin ? () => { setDeleteError(""); setDeleteTarget({ ids: [l.id], name: l.name }); } : undefined}
+      />
+    </td>
+  );
+
   const allOnPageSelected = paginatedLeads.length > 0 && paginatedLeads.every(l => selectedIds.has(l.id));
   const toggleSelectAllOnPage = () => setSelectedIds(prev => {
     const next = new Set(prev);
@@ -953,7 +1017,8 @@ export default function DataCallingPage() {
   // moved from an always-rendered fixed column to a toggleable one (Task A,
   // 2026-10-10), so the fixed base dropped by 1 — it's now counted via the
   // DATA_CALLING_COLUMNS filter below instead.
-  const visibleColCount = (isAdmin ? 5 : 3) + DATA_CALLING_COLUMNS.filter(c => visibleColumns[c.key]).length;
+  // Always-shown: Lead Name and Status (+ Admin's checkbox and row-menu columns).
+  const visibleColCount = (showAdminCols ? 3 : 2) + DATA_CALLING_COLUMNS.filter(c => visibleColumns[c.key]).length;
 
   return (
     <div className="space-y-4 pb-8 animate-fade-in text-slate-800">
@@ -1614,17 +1679,18 @@ export default function DataCallingPage() {
           {/* Main Data Calling Table */}
           <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden">
             <div ref={tableScrollRef} className="overflow-x-auto md:overflow-y-auto md:max-h-[55vh]">
-              <table className="table-fixed w-full text-left border-collapse" style={{ minWidth: (isAdmin ? 44 + 64 : 0) + (visibleColCount - (isAdmin ? 2 : 0)) * 150 }}>
+              <table className={`table-fixed w-full text-left border-collapse ${phoneLayout ? "[&_th]:px-2.5 [&_td]:px-2.5 [&_th]:py-3 [&_td]:py-4 [&_th]:whitespace-normal [&_th]:uppercase [&_th]:text-[10px] [&_th]:font-semibold [&_th]:tracking-wider [&_th]:text-slate-500 [&_th_button]:uppercase [&_th_button]:text-[10px] [&_th_button]:font-semibold [&_th_button]:tracking-wider [&_th_button]:text-slate-500 [&_th_svg]:hidden [&_th:not(:first-child)]:border-l [&_td:not(:first-child)]:border-l [&_th]:border-slate-100 [&_td]:border-slate-100 [&_td]:align-middle" : ""}`} style={phoneLayout && visibleColCount <= 5 ? undefined : { minWidth: (showAdminCols ? 44 : 0) + (visibleColCount - (showAdminCols ? 1 : 0)) * (phoneLayout ? 110 : 150) }}>
                 <colgroup>
-                  {isAdmin && <col className="w-[44px]" />}
+                  {showAdminCols && <col className="w-[44px]" />}
                   <col />
-                  <col />
-                  <col />
+                  {visibleColumns.email && <col />}
+                  <col className={phoneLayout ? "w-[118px]" : undefined} />
+                  {phoneLayout && visibleColumns.actions && <col className="w-[56px]" />}
                   {visibleColumns.qualificationStatus && <col />}
                   {visibleColumns.assignedTo && <col />}
                   {visibleColumns.date && <col />}
-                  {visibleColumns.notes && <col />}
-                  <col />
+                  {visibleColumns.notes && <col className={phoneLayout ? "w-[80px]" : undefined} />}
+                  {visibleColumns.nextCallDate && <col />}
                   {visibleColumns.property && <col />}
                   {visibleColumns.dataCallSource && <col />}
                   {visibleColumns.uploadedBy && <col />}
@@ -1633,12 +1699,11 @@ export default function DataCallingPage() {
                   {visibleColumns.unqualifiedLeads && <col />}
                   {visibleColumns.cpl && <col />}
                   {visibleColumns.qualifiedPercent && <col />}
-                  {visibleColumns.actions && <col />}
-                  {isAdmin && <col className="w-[64px]" />}
+                  {!phoneLayout && visibleColumns.actions && <col className="w-[80px]" />}
                 </colgroup>
                 <thead className="sticky top-0 z-10 bg-white">
                   <tr className="border-b border-slate-200/80 text-left text-xs font-bold text-slate-800 whitespace-nowrap">
-                    {isAdmin && (
+                    {showAdminCols && (
                       <th className="px-3.5 py-3 whitespace-nowrap">
                         <input
                           type="checkbox"
@@ -1664,14 +1729,14 @@ export default function DataCallingPage() {
                         </div>
                       ) : (
                         <div className="flex items-center gap-1.5">
-                          <span>Lead Name</span>
+                          <button type="button" onClick={() => setSearchOpen(true)} className="text-left">Lead Name</button>
                           <button onClick={() => setSearchOpen(true)} className="text-slate-400 hover:text-slate-700" title="Search lead">
                             <Search className="h-3.5 w-3.5" />
                           </button>
                         </div>
                       )}
                     </th>
-                    <th className="px-4 py-3 whitespace-nowrap">Email</th>
+                    {visibleColumns.email && <th className="px-4 py-3 whitespace-nowrap">Email</th>}
                     <th className="px-4 py-3 whitespace-nowrap">
                       <SearchableMultiSelect
                         variant="inline"
@@ -1683,6 +1748,7 @@ export default function DataCallingPage() {
                         panelWidth={180}
                       />
                     </th>
+                    {phoneLayout && visibleColumns.actions && <th className="px-4 py-3 whitespace-nowrap">Action</th>}
                     {visibleColumns.qualificationStatus && (
                       <th className="px-4 py-3 whitespace-nowrap">
                         <SearchableMultiSelect
@@ -1711,11 +1777,23 @@ export default function DataCallingPage() {
                     )}
                     {visibleColumns.date && <th className="px-4 py-3 whitespace-nowrap">Date</th>}
                     {visibleColumns.notes && <th className="px-4 py-3 whitespace-nowrap">Notes</th>}
-                    <th className="px-4 py-3 whitespace-nowrap">Next Call Date</th>
-                    {visibleColumns.property && <th className="px-4 py-3 whitespace-nowrap">Property</th>}
-                    {visibleColumns.dataCallSource && (
+                    {visibleColumns.nextCallDate && <th className="px-4 py-3 whitespace-nowrap">Next Call Date</th>}
+                    {visibleColumns.property && (
                       <th className="px-4 py-3 whitespace-nowrap">
                         <SearchableMultiSelect
+                          variant="inline"
+                          label="Property"
+                          options={propertyFilterOptions}
+                          selected={propertyFilters}
+                          onChange={(next) => { setPropertyFilters(next); setCurrentPage(1); }}
+                          searchPlaceholder="Search properties..."
+                          panelWidth={240}
+                        />
+                      </th>
+                    )}
+                    {visibleColumns.dataCallSource && (
+                      <th className="px-4 py-3 whitespace-nowrap">
+                        {!isAdmin ? "Data Call Source" : <SearchableMultiSelect
                           variant="inline"
                           label="Data Call Source"
                           selected={dataCallSourceFilters}
@@ -1723,7 +1801,7 @@ export default function DataCallingPage() {
                           options={dataCallSourceOptions}
                           searchPlaceholder="Search sources..."
                           panelWidth={200}
-                        />
+                        />}
                       </th>
                     )}
                     {visibleColumns.uploadedBy && <th className="px-4 py-3 whitespace-nowrap">Uploaded By</th>}
@@ -1732,8 +1810,7 @@ export default function DataCallingPage() {
                     {visibleColumns.unqualifiedLeads && <th className="px-4 py-3 whitespace-nowrap">Unqualified Leads</th>}
                     {visibleColumns.cpl && <th className="px-4 py-3 whitespace-nowrap">CPL</th>}
                     {visibleColumns.qualifiedPercent && <th className="px-4 py-3 whitespace-nowrap">Qualified %age</th>}
-                    {visibleColumns.actions && <th className="px-4 py-3 text-right whitespace-nowrap">Actions</th>}
-                    {isAdmin && <th className="px-3 py-3 whitespace-nowrap"><span className="sr-only">Actions</span></th>}
+                    {!phoneLayout && visibleColumns.actions && <th className="px-4 py-3 whitespace-nowrap">Actions</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-[12px] font-medium text-slate-700">
@@ -1746,7 +1823,7 @@ export default function DataCallingPage() {
                   ) : (
                     paginatedLeads.map(l => (
                       <tr key={l.id} className="hover:bg-slate-50/50 transition-colors">
-                        {isAdmin && (
+                        {showAdminCols && (
                           <td className="px-3.5 py-3.5">
                             <input
                               type="checkbox"
@@ -1759,13 +1836,13 @@ export default function DataCallingPage() {
                         <td className="px-4 py-3.5">
                           <button
                             onClick={() => setSelectedLead(l)}
-                            className="font-semibold text-[#0B1E6E] hover:underline text-left [overflow-wrap:anywhere] block max-w-full"
+                            className={phoneLayout ? "block max-w-full line-clamp-2 [overflow-wrap:anywhere] text-left text-[12px] font-bold leading-snug text-slate-900" : "font-semibold text-[#0B1E6E] hover:underline text-left [overflow-wrap:anywhere] block max-w-full"}
                             title={l.name}
                           >
                             {l.name}
                           </button>
                           {l.phone && (
-                            <div className="flex items-center gap-1 mt-0.5 text-[10px] text-slate-400 font-medium">
+                            <div className={phoneLayout ? "mt-0.5 truncate font-mono text-[11px] text-slate-500" : "flex items-center gap-1 mt-0.5 text-[10px] text-slate-400 font-medium"}>
                               <span className="[overflow-wrap:anywhere]">{isAdmin ? l.phone : maskPhone(l.phone)}</span>
                               {isAdmin && (
                                 <button onClick={() => copyToClipboard(l.phone)} className="text-slate-300 hover:text-slate-500 shrink-0" title="Copy phone number">
@@ -1775,6 +1852,7 @@ export default function DataCallingPage() {
                             </div>
                           )}
                         </td>
+                        {visibleColumns.email && (
                         <td className="px-4 py-3.5">
                           {l.email ? (
                             <div className="flex items-center gap-1">
@@ -1787,25 +1865,24 @@ export default function DataCallingPage() {
                             </div>
                           ) : "—"}
                         </td>
+                        )}
                         <td className="px-4 py-3.5 whitespace-nowrap">
-                          {/* Manager can see but never change call status directly — only
-                              an Admin can; see canEditLeadStatus above.
-                              See project_crm_role_based_lead_scoping memory (2026-10-10). */}
                           {canEditLeadStatus(l) ? (
                             <SearchableSelect
                               variant="inline"
                               value={l.callStatus || ""}
                               onChange={(v) => openCallStatusChange(l, v as NonNullable<Lead["callStatus"]>)}
                               options={ROW_CALL_STATUS_OPTIONS}
-                              placeholder="Not called yet"
+                              placeholder={phoneLayout ? "Not called" : "Not called yet"}
                               searchPlaceholder="Search call status..."
                               panelWidth={176}
-                              className="text-slate-900"
+                              className={phoneLayout ? "max-w-full rounded-xl bg-blue-50 px-2 py-1.5 text-[11px] font-semibold text-blue-600 [&_svg]:h-3 [&_svg]:w-3" : "text-slate-900"}
                             />
                           ) : (
-                            <span className="text-slate-900" title={STATUS_LOCKED_HINT}>{l.callStatus || "Not called yet"}</span>
+                            <span className={phoneLayout ? "inline-block rounded-xl bg-slate-100 px-2 py-1.5 text-[11px] font-semibold text-slate-600" : "text-slate-900"} title={STATUS_LOCKED_HINT}>{l.callStatus || "Not called yet"}</span>
                           )}
                         </td>
+                        {phoneLayout && visibleColumns.actions && renderActionsCell(l)}
                         {visibleColumns.qualificationStatus && (
                         <td className="px-4 py-3.5 whitespace-nowrap">
                           {/* Sub-status: pickable only while Call Status is Connected
@@ -1854,50 +1931,22 @@ export default function DataCallingPage() {
                           </td>
                         )}
                         {visibleColumns.date && <td className="px-4 py-3.5">{formatDateTime(l.createdAtStr)}</td>}
-                        {visibleColumns.notes && <td className="px-4 py-3.5"><LeadNoteCell lead={l} /></td>}
-                        <td className="px-4 py-3.5"><NextCallCell next={nextCallDateFor(l.id)} /></td>
+                        {visibleColumns.notes && <td className="px-4 py-3.5"><LeadNoteCell lead={l} compact={phoneLayout} /></td>}
+                        {visibleColumns.nextCallDate && <td className="px-4 py-3.5"><NextCallCell next={nextCallDateFor(l.id)} /></td>}
                         {visibleColumns.property && <td className="px-4 py-3.5 [overflow-wrap:anywhere]">{l.property || "—"}</td>}
-                        {visibleColumns.dataCallSource && <td className="px-4 py-3.5 [overflow-wrap:anywhere]">{l.subSource || l.source || "—"}</td>}
+                        {visibleColumns.dataCallSource && (
+                          <td className="px-4 py-3.5 [overflow-wrap:anywhere]">
+                            {/* Managers see only that it's an uploaded-data lead, not the batch name. */}
+                            {isAdmin ? (l.subSource || l.source || "—") : <ExcelIcon className="h-4 w-4" />}
+                          </td>
+                        )}
                         {visibleColumns.uploadedBy && <td className="px-4 py-3.5 [overflow-wrap:anywhere]">{l.uploadedByName || "—"}</td>}
                         {visibleColumns.usageCount && <td className="px-4 py-3.5">{l.logs ? l.logs.length : 0}</td>}
                         {visibleColumns.qualifiedLeads && <td className="px-4 py-3.5 text-slate-300" title="Not applicable — this is a per-lead row, not an aggregate">—</td>}
                         {visibleColumns.unqualifiedLeads && <td className="px-4 py-3.5 text-slate-300" title="Not applicable — this is a per-lead row, not an aggregate">—</td>}
                         {visibleColumns.cpl && <td className="px-4 py-3.5 text-slate-300" title="Not applicable — this is a per-lead row, not an aggregate">—</td>}
                         {visibleColumns.qualifiedPercent && <td className="px-4 py-3.5 text-slate-300" title="Not applicable — this is a per-lead row, not an aggregate">—</td>}
-                        {visibleColumns.actions && (
-                          <td className="px-4 py-3.5 text-right">
-                            <button
-                              type="button"
-                              onClick={() => handleWhatsApp(l)}
-                              className="inline-flex items-center justify-center h-10 w-10 sm:h-7 sm:w-7 rounded-lg bg-slate-100 text-slate-700 hover:bg-emerald-50 hover:text-emerald-600 transition-colors"
-                              title="WhatsApp"
-                            >
-                              <WhatsAppIcon className="h-3.5 w-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => callAllowed && handleCall(l)}
-                              disabled={!callAllowed}
-                              className="inline-flex items-center justify-center h-10 w-10 sm:h-7 sm:w-7 rounded-lg bg-slate-100 text-slate-700 hover:bg-brand-50 hover:text-brand-700 transition-colors ml-1.5 disabled:opacity-30 disabled:hover:bg-slate-100 disabled:hover:text-slate-700"
-                              title={callAllowed ? "Call" : "Calling is only available on the mobile app for your role"}
-                            >
-                              <CallIcon className="h-3.5 w-3.5" />
-                            </button>
-                          </td>
-                        )}
-                        {isAdmin && (
-                          <td className="px-3 py-3.5">
-                            <button
-                              type="button"
-                              onClick={() => { setDeleteError(""); setDeleteTarget({ ids: [l.id], name: l.name }); }}
-                              title="Delete lead"
-                              aria-label={`Delete ${l.name}`}
-                              className="inline-flex items-center justify-center h-8 w-8 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          </td>
-                        )}
+                        {!phoneLayout && visibleColumns.actions && renderActionsCell(l)}
                       </tr>
                     ))
                   )}
@@ -1942,7 +1991,7 @@ export default function DataCallingPage() {
                 </button>
               </div>
               <div className="grid grid-cols-2 gap-3">
-                {DATA_CALLING_COLUMNS.map(c => {
+                {pickableColumns.map(c => {
                   const isOn = visibleColumns[c.key];
                   return (
                     <button
@@ -1992,7 +2041,7 @@ export default function DataCallingPage() {
                 </button>
               </div>
               <div className="grid grid-cols-2 gap-3">
-                {ANALYTICS_COLUMNS.map(c => {
+                {pickableAnalyticsColumns.map(c => {
                   const isOn = analyticsVisibleColumns[c.key];
                   return (
                     <button
@@ -2119,7 +2168,6 @@ export default function DataCallingPage() {
         isOpen={selectedLead !== null}
         onClose={() => setSelectedLead(null)}
         onUpdateStatus={updateLeadStatus}
-        managerStatusReadOnly
       />
 
       {/* RNR needs a next-call date (scheduled via the same follow-up
