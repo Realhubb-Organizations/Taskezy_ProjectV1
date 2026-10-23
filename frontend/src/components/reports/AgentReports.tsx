@@ -417,8 +417,8 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
             <>
               {/* Agent header. Allocated Spend / Booking ROI are for admins and
                   managers only — an agent's own view is just name + manager. */}
-              <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-5 flex flex-wrap items-center gap-x-6 gap-y-3">
-                <div className="flex items-center gap-3 min-w-0 flex-1">
+              <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-5 flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-x-6 gap-y-3">
+                <div className="flex items-center gap-3 min-w-0 w-full sm:w-auto sm:flex-1">
                   <div className="h-11 w-11 rounded-full bg-[#0B1E6E] text-white text-sm font-bold flex items-center justify-center shrink-0">
                     {activeAgent.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join("").toUpperCase()}
                   </div>
@@ -429,7 +429,7 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                     </p>
                   </div>
                 </div>
-                {!isScopedToSelf && <div className="flex items-center gap-6">
+                {!isScopedToSelf && <div className="flex items-center flex-wrap gap-6">
                   <div>
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Allocated Spend</span>
                     {isDataLoading ? (
