@@ -6,7 +6,7 @@ import { useApp, Lead, LeadStatus, FollowupCall, mapApiFollowupToFrontend } from
 import { apiListFollowupsPage, apiGetDistinctCampaigns, LeadListFilters } from "@/lib/apiClient";
 import { useServerLeadList } from "@/lib/useServerLeadList";
 import { useDialog } from "@/components/ui/DialogProvider";
-import { deriveActivityTimeline, PICKABLE_STATUS_OPTIONS, statusBadgeClasses, frontendStatusToDbCode } from "@/lib/leadStatusMapping";
+import { deriveActivityTimeline, PICKABLE_STATUS_OPTIONS, statusBadgeClasses, frontendStatusToDbCode, withDeadLeadGate } from "@/lib/leadStatusMapping";
 import { WhatsAppIcon, CallIcon } from "@/components/icons/ContactIcons";
 import { Phone, Mail, X, Copy, Check, User, Search, ArrowRight } from "lucide-react";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
@@ -460,7 +460,7 @@ export default function LeadDrillDownPanel({ title, baseFilters, onClose }: {
   ) : (
     <SearchableSelect
       variant="inline"
-      options={PICKABLE_STATUS_OPTIONS.includes(l.status) ? PICKABLE_STATUS_OPTIONS : [l.status, ...PICKABLE_STATUS_OPTIONS]}
+      options={withDeadLeadGate(PICKABLE_STATUS_OPTIONS.includes(l.status) ? PICKABLE_STATUS_OPTIONS : [l.status, ...PICKABLE_STATUS_OPTIONS], l, activeRole === "ADMIN")}
       value={l.status}
       onChange={(v) => handleDrillStatusChange(l.id, v as LeadStatus)}
       searchPlaceholder="Search status..."

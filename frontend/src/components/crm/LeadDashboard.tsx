@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useApp, Lead, LeadStatus, FollowupCall, mapApiLeadToFrontendLead, mapApiFollowupToFrontend } from "@/context/AppContext";
 import { useDialog } from "@/components/ui/DialogProvider";
 import { Sliders, Sparkles, Plus, Check, ChevronDown, Search, X, Minus, Download, RotateCcw, Users, Trash2, AlertTriangle } from "lucide-react";
-import { STATUS_OPTIONS, PICKABLE_STATUS_OPTIONS, frontendStatusToDbCode } from "@/lib/leadStatusMapping";
+import { STATUS_OPTIONS, PICKABLE_STATUS_OPTIONS, frontendStatusToDbCode, withDeadLeadGate } from "@/lib/leadStatusMapping";
 import { type LeadSummaryStats } from "@/lib/leadSummaryStats";
 import { apiListLeadsPage, apiGetLead, apiGetLeadStats, apiGetLeadAnalyticsStats, apiGetDistinctCampaigns, apiListFollowupsPage, apiDeleteLead, apiBulkDeleteLeads, apiBulkReassignLeads, type LeadListFilters, type AgentAnalyticsStats } from "@/lib/apiClient";
 import { useServerLeadList } from "@/lib/useServerLeadList";
@@ -283,7 +283,7 @@ export default function LeadDashboard() {
     return (
       <SearchableSelect
         variant="inline"
-        options={allOptions}
+        options={withDeadLeadGate(allOptions, l, isAdmin)}
         value={l.status}
         onChange={(v) => handleUpdateLeadStatus(l.id, v as LeadStatus)}
         searchPlaceholder="Search status..."

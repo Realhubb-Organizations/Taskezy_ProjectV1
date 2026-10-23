@@ -87,7 +87,10 @@ const TRANSITIONS: Record<LeadStatusCode, { allowed: LeadStatusCode[]; optional:
 // real spread-over-time effort check, not a raw attempt count. Applies to
 // every path to Dead Lead (NEW_LEAD, RNR, CALL_BACK, FOLLOWUP, etc.), not
 // just RNR — replaces the earlier RNR-only 7-day-span/3-day-gap rule.
-const DEAD_LEAD_MIN_CALL_DAYS = 15;
+// Exported so the leads list query (leads.repository.ts) can expose the
+// same threshold to the frontend for disabling the Dead Lead option in the
+// status picker before it would even be rejected server-side.
+export const DEAD_LEAD_MIN_CALL_DAYS = 15;
 
 /**
  * Counts distinct business-calendar days (BUSINESS_TIMEZONE, so a late-

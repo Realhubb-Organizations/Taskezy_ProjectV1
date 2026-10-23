@@ -58,6 +58,12 @@ export interface LeadListRow {
   // Qualified / Unqualified — only ever set while call_status is Connected
   // (migration 033).
   call_sub_status: string | null;
+  // Distinct business-calendar days this lead has a real phone call logged
+  // (call_attempts, channel = 'CALL') — lets the frontend disable the Dead
+  // Lead status option until leadStatusTransitions.ts's
+  // DEAD_LEAD_MIN_CALL_DAYS threshold is met, instead of only finding out
+  // on a rejected save.
+  dead_lead_call_days: string;
   logs: { message: string; timestamp: string; user: string }[];
 }
 
@@ -175,6 +181,8 @@ const LIST_SELECT = `
     l.property_id, p.name AS property_name,
     l.assigned_at, l.first_response_at, l.created_at,
     l.source, l.sub_source, l.call_status, l.call_sub_status, l.campaign, l.meta_page_name, l.meta_form_id, l.meta_ad_id,
+    (SELECT count(DISTINCT (ca.created_at AT TIME ZONE '${BUSINESS_TIMEZONE}')::date)
+     FROM call_attempts ca WHERE ca.lead_id = l.id AND ca.channel = 'CALL') AS dead_lead_call_days,
     COALESCE(
       (SELECT json_agg(json_build_object('message', ll.message, 'timestamp', ll.created_at, 'user', ll.user_name_snapshot) ORDER BY ll.created_at)
        FROM lead_logs ll

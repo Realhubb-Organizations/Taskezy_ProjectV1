@@ -250,6 +250,11 @@ export interface Lead {
   notes?: string; // the lead's current note, written by a person
   notesUpdatedAt?: string;
   notesUpdatedBy?: string;
+  // Distinct business-calendar days with a real logged phone call — gates
+  // the Dead Lead status option, see leadStatusMapping.ts's
+  // DEAD_LEAD_MIN_CALL_DAYS / isDeadLeadEligible. undefined for a
+  // locally-created lead that hasn't round-tripped through the API yet.
+  deadLeadCallDays?: number;
 }
 
 export interface AdSpendRecord {
@@ -763,7 +768,8 @@ export function mapApiLeadToFrontendLead(row: ApiLeadRow): Lead {
     leadScore: row.lead_score ?? undefined,
     assignedAt: row.assigned_at || undefined,
     firstResponseAt: row.first_response_at || undefined,
-    createdAtStr: row.created_at
+    createdAtStr: row.created_at,
+    deadLeadCallDays: Number(row.dead_lead_call_days ?? 0)
   };
 }
 

@@ -5,7 +5,7 @@ import { useApp, Lead, LeadStatus } from "@/context/AppContext";
 import { useDialog } from "@/components/ui/DialogProvider";
 import { SearchableSelect } from "@/components/ui/SearchableDropdown";
 import { DatePicker } from "@/components/ui/DateRangePicker";
-import { deriveActivityTimeline, nextStatusOptions, statusBadgeClasses } from "@/lib/leadStatusMapping";
+import { deriveActivityTimeline, nextStatusOptions, statusBadgeClasses, withDeadLeadGate } from "@/lib/leadStatusMapping";
 import { canChangeLeadStatus, canReassignThisLead, isLeadAssignableUser, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
 import { maskPhone, maskEmail } from "@/lib/maskPII";
 import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/callTrigger";
@@ -131,7 +131,7 @@ export default function LeadDetailDrawer({
   // commit anything it shouldn't — this is purely about not showing a
   // choice that would just come back as a 400.
   const statusChoices = nextStatusOptions(localStatus);
-  const statusOptionsList = [localStatus, ...statusChoices.map(c => c.status)];
+  const statusOptionsList = withDeadLeadGate([localStatus, ...statusChoices.map(c => c.status)], lead, activeRole === "ADMIN");
 
   const handleSelectStatus = async (nextStatus: LeadStatus) => {
     const choice = statusChoices.find(c => c.status === nextStatus);
@@ -436,31 +436,6 @@ export default function LeadDetailDrawer({
                 memory (2026-10-10). */}
             {activeRole === "ADMIN" && <span>Source : {lead.source || lead.campaign || "Direct / Manual Entry"}</span>}
           </div>
-          {/* RNR -> Dead Lead is gated server-side on ≥7 days of logged
-              call-back attempts (leadStatusTransitions.ts), reusing this
-              same follow-up record. This is the one UI entry point that
-              populates that history for every role — including Admin on
-              web, who never generates a call_attempts row from a native
-              call (see callTrigger.ts). Logs "now", not a future date. */}
-          {localStatus === "RNR" && (
-            <button
-              type="button"
-              onClick={() => {
-                addFollowupCall({
-                  scheduledAt: new Date().toISOString(),
-                  leadId: lead.id,
-                  leadName: lead.name,
-                  phone: lead.phone,
-                  callType: "CALLBACK",
-                  assignedToName: lead.assignedAgent || ""
-                });
-                toast("Call-back attempt logged.", "success");
-              }}
-              className="w-full text-[11px] font-bold text-[#0B1E6E] border border-[#0B1E6E]/20 bg-[#0B1E6E]/5 hover:bg-[#0B1E6E]/10 rounded-lg px-3 py-1.5 transition-colors"
-            >
-              Log Call-Back Attempt
-            </button>
-          )}
         </div>
 
         {/* Assigned / Property / Reassigned / Captured (+ ad footprint, when
