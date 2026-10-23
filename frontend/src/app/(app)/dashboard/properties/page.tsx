@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useApp, mapApiPropertyToFrontend, Property, PropertyTeamAssignmentMode, LeadAssignmentMode, PropertyTeamMember } from "@/context/AppContext";
 import { apiListPropertiesPage, type PropertyListFilters } from "@/lib/apiClient";
 import {
@@ -8,14 +9,12 @@ import {
   ArrowUp,
   Building,
   Plus,
-  Eye,
-  MessageCircle,
+  MoreVertical,
   Edit,
   Copy,
   Trash2,
   Download,
   X,
-  MapPin,
   Users,
   Info,
   AlertTriangle
@@ -39,15 +38,31 @@ import TablePagination from "@/components/ui/TablePagination";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
 import { DatePicker } from "@/components/ui/DateRangePicker";
 import { DateTimeLines, dateTimeParts } from "@/components/ui/DateTimeLines";
+import { downloadPropertyBrochure, possessionLabel, priceLabel, propertyBrochureFile, propertyShareText } from "@/lib/propertyBrochurePdf";
+import { WhatsAppIcon } from "@/components/icons/ContactIcons";
 
 const ROWS_PER_PAGE_OPTIONS = [25, 50, 100];
 
-function formatDateTime(iso?: string): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+// Square icon button with a small label shown on hover / keyboard focus.
+function IconAction({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <span className="relative group">
+      <button
+        type="button"
+        onClick={onClick}
+        aria-label={label}
+        className="h-9 w-9 inline-flex items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-slate-50 transition-colors"
+      >
+        {children}
+      </button>
+      <span
+        role="tooltip"
+        className="pointer-events-none absolute left-0 top-full mt-1.5 whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-xs text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 z-10"
+      >
+        {label}
+      </span>
+    </span>
+  );
 }
 
 export default function PropertiesPage() {
@@ -213,29 +228,61 @@ export default function PropertiesPage() {
     }, 200);
   };
 
-  const handleContactProperty = (p: Property) => {
-    if (!p.contactNumber) {
-      toast("No contact number is set for this property yet.", "warning");
-      return;
+  // Phones: the share sheet with the brochure PDF + message (pick WhatsApp,
+  // then the chat). Laptops: WhatsApp Web can't take a file, so it opens
+  // with the formatted message and the user picks the chat.
+  const handleShareProperty = async (p: Property) => {
+    const text = propertyShareText(p);
+    const isPhone = /Android|iPhone|iPad/i.test(navigator.userAgent);
+    try {
+      if (isPhone && typeof navigator.share === "function") {
+        const file = await propertyBrochureFile(p);
+        if (navigator.canShare?.({ files: [file] })) {
+          await navigator.share({ files: [file], text });
+          return;
+        }
+      }
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return; // closed the share sheet
+      console.error("Sharing the brochure failed:", err);
     }
-    window.open(`tel:${p.contactNumber}`, "_self");
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener");
   };
 
-  const handleDuplicateProperty = (p: Property) => {
-    setDuplicateSource(p);
-    setIsAddOpen(true);
+  // Row "⋯" menu — portaled and fixed-positioned so the table's overflow
+  // can't clip it. Closes on outside click, Escape, scroll or resize.
+  const [rowMenu, setRowMenu] = useState<{ property: Property; top: number; right: number } | null>(null);
+  useEffect(() => {
+    if (!rowMenu) return;
+    const close = () => setRowMenu(null);
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [rowMenu]);
+
+  // Same text as the WhatsApp share, ready to paste anywhere.
+  const handleCopyPropertyText = async (p: Property) => {
+    try {
+      await navigator.clipboard.writeText(propertyShareText(p));
+      toast("Copied", "success");
+    } catch {
+      toast("Couldn't copy. Please try again.", "error");
+    }
   };
 
-  const handleDownloadProperty = (p: Property) => {
-    const blob = new Blob([JSON.stringify(p, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${p.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.json`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+  const handleDownloadProperty = async (p: Property) => {
+    try {
+      await downloadPropertyBrochure(p);
+    } catch (err) {
+      console.error("Brochure PDF failed:", err);
+      toast("Couldn't create the brochure PDF. Please try again.", "error");
+    }
   };
 
   // ---- Server-paginated Properties admin table (real fetch-per-page,
@@ -476,7 +523,7 @@ export default function PropertiesPage() {
         <div className="overflow-x-auto">
           {/* Fixed layout: Actions sized to its icon buttons, every other
               column shares the remaining width equally. */}
-          <table className={`table-fixed w-full border-collapse text-xs ${isAdmin ? "min-w-[1270px]" : "min-w-[1150px]"}`}>
+          <table className={`table-fixed w-full border-collapse text-xs min-w-[1106px]`}>
             <colgroup>
               <col />
               <col />
@@ -486,7 +533,7 @@ export default function PropertiesPage() {
               <col />
               {/* Campaigns column — Admin-only, see below */}
               {isAdmin && <col />}
-              <col className={isAdmin ? "w-[220px]" : "w-[100px]"} />
+              <col className="w-[56px]" />
             </colgroup>
             <thead>
               <tr className="border-b border-slate-200">
@@ -517,7 +564,7 @@ export default function PropertiesPage() {
                     hidden entirely for Manager/Member, not just emptied out.
                     See project_crm_role_based_lead_scoping memory. */}
                 {isAdmin && <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Campaigns</th>}
-                <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Actions</th>
+                <th className="px-2 py-3" aria-label="Actions" />
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -547,9 +594,9 @@ export default function PropertiesPage() {
                 </tr>
               ) : (
                 pageRows.map((p) => (
-                  <tr key={p.id} className="hover:bg-slate-50/60 transition-colors">
+                  <tr key={p.id} onClick={() => openDrawer(p, false)} className="hover:bg-slate-50/60 transition-colors cursor-pointer">
                     <td className="px-4 py-3 align-top">
-                      <button onClick={() => openDrawer(p, false)} className="text-left group [overflow-wrap:anywhere]">
+                      <button onClick={(e) => { e.stopPropagation(); openDrawer(p, false); }} className="text-left group [overflow-wrap:anywhere]">
                         <span className="block font-bold text-slate-800 group-hover:text-brand-700 transition-colors">{p.developer}</span>
                         <span className="block text-[11px] text-slate-450">{p.name}</span>
                       </button>
@@ -562,7 +609,7 @@ export default function PropertiesPage() {
                       <div className="[overflow-wrap:anywhere]">
                         {currentUser?.role_type === "Manager" && myTeamMembersOnProperty(p).length > 1 ? (
                           <>
-                            <button type="button" onClick={() => toggleMyTeamOnProperty(p)} className="font-semibold text-brand-700 hover:underline">
+                            <button type="button" onClick={(e) => { e.stopPropagation(); toggleMyTeamOnProperty(p); }} className="font-semibold text-brand-700 hover:underline">
                               {teamLabelForProperty(p)}
                             </button>
                             {expandedTeamPropertyId === p.id && (
@@ -592,33 +639,21 @@ export default function PropertiesPage() {
                         })()}
                       </td>
                     )}
-                    <td className="px-4 py-3 align-top">
-                      <div className="flex items-center gap-1 whitespace-nowrap">
-                        <button onClick={() => openDrawer(p, false)} className="inline-flex items-center justify-center h-10 w-10 sm:h-7 sm:w-7 rounded-lg text-slate-500 hover:text-brand-700 hover:bg-brand-50 transition-colors" title="View details">
-                          <Eye className="h-3.5 w-3.5" />
-                        </button>
-                        <button onClick={() => handleContactProperty(p)} className="inline-flex items-center justify-center h-10 w-10 sm:h-7 sm:w-7 rounded-lg text-slate-500 hover:text-brand-700 hover:bg-brand-50 transition-colors" title="Contact">
-                          <MessageCircle className="h-3.5 w-3.5" />
-                        </button>
-                        {isAdmin && (
-                          <button onClick={() => openDrawer(p, true)} className="inline-flex items-center justify-center h-10 w-10 sm:h-7 sm:w-7 rounded-lg text-slate-500 hover:text-brand-700 hover:bg-brand-50 transition-colors" title="Edit">
-                            <Edit className="h-3.5 w-3.5" />
-                          </button>
-                        )}
-                        {isAdmin && (
-                          <button onClick={() => handleDuplicateProperty(p)} className="inline-flex items-center justify-center h-10 w-10 sm:h-7 sm:w-7 rounded-lg text-slate-500 hover:text-brand-700 hover:bg-brand-50 transition-colors" title="Duplicate">
-                            <Copy className="h-3.5 w-3.5" />
-                          </button>
-                        )}
-                        {isAdmin && (
-                          <button onClick={() => handleDeleteProperty(p)} className="inline-flex items-center justify-center h-10 w-10 sm:h-7 sm:w-7 rounded-lg text-slate-500 hover:text-red-600 hover:bg-red-50 transition-colors" title="Delete">
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        )}
-                        <button onClick={() => handleDownloadProperty(p)} className="inline-flex items-center justify-center h-10 w-10 sm:h-7 sm:w-7 rounded-lg text-slate-500 hover:text-brand-700 hover:bg-brand-50 transition-colors" title="Download">
-                          <Download className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
+                    <td className="px-2 py-3 align-top text-center">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const r = e.currentTarget.getBoundingClientRect();
+                          setRowMenu(prev => (prev?.property.id === p.id ? null : { property: p, top: r.bottom + 4, right: window.innerWidth - r.right }));
+                        }}
+                        aria-label="More actions"
+                        aria-haspopup="menu"
+                        aria-expanded={rowMenu?.property.id === p.id}
+                        className={`inline-flex items-center justify-center h-10 w-10 sm:h-8 sm:w-8 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors ${rowMenu?.property.id === p.id ? "bg-slate-100 text-slate-800" : ""}`}
+                      >
+                        <MoreVertical className="h-4 w-4" />
+                      </button>
                     </td>
                   </tr>
                 ))
@@ -639,40 +674,43 @@ export default function PropertiesPage() {
         />
       </div>
 
-      {/* Detail / Edit Drawer */}
-      {selectedProperty && (
+      {/* Detail / Edit popup — portaled to <body> like the other app modals
+          (an ancestor's transform would otherwise offset a fixed overlay). */}
+      {selectedProperty && createPortal(
         <>
           <div
-            className={`fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-40 transition-opacity duration-200 ${isDrawerOpen ? "opacity-100" : "opacity-0"}`}
+            className={`fixed inset-0 bg-slate-900/60 z-50 transition-opacity duration-200 ${isDrawerOpen ? "opacity-100" : "opacity-0"}`}
             onClick={closeDrawer}
           />
           <div
-            className={`fixed top-0 right-0 h-full w-full sm:w-[26rem] bg-white shadow-2xl z-50 overflow-y-auto transition-transform duration-200 ${
-              isDrawerOpen ? "translate-x-0" : "translate-x-full"
+            className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4"
+            onClick={(e) => { if (e.target === e.currentTarget) closeDrawer(); }}
+          >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="property-dialog-title"
+            className={`w-full sm:max-w-2xl max-h-[90vh] max-h-[90dvh] flex flex-col overflow-hidden bg-white border-0 sm:border border-slate-200 rounded-t-2xl sm:rounded-2xl shadow-2xl transition-all duration-200 ${
+              isDrawerOpen ? "opacity-100 translate-y-0 sm:scale-100" : "opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95"
             }`}
           >
-            <div className="p-6 space-y-6">
-              <div className="flex justify-between items-start">
-                <div>
-                  <span className="text-[10px] font-bold text-brand-600 uppercase tracking-wider">{selectedProperty.developer}</span>
-                  <h3 className="text-lg font-bold text-slate-800 mt-0.5">{selectedProperty.name}</h3>
-                  <p className="text-xs text-slate-500 flex items-center gap-1 mt-1">
-                    <MapPin className="h-3.5 w-3.5 text-slate-400" />
-                    {selectedProperty.location}
-                  </p>
-                </div>
-                <div className="flex items-center gap-1">
-                  {isAdmin && (
-                    <button onClick={() => setIsEditing(!isEditing)} className="text-slate-400 hover:text-brand-600 transition-colors p-1" title="Toggle Edit Mode">
-                      <Edit className="h-4 w-4" />
-                    </button>
-                  )}
-                  <button onClick={closeDrawer} className="text-slate-400 hover:text-slate-600 transition-colors p-1">
-                    <X className="h-5 w-5" />
-                  </button>
-                </div>
+            <div className="shrink-0 flex items-start justify-between gap-6 px-6 sm:px-8 pt-6 pb-5 border-b border-slate-200">
+              <div className="min-w-0">
+                <h3 id="property-dialog-title" className="text-base font-semibold text-slate-900">
+                  {isEditing && isAdmin ? `Edit ${selectedProperty.name}` : selectedProperty.name}
+                </h3>
+                <p className="text-sm text-slate-500 mt-0.5 line-clamp-2">
+                  {[selectedProperty.developer, selectedProperty.location].filter(Boolean).join(" · ")}
+                </p>
               </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <button onClick={closeDrawer} aria-label="Close" className="h-8 w-8 inline-flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
 
+            <div className="flex-1 overflow-y-auto px-6 sm:px-8 py-6 space-y-7">
               {isEditing && isAdmin ? (
                 <form onSubmit={handleSavePropertyEdit} noValidate className="space-y-4 text-xs">
                   <div>
@@ -828,61 +866,83 @@ export default function PropertiesPage() {
                 </form>
               ) : (
                 <>
-                  <div className="grid grid-cols-2 gap-3 text-xs bg-slate-50 p-4 rounded-xl border border-slate-200">
-                    <div>
-                      <span className="text-slate-450 block mb-0.5">Project Status</span>
-                      <span className="font-bold text-slate-800">{selectedProperty.propertyStatus || "—"}</span>
+                  {/* Quick actions — icon buttons with a hover label */}
+                  <div className="flex items-center gap-2">
+                    <IconAction label="Share on WhatsApp" onClick={() => handleShareProperty(selectedProperty)}>
+                      <WhatsAppIcon className="h-4 w-4" />
+                    </IconAction>
+                    <IconAction label="Copy details" onClick={() => handleCopyPropertyText(selectedProperty)}>
+                      <Copy className="h-4 w-4" />
+                    </IconAction>
+                    <IconAction label="Download brochure" onClick={() => handleDownloadProperty(selectedProperty)}>
+                      <Download className="h-4 w-4" />
+                    </IconAction>
+                    {isAdmin && (
+                      <IconAction label="Edit" onClick={() => setIsEditing(true)}>
+                        <Edit className="h-4 w-4" />
+                      </IconAction>
+                    )}
+                  </div>
+
+                  {/* Key facts — plain label / value pairs */}
+                  <dl className="grid grid-cols-2 gap-x-8 gap-y-5">
+                    <div className="col-span-2">
+                      <dt className="text-xs text-slate-500">Price</dt>
+                      <dd className="text-lg font-semibold text-slate-900 mt-0.5">{priceLabel(selectedProperty) ?? "On request"}</dd>
                     </div>
                     <div>
-                      <span className="text-slate-450 block mb-0.5">Possession Date</span>
-                      <span className="font-bold text-slate-800">{selectedProperty.possessionDate || "—"}</span>
+                      <dt className="text-xs text-slate-500">Status</dt>
+                      <dd className="text-sm font-medium text-slate-900 mt-0.5">{selectedProperty.propertyStatus || "—"}</dd>
                     </div>
                     <div>
-                      <span className="text-slate-450 block mb-0.5">Added On</span>
-                      <span className="font-bold text-slate-800">{formatDateTime(selectedProperty.createdAt)}</span>
+                      <dt className="text-xs text-slate-500">Possession</dt>
+                      <dd className="text-sm font-medium text-slate-900 mt-0.5">{possessionLabel(selectedProperty.possessionDate) ?? "—"}</dd>
                     </div>
                     <div>
-                      <span className="text-slate-450 block mb-0.5">Assigned Team</span>
-                      <span className="font-bold text-slate-800 flex items-center gap-1">
-                        {teamLabelForProperty(selectedProperty) && <Users className="h-3 w-3 text-slate-400" />}
+                      <dt className="text-xs text-slate-500">Type</dt>
+                      <dd className="text-sm font-medium text-slate-900 mt-0.5">{selectedProperty.type || "—"}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-slate-500">Added on</dt>
+                      <dd className="text-sm font-medium text-slate-900 mt-0.5">
+                        {selectedProperty.createdAt
+                          ? new Date(selectedProperty.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
+                          : "—"}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-slate-500">Assigned team</dt>
+                      <dd className="text-sm font-medium text-slate-900 mt-0.5">
                         {currentUser?.role_type === "Manager" && myTeamMembersOnProperty(selectedProperty).length > 1 ? (
                           <button type="button" onClick={() => toggleMyTeamOnProperty(selectedProperty)} className="text-brand-700 hover:underline">
                             {teamLabelForProperty(selectedProperty)}
                           </button>
-                        ) : teamLabelForProperty(selectedProperty)}
-                      </span>
+                        ) : (teamLabelForProperty(selectedProperty) || "—")}
+                      </dd>
                     </div>
-                    {/* Own grid row, full width — nesting this inside the "Assigned
-                        Team" cell would grow that cell's height and, since it shares
-                        a grid row with "Added On", leave that cell's half of the row
-                        as blank space instead of just this one growing. */}
+                    {selectedProperty.teamAssignmentMode === "CUSTOM_MEMBERS" && selectedProperty.leadAssignmentMode && (
+                      <div>
+                        <dt className="text-xs text-slate-500">Lead assignment</dt>
+                        <dd className="text-sm font-medium text-slate-900 mt-0.5">{selectedProperty.leadAssignmentMode === "ROUND_ROBIN" ? "Round robin" : "Percentage split"}</dd>
+                      </div>
+                    )}
                     {currentUser?.role_type === "Manager" && expandedTeamPropertyId === selectedProperty.id && (
-                      <div className="col-span-2 -mt-1.5">
-                        <div className="flex flex-col gap-1 bg-white border border-slate-200 rounded-lg px-2 py-1.5 max-w-[180px]">
+                      <div className="col-span-2">
+                        <div className="flex flex-col gap-1 border border-slate-200 rounded-lg px-3 py-2 max-w-[220px]">
                           {myTeamMembersOnProperty(selectedProperty).map(m => (
-                            <span key={m.userId} className="text-[11px] font-semibold text-slate-700 truncate" title={m.name}>
+                            <span key={m.userId} className="text-sm text-slate-700 truncate" title={m.name}>
                               {m.name}
                             </span>
                           ))}
                         </div>
                       </div>
                     )}
-                    {selectedProperty.teamAssignmentMode === "CUSTOM_MEMBERS" && selectedProperty.leadAssignmentMode && (
-                      <div className="col-span-2">
-                        <span className="text-slate-450 block mb-0.5">Lead Assignment Mode</span>
-                        <span className="font-bold text-slate-800">{selectedProperty.leadAssignmentMode === "ROUND_ROBIN" ? "Round Robin" : "Percentage Split"}</span>
-                      </div>
-                    )}
-                    <div className="col-span-2 border-t border-slate-200 pt-2 mt-1">
-                      <span className="text-slate-450 block mb-0.5">Quoted Price</span>
-                      <span className="font-bold text-brand-700 font-mono text-sm">{selectedProperty.price ? `${selectedProperty.price}*` : "Contact for pricing"}</span>
-                    </div>
-                  </div>
+                  </dl>
 
                   {selectedProperty.description && (
-                    <div className="space-y-1.5 text-xs leading-relaxed">
-                      <span className="font-bold text-slate-700 block">About Project</span>
-                      <p className="text-slate-600 whitespace-pre-line">{selectedProperty.description}</p>
+                    <div className="border-t border-slate-200 pt-6">
+                      <h4 className="text-sm font-semibold text-slate-900">Overview</h4>
+                      <p className="text-sm text-slate-600 leading-6 whitespace-pre-line mt-2">{selectedProperty.description}</p>
                     </div>
                   )}
 
@@ -892,22 +952,22 @@ export default function PropertiesPage() {
                       instruction. See project_crm_role_based_lead_scoping memory. */}
                   {isAdmin && (
                     <>
-                      <div className="border-t border-slate-200 pt-4">
+                      <div className="border-t border-slate-200 pt-6">
                         <MetaCampaignLinker propertyId={selectedProperty.id} isAdmin={isAdmin} />
                       </div>
-                      <div className="border-t border-slate-200 pt-4">
+                      <div className="border-t border-slate-200 pt-6">
                         <GoogleCampaignLinker propertyId={selectedProperty.id} isAdmin={isAdmin} />
                       </div>
-                      <div className="border-t border-slate-200 pt-4">
+                      <div className="border-t border-slate-200 pt-6">
                         <SheetSourceLinker propertyId={selectedProperty.id} isAdmin={isAdmin} />
                       </div>
                     </>
                   )}
 
-                  <div className="border-t border-slate-200 pt-4 space-y-4">
+                  <div className="border-t border-slate-200 pt-6 space-y-4">
                     <div>
-                      <span className="font-bold text-slate-800 block text-xs">Register Client Interest</span>
-                      <p className="text-[10px] text-slate-500 mt-0.5">Register client details directly to initiate lead follow-up logs.</p>
+                      <h4 className="text-sm font-semibold text-slate-900">Register client interest</h4>
+                      <p className="text-xs text-slate-500 mt-0.5">Adds the client as a lead for this property.</p>
                     </div>
 
                     {interestSuccess && (
@@ -929,16 +989,64 @@ export default function PropertiesPage() {
                         <input type="email" maxLength={254} autoComplete="email" placeholder="Email address (optional)" value={interestEmail} onChange={(e) => { setInterestEmail(e.target.value); setInterestErrors(p => ({ ...p, email: undefined })); }} aria-invalid={!!interestErrors.email} className={`w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none ${fieldErrorClass(!!interestErrors.email)}`} />
                         <FieldError message={interestErrors.email} />
                       </div>
-                      <button type="submit" className="w-full px-5 py-2 bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold rounded-xl text-sm transition-all shadow-sm">
-                        Register Interest
-                      </button>
+                      <div className="flex justify-end">
+                        <button type="submit" className="h-9 px-4 bg-[#0B1E6E] hover:bg-[#081650] text-white font-medium rounded-lg text-sm transition-colors">
+                          Register interest
+                        </button>
+                      </div>
                     </form>
                   </div>
                 </>
               )}
             </div>
           </div>
-        </>
+          </div>
+        </>,
+        document.body
+      )}
+
+      {rowMenu && createPortal(
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setRowMenu(null)} />
+          <div
+            role="menu"
+            style={{ top: Math.min(rowMenu.top, window.innerHeight - 240), right: rowMenu.right }}
+            className="fixed z-50 w-52 py-1.5 bg-white border border-slate-200 rounded-xl shadow-lg text-sm text-slate-700"
+          >
+            {[
+              { label: "Share on WhatsApp", icon: <WhatsAppIcon className="h-4 w-4" />, run: () => handleShareProperty(rowMenu.property), show: true },
+              { label: "Edit", icon: <Edit className="h-4 w-4 text-slate-500" />, run: () => openDrawer(rowMenu.property, true), show: isAdmin },
+              { label: "Copy details", icon: <Copy className="h-4 w-4 text-slate-500" />, run: () => handleCopyPropertyText(rowMenu.property), show: true },
+              { label: "Download brochure", icon: <Download className="h-4 w-4 text-slate-500" />, run: () => handleDownloadProperty(rowMenu.property), show: true }
+            ].filter(i => i.show).map(item => (
+              <button
+                key={item.label}
+                type="button"
+                role="menuitem"
+                onClick={() => { setRowMenu(null); item.run(); }}
+                className="w-full flex items-center gap-3 px-3.5 py-2 text-left hover:bg-slate-50 transition-colors"
+              >
+                {item.icon}
+                {item.label}
+              </button>
+            ))}
+            {isAdmin && (
+              <>
+                <div className="my-1.5 border-t border-slate-100" />
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => { const p = rowMenu.property; setRowMenu(null); handleDeleteProperty(p); }}
+                  className="w-full flex items-center gap-3 px-3.5 py-2 text-left text-red-600 hover:bg-red-50 transition-colors"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Delete
+                </button>
+              </>
+            )}
+          </div>
+        </>,
+        document.body
       )}
 
       {/* Add / Duplicate Property Modal */}

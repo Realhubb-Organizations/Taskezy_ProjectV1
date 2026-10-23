@@ -22,14 +22,6 @@ interface LeadDetailDrawerProps {
   onReassigned?: (leadId: string) => void;
   /** Called after the lead's note is saved, so the caller can update its list. */
   onNoteSaved?: (leadId: string, note: string, updated: Lead | null) => void;
-  // Data Calling-only restriction (2026-10-10): a Manager sees the status as
-  // a plain read-only label there, same as someone who fails
-  // canChangeLeadStatus entirely — never editable, even for their own
-  // team's leads. Admin and sales agents are untouched; the main Leads
-  // dashboard doesn't pass this, so its own Manager behavior (editable for
-  // their team's leads) is unchanged there. See
-  // project_crm_role_based_lead_scoping memory.
-  managerStatusReadOnly?: boolean;
 }
 
 export default function LeadDetailDrawer({
@@ -38,8 +30,7 @@ export default function LeadDetailDrawer({
   onClose,
   onUpdateStatus,
   onReassigned,
-  onNoteSaved,
-  managerStatusReadOnly
+  onNoteSaved
 }: LeadDetailDrawerProps) {
   const { users, currentUser, activeRole, reassignLead, updateLeadNote, recordCallEnded, recordWhatsAppOpened } = useApp();
   const { toast, confirm } = useDialog();
@@ -366,7 +357,7 @@ export default function LeadDetailDrawer({
                   {callSubStatusOf(lead)}
                 </span>
               )}
-              {canChangeLeadStatus(lead, currentUser, users) && !(managerStatusReadOnly && currentUser?.role_type === "Manager") ? (
+              {canChangeLeadStatus(lead, currentUser, users) ? (
                 <SearchableSelect
                   variant="inline"
                   value={localStatus}
@@ -378,7 +369,7 @@ export default function LeadDetailDrawer({
                   className={`border rounded-lg px-2 py-0.5 text-[11px] transition-colors focus:outline-none ${statusBadgeClasses(localStatus)}`}
                 />
               ) : (
-                <span className={`border rounded-lg px-2 py-0.5 text-[11px] ${statusBadgeClasses(localStatus)}`} title={managerStatusReadOnly && currentUser?.role_type === "Manager" ? undefined : STATUS_LOCKED_HINT}>
+                <span className={`border rounded-lg px-2 py-0.5 text-[11px] ${statusBadgeClasses(localStatus)}`} title={STATUS_LOCKED_HINT}>
                   {localStatus}
                 </span>
               )}

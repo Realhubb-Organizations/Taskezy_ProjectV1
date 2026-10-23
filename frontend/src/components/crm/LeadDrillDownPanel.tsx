@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState, useRef } from "react";
+import LeadRowActionsMenu from "./LeadRowActionsMenu";
 import { createPortal } from "react-dom";
 import { useApp, Lead, LeadStatus, FollowupCall, mapApiFollowupToFrontend } from "@/context/AppContext";
 import { apiListFollowupsPage, apiGetDistinctCampaigns, LeadListFilters } from "@/lib/apiClient";
@@ -8,6 +9,7 @@ import { useServerLeadList } from "@/lib/useServerLeadList";
 import { useDialog } from "@/components/ui/DialogProvider";
 import { deriveActivityTimeline, PICKABLE_STATUS_OPTIONS, statusBadgeClasses, frontendStatusToDbCode, withDeadLeadGate } from "@/lib/leadStatusMapping";
 import { WhatsAppIcon, CallIcon } from "@/components/icons/ContactIcons";
+import { deriveActivityTimeline, PICKABLE_STATUS_OPTIONS, statusBadgeClasses, frontendStatusToDbCode } from "@/lib/leadStatusMapping";
 import { Phone, Mail, X, Copy, Check, User, Search, ArrowRight } from "lucide-react";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
@@ -582,23 +584,7 @@ export default function LeadDrillDownPanel({ title, baseFilters, onClose }: {
                       <td className="px-4 py-3 text-slate-500 align-top"><NextCallCell next={nextCallDateFor(l.id)} /></td>
                       <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]" title={l.campaign || l.source || "—"}>{l.campaign || l.source || "—"}</td>
                       <td className="px-4 py-3 align-top text-right">
-                        <button
-                          type="button"
-                          onClick={() => handleWhatsApp(l)}
-                          className="inline-flex items-center justify-center h-10 w-10 sm:h-7 sm:w-7 rounded-lg bg-slate-100 text-slate-700 hover:bg-emerald-50 hover:text-emerald-600 transition-colors"
-                          title="WhatsApp"
-                        >
-                          <WhatsAppIcon className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => callAllowed && handleCall(l)}
-                          disabled={!callAllowed}
-                          className="inline-flex items-center justify-center h-10 w-10 sm:h-7 sm:w-7 rounded-lg bg-slate-100 text-slate-700 hover:bg-brand-50 hover:text-brand-700 transition-colors ml-1.5 disabled:opacity-30 disabled:hover:bg-slate-100 disabled:hover:text-slate-700"
-                          title={callAllowed ? "Call" : "Calling is only available on the mobile app for your role"}
-                        >
-                          <CallIcon className="h-3.5 w-3.5" />
-                        </button>
+                        <LeadRowActionsMenu onWhatsApp={() => handleWhatsApp(l)} onCall={() => handleCall(l)} callAllowed={callAllowed} />
                       </td>
                     </tr>
                   ))
