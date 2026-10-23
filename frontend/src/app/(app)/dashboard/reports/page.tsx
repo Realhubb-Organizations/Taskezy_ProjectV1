@@ -120,13 +120,13 @@ function ReportsPageContent() {
       {/* Main section tabs — same segmented pill switcher as the Leads and
           Campaigns tab toggles (bg-slate-200/70 track, bg-white active pill),
           not a standalone page title: the top bar already shows "Reports". */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="bg-slate-200/70 p-1 rounded-xl flex items-center gap-1">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="bg-slate-200/70 p-1 rounded-xl flex items-center gap-1 overflow-x-auto">
           {visibleTabs.map(t => (
             <button
               key={t.key}
               onClick={() => handleTabChange(t.key)}
-              className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold transition-all shrink-0 ${
                 activeTab === t.key ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-800"
               }`}
             >

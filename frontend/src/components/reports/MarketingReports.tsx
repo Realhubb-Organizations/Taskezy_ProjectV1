@@ -6,7 +6,7 @@ import { DollarSign, Target, Gauge, TrendingUp, Building2 } from "lucide-react";
 import { DateRange } from "./DateRangeFilter";
 import { filterAdSpendByRange, computeCPL, computeROIMultiple, formatCurrency } from "@/lib/reportMetrics";
 import { apiGetMarketingReportStats, type MarketingReportStats } from "@/lib/apiClient";
-import { LineSkeleton, TableRowsSkeleton } from "@/components/ui/Skeletons";
+import { LineSkeleton, TableRowsSkeleton, CardListSkeleton } from "@/components/ui/Skeletons";
 import { SearchableMultiSelect } from "@/components/ui/SearchableDropdown";
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
 
@@ -217,7 +217,55 @@ export default function MarketingReports({ dateRange }: { dateRange: DateRange }
       {subTab === "By Ad Account" && (
         <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 space-y-4">
           <h3 className="text-xs font-bold text-slate-700">Individual Ad Account Performance</h3>
-          <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm overflow-x-auto">
+          <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm">
+            {/* Phones: one card per ad account */}
+            <ul className="sm:hidden divide-y divide-slate-100">
+              {isDataLoading && accountRows.length === 0 ? (
+                <CardListSkeleton count={4} />
+              ) : accountRows.length === 0 ? (
+                <li className="p-6 text-center text-xs text-slate-400 italic font-semibold">No ad spend recorded in this date range.</li>
+              ) : (
+                accountPagination.pageRows.map(acc => (
+                  <li key={acc.accountName} className="p-4 space-y-3 text-xs">
+                    <div className="flex items-start justify-between gap-3">
+                      <p className="font-bold text-slate-800 [overflow-wrap:anywhere]">{acc.accountName}</p>
+                      <span className={`shrink-0 px-1.5 py-0.5 rounded text-[9px] font-bold border ${
+                        acc.platform === "Meta" ? "bg-blue-50 text-blue-700 border-blue-100" : "bg-amber-50 text-amber-700 border-amber-100"
+                      }`}>
+                        {acc.platform}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-2">
+                      <div>
+                        <span className="block text-[10px] font-semibold text-slate-400">Spend</span>
+                        <span className="font-mono font-semibold text-slate-700">{formatCurrency(acc.spend)}</span>
+                      </div>
+                      <div>
+                        <span className="block text-[10px] font-semibold text-slate-400">Platform Leads</span>
+                        <span className="font-mono text-slate-600">{acc.platformLeads}</span>
+                      </div>
+                      <div>
+                        <span className="block text-[10px] font-semibold text-slate-400">CPL</span>
+                        <span className="font-mono font-bold text-brand-700">{formatCurrency(acc.cpl)}</span>
+                      </div>
+                      <div>
+                        <span className="block text-[10px] font-semibold text-slate-400">Lead Quality</span>
+                        {acc.hasMatchedLeads ? (
+                          <span className="font-mono font-semibold text-slate-700">{acc.qualityPercent.toFixed(0)}%</span>
+                        ) : (
+                          <span className="text-slate-400 italic">No CRM leads</span>
+                        )}
+                      </div>
+                      <div>
+                        <span className="block text-[10px] font-semibold text-slate-400">Booking ROI</span>
+                        <span className="font-mono font-bold text-emerald-650">{acc.hasMatchedLeads ? `${acc.roi.toFixed(1)}x` : "—"}</span>
+                      </div>
+                    </div>
+                  </li>
+                ))
+              )}
+            </ul>
+            <div className="hidden sm:block overflow-x-auto">
             <table className="table-fixed w-full min-w-[1050px] text-[11px] border-collapse">
               <colgroup>
                 <col />
@@ -273,6 +321,7 @@ export default function MarketingReports({ dateRange }: { dateRange: DateRange }
                 )}
               </tbody>
             </table>
+            </div>
             <TablePagination {...accountPagination.paginationProps} rowLabel="Ad Account" />
           </div>
         </div>
@@ -333,7 +382,48 @@ export default function MarketingReports({ dateRange }: { dateRange: DateRange }
             <Building2 className="h-4 w-4 text-slate-500" />
             Property-wise Marketing Performance
           </h3>
-          <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm overflow-x-auto">
+          <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm">
+            {/* Phones: one card per property */}
+            <ul className="sm:hidden divide-y divide-slate-100">
+              {isDataLoading && propertyRows.length === 0 ? (
+                <CardListSkeleton count={4} />
+              ) : propertyRows.length === 0 ? (
+                <li className="p-6 text-center text-xs text-slate-400 italic font-semibold">No property-linked activity in this date range.</li>
+              ) : (
+                propertyPagination.pageRows.map(row => (
+                  <li key={row.name} className="p-4 space-y-3 text-xs">
+                    <p className="font-bold text-slate-800 [overflow-wrap:anywhere]">{row.name}</p>
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-2">
+                      <div>
+                        <span className="block text-[10px] font-semibold text-slate-400">Spend</span>
+                        <span className="font-mono text-slate-700">{formatCurrency(row.spend)}</span>
+                      </div>
+                      <div>
+                        <span className="block text-[10px] font-semibold text-slate-400">CRM Leads</span>
+                        <span className="font-mono text-slate-600">{row.crmLeadsCount}</span>
+                      </div>
+                      <div>
+                        <span className="block text-[10px] font-semibold text-slate-400">CPL</span>
+                        <span className="font-mono font-bold text-brand-700">{formatCurrency(row.cpl)}</span>
+                      </div>
+                      <div>
+                        <span className="block text-[10px] font-semibold text-slate-400">Bookings</span>
+                        <span className="font-mono text-slate-600">{row.bookingCount}</span>
+                      </div>
+                      <div>
+                        <span className="block text-[10px] font-semibold text-slate-400">Booking Value</span>
+                        <span className="font-mono text-slate-700">{formatCurrency(row.bookingValue)}</span>
+                      </div>
+                      <div>
+                        <span className="block text-[10px] font-semibold text-slate-400">ROI</span>
+                        <span className="font-mono font-bold text-emerald-650">{row.roi.toFixed(1)}x</span>
+                      </div>
+                    </div>
+                  </li>
+                ))
+              )}
+            </ul>
+            <div className="hidden sm:block overflow-x-auto">
             <table className="table-fixed w-full min-w-[1050px] text-[11px] border-collapse">
               <colgroup>
                 <col />
@@ -375,6 +465,7 @@ export default function MarketingReports({ dateRange }: { dateRange: DateRange }
                 )}
               </tbody>
             </table>
+            </div>
             <TablePagination {...propertyPagination.paginationProps} rowLabel="Property" />
           </div>
         </div>
