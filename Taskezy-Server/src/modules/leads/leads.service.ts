@@ -186,7 +186,7 @@ export async function getDistinctCampaigns(caller: AccessTokenPayload, filter: {
 // kept here (DB codes, not frontend display strings) for the same reason
 // the 7-stat-card codes above are, but must stay in lockstep with that
 // file if either list ever changes.
-const UNQUALIFIED_CODES = ["RNR", "LOW_BUDGET", "DEAD_LEAD"];
+const UNQUALIFIED_CODES = ["RNR", "LOW_BUDGET", "DEAD_LEAD", "NOT_INTERESTED"];
 const SITE_VISIT_CODES = ["SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE"];
 
 export interface AgentAnalyticsStats {

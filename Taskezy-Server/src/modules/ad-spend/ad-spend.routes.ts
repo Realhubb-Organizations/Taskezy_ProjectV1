@@ -62,7 +62,7 @@ const campaignLeadStatsQuerySchema = z.object({
 // UNQUALIFIED_LEAD_STATUSES/SITE_VISIT_LEAD_STATUSES (DB codes, not the
 // frontend's display labels) — must stay in lockstep with that file.
 const QUALIFIED_CODES = ["CALL_BACK", "FOLLOWUP", "EOI", "SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE", "BOOKED"];
-const UNQUALIFIED_CODES = ["DEAD_LEAD", "RNR"];
+const UNQUALIFIED_CODES = ["DEAD_LEAD", "RNR", "NOT_INTERESTED"];
 const SITE_VISIT_CODES = ["SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE"];
 
 /**
@@ -376,7 +376,7 @@ adSpendRouter.get(
 // Cancelled, unlike campaign-lead-stats' UNQUALIFIED_CODES above). Must
 // stay in lockstep with reportMetrics.ts if either list ever changes.
 const BUYER_CODES = ["CALL_BACK", "FOLLOWUP", "EOI", "SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE", "BOOKED"];
-const NON_BUYER_CODES = ["DEAD_LEAD", "RNR", "LOW_BUDGET", "CANCELLED"];
+const NON_BUYER_CODES = ["DEAD_LEAD", "RNR", "LOW_BUDGET", "CANCELLED", "NOT_INTERESTED"];
 const VISIT_CODES = ["SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE"];
 
 const marketingReportStatsQuerySchema = z.object({

@@ -8,7 +8,8 @@ import { BUSINESS_TIMEZONE } from "../../utils/businessDate";
 export const LEAD_STATUS_CODES = [
   "NEW_LEAD", "RNR", "CALL_BACK", "DEAD_LEAD", "FOLLOWUP", "EOI",
   "SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE", "LOW_BUDGET",
-  "OTHER_REQUIREMENT", "BROKER", "BOOKED", "CANCELLED", "DIFFERENT_LOCATION"
+  "OTHER_REQUIREMENT", "BROKER", "BOOKED", "CANCELLED", "DIFFERENT_LOCATION",
+  "NOT_INTERESTED"
 ] as const;
 
 export type LeadStatusCode = (typeof LEAD_STATUS_CODES)[number];
@@ -18,7 +19,8 @@ const LABEL: Record<LeadStatusCode, string> = {
   FOLLOWUP: "Followup", EOI: "EOI", SITE_VISIT_SCHEDULED: "Site Visit Scheduled",
   SITE_VISIT_DONE: "Site Visit Done", LOW_BUDGET: "Low Budget",
   OTHER_REQUIREMENT: "Other requirement", BROKER: "Broker", BOOKED: "Booked",
-  CANCELLED: "Cancelled", DIFFERENT_LOCATION: "Different Location"
+  CANCELLED: "Cancelled", DIFFERENT_LOCATION: "Different Location",
+  NOT_INTERESTED: "Not Interested"
 };
 
 // From `Lead status view flow - Sheet1.pdf`, re-read carefully (13 columns
@@ -28,7 +30,7 @@ const LABEL: Record<LeadStatusCode, string> = {
 // status) is out of scope for this round, not represented here.
 const TRANSITIONS: Record<LeadStatusCode, { allowed: LeadStatusCode[]; optional: LeadStatusCode[] }> = {
   NEW_LEAD: {
-    allowed: ["RNR", "CALL_BACK", "DEAD_LEAD", "FOLLOWUP", "SITE_VISIT_SCHEDULED", "LOW_BUDGET", "OTHER_REQUIREMENT", "BROKER"],
+    allowed: ["RNR", "CALL_BACK", "DEAD_LEAD", "NOT_INTERESTED", "FOLLOWUP", "SITE_VISIT_SCHEDULED", "LOW_BUDGET", "OTHER_REQUIREMENT", "BROKER"],
     optional: ["CANCELLED", "DIFFERENT_LOCATION"]
   },
   RNR: {
@@ -36,16 +38,17 @@ const TRANSITIONS: Record<LeadStatusCode, { allowed: LeadStatusCode[]; optional:
     // minimum-call-history gate is enforced separately in
     // assertTransitionAllowed below (applies to every path to DEAD_LEAD,
     // not just this one), not by omitting it from this list.
-    allowed: ["CALL_BACK", "DEAD_LEAD", "FOLLOWUP", "SITE_VISIT_SCHEDULED", "LOW_BUDGET", "OTHER_REQUIREMENT", "BROKER"],
+    allowed: ["CALL_BACK", "DEAD_LEAD", "NOT_INTERESTED", "FOLLOWUP", "SITE_VISIT_SCHEDULED", "LOW_BUDGET", "OTHER_REQUIREMENT", "BROKER"],
     optional: ["CANCELLED", "DIFFERENT_LOCATION"]
   },
   CALL_BACK: {
-    allowed: ["RNR", "DEAD_LEAD", "FOLLOWUP", "SITE_VISIT_SCHEDULED", "LOW_BUDGET", "OTHER_REQUIREMENT", "BROKER"],
+    allowed: ["RNR", "DEAD_LEAD", "NOT_INTERESTED", "FOLLOWUP", "SITE_VISIT_SCHEDULED", "LOW_BUDGET", "OTHER_REQUIREMENT", "BROKER"],
     optional: ["CANCELLED", "DIFFERENT_LOCATION"]
   },
   DEAD_LEAD: { allowed: [], optional: [] }, // terminal
+  NOT_INTERESTED: { allowed: [], optional: [] }, // terminal, same tier as DEAD_LEAD
   FOLLOWUP: {
-    allowed: ["DEAD_LEAD", "EOI", "SITE_VISIT_SCHEDULED", "LOW_BUDGET", "OTHER_REQUIREMENT", "BROKER"],
+    allowed: ["DEAD_LEAD", "NOT_INTERESTED", "EOI", "SITE_VISIT_SCHEDULED", "LOW_BUDGET", "OTHER_REQUIREMENT", "BROKER"],
     optional: ["CANCELLED", "DIFFERENT_LOCATION"]
   },
   EOI: {
@@ -61,21 +64,21 @@ const TRANSITIONS: Record<LeadStatusCode, { allowed: LeadStatusCode[]; optional:
     optional: ["CANCELLED", "DIFFERENT_LOCATION"]
   },
   LOW_BUDGET: {
-    allowed: ["RNR", "CALL_BACK", "DEAD_LEAD", "FOLLOWUP", "EOI", "SITE_VISIT_SCHEDULED", "BROKER"],
+    allowed: ["RNR", "CALL_BACK", "DEAD_LEAD", "NOT_INTERESTED", "FOLLOWUP", "EOI", "SITE_VISIT_SCHEDULED", "BROKER"],
     optional: ["CANCELLED", "DIFFERENT_LOCATION"]
   },
   OTHER_REQUIREMENT: {
-    allowed: ["RNR", "CALL_BACK", "DEAD_LEAD", "FOLLOWUP", "EOI", "SITE_VISIT_SCHEDULED", "LOW_BUDGET", "BROKER"],
+    allowed: ["RNR", "CALL_BACK", "DEAD_LEAD", "NOT_INTERESTED", "FOLLOWUP", "EOI", "SITE_VISIT_SCHEDULED", "LOW_BUDGET", "BROKER"],
     optional: ["CANCELLED", "DIFFERENT_LOCATION"]
   },
-  BROKER: { allowed: ["DEAD_LEAD"], optional: ["CANCELLED"] }, // not fully terminal, but near it
+  BROKER: { allowed: ["DEAD_LEAD", "NOT_INTERESTED"], optional: ["CANCELLED"] }, // not fully terminal, but near it
   // BOOKED read as fully locked in the source matrix (every column "No") —
   // flagged to the user, since a real booking can fall through; confirmed
   // 2026-10-13 that Booked -> Cancelled should be reachable after all.
   BOOKED: { allowed: [], optional: ["CANCELLED"] },
   CANCELLED: { allowed: [], optional: [] }, // terminal
   DIFFERENT_LOCATION: {
-    allowed: ["RNR", "CALL_BACK", "DEAD_LEAD", "FOLLOWUP", "EOI", "SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE", "LOW_BUDGET", "OTHER_REQUIREMENT", "BROKER"],
+    allowed: ["RNR", "CALL_BACK", "DEAD_LEAD", "NOT_INTERESTED", "FOLLOWUP", "EOI", "SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE", "LOW_BUDGET", "OTHER_REQUIREMENT", "BROKER"],
     optional: ["CANCELLED"]
   }
 };

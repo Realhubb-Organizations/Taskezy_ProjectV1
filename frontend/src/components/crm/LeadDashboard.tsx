@@ -90,7 +90,7 @@ function PaginatedSubList<T>({ items, rowLabel, children }: { items: T[]; rowLab
 // drill-down click handlers (which need to set the Leads tab's status
 // filter to "whichever statuses this number represents") share one
 // definition instead of drifting apart.
-const UNQUALIFIED_STATUSES: LeadStatus[] = ["RNR", "Low Budget", "Dead Lead"];
+const UNQUALIFIED_STATUSES: LeadStatus[] = ["RNR", "Low Budget", "Dead Lead", "Not Interested"];
 const SITE_VISIT_STATUSES: LeadStatus[] = ["Site Visit Scheduled", "Site Visit Done"];
 
 // The Leads Analytics per-agent table's togglable columns — Member Name

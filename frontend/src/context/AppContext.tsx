@@ -196,7 +196,8 @@ export type LeadStatus =
   | "Broker"
   | "Booked"
   | "Cancelled"
-  | "Different Location";
+  | "Different Location"
+  | "Not Interested";
 
 export interface LeadLog {
   timestamp: string;
