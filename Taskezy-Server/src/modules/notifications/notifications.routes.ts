@@ -6,7 +6,7 @@ import { asyncHandler } from "../../utils/asyncHandler";
 import { sendOk, sendPaginated } from "../../utils/apiResponse";
 import { ApiError } from "../../utils/ApiError";
 import { pool, query } from "../../db/pool";
-import { INFORMATIONAL_SQL, tryDeleteNotifications, createNotification } from "./notifications.service";
+import { createNotification } from "./notifications.service";
 import { consumeTicket, issueTicket } from "../../utils/sseTickets";
 import { subscribe } from "../../utils/sseHub";
 
@@ -21,6 +21,12 @@ const stringToArray = z.union([z.string(), z.array(z.string())])
 export const notificationsRouter = Router();
 
 const HEARTBEAT_MS = 25000;
+
+// A read notification stays visible for 48h after being read (sorted below
+// unread ones — see GET "/"'s ORDER BY), then drops out of every list/count
+// below; notificationCleanupScheduler.ts does the actual row deletion once
+// that window passes. An unread notification (read_at IS NULL) is always visible.
+const VISIBLE_SQL = `(read = false OR read_at > now() - interval '48 hours')`;
 
 // Registered BEFORE requireAuth below: the browser's EventSource API cannot
 // set an Authorization header, so this route is authenticated by a one-time
@@ -107,7 +113,7 @@ notificationsRouter.get(
       page: number; pageSize: number; system?: string; category?: string[]; excludeCategory?: string[];
     };
 
-    const conditions = ["(recipient_user_id IS NULL OR recipient_user_id = $1)"];
+    const conditions = ["(recipient_user_id IS NULL OR recipient_user_id = $1)", VISIBLE_SQL];
     const params: unknown[] = [req.user!.sub];
 
     if (system) {
@@ -133,7 +139,7 @@ notificationsRouter.get(
       `SELECT id, system, category, title, message, read, lead_id, link, created_at
        FROM notifications
        ${whereClause}
-       ORDER BY created_at DESC
+       ORDER BY read ASC, created_at DESC
        LIMIT $${dataParams.length - 1} OFFSET $${dataParams.length}`,
       dataParams
     );
@@ -160,7 +166,7 @@ notificationsRouter.get(
          count(*) FILTER (WHERE system = 'HRMS') AS hrms,
          count(*) FILTER (WHERE system = 'FINANCE') AS finance
        FROM notifications
-       WHERE (recipient_user_id IS NULL OR recipient_user_id = $1)`,
+       WHERE (recipient_user_id IS NULL OR recipient_user_id = $1) AND ${VISIBLE_SQL}`,
       [req.user!.sub]
     );
     const r = rows[0] ?? {};
@@ -185,22 +191,14 @@ const idParamSchema = z.object({ id: z.string().uuid() });
 
 // A notification can only be marked read by its recipient, or by anyone for a
 // broadcast row (recipient_user_id IS NULL) — same visibility rule as GET.
-// An informational notification is deleted outright when its own recipient
-// reads it; lead activity alerts and shared broadcast rows are only marked read.
+// Stays visible (sorted below unread) for 48h after this, per VISIBLE_SQL
+// above, instead of disappearing immediately.
 notificationsRouter.patch(
   "/:id/read",
   validate({ params: idParamSchema }),
   asyncHandler(async (req, res) => {
-    const deleted = await tryDeleteNotifications(
-      `DELETE FROM notifications WHERE id = $1 AND recipient_user_id = $2 AND ${INFORMATIONAL_SQL}`,
-      [req.params.id, req.user!.sub]
-    );
-    if (deleted) {
-      sendOk(res, { read: true });
-      return;
-    }
     const { rows } = await pool.query(
-      `UPDATE notifications SET read = true
+      `UPDATE notifications SET read = true, read_at = now()
        WHERE id = $1 AND (recipient_user_id IS NULL OR recipient_user_id = $2)
        RETURNING id`,
       [req.params.id, req.user!.sub]
@@ -221,13 +219,8 @@ notificationsRouter.patch(
     const { system } = req.query as { system?: string };
     const params: unknown[] = [req.user!.sub];
     const systemFilter = system ? ` AND system = $${params.push(system)}` : "";
-    // Same rule as a single read: the caller's own informational rows go, the rest are marked read.
-    await tryDeleteNotifications(
-      `DELETE FROM notifications WHERE recipient_user_id = $1 AND ${INFORMATIONAL_SQL}${systemFilter}`,
-      params
-    );
     await pool.query(
-      `UPDATE notifications SET read = true WHERE (recipient_user_id IS NULL OR recipient_user_id = $1)${systemFilter}`,
+      `UPDATE notifications SET read = true, read_at = now() WHERE (recipient_user_id IS NULL OR recipient_user_id = $1)${systemFilter}`,
       params
     );
     sendOk(res, { read: true });

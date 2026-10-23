@@ -18,6 +18,9 @@ export interface DropdownOption {
   label: string;
   /** Options sharing a group are listed under that heading, in first-seen order. */
   group?: string;
+  /** Shown (SearchableSelect only) greyed out and unselectable, with disabledHint as a title tooltip — e.g. a status not yet reachable. */
+  disabled?: boolean;
+  disabledHint?: string;
 }
 
 type OptionsInput = (string | DropdownOption)[];
@@ -358,8 +361,13 @@ export function SearchableSelect({
               key={o.value}
               role="option"
               aria-selected={o.value === value}
-              onClick={() => pick(o.value)}
-              className={`${rowClass} w-full text-left ${o.value === value ? "bg-blue-50/60 text-[#0B1E6E]" : ""}`}
+              aria-disabled={o.disabled}
+              disabled={o.disabled}
+              title={o.disabled ? o.disabledHint : undefined}
+              onClick={() => { if (!o.disabled) pick(o.value); }}
+              className={`${rowClass} w-full text-left ${
+                o.disabled ? "opacity-40 cursor-not-allowed" : o.value === value ? "bg-blue-50/60 text-[#0B1E6E]" : ""
+              }`}
             >
               <span className="truncate flex-1">{render(o.label)}</span>
               {o.value === value && <Check className="h-3.5 w-3.5 shrink-0 text-[#0B1E6E]" aria-hidden="true" />}

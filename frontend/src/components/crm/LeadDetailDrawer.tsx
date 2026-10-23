@@ -1,16 +1,17 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
-import { X, Phone, Mail, Share2, Calendar, ArrowRight, Bell, Repeat, Copy, Check, User, Pencil } from "lucide-react";
+import { X, Phone, Mail, Share2, ArrowRight, Repeat, Copy, Check, User, Pencil } from "lucide-react";
 import { useApp, Lead, LeadStatus } from "@/context/AppContext";
 import { useDialog } from "@/components/ui/DialogProvider";
 import { SearchableSelect } from "@/components/ui/SearchableDropdown";
-import { DatePicker } from "@/components/ui/DateRangePicker";
-import { deriveActivityTimeline, nextStatusOptions, statusBadgeClasses } from "@/lib/leadStatusMapping";
+import { deriveActivityTimeline, nextStatusOptions, statusBadgeClasses, withDeadLeadGate } from "@/lib/leadStatusMapping";
 import { canChangeLeadStatus, canReassignThisLead, isLeadAssignableUser, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
 import { maskPhone, maskEmail } from "@/lib/maskPII";
 import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/callTrigger";
 import { WhatsAppIcon } from "@/components/icons/ContactIcons";
 import { callSubStatusOf } from "@/lib/callSubStatus";
+import { useLeadStatusScheduler } from "@/lib/leadScheduler";
+import LeadScheduleModal from "./LeadScheduleModal";
 
 interface LeadDetailDrawerProps {
   lead: Lead | null;
@@ -31,13 +32,21 @@ export default function LeadDetailDrawer({
   onReassigned,
   onNoteSaved
 }: LeadDetailDrawerProps) {
-  const { addNotification, addCalendarEvent, addFollowupCall, users, currentUser, activeRole, reassignLead, updateLeadNote, recordCallEnded, recordWhatsAppOpened } = useApp();
+  const { users, currentUser, activeRole, reassignLead, updateLeadNote, recordCallEnded, recordWhatsAppOpened } = useApp();
   const { toast, confirm } = useDialog();
   const callAllowed = canTriggerLeadCall(activeRole === "ADMIN");
   const [localStatus, setLocalStatus] = useState<LeadStatus>("New Lead");
-  const [reminderDate, setReminderDate] = useState("");
-  const [reminderTime, setReminderTime] = useState("");
-  const [reminderSet, setReminderSet] = useState(false);
+  // RNR/Call Back/Followup/Site Visit Scheduled are gated behind a blocking
+  // popup (LeadScheduleModal below) that collects the next-call date/time +
+  // a note before the status actually changes — every other status still
+  // commits immediately. setLocalStatus runs as part of `commit` so it only
+  // reflects reality once the change is real (not optimistically before a
+  // popup the agent might still cancel). Called unconditionally (before the
+  // `if (!isOpen || !lead) return null` guard below) since it's a hook.
+  const scheduler = useLeadStatusScheduler((id, status) => {
+    onUpdateStatus(id, status);
+    setLocalStatus(status);
+  });
   const [reassignTarget, setReassignTarget] = useState("");
   const [reassigning, setReassigning] = useState(false);
   const [reassignError, setReassignError] = useState("");
@@ -80,9 +89,6 @@ export default function LeadDetailDrawer({
   useEffect(() => {
     if (lead) {
       setLocalStatus(lead.status);
-      setReminderDate("");
-      setReminderTime("");
-      setReminderSet(false);
       setCopiedField(null);
       setReassignTarget("");
       setReassignError("");
@@ -122,7 +128,7 @@ export default function LeadDetailDrawer({
   // commit anything it shouldn't — this is purely about not showing a
   // choice that would just come back as a 400.
   const statusChoices = nextStatusOptions(localStatus);
-  const statusOptionsList = [localStatus, ...statusChoices.map(c => c.status)];
+  const statusOptionsList = withDeadLeadGate([localStatus, ...statusChoices.map(c => c.status)], lead, activeRole === "ADMIN");
 
   const handleSelectStatus = async (nextStatus: LeadStatus) => {
     const choice = statusChoices.find(c => c.status === nextStatus);
@@ -134,54 +140,7 @@ export default function LeadDetailDrawer({
       });
       if (!ok) return;
     }
-    setLocalStatus(nextStatus);
-    onUpdateStatus(lead.id, nextStatus);
-  };
-
-  const handleSaveReminder = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!reminderDate || !reminderTime) {
-      toast("Please select both Date and Time for the reminder.", "warning");
-      return;
-    }
-    // API Integration Point: Save calendar task/reminder event details
-    setReminderSet(true);
-    const isSiteVisit = localStatus === "Site Visit Scheduled" || localStatus === "Site Visit Done";
-
-    addNotification({
-      system: "CRM",
-      category: "REMINDER",
-      title: `${localStatus} Reminder Set`,
-      message: `${lead.name} • ${reminderDate} at ${reminderTime}`,
-      leadId: lead.id
-    });
-    addCalendarEvent({
-      system: "CRM",
-      type: isSiteVisit ? "SITE_VISIT" : "FOLLOWUP",
-      title: `${localStatus} — ${lead.name}`,
-      date: reminderDate,
-      time: reminderTime,
-      // No phone number here — calendar event descriptions render as plain
-      // text on the Calendar pages with no masking/role check, so embedding
-      // lead.phone leaked it to anyone viewing that day (a Manager on their
-      // team's calendar, anyone on the Global Operations Calendar),
-      // bypassing the maskPhone-everywhere-but-Admin convention enforced
-      // everywhere else. The lead's name is already in the title above, and
-      // leadId links back to the real record where masking already applies
-      // correctly — nothing is lost by not duplicating the number here.
-      description: lead.property || "Property",
-      leadId: lead.id
-    });
-    addFollowupCall({
-      scheduledAt: new Date(`${reminderDate}T${reminderTime}`).toISOString(),
-      leadId: lead.id,
-      leadName: lead.name,
-      phone: lead.phone,
-      // isSiteVisit already covers "Meeting Scheduled" (see above), matching the SITE_VISIT calendar event type used for it.
-      callType: isSiteVisit ? "SITE_VISIT" : "CALLBACK",
-      assignedToName: lead.assignedAgent
-    });
-    toast(`Reminder saved for ${lead.name}.`, "success");
+    scheduler.requestChange(lead, nextStatus);
   };
 
   const handleSaveNote = async () => {
@@ -247,12 +206,6 @@ export default function LeadDetailDrawer({
     toast("Lead link and summary copied to clipboard!", "success");
   };
 
-  // Status check to see if we render the Date & Time picker
-  const needsReminderPicker =
-    localStatus === "Followup" ||
-    localStatus === "Site Visit Scheduled" ||
-    localStatus === "Call Back";
-
   // Assigned/Property/Reassigned/Captured grid, plus ad-footprint fields
   // (Campaign/Meta Page/Lead Form ID) only when the lead actually carries
   // them — no empty rows for manually-entered or non-Meta leads.
@@ -305,7 +258,9 @@ export default function LeadDetailDrawer({
   // containing block for any `position: fixed` descendant, so this drawer's
   // "fixed to the viewport" positioning was actually scoped to that page
   // div's box instead of the real screen. A portal escapes that ancestor.
-  return createPortal(
+  return (
+    <>
+      {createPortal(
     <div className="fixed inset-0 z-50" data-lead-drawer>
       {/* Backdrop */}
       <div className="fixed inset-0 bg-slate-900/60 transition-opacity" onClick={onClose} />
@@ -427,31 +382,6 @@ export default function LeadDetailDrawer({
                 memory (2026-10-10). */}
             {activeRole === "ADMIN" && <span>Source : {lead.source || lead.campaign || "Direct / Manual Entry"}</span>}
           </div>
-          {/* RNR -> Dead Lead is gated server-side on ≥7 days of logged
-              call-back attempts (leadStatusTransitions.ts), reusing this
-              same follow-up record. This is the one UI entry point that
-              populates that history for every role — including Admin on
-              web, who never generates a call_attempts row from a native
-              call (see callTrigger.ts). Logs "now", not a future date. */}
-          {localStatus === "RNR" && (
-            <button
-              type="button"
-              onClick={() => {
-                addFollowupCall({
-                  scheduledAt: new Date().toISOString(),
-                  leadId: lead.id,
-                  leadName: lead.name,
-                  phone: lead.phone,
-                  callType: "CALLBACK",
-                  assignedToName: lead.assignedAgent || ""
-                });
-                toast("Call-back attempt logged.", "success");
-              }}
-              className="w-full text-[11px] font-bold text-[#0B1E6E] border border-[#0B1E6E]/20 bg-[#0B1E6E]/5 hover:bg-[#0B1E6E]/10 rounded-lg px-3 py-1.5 transition-colors"
-            >
-              Log Call-Back Attempt
-            </button>
-          )}
         </div>
 
         {/* Assigned / Property / Reassigned / Captured (+ ad footprint, when
@@ -465,44 +395,6 @@ export default function LeadDetailDrawer({
           ))}
         </div>
 
-        {/* Reminder scheduler — only for statuses that need a follow-up task */}
-        {needsReminderPicker && (
-          <div className="px-5 py-3 border-b border-slate-100">
-            <form onSubmit={handleSaveReminder} className="bg-brand-50/40 border border-brand-100 rounded-2xl p-3.5 space-y-3">
-              <div className="flex items-center gap-1.5 text-[9px] font-extrabold text-brand-700">
-                <Bell className="h-3.5 w-3.5 text-brand-600 animate-bounce" />
-                <span>Configure Calendar Callback Task</span>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="block text-[8px] font-bold text-slate-400 uppercase">Callback Date</label>
-                  <DatePicker
-                    value={reminderDate}
-                    onChange={setReminderDate}
-                    className="w-full flex items-center justify-between gap-2 bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-[10px] font-bold text-slate-700 focus:outline-none focus:border-brand-500"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="block text-[8px] font-bold text-slate-400 uppercase">Callback Time</label>
-                  <input
-                    type="time"
-                    required
-                    value={reminderTime}
-                    onChange={(e) => setReminderTime(e.target.value)}
-                    className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-[10px] font-bold text-slate-700 focus:outline-none focus:border-brand-500"
-                  />
-                </div>
-              </div>
-              <button
-                type="submit"
-                className="w-full bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold px-5 py-2 rounded-xl text-sm transition-all flex items-center justify-center gap-2 shadow-sm"
-              >
-                <Calendar className="h-4 w-4" />
-                <span>Save Task Reminder</span>
-              </button>
-            </form>
-          </div>
-        )}
 
         {/* Reassign — admins and managers only (agents never see it), scoped
             to who this caller is actually allowed to hand the lead to */}
@@ -648,5 +540,16 @@ export default function LeadDetailDrawer({
       </div>
     </div>,
     document.body
+      )}
+      {scheduler.pendingSchedule && (
+        <LeadScheduleModal
+          pending={scheduler.pendingSchedule}
+          submitting={scheduler.submitting}
+          error={scheduler.error}
+          onCancel={scheduler.cancelSchedule}
+          onConfirm={scheduler.confirmSchedule}
+        />
+      )}
+    </>
   );
 }

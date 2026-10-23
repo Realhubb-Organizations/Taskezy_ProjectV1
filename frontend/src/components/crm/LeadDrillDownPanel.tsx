@@ -7,6 +7,8 @@ import { useApp, Lead, LeadStatus, FollowupCall, mapApiFollowupToFrontend } from
 import { apiListFollowupsPage, apiGetDistinctCampaigns, LeadListFilters } from "@/lib/apiClient";
 import { useServerLeadList } from "@/lib/useServerLeadList";
 import { useDialog } from "@/components/ui/DialogProvider";
+import { deriveActivityTimeline, PICKABLE_STATUS_OPTIONS, statusBadgeClasses, frontendStatusToDbCode, withDeadLeadGate } from "@/lib/leadStatusMapping";
+import { WhatsAppIcon, CallIcon } from "@/components/icons/ContactIcons";
 import { deriveActivityTimeline, PICKABLE_STATUS_OPTIONS, statusBadgeClasses, frontendStatusToDbCode } from "@/lib/leadStatusMapping";
 import { Phone, Mail, X, Copy, Check, User, Search, ArrowRight } from "lucide-react";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
@@ -19,6 +21,8 @@ import { maskPhone, maskEmail } from "@/lib/maskPII";
 import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/callTrigger";
 import NextCallCell from "./NextCallCell";
 import { callSubStatusOf } from "@/lib/callSubStatus";
+import { useLeadStatusScheduler } from "@/lib/leadScheduler";
+import LeadScheduleModal from "./LeadScheduleModal";
 
 // Drill-down table + lead quick-view drawer behind the 7 lead stat cards
 // (Total Leads … Site Visit Done). Shared by the CRM Dashboard and the admin
@@ -84,8 +88,7 @@ export function LeadQuickViewDrawer({ lead, onClose }: {
   lead: Lead;
   onClose: () => void;
 }) {
-  const { activeRole, recordCallEnded, addFollowupCall } = useApp();
-  const { toast } = useDialog();
+  const { activeRole, recordCallEnded } = useApp();
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const callAllowed = canTriggerLeadCall(activeRole === "ADMIN");
   const handleCall = () => {
@@ -197,27 +200,6 @@ export function LeadQuickViewDrawer({ lead, onClose }: {
                 See project_crm_role_based_lead_scoping memory (2026-10-10). */}
             {activeRole === "ADMIN" && <span>Source : {lead.source || lead.campaign || "Direct / Manual Entry"}</span>}
           </div>
-          {/* Same entry point as the shared LeadDetailDrawer — see its own
-              comment for why this matters (RNR -> Dead Lead's 7-day gate). */}
-          {lead.status === "RNR" && (
-            <button
-              type="button"
-              onClick={() => {
-                addFollowupCall({
-                  scheduledAt: new Date().toISOString(),
-                  leadId: lead.id,
-                  leadName: lead.name,
-                  phone: lead.phone,
-                  callType: "CALLBACK",
-                  assignedToName: lead.assignedAgent || ""
-                });
-                toast("Call-back attempt logged.", "success");
-              }}
-              className="w-full text-[11px] font-bold text-[#0B1E6E] border border-[#0B1E6E]/20 bg-[#0B1E6E]/5 hover:bg-[#0B1E6E]/10 rounded-lg px-3 py-1.5 transition-colors"
-            >
-              Log Call-Back Attempt
-            </button>
-          )}
         </div>
 
         {/* Assigned / Property / Reassigned / Captured */}
@@ -323,6 +305,10 @@ export default function LeadDrillDownPanel({ title, baseFilters, onClose }: {
 }) {
   const { currentUser, users, activeRole, recordCallEnded, recordWhatsAppOpened } = useApp();
   const handleDrillStatusChange = useLeadStatusChange();
+  // RNR/Call Back/Followup/Site Visit Scheduled are gated behind a
+  // blocking popup (LeadScheduleModal below) before handleDrillStatusChange
+  // (which already handles the Booked deal-value prompt) actually runs.
+  const statusScheduler = useLeadStatusScheduler(handleDrillStatusChange);
   const callAllowed = canTriggerLeadCall(activeRole === "ADMIN");
   const handleCall = (lead: Lead) => {
     triggerLeadCall(lead, {
@@ -460,9 +446,9 @@ export default function LeadDrillDownPanel({ title, baseFilters, onClose }: {
   ) : (
     <SearchableSelect
       variant="inline"
-      options={PICKABLE_STATUS_OPTIONS.includes(l.status) ? PICKABLE_STATUS_OPTIONS : [l.status, ...PICKABLE_STATUS_OPTIONS]}
+      options={withDeadLeadGate(PICKABLE_STATUS_OPTIONS.includes(l.status) ? PICKABLE_STATUS_OPTIONS : [l.status, ...PICKABLE_STATUS_OPTIONS], l, activeRole === "ADMIN")}
       value={l.status}
-      onChange={(v) => handleDrillStatusChange(l.id, v as LeadStatus)}
+      onChange={(v) => statusScheduler.requestChange(l, v as LeadStatus)}
       searchPlaceholder="Search status..."
       panelWidth={176}
       className="max-w-[110px] text-[11px] text-slate-700"
@@ -619,6 +605,15 @@ export default function LeadDrillDownPanel({ title, baseFilters, onClose }: {
       {/* Lead quick-view — opened by clicking a lead's name in the table above */}
       {quickViewLead && (
         <LeadQuickViewDrawer lead={quickViewLead} onClose={() => setQuickViewLead(null)} />
+      )}
+      {statusScheduler.pendingSchedule && (
+        <LeadScheduleModal
+          pending={statusScheduler.pendingSchedule}
+          submitting={statusScheduler.submitting}
+          error={statusScheduler.error}
+          onCancel={statusScheduler.cancelSchedule}
+          onConfirm={statusScheduler.confirmSchedule}
+        />
       )}
     </>
   );

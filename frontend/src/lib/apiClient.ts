@@ -259,6 +259,10 @@ export interface ApiLeadRow {
   // at least once.
   call_status: string | null;
   call_sub_status?: string | null;
+  // Distinct business-calendar days this lead has a real logged phone call —
+  // the Dead Lead status option is disabled client-side until this reaches
+  // leadStatusMapping.ts's DEAD_LEAD_MIN_CALL_DAYS (also enforced server-side).
+  dead_lead_call_days: string;
   logs: { message: string; timestamp: string; user: string }[];
 }
 

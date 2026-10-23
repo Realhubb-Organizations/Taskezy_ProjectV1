@@ -9,6 +9,9 @@ import { AccessTokenPayload } from "../../utils/tokens";
 import { findDirectReportIds } from "../users/users.repository";
 import { createPropertySchema, editPropertySchema, listPropertiesQuerySchema, propertyIdParamSchema } from "./properties.schema";
 import * as repo from "./properties.repository";
+import { query } from "../../db/pool";
+import { createNotification } from "../notifications/notifications.service";
+import { logger } from "../../utils/logger";
 
 export const propertiesRouter = Router();
 
@@ -133,6 +136,47 @@ const setTeamMembersSchema = z.object({
   })).max(100)
 });
 
+/**
+ * Notifies anyone newly added to a property's team — them directly ("you
+ * are assigned to <property>"), and their manager, if any ("<name> is
+ * assigned to <property>"). Best-effort: a failed notification must never
+ * fail the team-member save that triggered it, so every call site wraps
+ * this in a .catch.
+ */
+async function notifyNewPropertyTeamMembers(propertyName: string, newMembers: { userId: string; name: string }[]): Promise<void> {
+  if (newMembers.length === 0) return;
+  const { rows: managers } = await query<{ id: string; manager_id: string | null }>(
+    `SELECT id, manager_id FROM users WHERE id = ANY($1::uuid[])`,
+    [newMembers.map(m => m.userId)]
+  );
+  const managerIdByUser = new Map(managers.map(m => [m.id, m.manager_id]));
+
+  await Promise.all(newMembers.flatMap(member => {
+    const sends = [
+      createNotification({
+        system: "CRM",
+        category: "GENERAL",
+        title: "Property Assigned",
+        message: `You are assigned to ${propertyName} property.`,
+        recipientUserId: member.userId,
+        link: "/dashboard/properties"
+      })
+    ];
+    const managerId = managerIdByUser.get(member.userId);
+    if (managerId) {
+      sends.push(createNotification({
+        system: "CRM",
+        category: "GENERAL",
+        title: "Teammate Assigned to Property",
+        message: `${member.name} is assigned to ${propertyName} property.`,
+        recipientUserId: managerId,
+        link: "/dashboard/properties"
+      }));
+    }
+    return sends;
+  }));
+}
+
 propertiesRouter.put(
   "/:id/team-members",
   requireRole("ADMIN"),
@@ -140,6 +184,8 @@ propertiesRouter.put(
   asyncHandler(async (req, res) => {
     const existing = await repo.findById(req.params.id);
     if (!existing) throw ApiError.notFound("Property not found");
+    const previousMemberIds = new Set(existing.team_members.map(m => m.userId));
+
     try {
       await repo.replaceTeamMembersForProperty(req.params.id, req.body.members);
     } catch (err) {
@@ -148,7 +194,16 @@ propertiesRouter.put(
       }
       throw err;
     }
-    sendOk(res, await repo.findById(req.params.id));
+
+    const updated = await repo.findById(req.params.id);
+    const newMembers = (updated?.team_members ?? []).filter(m => !previousMemberIds.has(m.userId));
+    if (newMembers.length > 0) {
+      notifyNewPropertyTeamMembers(existing.name, newMembers).catch(err =>
+        logger.error({ err, propertyId: req.params.id }, "Could not send property-assignment notifications")
+      );
+    }
+
+    sendOk(res, updated);
   })
 );
 

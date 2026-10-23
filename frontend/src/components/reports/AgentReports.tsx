@@ -418,8 +418,8 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
             <>
               {/* Agent header. Allocated Spend / Booking ROI are for admins and
                   managers only — an agent's own view is just name + manager. */}
-              <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-5 flex flex-wrap items-center gap-x-6 gap-y-3">
-                <div className="flex items-center gap-3 min-w-0 flex-1">
+              <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-5 flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-x-6 gap-y-3">
+                <div className="flex items-center gap-3 min-w-0 w-full sm:w-auto sm:flex-1">
                   <div className="h-11 w-11 rounded-full bg-[#0B1E6E] text-white text-sm font-bold flex items-center justify-center shrink-0">
                     {activeAgent.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join("").toUpperCase()}
                   </div>
@@ -430,7 +430,7 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                     </p>
                   </div>
                 </div>
-                {!isScopedToSelf && <div className="flex items-center gap-6">
+                {!isScopedToSelf && <div className="flex items-center flex-wrap gap-6">
                   <div>
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Allocated Spend</span>
                     {isDataLoading ? (
@@ -565,7 +565,76 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                   ))}
                 </div>
                 {missedTab === "leads" && (
-                <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm overflow-x-auto">
+                <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm">
+                  {/* Phones: one card per missed lead — same shape as MetricDetailModal's card list */}
+                  <ul className="sm:hidden divide-y divide-slate-100">
+                    {missedLeadsList.loading && missedLeadsList.rows.length === 0 ? (
+                      <CardListSkeleton count={4} />
+                    ) : missedLeadsList.totalCount === 0 ? (
+                      <li className="p-6 text-center text-xs text-slate-400 italic font-semibold">No missed leads for {activeAgent} in this date range.</li>
+                    ) : (
+                      missedLeadsList.rows.map(lead => {
+                        const info = getMissedInfo(lead);
+                        const latestLog = lead.logs.length > 0 ? lead.logs[lead.logs.length - 1] : undefined;
+                        const missedAtTime = lead.assignedAt ? new Date(lead.assignedAt).getTime() + SLA_MINUTES * 60000 : undefined;
+                        const activityTime = latestLog ? new Date(latestLog.timestamp).getTime() : Date.now();
+                        const overdueMinutes = missedAtTime !== undefined ? Math.round((activityTime - missedAtTime) / 60000) : undefined;
+                        return (
+                          <li key={lead.id} className="p-4 space-y-3 text-xs">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="font-bold text-slate-800">{lead.name}</p>
+                                <p className="text-[10px] text-slate-450 font-mono">{activeRole === "ADMIN" ? lead.phone : maskPhone(lead.phone)}</p>
+                              </div>
+                              {activeRole === "ADMIN" && (
+                                <button
+                                  onClick={() => handleReassign(lead.id, lead.name)}
+                                  className="inline-flex items-center gap-1 text-[10px] font-bold text-brand-600 shrink-0"
+                                >
+                                  <RefreshCw className="h-3 w-3" /> Reassign
+                                </button>
+                              )}
+                            </div>
+                            <div className="grid grid-cols-2 gap-x-3 gap-y-2">
+                              <div>
+                                <span className="block text-[10px] font-semibold text-slate-400">Wait Time</span>
+                                <span className="font-bold text-red-650">{formatMinutes(info.responseMinutes)}</span>
+                                {info.responseMinutes === undefined && <span className="text-[9px] text-slate-400 block">still waiting</span>}
+                              </div>
+                              <div>
+                                <span className="block text-[10px] font-semibold text-slate-400">Overdue By</span>
+                                {overdueMinutes !== undefined && overdueMinutes > 0 ? (
+                                  <span className="font-bold text-amber-700">{formatMinutes(overdueMinutes)}</span>
+                                ) : (
+                                  <span className="text-slate-400">—</span>
+                                )}
+                                {!latestLog && <span className="text-[9px] text-slate-400 block">and counting</span>}
+                              </div>
+                              <div>
+                                <span className="block text-[10px] font-semibold text-slate-400">Assigned At</span>
+                                <span className="font-mono text-slate-600">
+                                  {lead.assignedAt ? new Date(lead.assignedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—"}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="block text-[10px] font-semibold text-slate-400">Reassigned At</span>
+                                <span className="font-mono text-slate-600">
+                                  {lead.reassignedAt
+                                    ? new Date(lead.reassignedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })
+                                    : "Not reassigned"}
+                                </span>
+                              </div>
+                            </div>
+                            <div>
+                              <span className="block text-[10px] font-semibold text-slate-400">Notes</span>
+                              <p className="text-slate-500 line-clamp-3 [overflow-wrap:anywhere]">{latestLog?.message || "No activity logged."}</p>
+                            </div>
+                          </li>
+                        );
+                      })
+                    )}
+                  </ul>
+                  <div className="hidden sm:block overflow-x-auto">
                   <table className={`table-fixed w-full text-[11px] border-collapse ${activeRole === "ADMIN" ? "min-w-[1050px]" : "min-w-[900px]"}`}>
                     <colgroup>
                       <col />
@@ -655,11 +724,54 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                       )}
                     </tbody>
                   </table>
+                  </div>
                   <TablePagination {...missedLeadsList.paginationProps} rowLabel="Missed Lead" />
                 </div>
                 )}
                 {missedTab === "followups" && (
-                <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm overflow-x-auto">
+                <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm">
+                  {/* Phones: one card per missed follow-up */}
+                  <ul className="sm:hidden divide-y divide-slate-100">
+                    {isDataLoading && missedFollowups.length === 0 ? (
+                      <CardListSkeleton count={4} />
+                    ) : missedFollowups.length === 0 ? (
+                      <li className="p-6 text-center text-xs text-slate-400 italic font-semibold">No missed follow-ups for {activeAgent} in this date range.</li>
+                    ) : (
+                      missedFollowupsPagination.pageRows.map(f => {
+                        const missedAtTime = f.dueNotifiedAt
+                          ? new Date(f.dueNotifiedAt).getTime() + 10 * 60000
+                          : new Date(`${f.date}T00:00:00`).getTime();
+                        const overdueMinutes = Math.round((Date.now() - missedAtTime) / 60000);
+                        return (
+                          <li key={f.id} className="p-4 space-y-3 text-xs">
+                            <div>
+                              <p className="font-bold text-slate-800">{f.leadName}</p>
+                              <p className="text-[10px] text-slate-450 font-mono">{activeRole === "ADMIN" ? f.phone : maskPhone(f.phone)}</p>
+                            </div>
+                            <div className="grid grid-cols-2 gap-x-3 gap-y-2">
+                              <div>
+                                <span className="block text-[10px] font-semibold text-slate-400">Type</span>
+                                <span className="text-slate-600">{f.type}</span>
+                              </div>
+                              <div>
+                                <span className="block text-[10px] font-semibold text-slate-400">Overdue By</span>
+                                {overdueMinutes > 0 ? (
+                                  <span className="font-bold text-amber-700">{formatMinutes(overdueMinutes)}</span>
+                                ) : (
+                                  <span className="text-slate-400">—</span>
+                                )}
+                              </div>
+                              <div className="col-span-2">
+                                <span className="block text-[10px] font-semibold text-slate-400">Scheduled</span>
+                                <span className="font-mono text-slate-600">{f.date} • {f.time}</span>
+                              </div>
+                            </div>
+                          </li>
+                        );
+                      })
+                    )}
+                  </ul>
+                  <div className="hidden sm:block overflow-x-auto">
                   <table className="table-fixed w-full min-w-[600px] text-[11px] border-collapse">
                     <colgroup>
                       <col />
@@ -715,6 +827,7 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                       )}
                     </tbody>
                   </table>
+                  </div>
                   <TablePagination {...missedFollowupsPagination.paginationProps} rowLabel="Missed Follow-up" />
                 </div>
                 )}

@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useApp, Lead, LeadStatus, FollowupCall, mapApiLeadToFrontendLead, mapApiFollowupToFrontend } from "@/context/AppContext";
 import { useDialog } from "@/components/ui/DialogProvider";
 import { Sliders, Sparkles, Plus, Check, ChevronDown, Search, X, Minus, Download, RotateCcw, Users, Trash2, AlertTriangle } from "lucide-react";
-import { STATUS_OPTIONS, PICKABLE_STATUS_OPTIONS, frontendStatusToDbCode } from "@/lib/leadStatusMapping";
+import { STATUS_OPTIONS, PICKABLE_STATUS_OPTIONS, frontendStatusToDbCode, withDeadLeadGate } from "@/lib/leadStatusMapping";
 import { type LeadSummaryStats } from "@/lib/leadSummaryStats";
 import { apiListLeadsPage, apiGetLead, apiGetLeadStats, apiGetLeadAnalyticsStats, apiGetDistinctCampaigns, apiListFollowupsPage, apiDeleteLead, apiBulkDeleteLeads, apiBulkReassignLeads, type LeadListFilters, type AgentAnalyticsStats } from "@/lib/apiClient";
 import { useServerLeadList } from "@/lib/useServerLeadList";
@@ -23,6 +23,8 @@ import TablePagination, { usePagination } from "@/components/ui/TablePagination"
 import AddLeadModal from "./AddLeadModal";
 import LeadDetailDrawer from "./LeadDetailDrawer";
 import LeadDrillDownPanel from "./LeadDrillDownPanel";
+import LeadScheduleModal from "./LeadScheduleModal";
+import { useLeadStatusScheduler } from "@/lib/leadScheduler";
 import { DateTimeLines, dateTimeParts } from "@/components/ui/DateTimeLines";
 import { nextFollowupFor } from "@/lib/followups";
 import NextCallCell from "./NextCallCell";
@@ -93,7 +95,7 @@ function PaginatedSubList<T>({ items, rowLabel, children }: { items: T[]; rowLab
 // drill-down click handlers (which need to set the Leads tab's status
 // filter to "whichever statuses this number represents") share one
 // definition instead of drifting apart.
-const UNQUALIFIED_STATUSES: LeadStatus[] = ["RNR", "Low Budget", "Dead Lead"];
+const UNQUALIFIED_STATUSES: LeadStatus[] = ["RNR", "Low Budget", "Dead Lead", "Not Interested"];
 const SITE_VISIT_STATUSES: LeadStatus[] = ["Site Visit Scheduled", "Site Visit Done"];
 
 // The Leads Analytics per-agent table's togglable columns — Member Name
@@ -263,6 +265,11 @@ export default function LeadDashboard() {
     setTimeout(() => setSuccessMsg(""), 3000);
   };
 
+  // RNR/Call Back/Followup/Site Visit Scheduled are gated behind a
+  // blocking popup (LeadScheduleModal below) before handleUpdateLeadStatus
+  // actually runs — every other status still commits immediately.
+  const statusScheduler = useLeadStatusScheduler(handleUpdateLeadStatus);
+
   // Per-row Status editor cell — the shared searchable single-select (the
   // full status list runs ~18 options deep). Shared by the main Leads table
   // and the Analytics drilldown table.
@@ -288,9 +295,9 @@ export default function LeadDashboard() {
     return (
       <SearchableSelect
         variant="inline"
-        options={allOptions}
+        options={withDeadLeadGate(allOptions, l, isAdmin)}
         value={l.status}
-        onChange={(v) => handleUpdateLeadStatus(l.id, v as LeadStatus)}
+        onChange={(v) => statusScheduler.requestChange(l, v as LeadStatus)}
         searchPlaceholder="Search status..."
         panelWidth={176}
         className={phoneLayout ? "max-w-full rounded-xl bg-blue-50 px-2 py-1.5 text-[11px] font-semibold text-blue-600 [&_svg]:h-3 [&_svg]:w-3" : "max-w-[110px] text-[11px] text-slate-700"}
@@ -2351,6 +2358,19 @@ export default function LeadDashboard() {
           onReassigned={() => setLeadsRefreshKey(k => k + 1)}
           onNoteSaved={handleNoteSaved}
         />
+
+        {/* Scheduler popup for the main table's inline Status dropdown —
+            LeadDetailDrawer has its own, separate instance for its own
+            dropdown. */}
+        {statusScheduler.pendingSchedule && (
+          <LeadScheduleModal
+            pending={statusScheduler.pendingSchedule}
+            submitting={statusScheduler.submitting}
+            error={statusScheduler.error}
+            onCancel={statusScheduler.cancelSchedule}
+            onConfirm={statusScheduler.confirmSchedule}
+          />
+        )}
 
         {/* Filter panel (column visibility) — opened from both the Leads
             tab's own Filter button and the Leads Analytics tab's sliders

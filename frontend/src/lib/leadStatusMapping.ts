@@ -1,4 +1,5 @@
-import { LeadStatus, LeadLog } from "@/context/AppContext";
+import { LeadStatus, LeadLog, Lead } from "@/context/AppContext";
+import { DropdownOption } from "@/components/ui/SearchableDropdown";
 
 // The 14-value Lead Status list (main Leads page only — Data Calling has
 // its own, independent Call Status, see callStatusMapping.ts). Replaced
@@ -22,7 +23,8 @@ export const FRONTEND_STATUS_TO_DB_CODE: Record<LeadStatus, string> = {
   "Broker": "BROKER",
   "Booked": "BOOKED",
   "Cancelled": "CANCELLED",
-  "Different Location": "DIFFERENT_LOCATION"
+  "Different Location": "DIFFERENT_LOCATION",
+  "Not Interested": "NOT_INTERESTED"
 };
 
 export const DB_CODE_TO_FRONTEND_STATUS: Record<string, LeadStatus> = {
@@ -40,6 +42,7 @@ export const DB_CODE_TO_FRONTEND_STATUS: Record<string, LeadStatus> = {
   BOOKED: "Booked",
   CANCELLED: "Cancelled",
   DIFFERENT_LOCATION: "Different Location",
+  NOT_INTERESTED: "Not Interested",
   // UNASSIGNED is a system sentinel (no agent assigned yet, see
   // leads.service.ts) — never user-facing, auto-promotes to New Lead the
   // moment an agent is assigned. Shown as New Lead here purely as a safe
@@ -52,7 +55,7 @@ export const DB_CODE_TO_FRONTEND_STATUS: Record<string, LeadStatus> = {
 export const STATUS_OPTIONS: LeadStatus[] = [
   "New Lead", "RNR", "Call Back", "Followup", "EOI", "Site Visit Scheduled",
   "Site Visit Done", "Low Budget", "Other requirement", "Broker", "Booked",
-  "Dead Lead", "Cancelled", "Different Location"
+  "Dead Lead", "Cancelled", "Different Location", "Not Interested"
 ];
 
 // Kept as an alias (not a separate list) for callers that pre-date
@@ -61,6 +64,40 @@ export const STATUS_OPTIONS: LeadStatus[] = [
 // LeadStatus union at all anymore (see isUnassignedInSystem on Lead
 // instead), so there's nothing left to filter out.
 export const PICKABLE_STATUS_OPTIONS: LeadStatus[] = STATUS_OPTIONS;
+
+// Matches the backend's leadStatusTransitions.ts DEAD_LEAD_MIN_CALL_DAYS —
+// a lead needs a real phone call logged on at least this many distinct
+// calendar days (lead.deadLeadCallDays, see call_attempts) before any
+// non-Admin role can mark it Dead Lead. Admin bypasses this everywhere, same
+// override pattern as every other role-gated action in this app.
+export const DEAD_LEAD_MIN_CALL_DAYS = 15;
+
+export function isDeadLeadEligible(lead: Lead): boolean {
+  return (lead.deadLeadCallDays ?? 0) >= DEAD_LEAD_MIN_CALL_DAYS;
+}
+
+/**
+ * Converts a plain status list into the shape SearchableSelect's `options`
+ * prop accepts, disabling (not removing — an agent should see Dead Lead
+ * exists and why it's unavailable, not wonder where it went) "Dead Lead"
+ * for a non-Admin until the lead has enough logged calling days. Shared by
+ * every status-change dropdown (LeadDashboard, LeadDrillDownPanel,
+ * LeadDetailDrawer) so they can't drift onto different rules.
+ */
+export function withDeadLeadGate(options: LeadStatus[], lead: Lead, isAdmin: boolean): (LeadStatus | DropdownOption)[] {
+  if (isAdmin) return options;
+  return options.map((status): LeadStatus | DropdownOption => {
+    if (status !== "Dead Lead" || isDeadLeadEligible(lead)) return status;
+    const have = lead.deadLeadCallDays ?? 0;
+    const remaining = DEAD_LEAD_MIN_CALL_DAYS - have;
+    return {
+      value: status,
+      label: status,
+      disabled: true,
+      disabledHint: `Needs ${remaining} more calling day${remaining === 1 ? "" : "s"} (${have}/${DEAD_LEAD_MIN_CALL_DAYS}) before this lead can be marked Dead Lead.`
+    };
+  });
+}
 
 // Badge color classes for a status pill — shared by every status badge/pill
 // in the app so the same status always reads the same color everywhere.
@@ -72,6 +109,7 @@ export function statusBadgeClasses(status: LeadStatus): string {
       return "bg-blue-50 text-blue-700 border-blue-200";
     case "Dead Lead":
     case "Cancelled":
+    case "Not Interested":
       return "bg-red-50 text-red-700 border-red-200";
     case "RNR":
     case "Call Back":
@@ -109,23 +147,24 @@ export function dbCodeToFrontendStatus(code: string): LeadStatus {
 // have to attempt a transition just to find out it's blocked.
 export const LEAD_STATUS_TRANSITIONS: Record<LeadStatus, { allowed: LeadStatus[]; optional: LeadStatus[] }> = {
   "New Lead": {
-    allowed: ["RNR", "Call Back", "Dead Lead", "Followup", "Site Visit Scheduled", "Low Budget", "Other requirement", "Broker"],
+    allowed: ["RNR", "Call Back", "Dead Lead", "Not Interested", "Followup", "Site Visit Scheduled", "Low Budget", "Other requirement", "Broker"],
     optional: ["Cancelled", "Different Location"]
   },
   "RNR": {
     // Dead Lead is listed as allowed here at the matrix level — the extra
     // 7-day/3-day-gap gate is enforced server-side, surfaced as a 400 if
     // the lead hasn't had enough logged call-back attempts yet.
-    allowed: ["Call Back", "Dead Lead", "Followup", "Site Visit Scheduled", "Low Budget", "Other requirement", "Broker"],
+    allowed: ["Call Back", "Dead Lead", "Not Interested", "Followup", "Site Visit Scheduled", "Low Budget", "Other requirement", "Broker"],
     optional: ["Cancelled", "Different Location"]
   },
   "Call Back": {
-    allowed: ["RNR", "Dead Lead", "Followup", "Site Visit Scheduled", "Low Budget", "Other requirement", "Broker"],
+    allowed: ["RNR", "Dead Lead", "Not Interested", "Followup", "Site Visit Scheduled", "Low Budget", "Other requirement", "Broker"],
     optional: ["Cancelled", "Different Location"]
   },
   "Dead Lead": { allowed: [], optional: [] },
+  "Not Interested": { allowed: [], optional: [] },
   "Followup": {
-    allowed: ["Dead Lead", "EOI", "Site Visit Scheduled", "Low Budget", "Other requirement", "Broker"],
+    allowed: ["Dead Lead", "Not Interested", "EOI", "Site Visit Scheduled", "Low Budget", "Other requirement", "Broker"],
     optional: ["Cancelled", "Different Location"]
   },
   "EOI": {
@@ -141,21 +180,21 @@ export const LEAD_STATUS_TRANSITIONS: Record<LeadStatus, { allowed: LeadStatus[]
     optional: ["Cancelled", "Different Location"]
   },
   "Low Budget": {
-    allowed: ["RNR", "Call Back", "Dead Lead", "Followup", "EOI", "Site Visit Scheduled", "Broker"],
+    allowed: ["RNR", "Call Back", "Dead Lead", "Not Interested", "Followup", "EOI", "Site Visit Scheduled", "Broker"],
     optional: ["Cancelled", "Different Location"]
   },
   "Other requirement": {
-    allowed: ["RNR", "Call Back", "Dead Lead", "Followup", "EOI", "Site Visit Scheduled", "Low Budget", "Broker"],
+    allowed: ["RNR", "Call Back", "Dead Lead", "Not Interested", "Followup", "EOI", "Site Visit Scheduled", "Low Budget", "Broker"],
     optional: ["Cancelled", "Different Location"]
   },
-  "Broker": { allowed: ["Dead Lead"], optional: ["Cancelled"] },
+  "Broker": { allowed: ["Dead Lead", "Not Interested"], optional: ["Cancelled"] },
   // Read as fully locked in the source matrix (every column "No") — but a
   // real booking can fall through, confirmed 2026-10-13 that Booked ->
   // Cancelled should be reachable after all.
   "Booked": { allowed: [], optional: ["Cancelled"] },
   "Cancelled": { allowed: [], optional: [] },
   "Different Location": {
-    allowed: ["RNR", "Call Back", "Dead Lead", "Followup", "EOI", "Site Visit Scheduled", "Site Visit Done", "Low Budget", "Other requirement", "Broker"],
+    allowed: ["RNR", "Call Back", "Dead Lead", "Not Interested", "Followup", "EOI", "Site Visit Scheduled", "Site Visit Done", "Low Budget", "Other requirement", "Broker"],
     optional: ["Cancelled"]
   }
 };
