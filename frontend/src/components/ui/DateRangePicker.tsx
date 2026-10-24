@@ -468,10 +468,16 @@ export function DatePicker({
         type="button"
         onClick={openPanel}
         disabled={disabled}
-        className={
-          className ??
-          "w-full flex items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none focus:border-brand-500 disabled:opacity-50 disabled:cursor-not-allowed"
-        }
+        // The layout classes (flex row, icon trailing on the same line as
+        // the text) are always applied — a caller's className only adds/
+        // overrides appearance on top (colors, borders, sizing). Letting a
+        // passed className fully replace the defaults (as this used to)
+        // silently drops `flex`, stacking the text and calendar icon onto
+        // separate lines — a real bug this shape already caused once
+        // (LeadScheduleModal.tsx passing a plain <input>-style className).
+        className={`w-full flex items-center justify-between gap-2 disabled:opacity-50 disabled:cursor-not-allowed ${
+          className ?? "bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none focus:border-brand-500"
+        }`}
       >
         <span className={`tabular-nums ${value ? "" : "text-slate-400"}`}>{value ? formatDisplayDate(value) : placeholder}</span>
         <Calendar className="h-3.5 w-3.5 shrink-0 text-slate-500" />
