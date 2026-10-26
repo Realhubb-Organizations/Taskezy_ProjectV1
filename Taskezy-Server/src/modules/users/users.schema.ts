@@ -25,7 +25,10 @@ export const listUsersQuerySchema = z.object({
   // The CRM Manage Users stat cards (Admin / Managers / Agents); same
   // definitions as the card counts on that page.
   // "crm" = all three together (everyone the CRM's user directory shows).
-  group: z.enum(["crm", "admin", "sales-managers", "sales-agents"]).optional()
+  group: z.enum(["crm", "admin", "sales-managers", "sales-agents"]).optional(),
+  // Independent of group — defaults to ACTIVE server-side (see
+  // users.routes.ts) so every existing caller's behavior is unchanged.
+  status: z.enum(["ACTIVE", "INACTIVE"]).optional()
 });
 
 export const createUserSchema = z.object({
@@ -61,7 +64,12 @@ export const editUserSchema = z.object({
   status: z.enum(["ACTIVE", "INACTIVE"]).optional(),
   // null clears it (e.g. promoting someone to no longer report to anyone);
   // omitted leaves it unchanged, same convention as leads' editLeadSchema.
-  managerId: z.string().uuid().nullable().optional()
+  managerId: z.string().uuid().nullable().optional(),
+  // Access Control toggle (Settings > Manage Users) — whether this manager
+  // may use the main CRM Leads page's bulk upload, on top of their always-
+  // on Data Calling access. Super-Admin-only to set (checked in
+  // users.routes.ts, not here — this schema only validates shape).
+  canBulkUploadCrmLeads: z.boolean().optional()
 }).refine((data) => Object.keys(data).length > 0, { message: "At least one field must be provided" });
 
 export const resetPasswordSchema = z.object({

@@ -14,6 +14,7 @@ import {
   apiListUsersPage,
   apiAnnounceToEveryone,
   apiListUserDevices,
+  apiEditUser,
   type ApiUserDevice
 } from "@/lib/apiClient";
 import { isNotificationSoundMuted, setNotificationSoundMuted } from "@/lib/notificationSound";
@@ -47,7 +48,10 @@ import {
   MoreHorizontal,
   ChevronDown,
   KeyRound,
-  Copy
+  Copy,
+  UserCheck,
+  UserX,
+  Lock
 } from "lucide-react";
 import { LineSkeleton, CardListSkeleton } from "@/components/ui/Skeletons";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
@@ -123,7 +127,10 @@ function initialsFor(name: string): string {
 export default function SettingsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { users, leads, activeRole, activeSystem, logout, updateUserFields, addTeamMember, resetRosterPassword, refreshMetaConnectionStatus, tenantSettings, updateTenantSettings, isDataLoading, manualRefreshSignal } = useApp();
+  const { users, leads, activeRole, activeSystem, logout, updateUserFields, addTeamMember, resetRosterPassword, refreshMetaConnectionStatus, tenantSettings, updateTenantSettings, isDataLoading, manualRefreshSignal, currentUser } = useApp();
+  // The one informal "Super Admin" account — only this admin may delete
+  // another admin (mirrors the same check enforced server-side).
+  const isSuperAdmin = currentUser?.email === "admin@realhubb.in";
   const { toast, confirm: confirmDialog } = useDialog();
 
   const initialTabParam = searchParams.get("tab");
@@ -526,12 +533,44 @@ export default function SettingsPage() {
   useEffect(() => {
     setUsersPage(1);
   }, [userGroup]);
+
+  // Active/Inactive is a second, independent filter dimension (not mutually
+  // exclusive with the role-group cards above — e.g. "Inactive Managers" is
+  // a real thing an admin wants to find) — a deactivated user used to just
+  // vanish from this list with no way to see or reactivate them.
+  const [userStatus, setUserStatus] = useState<"ACTIVE" | "INACTIVE">("ACTIVE");
+  useEffect(() => {
+    setUsersPage(1);
+  }, [userStatus]);
+  // Both counts fetched independently of whichever one is currently
+  // selected (pageSize 1 — only totalCount is used, same bridge pattern
+  // used elsewhere in this app for a cheap count-only fetch) so both cards
+  // always show real numbers regardless of the current filter.
+  const [activeUsersCount, setActiveUsersCount] = useState(0);
+  const [inactiveUsersCount, setInactiveUsersCount] = useState(0);
   // Manage Users is the CRM's user directory (admins, sales managers, sales
   // agents) unless the HRMS/Finance side is open — including for an admin,
   // whose default activeSystem is "ADMIN". There, with no card picked, the
   // list is still limited to CRM people ("crm"), never IT/Marketing/Finance.
   const isCrmUserDirectory = activeSystem !== "HRMS" && activeSystem !== "FINANCE";
   const effectiveUserGroup = isCrmUserDirectory ? (userGroup ?? "crm") : null;
+  useEffect(() => {
+    if (activeTab !== "Manage Users") return;
+    let cancelled = false;
+    const group = effectiveUserGroup ?? undefined;
+    Promise.all([
+      apiListUsersPage(1, 1, { group, status: "ACTIVE" }),
+      apiListUsersPage(1, 1, { group, status: "INACTIVE" })
+    ])
+      .then(([active, inactive]) => {
+        if (cancelled) return;
+        setActiveUsersCount(active.totalCount);
+        setInactiveUsersCount(inactive.totalCount);
+      })
+      .catch(() => { /* leave the previous counts showing on a transient failure */ });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, effectiveUserGroup, usersRefreshKey, manualRefreshSignal]);
   // Bumped when a page of rows arrives, so the new rows fade in.
   const [usersListKey, setUsersListKey] = useState(0);
   const [usersLoadError, setUsersLoadError] = useState(false);
@@ -570,6 +609,26 @@ export default function SettingsPage() {
     }
   };
 
+  // Access Control toggle — Super-Admin-only, scoped to Managers: by
+  // default a manager can only bulk-upload via Data Calling, not the main
+  // CRM Leads page's own bulk upload; this expand panel's toggle opts an
+  // individual manager into the latter. Same lazy-expand UI shape as the
+  // Devices panel right above, no separate fetch needed (the flag already
+  // comes back on every Manage Users page load).
+  const [expandedAccessControlUserId, setExpandedAccessControlUserId] = useState<string | null>(null);
+  const [togglingAccessControlUserId, setTogglingAccessControlUserId] = useState<string | null>(null);
+  const handleToggleBulkUploadAccess = async (user: User, next: boolean) => {
+    setTogglingAccessControlUserId(user.id);
+    try {
+      await apiEditUser(user.id, { canBulkUploadCrmLeads: next });
+      setServerUsers(prev => prev.map(u => (u.id === user.id ? { ...u, canBulkUploadCrmLeads: next } : u)));
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Could not update bulk-upload access.", "error");
+    } finally {
+      setTogglingAccessControlUserId(null);
+    }
+  };
+
   useEffect(() => {
     if (activeTab !== "Manage Users") return;
     let cancelled = false;
@@ -581,7 +640,7 @@ export default function SettingsPage() {
     // so a card/search never looks applied while the previous list remains.
     const RETRY_DELAYS_MS = [1000, 3000, 6000];
     const load = (attempt: number) => {
-      apiListUsersPage(usersPage, usersRowsPerPage, { search: debouncedSearchQuery || undefined, group: effectiveUserGroup ?? undefined })
+      apiListUsersPage(usersPage, usersRowsPerPage, { search: debouncedSearchQuery || undefined, group: effectiveUserGroup ?? undefined, status: userStatus })
         .then((result) => {
           if (cancelled) return;
           setServerUsers(result.rows.map(mapApiUserDirectoryEntryToFrontendUser));
@@ -607,7 +666,7 @@ export default function SettingsPage() {
       cancelled = true;
       if (retryTimer) clearTimeout(retryTimer);
     };
-  }, [activeTab, usersPage, usersRowsPerPage, debouncedSearchQuery, usersRefreshKey, effectiveUserGroup, manualRefreshSignal]);
+  }, [activeTab, usersPage, usersRowsPerPage, debouncedSearchQuery, usersRefreshKey, effectiveUserGroup, userStatus, manualRefreshSignal]);
 
   const handleEditClick = (user: User) => {
     setSelectedUser(user);
@@ -1491,7 +1550,47 @@ export default function SettingsPage() {
                 );
               })}
             </div>
-          ) : (
+          ) : null}
+
+          {/* Active/Inactive — an independent filter axis from the role-group
+              cards above (an admin wants "inactive managers" to be findable,
+              not just "inactive" company-wide), so this is its own row/toggle. */}
+          {isCrmUserDirectory && (
+            <div className="grid grid-cols-2 gap-2 sm:gap-3 sm:max-w-md">
+              {([
+                { status: "ACTIVE" as const, label: "Active Users", count: activeUsersCount, icon: UserCheck, color: "text-emerald-600 bg-emerald-50 border-emerald-100" },
+                { status: "INACTIVE" as const, label: "Inactive Users", count: inactiveUsersCount, icon: UserX, color: "text-rose-600 bg-rose-50 border-rose-100" }
+              ]).map(stat => {
+                const active = userStatus === stat.status;
+                return (
+                  <button
+                    key={stat.status}
+                    type="button"
+                    aria-pressed={active}
+                    title={`Show ${stat.label.toLowerCase()}`}
+                    onClick={() => setUserStatus(stat.status)}
+                    className={`text-left p-3 sm:p-4 rounded-2xl border flex items-center justify-between gap-2 min-w-0 transition-all duration-200 ease-out active:scale-[0.97] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0B1E6E]/40 ${
+                      active
+                        ? "bg-[#F4F6FC] border-[#0B1E6E] ring-1 ring-[#0B1E6E] shadow-md"
+                        : "bg-white border-slate-200 shadow-sm hover:border-slate-300 hover:shadow-md sm:hover:-translate-y-0.5"
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <span className={`text-[9px] font-bold uppercase tracking-wider block truncate transition-colors ${active ? "text-[#0B1E6E]" : "text-slate-400"}`}>{stat.label}</span>
+                      <p className="text-lg font-black text-slate-800 mt-0.5">
+                        {isDataLoading ? <LineSkeleton width={32} height={18} /> : stat.count}
+                      </p>
+                    </div>
+                    <div className={`h-7 w-7 sm:h-8 sm:w-8 rounded-lg border flex items-center justify-center shrink-0 transition-colors duration-200 ${active ? "bg-[#0B1E6E] border-[#0B1E6E] text-white" : stat.color}`}>
+                      <stat.icon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {!isCrmUserDirectory && (
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 lg:grid-cols-5">
               {[
                 { label: "Admin", count: userCounts.admin, icon: ShieldCheck, color: "text-violet-600 bg-violet-50 border-violet-100" },
@@ -1605,6 +1704,20 @@ export default function SettingsPage() {
                       </div>
 
                       <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                        {isSuperAdmin && user.role_type === "Manager" && (
+                          <button
+                            onClick={() => setExpandedAccessControlUserId(id => (id === user.id ? null : user.id))}
+                            aria-expanded={expandedAccessControlUserId === user.id}
+                            className={`p-2 rounded-lg border transition-colors ${
+                              expandedAccessControlUserId === user.id
+                                ? "text-[#0B1E6E] bg-[#F4F6FC] border-[#0B1E6E]/40"
+                                : "text-slate-500 hover:text-brand-700 hover:bg-slate-50 border-slate-200"
+                            }`}
+                            title="Access Control"
+                          >
+                            <Lock className="h-4 w-4" />
+                          </button>
+                        )}
                         {activeRole === "ADMIN" && (
                           <button
                             onClick={() => toggleDevicesExpand(user.id)}
@@ -1630,6 +1743,43 @@ export default function SettingsPage() {
                         ) : null}
                       </div>
                     </div>
+
+                    {/* Access Control dropdown — same slide-open pattern as
+                        Devices below; Super Admin only. No separate fetch —
+                        the flag already came back with this page of users. */}
+                    {isSuperAdmin && user.role_type === "Manager" && (
+                      <div className={`grid transition-[grid-template-rows] duration-300 ease-out ${expandedAccessControlUserId === user.id ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
+                        <div className="overflow-hidden">
+                          <div className="border-t border-slate-100 bg-slate-50/70 px-4 py-3">
+                            <div className="flex items-center justify-between gap-4 bg-white border border-slate-150 rounded-xl px-3.5 py-2.5">
+                              <div className="min-w-0">
+                                <p className="text-xs font-bold text-slate-700">CRM Leads bulk upload</p>
+                                <p className="text-[10px] text-slate-500 mt-0.5">
+                                  {user.name} can always bulk-upload via Data Calling. Enable this to also let them use the Leads page&apos;s bulk upload.
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                role="switch"
+                                aria-checked={!!user.canBulkUploadCrmLeads}
+                                aria-label="CRM Leads bulk upload access"
+                                disabled={togglingAccessControlUserId === user.id}
+                                onClick={() => handleToggleBulkUploadAccess(user, !user.canBulkUploadCrmLeads)}
+                                className={`relative shrink-0 h-7 w-12 rounded-full transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#0B1E6E] disabled:opacity-60 ${
+                                  user.canBulkUploadCrmLeads ? "bg-[#0B1E6E]" : "bg-slate-300"
+                                }`}
+                              >
+                                <span
+                                  className={`absolute top-0.5 left-0.5 h-6 w-6 rounded-full bg-white shadow-md ring-1 ring-black/5 transition-transform duration-200 ease-in-out ${
+                                    user.canBulkUploadCrmLeads ? "translate-x-5" : "translate-x-0"
+                                  }`}
+                                />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
                     {/* Devices dropdown — same slide-open pattern as the Team
                         dropdown below; fetched lazily by toggleDevicesExpand. */}
@@ -2238,7 +2388,7 @@ export default function SettingsPage() {
                 )}
               </div>
 
-              {selectedUser.role !== "ADMIN" && (
+              {(selectedUser.role !== "ADMIN" || isSuperAdmin) && (
                 <button
                   type="button"
                   onClick={() => setDeletingUser({ id: selectedUser.id, name: selectedUser.name })}

@@ -1,14 +1,111 @@
 import React, { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { X, Upload, FileSpreadsheet, Info, Download, Plus, Trash2 } from "lucide-react";
+import { X, Upload, FileSpreadsheet, Info, Download, Plus, Trash2, CheckCircle2, AlertTriangle } from "lucide-react";
 import { PlatformLabel } from "@/components/icons/ContactIcons";
 import { SearchableSelect } from "@/components/ui/SearchableDropdown";
 import { useDialog } from "@/components/ui/DialogProvider";
 import FieldError, { fieldErrorClass } from "@/components/ui/FieldError";
 import { collectErrors, normalizeIndianMobile, phoneInputProps, sanitizePhoneInput, validateEmail, validatePersonName, validatePhone } from "@/lib/validation";
+import ArchiveRestoreConfirm from "./ArchiveRestoreConfirm";
+import { apiPrecheckBulkImportLeads, type BulkImportPrecheckResult } from "@/lib/apiClient";
 
 const BASE_LEAD_SOURCES = ["Meta Ads", "Google Ads", "Referral Code", "Offline Event", "Direct Walkin"];
 const CUSTOM_LEAD_SOURCES_KEY = "taskezy_custom_lead_sources";
+
+// exceljs is a ~260KB dependency, dynamically imported so it's only fetched
+// when an admin/manager actually opens this modal's bulk tab — same
+// reasoning as Data Calling's own UploadLeadsModal.tsx, which this mirrors
+// (deliberately NOT shared code: that modal's batch concept is a free-text
+// "sub-source" with no Lead Source/Property, this one's is the opposite —
+// see leads.service.ts's bulkImportLeads for how the two stay distinct on
+// the backend too).
+async function loadExcelJS() {
+  const mod = await import("exceljs");
+  return mod.default;
+}
+
+const BULK_TEMPLATE_HEADERS = ["Name", "Phone", "Email"];
+
+async function downloadBulkLeadsTemplate() {
+  const ExcelJS = await loadExcelJS();
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet("Leads");
+  sheet.columns = [
+    { header: BULK_TEMPLATE_HEADERS[0], key: "name", width: 28 },
+    { header: BULK_TEMPLATE_HEADERS[1], key: "phone", width: 20 },
+    { header: BULK_TEMPLATE_HEADERS[2], key: "email", width: 28 }
+  ];
+  sheet.addRow({ name: "Ravi Kumar", phone: "9876543210", email: "ravi@example.com" });
+  sheet.getRow(1).font = { bold: true };
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "taskezy_bulk_leads_template.xlsx";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+interface BulkParsedLeadRow {
+  name: string;
+  phone: string;
+  email: string;
+}
+
+/** Column position matches the downloaded template (Name, Phone, Email) by
+ * default, but the header row is checked for matching words first so a
+ * re-ordered sheet still parses correctly. */
+async function parseBulkLeadsFile(file: File): Promise<BulkParsedLeadRow[]> {
+  const ExcelJS = await loadExcelJS();
+  const workbook = new ExcelJS.Workbook();
+  const buffer = await file.arrayBuffer();
+  await workbook.xlsx.load(buffer);
+  const sheet = workbook.worksheets[0];
+  if (!sheet) return [];
+
+  let nameCol = 1;
+  let phoneCol = 2;
+  let emailCol = 3;
+  const headerRow = sheet.getRow(1);
+  headerRow.eachCell((cell, colNumber) => {
+    const header = String(cell.value ?? "").trim().toLowerCase();
+    if (header.includes("name")) nameCol = colNumber;
+    if (header.includes("mobile") || header.includes("phone")) phoneCol = colNumber;
+    if (header.includes("email")) emailCol = colNumber;
+  });
+
+  const rows: BulkParsedLeadRow[] = [];
+  sheet.eachRow((row, rowNumber) => {
+    if (rowNumber === 1) return; // header
+    const name = String(row.getCell(nameCol).value ?? "").trim();
+    const phone = String(row.getCell(phoneCol).value ?? "").trim();
+    const email = String(row.getCell(emailCol).value ?? "").trim();
+    if (name || phone) rows.push({ name, phone, email });
+  });
+  return rows;
+}
+
+export interface BulkLeadUploadSubmitInput {
+  assignmentMode: "PROPERTY" | "AGENT";
+  propertyId: string;
+  agentIds?: string[];
+  source: string;
+  leads: BulkParsedLeadRow[];
+  // One batch-level choice from the archive-match precheck below — true
+  // re-attaches a matched row's old notes/call history onto the new lead.
+  restoreArchivedMatches?: boolean;
+}
+
+export interface BulkLeadUploadSubmitResult {
+  created: number;
+  duplicates: number;
+  skipped: { row: number; reason: string }[];
+  restored: number;
+}
 
 interface AddLeadModalProps {
   isOpen: boolean;
@@ -22,13 +119,20 @@ interface AddLeadModalProps {
     property: string;
     note: string;
   }) => void;
-  onSubmitBulk: (data: {
-    assignmentMode: "project" | "agent";
-    target: string;
-    fileName: string;
-  }) => void;
+  onSubmitBulk: (input: BulkLeadUploadSubmitInput) => Promise<BulkLeadUploadSubmitResult>;
   agentsList: string[];
   propertiesList: string[];
+  // Id-ful rosters for the bulk tab specifically — the real bulk-import
+  // endpoint needs agent/property UUIDs, unlike the manual tab above which
+  // has always operated on plain names (see addLead in AppContext.tsx).
+  bulkAgentsList: { id: string; name: string }[];
+  bulkPropertiesList: { id: string; name: string }[];
+  // Admins always have it; a Manager needs the Access Control toggle
+  // (Settings > Manage Users, Super Admin only) — the server enforces this
+  // independently (leads.service.ts's assertBulkImportAllowed), this just
+  // hides the tab so a blocked manager doesn't fill out a form that can
+  // only end in a 403.
+  canUseBulkTab: boolean;
 }
 
 export default function AddLeadModal({
@@ -37,7 +141,10 @@ export default function AddLeadModal({
   onSubmitManual,
   onSubmitBulk,
   agentsList,
-  propertiesList
+  propertiesList,
+  bulkAgentsList,
+  bulkPropertiesList,
+  canUseBulkTab
 }: AddLeadModalProps) {
   const { toast } = useDialog();
   const [activeTab, setActiveTab] = useState<"manual" | "bulk">("manual");
@@ -60,11 +167,37 @@ export default function AddLeadModal({
 
   // Tab 2 Bulk Form State
   const [bulkMode, setBulkMode] = useState<"project" | "agent">("project");
-  const [bulkTarget, setBulkTarget] = useState(propertiesList[0] || agentsList[0] || "");
+  // In "project" mode this id is both the round-robin target AND the
+  // batch's Property; in "agent" mode it's the batch's Property alone
+  // (bulkAgentId below is the actual assignment target), so there's no
+  // redundant second property picker in either mode.
+  const [bulkPropertyId, setBulkPropertyId] = useState(bulkPropertiesList[0]?.id || "");
+  const [bulkAgentId, setBulkAgentId] = useState(bulkAgentsList[0]?.id || "");
+  const [bulkSource, setBulkSource] = useState("Meta Ads");
   const [dragOver, setDragOver] = useState(false);
-  const [uploadedFile, setUploadedFile] = useState<string | null>(null);
+  const [bulkFile, setBulkFile] = useState<File | null>(null);
+  const [bulkSubmitting, setBulkSubmitting] = useState(false);
+  const [bulkErrorMsg, setBulkErrorMsg] = useState<string | null>(null);
+  const [bulkResult, setBulkResult] = useState<BulkLeadUploadSubmitResult | null>(null);
+  // Set only when the precheck finds rows matching a previously-deleted
+  // lead — holds the already-parsed rows so the chosen restore/skip button
+  // doesn't need to re-read the file.
+  const [bulkArchiveCheck, setBulkArchiveCheck] = useState<BulkImportPrecheckResult | null>(null);
+  const [bulkParsedLeads, setBulkParsedLeads] = useState<BulkParsedLeadRow[] | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Reset the bulk tab's transient state on close, so reopening never shows
+  // a stale "import successful" screen or a leftover file from last time.
+  useEffect(() => {
+    if (isOpen) return;
+    setBulkFile(null);
+    setBulkSubmitting(false);
+    setBulkErrorMsg(null);
+    setBulkResult(null);
+    setBulkArchiveCheck(null);
+    setBulkParsedLeads(null);
+  }, [isOpen]);
 
   // Lock background scroll while the modal is open — without this the page
   // behind stayed scrollable, which combined with the modal's own overflow
@@ -143,15 +276,80 @@ export default function AddLeadModal({
     setNote("");
   };
 
-  const handleBulkSubmit = (e: React.FormEvent) => {
+  const handleBulkSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!uploadedFile) {
-      toast("Please upload a lead spreadsheet file first.", "warning");
+    setBulkErrorMsg(null);
+    if (!bulkFile) {
+      setBulkErrorMsg("Please upload a lead spreadsheet file first.");
       return;
     }
-    onSubmitBulk({ assignmentMode: bulkMode, target: bulkTarget, fileName: uploadedFile });
-    // Reset bulk form fields
-    setUploadedFile(null);
+    if (!bulkSource.trim()) {
+      setBulkErrorMsg("Please select a lead source for this batch.");
+      return;
+    }
+    if (!bulkPropertyId) {
+      setBulkErrorMsg("Please select a property for this batch.");
+      return;
+    }
+    if (bulkMode === "agent" && !bulkAgentId) {
+      setBulkErrorMsg("Please select an agent to assign these leads to.");
+      return;
+    }
+
+    setBulkSubmitting(true);
+    try {
+      const leads = await parseBulkLeadsFile(bulkFile);
+      if (leads.length === 0) {
+        setBulkErrorMsg("No rows found in that file. Make sure it follows the downloaded template (Name, Phone, Email).");
+        setBulkSubmitting(false);
+        return;
+      }
+      // Ask once, batch-level, if any row matches a previously-deleted
+      // lead — only when it actually finds one; a normal upload with no
+      // archived matches goes straight to the real import below.
+      const precheck = await apiPrecheckBulkImportLeads(leads);
+      if (precheck.archivedMatchCount > 0) {
+        setBulkParsedLeads(leads);
+        setBulkArchiveCheck(precheck);
+        setBulkSubmitting(false);
+        return;
+      }
+      const result = await onSubmitBulk({
+        assignmentMode: bulkMode === "project" ? "PROPERTY" : "AGENT",
+        propertyId: bulkPropertyId,
+        agentIds: bulkMode === "agent" ? [bulkAgentId] : undefined,
+        source: bulkSource.trim(),
+        leads,
+        restoreArchivedMatches: false
+      });
+      setBulkResult(result);
+    } catch (err) {
+      setBulkErrorMsg(err instanceof Error ? err.message : "Could not read that file — make sure it's a valid .xlsx/.xls spreadsheet.");
+    } finally {
+      setBulkSubmitting(false);
+    }
+  };
+
+  const handleBulkArchiveChoice = async (restoreArchivedMatches: boolean) => {
+    if (!bulkParsedLeads) return;
+    setBulkSubmitting(true);
+    setBulkErrorMsg(null);
+    try {
+      const result = await onSubmitBulk({
+        assignmentMode: bulkMode === "project" ? "PROPERTY" : "AGENT",
+        propertyId: bulkPropertyId,
+        agentIds: bulkMode === "agent" ? [bulkAgentId] : undefined,
+        source: bulkSource.trim(),
+        leads: bulkParsedLeads,
+        restoreArchivedMatches
+      });
+      setBulkResult(result);
+      setBulkArchiveCheck(null);
+    } catch (err) {
+      setBulkErrorMsg(err instanceof Error ? err.message : "Could not complete the import — please try again.");
+    } finally {
+      setBulkSubmitting(false);
+    }
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -167,18 +365,14 @@ export default function AddLeadModal({
     e.preventDefault();
     setDragOver(false);
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      setUploadedFile(e.dataTransfer.files[0].name);
+      setBulkFile(e.dataTransfer.files[0]);
     }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      setUploadedFile(e.target.files[0].name);
+      setBulkFile(e.target.files[0]);
     }
-  };
-
-  const triggerDownloadTemplate = () => {
-    toast("Downloading Excel spreadsheet template sheet: taskezy_bulk_leads_v2.xlsx...", "info");
   };
 
   // Rendered via a portal straight into <body>: this component's caller
@@ -226,14 +420,16 @@ export default function AddLeadModal({
             >
               Manual Single Entry
             </button>
-            <button
-              onClick={() => setActiveTab("bulk")}
-              className={`flex-1 py-3 text-center border-b-2 transition-all ${
-                activeTab === "bulk" ? "border-[#0B1E6E] text-[#0B1E6E] font-black" : "border-transparent hover:bg-slate-50/50"
-              }`}
-            >
-              Bulk Spreadsheet Upload
-            </button>
+            {canUseBulkTab && (
+              <button
+                onClick={() => setActiveTab("bulk")}
+                className={`flex-1 py-3 text-center border-b-2 transition-all ${
+                  activeTab === "bulk" ? "border-[#0B1E6E] text-[#0B1E6E] font-black" : "border-transparent hover:bg-slate-50/50"
+                }`}
+              >
+                Bulk Spreadsheet Upload
+              </button>
+            )}
           </div>
 
           {activeTab === "manual" ? (
@@ -388,10 +584,88 @@ export default function AddLeadModal({
                 </button>
               </div>
             </form>
+          ) : bulkResult ? (
+            /* BULK UPLOAD RESULT */
+            <div className="flex-1 min-h-0 flex flex-col">
+              <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                <div className="flex items-center gap-3">
+                  <CheckCircle2 className="h-8 w-8 text-emerald-500 shrink-0" />
+                  <div>
+                    <p className="text-sm font-extrabold text-slate-900">{bulkResult.created} lead{bulkResult.created === 1 ? "" : "s"} imported</p>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      {bulkResult.duplicates > 0 && `${bulkResult.duplicates} duplicate phone number${bulkResult.duplicates === 1 ? "" : "s"} skipped. `}
+                      {bulkResult.restored > 0 && `${bulkResult.restored} restored from previously-deleted leads. `}
+                      {bulkResult.skipped.length > 0 && `${bulkResult.skipped.length} row${bulkResult.skipped.length === 1 ? "" : "s"} skipped — see below.`}
+                      {bulkResult.duplicates === 0 && bulkResult.restored === 0 && bulkResult.skipped.length === 0 && "Every row imported cleanly."}
+                    </p>
+                  </div>
+                </div>
+                {bulkResult.skipped.length > 0 && (
+                  <div className="border border-amber-200 bg-amber-50/60 rounded-xl max-h-40 overflow-y-auto">
+                    {bulkResult.skipped.map((s, i) => (
+                      <div key={i} className="flex items-start gap-2 px-3.5 py-2 text-xs text-amber-800 border-b border-amber-100 last:border-b-0">
+                        <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                        <span><span className="font-bold">Row {s.row}:</span> {s.reason}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="shrink-0 flex gap-3 px-6 py-4 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="flex-1 sm:flex-none sm:ml-auto bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold px-5 py-2 rounded-xl text-sm transition-all shadow-md shadow-[#0B1E6E]/10"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          ) : bulkArchiveCheck ? (
+            <div className="flex-1 min-h-0 flex flex-col">
+              <ArchiveRestoreConfirm
+                precheck={bulkArchiveCheck}
+                onRestore={() => handleBulkArchiveChoice(true)}
+                onSkip={() => handleBulkArchiveChoice(false)}
+                onBack={() => { setBulkArchiveCheck(null); setBulkErrorMsg(null); }}
+                submitting={bulkSubmitting}
+                error={bulkErrorMsg}
+              />
+            </div>
           ) : (
             /* BULK UPLOAD TAB */
             <form onSubmit={handleBulkSubmit} className="flex-1 min-h-0 flex flex-col">
               <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                {/* Lead Source + Property — batch-level fields, same
+                    concepts as the Manual tab's, required here so every
+                    bulk-imported lead carries real attribution instead of
+                    landing with none. */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="block text-[9px] font-bold text-slate-400 uppercase">Lead Source</label>
+                    <SearchableSelect
+                      value={bulkSource}
+                      onChange={setBulkSource}
+                      options={sourceOptions}
+                      renderLabel={(l) => <PlatformLabel text={l} className="truncate" />}
+                      placeholder="Select source"
+                      searchPlaceholder="Search sources..."
+                    />
+                  </div>
+                  {bulkMode === "agent" && (
+                    <div className="space-y-1">
+                      <label className="block text-[9px] font-bold text-slate-400 uppercase">Property</label>
+                      <SearchableSelect
+                        value={bulkPropertyId}
+                        onChange={setBulkPropertyId}
+                        options={bulkPropertiesList.map(p => ({ value: p.id, label: p.name }))}
+                        placeholder="Select property"
+                        searchPlaceholder="Search properties..."
+                      />
+                    </div>
+                  )}
+                </div>
+
                 {/* Assignment Logic Toggle UI */}
                 <div className="space-y-2 p-4 bg-slate-50 border border-slate-200/80 rounded-2xl">
                   <label className="block text-[9px] font-extrabold text-slate-450 uppercase tracking-wider">Assignment Router Logic</label>
@@ -400,7 +674,7 @@ export default function AddLeadModal({
                       type="button"
                       onClick={() => {
                         setBulkMode("project");
-                        setBulkTarget(propertiesList[0] || "");
+                        setBulkPropertyId(bulkPropertiesList[0]?.id || "");
                       }}
                       className={`py-2 text-[10px] font-extrabold border rounded-xl transition-all ${
                         bulkMode === "project"
@@ -414,7 +688,7 @@ export default function AddLeadModal({
                       type="button"
                       onClick={() => {
                         setBulkMode("agent");
-                        setBulkTarget(agentsList[0] || "");
+                        setBulkAgentId(bulkAgentsList[0]?.id || "");
                       }}
                       className={`py-2 text-[10px] font-extrabold border rounded-xl transition-all ${
                         bulkMode === "agent"
@@ -430,20 +704,26 @@ export default function AddLeadModal({
                     <label className="block text-[8px] font-bold text-slate-400 uppercase">
                       {bulkMode === "project" ? "Target Property Project" : "Target Sales Rep"}
                     </label>
-                    <SearchableSelect
-                      value={bulkTarget}
-                      onChange={setBulkTarget}
-                      options={
-                        bulkMode === "project"
-                          ? propertiesList.map(p => ({ value: p, label: `${p} Project Team` }))
-                          : agentsList.map(a => ({ value: a, label: `${a} (Dedicated Agent)` }))
-                      }
-                      placeholder={bulkMode === "project" ? "Select property" : "Select agent"}
-                      searchPlaceholder={bulkMode === "project" ? "Search properties..." : "Search agents..."}
-                    />
+                    {bulkMode === "project" ? (
+                      <SearchableSelect
+                        value={bulkPropertyId}
+                        onChange={setBulkPropertyId}
+                        options={bulkPropertiesList.map(p => ({ value: p.id, label: `${p.name} Project Team` }))}
+                        placeholder="Select property"
+                        searchPlaceholder="Search properties..."
+                      />
+                    ) : (
+                      <SearchableSelect
+                        value={bulkAgentId}
+                        onChange={setBulkAgentId}
+                        options={bulkAgentsList.map(a => ({ value: a.id, label: `${a.name} (Dedicated Agent)` }))}
+                        placeholder="Select agent"
+                        searchPlaceholder="Search agents..."
+                      />
+                    )}
                     <p className="text-[8px] text-slate-400 italic font-medium leading-relaxed mt-1">
                       {bulkMode === "project"
-                        ? "Round-robin distribution distributes imported leads evenly across active agents assigned to this property."
+                        ? "Round-robin distribution distributes imported leads evenly across active agents assigned to this property. This is also the batch's Property."
                         : "All imported leads in the spreadsheet will be assigned strictly to the selected agent."}
                     </p>
                   </div>
@@ -458,7 +738,7 @@ export default function AddLeadModal({
                   className={`border-2 border-dashed rounded-2xl p-6 text-center transition-all cursor-pointer flex flex-col items-center justify-center space-y-2 ${
                     dragOver
                       ? "border-[#0B1E6E] bg-[#0B1E6E]/5"
-                      : uploadedFile
+                      : bulkFile
                         ? "border-emerald-500 bg-emerald-50/25"
                         : "border-slate-300 hover:border-slate-400 bg-white"
                   }`}
@@ -467,17 +747,17 @@ export default function AddLeadModal({
                     type="file"
                     ref={fileInputRef}
                     onChange={handleFileChange}
-                    accept=".csv,.xlsx,.xls"
+                    accept=".xlsx,.xls"
                     className="hidden"
                   />
-                  {uploadedFile ? (
+                  {bulkFile ? (
                     <>
                       <div className="h-10 w-10 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600">
-                        <FileSpreadsheet className="h-5 w-5 animate-pulse" />
+                        <FileSpreadsheet className="h-5 w-5" />
                       </div>
                       <div>
                         <p className="text-xs font-bold text-slate-805">File Loaded Successfully</p>
-                        <p className="text-[9px] font-mono text-emerald-600 font-bold mt-0.5">{uploadedFile}</p>
+                        <p className="text-[9px] font-mono text-emerald-600 font-bold mt-0.5">{bulkFile.name}</p>
                       </div>
                     </>
                   ) : (
@@ -486,12 +766,14 @@ export default function AddLeadModal({
                         <Upload className="h-5 w-5" />
                       </div>
                       <div>
-                        <p className="text-xs font-bold text-slate-700">Drag &amp; drop Excel/CSV sheet here</p>
-                        <p className="text-[9px] text-slate-400 font-semibold mt-0.5">or click to browse local files (max 10MB)</p>
+                        <p className="text-xs font-bold text-slate-700">Drag &amp; drop an Excel sheet here</p>
+                        <p className="text-[9px] text-slate-400 font-semibold mt-0.5">or click to browse local files (.xlsx/.xls)</p>
                       </div>
                     </>
                   )}
                 </div>
+
+                {bulkErrorMsg && <p className="text-[11px] text-red-600 font-semibold">{bulkErrorMsg}</p>}
 
                 {/* Template Download & Instructions */}
                 <div className="flex flex-wrap justify-between items-center gap-2 text-xs py-2 bg-slate-50 border border-slate-200 rounded-xl px-4">
@@ -501,7 +783,7 @@ export default function AddLeadModal({
                   </div>
                   <button
                     type="button"
-                    onClick={triggerDownloadTemplate}
+                    onClick={() => { downloadBulkLeadsTemplate().catch(() => setBulkErrorMsg("Could not generate the template file — please try again.")); }}
                     className="inline-flex items-center gap-1 text-[9px] font-extrabold text-[#0B1E6E] hover:underline shrink-0"
                   >
                     <Download className="h-3 w-3" />
@@ -531,9 +813,10 @@ export default function AddLeadModal({
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 sm:flex-none sm:ml-auto bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold px-5 py-2 rounded-xl text-sm transition-all shadow-md shadow-[#0B1E6E]/10"
+                  disabled={bulkSubmitting}
+                  className="flex-1 sm:flex-none sm:ml-auto bg-[#0B1E6E] hover:bg-[#081650] disabled:opacity-60 text-white font-bold px-5 py-2 rounded-xl text-sm transition-all shadow-md shadow-[#0B1E6E]/10"
                 >
-                  Import Leads Database
+                  {bulkSubmitting ? "Importing…" : "Import Leads Database"}
                 </button>
               </div>
             </form>

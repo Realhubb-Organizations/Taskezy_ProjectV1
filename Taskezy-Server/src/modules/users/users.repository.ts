@@ -12,6 +12,8 @@ export interface UserDirectoryRow {
   designation: string | null;
   manager_id: string | null;
   manager_name: string | null;
+  /** Access Control toggle — only populated by findManyUsers (Manage Users' own query); undefined elsewhere. */
+  can_bulk_upload_crm_leads?: boolean;
 }
 
 // Read-only directory (no password_hash) — used by other modules to resolve
@@ -34,16 +36,22 @@ export interface UserListFilter {
   search?: string;
   /** CRM Manage Users stat cards: admins, sales managers, or sales agents. */
   group?: "crm" | "admin" | "sales-managers" | "sales-agents";
+  /** Defaults to "ACTIVE" when omitted — see findManyUsers. */
+  status?: "ACTIVE" | "INACTIVE";
 }
 
 // Paginated counterpart to findAllActive() for the admin Settings "Manage
-// Users" table specifically — same ACTIVE-only scope and column set/order so
-// a page of this looks identical to a slice of the old full array, just
-// fetched one page at a time instead of loading every user to slice
-// client-side.
-export async function findManyActive(filter: UserListFilter): Promise<{ rows: UserDirectoryRow[]; totalCount: number }> {
-  const conditions: string[] = [`u.status = 'ACTIVE'`];
-  const params: unknown[] = [];
+// Users" table specifically — same column set/order so a page of this looks
+// identical to a slice of the old full array, just fetched one page at a
+// time instead of loading every user to slice client-side. Unlike
+// findAllActive(), status is a real filter here (not hardcoded to ACTIVE) —
+// a deactivated user used to simply vanish from this list with no way to
+// find them again; defaults to ACTIVE so every existing caller (just the
+// one route below) keeps today's behavior unless it explicitly asks for
+// INACTIVE.
+export async function findManyUsers(filter: UserListFilter): Promise<{ rows: UserDirectoryRow[]; totalCount: number }> {
+  const params: unknown[] = [filter.status ?? "ACTIVE"];
+  const conditions: string[] = [`u.status = $1`];
 
   if (filter.group === "crm") {
     conditions.push(`(u.role = 'ADMIN' OR (u.department = 'SALES' AND u.role <> 'FINANCE'))`);
@@ -69,7 +77,8 @@ export async function findManyActive(filter: UserListFilter): Promise<{ rows: Us
   const dataParams = [...params, filter.pageSize, offset];
   const { rows } = await query<UserDirectoryRow>(
     `SELECT u.id, u.first_name, u.last_name, u.email, u.role, u.department, u.role_type, u.designation,
-            u.manager_id, m.first_name || COALESCE(' ' || m.last_name, '') AS manager_name
+            u.manager_id, m.first_name || COALESCE(' ' || m.last_name, '') AS manager_name,
+            u.can_bulk_upload_crm_leads
      FROM users u
      LEFT JOIN users m ON m.id = u.manager_id
      ${whereClause}
@@ -90,7 +99,7 @@ export interface FullUserRow extends UserDirectoryRow {
 const FULL_SELECT = `
   SELECT u.id, u.first_name, u.last_name, u.email, u.phone_number, u.role, u.department, u.role_type,
          u.employment_type, u.designation, u.status, u.created_at, u.manager_id,
-         m.first_name || COALESCE(' ' || m.last_name, '') AS manager_name
+         m.first_name || COALESCE(' ' || m.last_name, '') AS manager_name, u.can_bulk_upload_crm_leads
   FROM users u
   LEFT JOIN users m ON m.id = u.manager_id
 `;
@@ -113,6 +122,15 @@ export async function isActiveManager(id: string): Promise<boolean> {
     [id]
   );
   return rows.length > 0;
+}
+
+/** Access Control toggle (Settings > Manage Users, Super Admin only) — whether this manager may use the main CRM Leads page's bulk upload. See leads.service.ts's assertBulkImportAllowed. */
+export async function isBulkUploadCrmLeadsEnabled(id: string): Promise<boolean> {
+  const { rows } = await query<{ can_bulk_upload_crm_leads: boolean }>(
+    `SELECT can_bulk_upload_crm_leads FROM users WHERE id = $1`,
+    [id]
+  );
+  return rows[0]?.can_bulk_upload_crm_leads ?? false;
 }
 
 /** Every active admin — the follow-up SLA scheduler escalates a missed reminder to all of them. */
@@ -185,6 +203,7 @@ export interface EditUserInput {
   department?: string;
   status?: string;
   managerId?: string | null;
+  canBulkUploadCrmLeads?: boolean;
 }
 
 export async function update(id: string, input: EditUserInput): Promise<void> {
@@ -192,7 +211,8 @@ export async function update(id: string, input: EditUserInput): Promise<void> {
   const params: unknown[] = [];
   const columnMap: Record<string, string> = {
     firstName: "first_name", lastName: "last_name", email: "email", designation: "designation",
-    roleType: "role_type", department: "department", status: "status", managerId: "manager_id"
+    roleType: "role_type", department: "department", status: "status", managerId: "manager_id",
+    canBulkUploadCrmLeads: "can_bulk_upload_crm_leads"
   };
 
   for (const [field, value] of Object.entries(input)) {

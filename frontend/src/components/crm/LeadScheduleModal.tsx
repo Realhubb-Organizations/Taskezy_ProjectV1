@@ -14,10 +14,13 @@ interface LeadScheduleModalProps {
   onConfirm: (input: { date: string; time: string; note: string }) => void;
 }
 
-// Blocking popup for the 4 SCHEDULER_REQUIRED_STATUSES (RNR/Call Back/
-// Followup/Site Visit Scheduled) — the status change doesn't commit until
-// this is submitted. Only ever rendered for those 4 statuses, so date/time
-// are always required here (no per-status optional branch needed).
+// Blocking popup for every SCHEDULER_REQUIRED_STATUSES status (RNR/Call
+// Back/Followup/EOI/Site Visit Scheduled) — the status change doesn't
+// commit until this is submitted, and date+time are mandatory. Also shown
+// (same popup, same useful prompt) for SCHEDULER_OPTIONAL_STATUSES
+// (Low Budget/Other requirement) — there date+time can be left blank;
+// Save & Continue still changes the status either way, just skips
+// creating a reminder if nothing was filled in.
 export default function LeadScheduleModal({ pending, submitting, error, onCancel, onConfirm }: LeadScheduleModalProps) {
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
@@ -26,8 +29,14 @@ export default function LeadScheduleModal({ pending, submitting, error, onCancel
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!date || !time) {
+    if (pending.required && (!date || !time)) {
       setLocalError("Please select both date and time.");
+      return;
+    }
+    // Optional: either both or neither — picking just one is almost
+    // certainly a mistake (a date with no time, or vice versa).
+    if (!pending.required && (date || time) && !(date && time)) {
+      setLocalError("Please select both date and time, or leave both blank.");
       return;
     }
     setLocalError("");
@@ -62,12 +71,12 @@ export default function LeadScheduleModal({ pending, submitting, error, onCancel
         <form onSubmit={handleSubmit} className="space-y-3">
           <div className="grid grid-cols-2 gap-2">
             <div className="space-y-1">
-              <label className="block text-[10px] font-bold text-slate-500 uppercase">Date</label>
+              <label className="block text-[10px] font-bold text-slate-500 uppercase">Date{pending.required ? "" : " (optional)"}</label>
               <DatePicker value={date} onChange={setDate} className={inputClass} />
             </div>
             <div className="space-y-1">
-              <label className="block text-[10px] font-bold text-slate-500 uppercase">Time</label>
-              <input type="time" required value={time} onChange={(e) => setTime(e.target.value)} className={inputClass} />
+              <label className="block text-[10px] font-bold text-slate-500 uppercase">Time{pending.required ? "" : " (optional)"}</label>
+              <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className={inputClass} />
             </div>
           </div>
           <div className="space-y-1">

@@ -4,7 +4,7 @@ import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { useApp, Lead, mapApiLeadToFrontendLead } from "@/context/AppContext";
 import { useDialog } from "@/components/ui/DialogProvider";
-import AddLeadModal from "@/components/crm/AddLeadModal";
+import AddLeadModal, { type BulkLeadUploadSubmitInput, type BulkLeadUploadSubmitResult } from "@/components/crm/AddLeadModal";
 import LeadDrillDownPanel, { LeadQuickViewDrawer, useLeadStatusChange } from "@/components/crm/LeadDrillDownPanel";
 import LeadScheduleModal from "@/components/crm/LeadScheduleModal";
 import { useLeadStatusScheduler } from "@/lib/leadScheduler";
@@ -26,7 +26,7 @@ import { DateRangeValue, toIsoDate } from "@/components/ui/DateRangePicker";
 // this rendered, even for users who weren't in CRM at all) into its own
 // real path, alongside /hrms/dashboard and /finance/dashboard.
 export default function CrmDashboardPage() {
-  const { leads, properties, users, currentUser, addLead, pendingTasks, isDataLoading } = useApp();
+  const { leads, properties, users, currentUser, addLead, pendingTasks, isDataLoading, bulkImportLeads } = useApp();
   const { toast } = useDialog();
 
   // Opens on All Time (every role) so the cards' Total/New Leads match the
@@ -224,15 +224,17 @@ export default function CrmDashboardPage() {
     }
   };
 
-  // AddLeadModal's bulk tab doesn't actually read/parse the uploaded file
-  // (see its handleDrop/handleFileChange — only the filename is captured)
-  // or call any import endpoint. This used to show "Bulk import started..."
-  // as if it had — a fake success with nothing actually created. Matches
-  // LeadDashboard.tsx's handleAddBulkLeads, which already made this exact
-  // call honestly instead of claiming success.
-  const handleUploadBulkLeads = () => {
-    toast("Bulk import isn't wired up to a real backend yet — please use Manual Ingestion Entry for now.", "info");
-    setIsUploadOpen(false);
+  // Real bulk-import now — see LeadDashboard.tsx's handleAddBulkLeads for
+  // the full reasoning (same handler, same modal). The modal shows its own
+  // result screen, so this just forwards the call.
+  const handleUploadBulkLeads = async (input: BulkLeadUploadSubmitInput): Promise<BulkLeadUploadSubmitResult> => {
+    return bulkImportLeads({
+      source: input.source,
+      assignmentMode: input.assignmentMode,
+      propertyId: input.propertyId,
+      agentIds: input.agentIds,
+      leads: input.leads
+    });
   };
 
   return (
@@ -359,6 +361,9 @@ export default function CrmDashboardPage() {
         onSubmitBulk={handleUploadBulkLeads}
         agentsList={uploadAssignableUsers(users, currentUser).map(u => u.name)}
         propertiesList={propertiesList}
+        bulkAgentsList={uploadAssignableUsers(users, currentUser).map(u => ({ id: u.id, name: u.name }))}
+        bulkPropertiesList={properties.map(p => ({ id: p.id, name: p.name }))}
+        canUseBulkTab={currentUser?.role === "ADMIN" || !!currentUser?.canBulkUploadCrmLeads}
       />
 
       {/* Lead quick-view for the sales Pending Tasks table above (the

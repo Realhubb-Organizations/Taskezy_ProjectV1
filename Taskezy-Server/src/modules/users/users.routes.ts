@@ -18,6 +18,11 @@ export const usersRouter = Router();
 
 usersRouter.use(requireAuth);
 
+// The one informal "Super Admin" account (no distinct role in the schema —
+// every other admin is a plain ADMIN) — only this account may delete
+// another admin, per explicit product decision.
+const SUPER_ADMIN_EMAIL = "admin@realhubb.in";
+
 // Same three-way split as leads.service.ts's scopeForCaller — duplicated
 // rather than imported (see call-log's, followups', invoices', attendance's
 // and properties' own copies of this same pattern for precedent), but this
@@ -64,7 +69,9 @@ usersRouter.get(
   "/",
   validate({ query: listUsersQuerySchema }),
   asyncHandler(async (req, res) => {
-    const { page, pageSize, search, group } = req.query as unknown as { page?: number; pageSize?: number; search?: string; group?: repo.UserListFilter["group"] };
+    const { page, pageSize, search, group, status } = req.query as unknown as {
+      page?: number; pageSize?: number; search?: string; group?: repo.UserListFilter["group"]; status?: repo.UserListFilter["status"];
+    };
 
     // Bare `GET /users` (no page/pageSize) stays the original full-directory
     // fetch — every dropdown/name-resolution consumer across the app
@@ -90,7 +97,7 @@ usersRouter.get(
 
     const effectivePage = page ?? 1;
     const effectivePageSize = pageSize ?? 20;
-    const { rows, totalCount } = await repo.findManyActive({ page: effectivePage, pageSize: effectivePageSize, search, group });
+    const { rows, totalCount } = await repo.findManyUsers({ page: effectivePage, pageSize: effectivePageSize, search, group, status });
     sendPaginated(res, rows, {
       page: effectivePage,
       pageSize: effectivePageSize,
@@ -132,6 +139,15 @@ usersRouter.patch(
   asyncHandler(async (req, res) => {
     const existing = await repo.findById(req.params.id);
     if (!existing) throw ApiError.notFound("User not found");
+
+    // Access Control toggle is Super-Admin-only — every other admin can
+    // still edit everything else about a user, just not this one field.
+    if (req.body.canBulkUploadCrmLeads !== undefined) {
+      const caller = await repo.findById(req.user!.sub);
+      if (caller?.email !== SUPER_ADMIN_EMAIL) {
+        throw ApiError.forbidden("Only the Super Admin can change bulk-upload access control.");
+      }
+    }
 
     // Don't allow demoting/deactivating the last active admin — would lock
     // the tenant out of its own admin console with no way back in.
@@ -229,6 +245,10 @@ usersRouter.delete(
       throw ApiError.badRequest("You cannot delete your own account.");
     }
     if (existing.role === "ADMIN") {
+      const caller = await repo.findById(req.user!.sub);
+      if (caller?.email !== SUPER_ADMIN_EMAIL) {
+        throw ApiError.forbidden("Only the Super Admin can delete another admin account.");
+      }
       const remainingAdmins = await repo.countAdmins(existing.id);
       if (remainingAdmins === 0) {
         throw ApiError.badRequest("Cannot delete the last active administrator account.");

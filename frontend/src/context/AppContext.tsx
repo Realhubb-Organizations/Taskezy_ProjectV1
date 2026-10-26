@@ -174,6 +174,10 @@ export interface User {
   password_hash?: string;
   created_at?: string;
   updated_at?: string;
+  // Access Control toggle (Settings > Manage Users, Super Admin only) —
+  // whether this manager may use the main CRM Leads page's bulk upload,
+  // on top of their always-on Data Calling access.
+  canBulkUploadCrmLeads?: boolean;
 }
 
 // The 14-value Lead Status list (main Leads page only) — replaced the old
@@ -794,7 +798,8 @@ export function mapApiUserDirectoryEntryToFrontendUser(row: ApiUserDirectoryEntr
     department: (row.department as User["department"]) || undefined,
     managerId: row.manager_id || undefined,
     managerName: row.manager_name || undefined,
-    status: "ACTIVE"
+    status: "ACTIVE",
+    canBulkUploadCrmLeads: row.can_bulk_upload_crm_leads ?? false
   };
 }
 

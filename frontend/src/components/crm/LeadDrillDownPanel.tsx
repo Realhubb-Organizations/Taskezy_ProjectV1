@@ -7,7 +7,7 @@ import { useApp, Lead, LeadStatus, FollowupCall, mapApiFollowupToFrontend } from
 import { apiListFollowupsPage, apiGetDistinctCampaigns, LeadListFilters } from "@/lib/apiClient";
 import { useServerLeadList } from "@/lib/useServerLeadList";
 import { useDialog } from "@/components/ui/DialogProvider";
-import { deriveActivityTimeline, PICKABLE_STATUS_OPTIONS, statusBadgeClasses, frontendStatusToDbCode, withDeadLeadGate } from "@/lib/leadStatusMapping";
+import { deriveActivityTimeline, PICKABLE_STATUS_OPTIONS, statusBadgeClasses, frontendStatusToDbCode, withDeadLeadGate, nextStatusOptions } from "@/lib/leadStatusMapping";
 import { WhatsAppIcon, CallIcon } from "@/components/icons/ContactIcons";
 import { Phone, Mail, X, Copy, Check, User, Search, ArrowRight } from "lucide-react";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
@@ -447,7 +447,11 @@ export default function LeadDrillDownPanel({ title, baseFilters, onClose }: {
   ) : (
     <SearchableSelect
       variant="inline"
-      options={withDeadLeadGate(PICKABLE_STATUS_OPTIONS.includes(l.status) ? PICKABLE_STATUS_OPTIONS : [l.status, ...PICKABLE_STATUS_OPTIONS], l, activeRole === "ADMIN")}
+      // Only statuses the transition matrix allows from this lead's current
+      // one are offered — e.g. Site Visit Done only shows once the lead is
+      // on Site Visit Scheduled (or Different Location), not from every
+      // status. Same gate as LeadDashboard.tsx's inline status cell.
+      options={withDeadLeadGate([l.status, ...nextStatusOptions(l.status).map(c => c.status)], l, activeRole === "ADMIN")}
       value={l.status}
       onChange={(v) => statusScheduler.requestChange(l, v as LeadStatus)}
       searchPlaceholder="Search status..."

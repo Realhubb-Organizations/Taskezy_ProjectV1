@@ -474,16 +474,28 @@ export function apiCreateLead(input: CreateLeadApiInput): Promise<ApiLeadRow> {
 // evenly across every selected agent. See Taskezy-Server/leads.service.ts's
 // bulkImportLeads for the full assignment/fallback logic.
 export interface BulkImportLeadsApiInput {
-  subSource: string;
+  // Data Calling's free-text batch label — omit for the main CRM Leads
+  // page's own bulk upload, which has no equivalent concept.
+  subSource?: string;
+  // A real lead channel (e.g. "Meta Ads") — omitted defaults to "Bulk
+  // Upload" server-side, Data Calling's own behavior. Passing a real value
+  // here is what keeps these leads out of Data Calling and inside the
+  // normal CRM Leads pipeline (see leads.service.ts's bulkImportLeads).
+  source?: string;
+  // One batch-level choice from the precheck flow below — true re-attaches
+  // a matched row's archived notes/call history onto the newly created
+  // lead; omitted/false just creates it fresh.
+  restoreArchivedMatches?: boolean;
   assignmentMode: "PROPERTY" | "AGENT";
   propertyId?: string;
   agentIds?: string[];
-  leads: { name: string; phone: string }[];
+  leads: { name: string; phone: string; email?: string }[];
 }
 export interface BulkImportLeadsApiResult {
   created: number;
   duplicates: number;
   skipped: { row: number; reason: string }[];
+  restored: number;
 }
 // Queued server-side (Taskezy-Server/src/jobs/queue.ts's bulk-import-leads
 // worker) since a real upload can be 100k+ rows — this just hands the file
@@ -497,6 +509,20 @@ export interface JobStatus<T> {
 }
 export function apiGetBulkImportStatus(jobId: string): Promise<JobStatus<BulkImportLeadsApiResult>> {
   return request<JobStatus<BulkImportLeadsApiResult>>(`/api/v1/leads/bulk-import/${jobId}/status`);
+}
+
+export interface BulkImportPrecheckResult {
+  totalRows: number;
+  activeDuplicateCount: number;
+  archivedMatchCount: number;
+  archivedMatchesPreview: { name: string; phone: string; deletedAt: string; deletedByName: string }[];
+}
+// Run before the real import — tells the upload modal how many rows match
+// a previously-deleted lead, so it can ask once (not per-row) whether to
+// restore their archived history. Synchronous, not queued (a couple of
+// indexed reads, far lighter than the real import).
+export function apiPrecheckBulkImportLeads(leads: { name: string; phone: string }[]): Promise<BulkImportPrecheckResult> {
+  return request<BulkImportPrecheckResult>("/api/v1/leads/bulk-import/precheck", { method: "POST", body: JSON.stringify({ leads }) });
 }
 
 // Shared by every queued bulk lead action (import/delete/reassign — see
@@ -627,6 +653,8 @@ export interface ApiUserDirectoryEntry {
   designation: string | null;
   manager_id: string | null;
   manager_name: string | null;
+  /** Access Control toggle (Settings > Manage Users, Super Admin only) — whether this manager may use the main CRM Leads page's bulk upload. Only populated by apiListUsersPage. */
+  can_bulk_upload_crm_leads?: boolean;
 }
 
 export function apiListUsers(): Promise<ApiUserDirectoryEntry[]> {
@@ -642,6 +670,8 @@ export interface UserListFilters {
   search?: string;
   /** CRM Manage Users stat card filter. */
   group?: "crm" | "admin" | "sales-managers" | "sales-agents";
+  /** Defaults to ACTIVE server-side when omitted. */
+  status?: "ACTIVE" | "INACTIVE";
 }
 
 export interface UsersPageResult {
@@ -662,6 +692,7 @@ export async function apiListUsersPage(
   params.set("pageSize", String(pageSize));
   if (filters.search) params.set("search", filters.search);
   if (filters.group) params.set("group", filters.group);
+  if (filters.status) params.set("status", filters.status);
   const { data, meta } = await requestWithMeta<ApiUserDirectoryEntry>(`/api/v1/users?${params.toString()}`);
   return {
     rows: data,
@@ -706,6 +737,8 @@ export interface EditUserApiInput {
   department?: "SALES" | "TECH" | "MARKETING" | "FINANCE";
   status?: "ACTIVE" | "INACTIVE";
   managerId?: string | null;
+  // Super-Admin-only field — the server rejects it from any other admin.
+  canBulkUploadCrmLeads?: boolean;
 }
 
 export function apiEditUser(userId: string, input: EditUserApiInput): Promise<ApiFullUser> {

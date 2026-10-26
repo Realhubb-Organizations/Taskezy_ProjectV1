@@ -542,6 +542,7 @@ export async function create(input: CreateLeadInput): Promise<LeadListRow> {
 export interface BulkCreateLeadRow {
   name: string;
   phone: string;
+  email: string | null;
   assignedAgentId: string;
   /** Unlike create() (always 'NEW_LEAD'), bulk import's Property-wise mode can fall
    * back to 'UNASSIGNED' when the property has no assignable team, same
@@ -565,23 +566,93 @@ export interface BulkCreateLeadRow {
  */
 export async function createBulkLeadsChunk(
   rows: BulkCreateLeadRow[],
-  common: { source: string; subSource: string; propertyId: string | null; uploadedByUserId: string }
-): Promise<Set<string>> {
-  if (rows.length === 0) return new Set();
+  common: { source: string; subSource: string | null; propertyId: string | null; uploadedByUserId: string }
+): Promise<Map<string, string>> {
+  if (rows.length === 0) return new Map();
   const names = rows.map(r => r.name);
   const phones = rows.map(r => r.phone);
+  const emails = rows.map(r => r.email);
   const agentIds = rows.map(r => r.assignedAgentId);
   const statusCodes = rows.map(r => r.statusCode);
 
-  const { rows: inserted } = await pool.query<{ phone: string }>(
-    `INSERT INTO leads (name, phone, source, sub_source, property_id, assigned_agent_id, status_code, assigned_at, uploaded_by_user_id)
-     SELECT n, p, $1, $2, $3, a, s, now(), $8
-     FROM unnest($4::text[], $5::text[], $6::uuid[], $7::text[]) AS t(n, p, a, s)
+  const { rows: inserted } = await pool.query<{ id: string; phone: string }>(
+    `INSERT INTO leads (name, phone, email, source, sub_source, property_id, assigned_agent_id, status_code, assigned_at, uploaded_by_user_id)
+     SELECT n, p, e, $1, $2, $3, a, s, now(), $9
+     FROM unnest($4::text[], $5::text[], $6::text[], $7::uuid[], $8::text[]) AS t(n, p, e, a, s)
      ON CONFLICT (phone) DO NOTHING
-     RETURNING phone`,
-    [common.source, common.subSource, common.propertyId, names, phones, agentIds, statusCodes, common.uploadedByUserId]
+     RETURNING id, phone`,
+    [common.source, common.subSource, common.propertyId, names, phones, emails, agentIds, statusCodes, common.uploadedByUserId]
   );
-  return new Set(inserted.map(r => r.phone));
+  return new Map(inserted.map(r => [r.phone, r.id]));
+}
+
+/** How many of the given phones already belong to an active lead — informational count for bulk-import's precheck, never gates the real import. */
+export async function countLeadsByPhones(phones: string[]): Promise<number> {
+  if (phones.length === 0) return 0;
+  const { rows } = await pool.query<{ count: string }>(`SELECT count(*) FROM leads WHERE phone = ANY($1::text[])`, [phones]);
+  return Number(rows[0]?.count ?? 0);
+}
+
+export interface ArchivedLeadMatch {
+  name: string;
+  deletedAt: string;
+  deletedByName: string;
+  logs: unknown[];
+}
+
+/**
+ * Most-recent `lead_deletion_archive` row per phone, for the given list —
+ * used by bulk-import's "this phone was previously deleted" check (see
+ * leads.service.ts's precheckBulkImportLeads/bulkImportLeads). Reads only
+ * (the archive table deliberately has no UPDATE/DELETE grant for the app
+ * role — see migration 020/021's comments) — nothing here ever marks or
+ * mutates an archive row, it's purely a lookup.
+ */
+export async function findArchivedMatchesByPhones(phones: string[]): Promise<Map<string, ArchivedLeadMatch>> {
+  if (phones.length === 0) return new Map();
+  const { rows } = await pool.query<{ phone: string; name: string; deleted_at: string; deleted_by_name_snapshot: string; logs_snapshot: unknown[] }>(
+    `SELECT DISTINCT ON (lead_snapshot->>'phone')
+       lead_snapshot->>'phone' AS phone, lead_snapshot->>'name' AS name,
+       deleted_at, deleted_by_name_snapshot, logs_snapshot
+     FROM lead_deletion_archive
+     WHERE lead_snapshot->>'phone' = ANY($1::text[])
+     ORDER BY lead_snapshot->>'phone', deleted_at DESC`,
+    [phones]
+  );
+  return new Map(
+    rows.map(r => [r.phone, { name: r.name, deletedAt: r.deleted_at, deletedByName: r.deleted_by_name_snapshot, logs: r.logs_snapshot }])
+  );
+}
+
+/**
+ * Re-attaches archived call/note history onto newly (re-)created leads —
+ * one unnest-backed multi-row INSERT for every log line across every lead
+ * in this chunk, same pattern as scripts/importMigration4050.ts's own
+ * bulk note-history insert. Each log's real original user_id/
+ * user_name_snapshot/created_at come straight from the archived snapshot
+ * (to_jsonb of the real lead_logs row), not substituted.
+ */
+export async function insertRestoredLeadLogsChunk(rows: { newLeadId: string; logs: unknown[] }[]): Promise<void> {
+  const leadIds: string[] = [];
+  const userIds: string[] = [];
+  const userNames: string[] = [];
+  const messages: string[] = [];
+  const timestamps: string[] = [];
+  for (const row of rows) {
+    for (const log of row.logs as { user_id: string; user_name_snapshot: string; message: string; created_at: string }[]) {
+      leadIds.push(row.newLeadId);
+      userIds.push(log.user_id);
+      userNames.push(log.user_name_snapshot);
+      messages.push(log.message);
+      timestamps.push(log.created_at);
+    }
+  }
+  if (leadIds.length === 0) return;
+  await pool.query(
+    `INSERT INTO lead_logs (lead_id, user_id, user_name_snapshot, message, created_at)
+     SELECT * FROM unnest($1::uuid[], $2::uuid[], $3::text[], $4::text[], $5::timestamptz[])`,
+    [leadIds, userIds, userNames, messages, timestamps]
+  );
 }
 
 /** Must run inside the same transaction as insertLeadLog (see leads.service.ts). */

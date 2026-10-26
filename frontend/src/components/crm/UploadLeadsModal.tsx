@@ -4,6 +4,8 @@ import React, { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { X, UploadCloud, Download, ChevronDown, Check, CheckCircle2, AlertTriangle } from "lucide-react";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
+import ArchiveRestoreConfirm from "./ArchiveRestoreConfirm";
+import { apiPrecheckBulkImportLeads, type BulkImportPrecheckResult } from "@/lib/apiClient";
 
 // exceljs is a ~260KB dependency used only by this modal (template
 // generation + file parsing) — dynamically imported so it's fetched when an
@@ -138,6 +140,7 @@ export interface BulkImportSubmitResult {
   created: number;
   duplicates: number;
   skipped: BulkImportSkippedRow[];
+  restored: number;
 }
 
 export interface BulkImportSubmitInput {
@@ -146,6 +149,9 @@ export interface BulkImportSubmitInput {
   propertyId?: string;
   agentIds?: string[];
   leads: ParsedLeadRow[];
+  // One batch-level choice from the archive-match precheck below — true
+  // re-attaches a matched row's old notes/call history onto the new lead.
+  restoreArchivedMatches?: boolean;
 }
 
 interface UploadLeadsModalProps {
@@ -222,6 +228,11 @@ export default function UploadLeadsModal({ isOpen, onClose, onSubmit, properties
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [result, setResult] = useState<BulkImportSubmitResult | null>(null);
+  // Set only when the precheck finds rows matching a previously-deleted
+  // lead — holds the already-parsed rows so the chosen restore/skip button
+  // doesn't need to re-read the file.
+  const [archiveCheck, setArchiveCheck] = useState<BulkImportPrecheckResult | null>(null);
+  const [parsedLeads, setParsedLeads] = useState<ParsedLeadRow[] | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -243,6 +254,8 @@ export default function UploadLeadsModal({ isOpen, onClose, onSubmit, properties
     setIsSubmitting(false);
     setErrorMsg(null);
     setResult(null);
+    setArchiveCheck(null);
+    setParsedLeads(null);
   }, [isOpen]);
 
   if (!isOpen) return null;
@@ -292,16 +305,50 @@ export default function UploadLeadsModal({ isOpen, onClose, onSubmit, properties
         setIsSubmitting(false);
         return;
       }
+      // Ask once, batch-level, if any row matches a previously-deleted
+      // lead — only when it actually finds one; a normal upload with no
+      // archived matches goes straight to the real import below, same as
+      // before this check existed.
+      const precheck = await apiPrecheckBulkImportLeads(leads);
+      if (precheck.archivedMatchCount > 0) {
+        setParsedLeads(leads);
+        setArchiveCheck(precheck);
+        setIsSubmitting(false);
+        return;
+      }
       const submitResult = await onSubmit({
         subSource: subSource.trim(),
         assignmentMode,
         propertyId: assignmentMode === "PROPERTY" ? propertyId : undefined,
         agentIds: assignmentMode === "AGENT" ? agentIds : undefined,
-        leads
+        leads,
+        restoreArchivedMatches: false
       });
       setResult(submitResult);
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : "Could not read that file — make sure it's a valid .xlsx spreadsheet.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleArchiveChoice = async (restoreArchivedMatches: boolean) => {
+    if (!parsedLeads) return;
+    setIsSubmitting(true);
+    setErrorMsg(null);
+    try {
+      const submitResult = await onSubmit({
+        subSource: subSource.trim(),
+        assignmentMode,
+        propertyId: assignmentMode === "PROPERTY" ? propertyId : undefined,
+        agentIds: assignmentMode === "AGENT" ? agentIds : undefined,
+        leads: parsedLeads,
+        restoreArchivedMatches
+      });
+      setResult(submitResult);
+      setArchiveCheck(null);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Could not complete the import — please try again.");
     } finally {
       setIsSubmitting(false);
     }
@@ -335,8 +382,9 @@ export default function UploadLeadsModal({ isOpen, onClose, onSubmit, properties
                   <p className="text-sm font-extrabold text-slate-900">{result.created} lead{result.created === 1 ? "" : "s"} imported</p>
                   <p className="text-xs text-slate-500 mt-0.5">
                     {result.duplicates > 0 && `${result.duplicates} duplicate phone number${result.duplicates === 1 ? "" : "s"} skipped. `}
+                    {result.restored > 0 && `${result.restored} restored from previously-deleted leads. `}
                     {result.skipped.length > 0 && `${result.skipped.length} row${result.skipped.length === 1 ? "" : "s"} skipped — see below.`}
-                    {result.duplicates === 0 && result.skipped.length === 0 && "Every row imported cleanly."}
+                    {result.duplicates === 0 && result.restored === 0 && result.skipped.length === 0 && "Every row imported cleanly."}
                   </p>
                 </div>
               </div>
@@ -351,6 +399,15 @@ export default function UploadLeadsModal({ isOpen, onClose, onSubmit, properties
                 </div>
               )}
             </div>
+          ) : archiveCheck ? (
+            <ArchiveRestoreConfirm
+              precheck={archiveCheck}
+              onRestore={() => handleArchiveChoice(true)}
+              onSkip={() => handleArchiveChoice(false)}
+              onBack={() => { setArchiveCheck(null); setErrorMsg(null); }}
+              submitting={isSubmitting}
+              error={errorMsg}
+            />
           ) : (
             <div className="px-6 py-5 grid grid-cols-1 sm:grid-cols-[1fr_150px] gap-6">
               <div className="space-y-4">
@@ -474,14 +531,14 @@ export default function UploadLeadsModal({ isOpen, onClose, onSubmit, properties
               >
                 {result ? "Close" : "Cancel"}
               </button>
-              {!result && (
+              {!result && !archiveCheck && (
                 <button
                   type="button"
                   onClick={handleUpload}
                   disabled={isSubmitting}
                   className="bg-[#0B1E6E] hover:bg-[#081650] disabled:opacity-60 text-white font-bold px-5 py-2 rounded-xl text-sm transition-all shadow-md shadow-[#0B1E6E]/10"
                 >
-                  {isSubmitting ? "Uploading…" : "Upload"}
+                  {isSubmitting ? "Checking file…" : "Upload"}
                 </button>
               )}
             </div>
