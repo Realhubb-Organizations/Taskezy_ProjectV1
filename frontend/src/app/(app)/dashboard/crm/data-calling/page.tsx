@@ -198,10 +198,11 @@ export default function DataCallingPage() {
   // Owner, the owner's manager (their team's leads) or an admin — same rule
   // the server enforces; every change is recorded in Activity History.
   const canEditLeadStatus = (l: Lead) => canChangeLeadStatus(l, currentUser, users);
-  const callAllowed = canTriggerLeadCall(isAdmin);
+  const callAllowed = canTriggerLeadCall(isAdmin, currentUser?.email);
   const handleCall = (lead: Lead) => {
     triggerLeadCall(lead, {
       isAdmin,
+      userEmail: currentUser?.email,
       toast,
       onCallEnded: (leadId, startedAt, durationSeconds) => {
         recordCallEnded(leadId, startedAt, durationSeconds).catch((err) =>

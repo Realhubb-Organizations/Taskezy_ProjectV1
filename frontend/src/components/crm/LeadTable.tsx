@@ -20,9 +20,9 @@ export default function LeadTable({
   activeRole
 }: LeadTableProps) {
   const { toast } = useDialog();
-  const { recordCallEnded, recordWhatsAppOpened } = useApp();
+  const { currentUser, recordCallEnded, recordWhatsAppOpened } = useApp();
   const isAdmin = activeRole === "ADMIN";
-  const callAllowed = canTriggerLeadCall(isAdmin);
+  const callAllowed = canTriggerLeadCall(isAdmin, currentUser?.email);
 
   // Delegates to the shared status badge convention (leadStatusMapping.ts)
   // used by every other status pill in the app, rather than its own
@@ -32,6 +32,7 @@ export default function LeadTable({
   const handleCall = (lead: Lead) => {
     triggerLeadCall(lead, {
       isAdmin,
+      userEmail: currentUser?.email,
       toast,
       onCallEnded: (leadId, startedAt, durationSeconds) => {
         recordCallEnded(leadId, startedAt, durationSeconds).catch((err) =>

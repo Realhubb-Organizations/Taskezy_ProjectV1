@@ -50,6 +50,7 @@ export default function PendingLeadsTable({
     }
     triggerLeadCall({ id: row.leadId, phone: row.phone, name: row.name }, {
       isAdmin,
+      userEmail: currentUser?.email,
       onCallEnded: (leadId, startedAt, durationSeconds) => {
         recordCallEnded(leadId, startedAt, durationSeconds).catch((err) => console.warn("Could not record call feedback gate:", err));
       }
@@ -273,7 +274,7 @@ export default function PendingLeadsTable({
                       <LeadRowActionsMenu
                         onWhatsApp={() => handleWhatsApp(row)}
                         onCall={() => handleCall(row)}
-                        callAllowed={canTriggerLeadCall(isAdmin) && (isAdmin || !!row.leadId)}
+                        callAllowed={canTriggerLeadCall(isAdmin, currentUser?.email) && (isAdmin || !!row.leadId)}
                       />
                     </div>
                   </td>
