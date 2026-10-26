@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { forwardRef, useEffect, useImperativeHandle, useMemo, useState } from "react";
+import { LinkerHandle, sameList } from "./linkerHandle";
 import { Megaphone, X, Loader2, Plus } from "lucide-react";
 import {
   apiGetMetaCampaignSuggestions,
@@ -15,6 +16,8 @@ import { validateText } from "@/lib/validation";
 interface MetaCampaignLinkerProps {
   propertyId: string;
   isAdmin: boolean;
+  /** Fires when the list differs from what's saved (the popup's Save button). */
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 /**
@@ -22,8 +25,11 @@ interface MetaCampaignLinkerProps {
  * matches one linked here (see meta.lead-ingest.ts) — this is what makes
  * that matching possible, not just cosmetic tagging.
  */
-export default function MetaCampaignLinker({ propertyId, isAdmin }: MetaCampaignLinkerProps) {
+// Add / remove only change the list on screen; the property popup's Save
+// button calls save() through the ref to persist it (one call per linker).
+const MetaCampaignLinker = forwardRef<LinkerHandle, MetaCampaignLinkerProps>(function MetaCampaignLinker({ propertyId, isAdmin, onDirtyChange }, ref) {
   const [campaigns, setCampaigns] = useState<string[]>([]);
+  const [savedCampaigns, setSavedCampaigns] = useState<string[]>([]);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [selected, setSelected] = useState("");
   const [customInput, setCustomInput] = useState("");
@@ -43,6 +49,7 @@ export default function MetaCampaignLinker({ propertyId, isAdmin }: MetaCampaign
       .then(([linked, suggested]) => {
         if (cancelled) return;
         setCampaigns(linked);
+        setSavedCampaigns(linked);
         setSuggestions(suggested);
       })
       .catch(() => {
@@ -56,21 +63,31 @@ export default function MetaCampaignLinker({ propertyId, isAdmin }: MetaCampaign
     };
   }, [propertyId, isAdmin]);
 
-  const save = async (next: string[]) => {
-    setSaving(true);
-    setError("");
-    const previous = campaigns;
-    setCampaigns(next); // optimistic — reverted below on failure
-    try {
-      const confirmed = await apiSetPropertyMetaCampaigns(propertyId, next);
-      setCampaigns(confirmed);
-    } catch (err) {
-      setCampaigns(previous);
-      setError(err instanceof ApiRequestError ? err.message : "Could not save — please try again.");
-    } finally {
-      setSaving(false);
+  const dirty = !sameList(campaigns, savedCampaigns);
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+
+  useImperativeHandle(ref, () => ({
+    save: async () => {
+      if (!dirty) return true;
+      setSaving(true);
+      setError("");
+      try {
+        const confirmed = await apiSetPropertyMetaCampaigns(propertyId, campaigns);
+        setCampaigns(confirmed);
+        setSavedCampaigns(confirmed);
+        return true;
+      } catch (err) {
+        setError(err instanceof ApiRequestError ? err.message : "Could not save — please try again.");
+        return false;
+      } finally {
+        setSaving(false);
+      }
     }
-  };
+  }), [dirty, propertyId, campaigns]);
+
+  const save = (next: string[]) => setCampaigns(next); // staged until the popup's Save
 
   const availableSuggestions = useMemo(
     () => suggestions.filter(s => !campaigns.includes(s)),
@@ -210,7 +227,10 @@ export default function MetaCampaignLinker({ propertyId, isAdmin }: MetaCampaign
         </div>
       )}
 
+      {dirty && !error && <p className="text-[10px] text-amber-600 font-semibold">Unsaved changes — click Save to apply.</p>}
       {error && <p className="text-[10px] text-red-600 font-bold">{error}</p>}
     </div>
   );
-}
+});
+
+export default MetaCampaignLinker;

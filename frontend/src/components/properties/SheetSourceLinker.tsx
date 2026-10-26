@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { forwardRef, useEffect, useImperativeHandle, useMemo, useState } from "react";
+import { LinkerHandle, sameList } from "./linkerHandle";
 import { FileSpreadsheet, X, Loader2, Plus } from "lucide-react";
 import {
   apiGetSheetSourceSuggestions,
@@ -15,6 +16,8 @@ import { validateText } from "@/lib/validation";
 interface SheetSourceLinkerProps {
   propertyId: string;
   isAdmin: boolean;
+  /** Fires when the list differs from what's saved (the popup's Save button). */
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 /**
@@ -27,8 +30,11 @@ interface SheetSourceLinkerProps {
  * lead (recordSheetSourceSeen) rather than a synced-campaign cache, since
  * there's no equivalent sync job for sheet sources.
  */
-export default function SheetSourceLinker({ propertyId, isAdmin }: SheetSourceLinkerProps) {
+// Add / remove only change the list on screen; the property popup's Save
+// button calls save() through the ref to persist it (one call per linker).
+const SheetSourceLinker = forwardRef<LinkerHandle, SheetSourceLinkerProps>(function SheetSourceLinker({ propertyId, isAdmin, onDirtyChange }, ref) {
   const [sources, setSources] = useState<string[]>([]);
+  const [savedSources, setSavedSources] = useState<string[]>([]);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [selected, setSelected] = useState("");
   const [customInput, setCustomInput] = useState("");
@@ -48,6 +54,7 @@ export default function SheetSourceLinker({ propertyId, isAdmin }: SheetSourceLi
       .then(([linked, suggested]) => {
         if (cancelled) return;
         setSources(linked);
+        setSavedSources(linked);
         setSuggestions(suggested);
       })
       .catch(() => {
@@ -61,21 +68,31 @@ export default function SheetSourceLinker({ propertyId, isAdmin }: SheetSourceLi
     };
   }, [propertyId, isAdmin]);
 
-  const save = async (next: string[]) => {
-    setSaving(true);
-    setError("");
-    const previous = sources;
-    setSources(next); // optimistic — reverted below on failure
-    try {
-      const confirmed = await apiSetPropertySheetSources(propertyId, next);
-      setSources(confirmed);
-    } catch (err) {
-      setSources(previous);
-      setError(err instanceof ApiRequestError ? err.message : "Could not save — please try again.");
-    } finally {
-      setSaving(false);
+  const dirty = !sameList(sources, savedSources);
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+
+  useImperativeHandle(ref, () => ({
+    save: async () => {
+      if (!dirty) return true;
+      setSaving(true);
+      setError("");
+      try {
+        const confirmed = await apiSetPropertySheetSources(propertyId, sources);
+        setSources(confirmed);
+        setSavedSources(confirmed);
+        return true;
+      } catch (err) {
+        setError(err instanceof ApiRequestError ? err.message : "Could not save — please try again.");
+        return false;
+      } finally {
+        setSaving(false);
+      }
     }
-  };
+  }), [dirty, propertyId, sources]);
+
+  const save = (next: string[]) => setSources(next); // staged until the popup's Save
 
   const availableSuggestions = useMemo(
     () => suggestions.filter(s => !sources.includes(s)),
@@ -215,7 +232,10 @@ export default function SheetSourceLinker({ propertyId, isAdmin }: SheetSourceLi
         </div>
       )}
 
+      {dirty && !error && <p className="text-[10px] text-amber-600 font-semibold">Unsaved changes — click Save to apply.</p>}
       {error && <p className="text-[10px] text-red-600 font-bold">{error}</p>}
     </div>
   );
-}
+});
+
+export default SheetSourceLinker;
