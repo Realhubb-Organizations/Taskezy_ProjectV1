@@ -125,13 +125,13 @@ export default function TeamTasksTable({
   return (
     <div className="bg-white rounded-2xl shadow-md">
       <div className="px-5 pt-4 flex items-end justify-between gap-3">
-        <div className="flex items-end gap-6 border-b border-slate-200 flex-1 max-w-xl">
+        <div className="flex items-end gap-6 flex-1 max-w-xl">
           {tabs.map(t => (
             <button
               key={t.value}
               onClick={() => { onTabChange(t.value); setPage(1); }}
-              className={`pb-2 -mb-px text-base font-extrabold border-b-2 transition-colors ${
-                tab === t.value ? "text-[#0B1E6E] border-[#0B1E6E]" : "text-slate-400 border-transparent hover:text-slate-600"
+              className={`pb-2 text-base font-extrabold border-b-2 transition-colors ${
+                tab === t.value ? "text-[#0B1E6E] border-[#0B1E6E]" : "text-slate-400 border-slate-200 hover:text-slate-600"
               }`}
             >
               {t.label}

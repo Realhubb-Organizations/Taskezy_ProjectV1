@@ -135,7 +135,7 @@ export default function SalesPendingTasksTable({
       <div className="px-5 pt-5 pb-3 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="text-lg font-extrabold text-slate-900">{title}</h3>
-          {subtitle && <p className="text-xs text-slate-400 font-medium mt-0.5">{subtitle}</p>}
+          {subtitle && <p className="text-xs text-slate-400 font-medium mt-1">{subtitle}</p>}
           {headerTabs}
         </div>
         {/* Legend doubles as a filter — click a bucket to show only its
