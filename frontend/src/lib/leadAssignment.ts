@@ -123,3 +123,10 @@ export function canReassignThisLead(
   if (lead.assignedAgent === user.name) return true;
   return users.find(u => u.name === lead.assignedAgent)?.managerId === user.id;
 }
+
+/** Deals items out one at a time across `buckets` (round-robin), so several assignees get an even share (sizes differ by at most 1). */
+export function splitEvenly<T>(items: T[], buckets: number): T[][] {
+  const out: T[][] = Array.from({ length: buckets }, () => []);
+  items.forEach((item, i) => out[i % buckets].push(item));
+  return out;
+}

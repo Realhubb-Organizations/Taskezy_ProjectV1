@@ -16,7 +16,7 @@ import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/
 import { LineSkeleton, TableRowsSkeleton } from "@/components/ui/Skeletons";
 import Tooltip from "@/components/ui/Tooltip";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
-import { canChangeLeadStatus, canUploadLeads, eligibleAssignees, isUnassignedLead, uploadAssignableUsers, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
+import { canChangeLeadStatus, canUploadLeads, eligibleAssignees, isUnassignedLead, splitEvenly, uploadAssignableUsers, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
 import DateRangePicker, { type DateRangeValue, todayIso } from "@/components/ui/DateRangePicker";
 import DateRangeSelect from "@/components/ui/DateRangeSelect";
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
@@ -826,7 +826,7 @@ export default function LeadDashboard() {
 
   const [assignFlowMode, setAssignFlowMode] = useState<"assign" | "reshuffle" | null>(null);
   const [assignPropertyIds, setAssignPropertyIds] = useState<Set<string>>(new Set());
-  const [assignAssigneeId, setAssignAssigneeId] = useState("");
+  const [assignAssigneeIds, setAssignAssigneeIds] = useState<string[]>([]);
   const [assignNote, setAssignNote] = useState("");
   const flowTargetLeads = assignFlowMode === "reshuffle" ? selectedAssignedLeads : selectedUnassignedLeads;
   const assigneeOptions = eligibleAssignees({
@@ -836,7 +836,7 @@ export default function LeadDashboard() {
     caller: currentUser,
     targetLeads: flowTargetLeads
   });
-  const canConfirmAssign = assignPropertyIds.size > 0 && !!assignAssigneeId && assigneeOptions.some(u => u.id === assignAssigneeId) && assignNote.trim().length > 0;
+  const canConfirmAssign = assignPropertyIds.size > 0 && assignAssigneeIds.length > 0 && assignAssigneeIds.every(id => assigneeOptions.some(u => u.id === id)) && assignNote.trim().length > 0;
 
   const [assignSubmitting, setAssignSubmitting] = useState(false);
   const [assignError, setAssignError] = useState("");
@@ -849,7 +849,7 @@ export default function LeadDashboard() {
   const openAssignFlow = (mode: "assign" | "reshuffle") => {
     setAssignNote("");
     setAssignPropertyIds(new Set());
-    setAssignAssigneeId("");
+    setAssignAssigneeIds([]);
     setAssignError("");
     setAssignFlowMode(mode);
   };
@@ -863,16 +863,27 @@ export default function LeadDashboard() {
   // don't need their own pre-filter or second call here. Every moved lead
   // still broadcasts leads-changed same as before, picked up by AppContext's
   // existing per-lead refetch listener without an explicit refetch here.
+  // Several assignees: the leads are dealt out evenly (splitEvenly) and
+  // sent as one bulk-reassign job per assignee, results added together.
   const confirmBulkAssign = async () => {
-    const assignee = users.find(u => u.id === assignAssigneeId);
-    if (!canConfirmAssign || !assignFlowMode || !assignee || assignSubmitting) return;
+    const assignees = assignAssigneeIds.map(id => users.find(u => u.id === id)).filter((u): u is NonNullable<typeof u> => !!u);
+    if (!canConfirmAssign || !assignFlowMode || assignees.length === 0 || assignSubmitting) return;
     const mode = assignFlowMode;
     const targetLeads = flowTargetLeads;
+    const assigneeLabel = assignees.length === 1 ? assignees[0].name : `${assignees.length} members`;
 
     setAssignSubmitting(true);
     setAssignError("");
     try {
-      const result = await apiBulkReassignLeads(targetLeads.map(l => l.id), assignee.id, assignNote.trim());
+      const shares = splitEvenly(targetLeads.map(l => l.id), assignees.length);
+      const result = { moved: 0, skipped: 0, failed: [] as { reason: string }[] };
+      for (let i = 0; i < assignees.length; i++) {
+        if (shares[i].length === 0) continue;
+        const r = await apiBulkReassignLeads(shares[i], assignees[i].id, assignNote.trim());
+        result.moved += r.moved;
+        result.skipped += r.skipped;
+        result.failed.push(...r.failed);
+      }
       clearSelected(targetLeads.map(l => l.id));
       if (result.moved > 0) setLeadsRefreshKey(k => k + 1);
 
@@ -885,8 +896,8 @@ export default function LeadDashboard() {
       }
       setAssignFlowMode(null);
       setSuccessMsg(
-        `${mode === "reshuffle" ? "Reshuffled" : "Assigned"} ${result.moved} lead${result.moved === 1 ? "" : "s"} to ${assignee.name}` +
-        (result.skipped > 0 ? ` (${result.skipped} already with ${assignee.name}, skipped)` : "") + "."
+        `${mode === "reshuffle" ? "Reshuffled" : "Assigned"} ${result.moved} lead${result.moved === 1 ? "" : "s"} to ${assigneeLabel}` +
+        (result.skipped > 0 ? ` (${result.skipped} already with ${assignees.length === 1 ? assigneeLabel : "the same member"}, skipped)` : "") + "."
       );
       setTimeout(() => setSuccessMsg(""), 4000);
     } catch (err) {
@@ -2229,7 +2240,7 @@ export default function LeadDashboard() {
                   <SearchableMultiSelect
                     variant="field"
                     selected={Array.from(assignPropertyIds)}
-                    onChange={(ids) => { setAssignPropertyIds(new Set(ids)); setAssignAssigneeId(""); }}
+                    onChange={(ids) => { setAssignPropertyIds(new Set(ids)); setAssignAssigneeIds([]); }}
                     options={properties.map(p => ({ value: p.id, label: p.name }))}
                     placeholder="Select property"
                     searchPlaceholder="Search property..."
@@ -2240,14 +2251,18 @@ export default function LeadDashboard() {
                   <label className="block text-sm font-bold text-slate-800">
                     {assignFlowMode === "reshuffle" ? "Select Reshuffle Assignee" : "Select Assignee"}
                   </label>
-                  <SearchableSelect
-                    value={assignAssigneeId}
-                    onChange={setAssignAssigneeId}
+                  <SearchableMultiSelect
+                    variant="field"
+                    selected={assignAssigneeIds}
+                    onChange={setAssignAssigneeIds}
                     options={assigneeOptions.map(u => ({ value: u.id, label: u.name }))}
                     disabled={assignPropertyIds.size === 0}
                     placeholder="Select Member"
                     searchPlaceholder="Search assignee..."
                   />
+                  {assignAssigneeIds.length > 1 && (
+                    <p className="text-[11px] text-slate-400">Leads will be split evenly between the {assignAssigneeIds.length} selected members.</p>
+                  )}
                   {assignPropertyIds.size > 0 && assigneeOptions.length === 0 && (
                     <p className="text-[11px] text-slate-400 italic">
                       {isAdmin ? "No eligible members for the selected properties." : "None of your direct reports are eligible for the selected properties."}

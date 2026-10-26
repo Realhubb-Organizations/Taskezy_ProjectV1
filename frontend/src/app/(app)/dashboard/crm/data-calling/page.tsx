@@ -12,7 +12,7 @@ import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/Searcha
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
 import DateRangePicker, { DatePicker, DateRangeValue, todayIso, toIsoDate } from "@/components/ui/DateRangePicker";
 import DateRangeSelect from "@/components/ui/DateRangeSelect";
-import { canChangeLeadStatus, canReassignThisLead, canUploadLeads, uploadAssignableUsers, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
+import { canChangeLeadStatus, canReassignThisLead, canUploadLeads, splitEvenly, uploadAssignableUsers, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
 import { nextFollowupFor } from "@/lib/followups";
 import { apiListFollowupsPage } from "@/lib/apiClient";
 import NextCallCell from "@/components/crm/NextCallCell";
@@ -770,7 +770,7 @@ export default function DataCallingPage() {
   const [assignFlowMode, setAssignFlowMode] = useState<"assign" | "reshuffle" | null>(null);
   const flowTargetIds = assignFlowMode === "reshuffle" ? selectedAssignedIds : selectedUnassignedIds;
   const [assignSelectedPropertyIds, setAssignSelectedPropertyIds] = useState<Set<string>>(new Set());
-  const [assignSelectedAssigneeId, setAssignSelectedAssigneeId] = useState<string>("");
+  const [assignSelectedAssigneeIds, setAssignSelectedAssigneeIds] = useState<string[]>([]);
 
   const eligibleAssignees = useMemo(() => {
     if (assignSelectedPropertyIds.size === 0) return [];
@@ -786,18 +786,14 @@ export default function DataCallingPage() {
     });
     return anyAllMembers ? users.filter(u => u.role === "AGENT") : users.filter(u => restrictedIds.has(u.id));
   }, [assignSelectedPropertyIds, properties, users]);
-  const selectedAssigneeName = useMemo(
-    () => users.find(u => u.id === assignSelectedAssigneeId)?.name || "",
-    [users, assignSelectedAssigneeId]
-  );
   const [assignNote, setAssignNote] = useState("");
-  const canConfirmAssign = assignSelectedPropertyIds.size > 0 && !!assignSelectedAssigneeId && assignNote.trim().length > 0;
+  const canConfirmAssign = assignSelectedPropertyIds.size > 0 && assignSelectedAssigneeIds.length > 0 && assignNote.trim().length > 0;
   const [assignSubmitting, setAssignSubmitting] = useState(false);
   const [assignError, setAssignError] = useState("");
 
   const openAssignFlow = (mode: "assign" | "reshuffle") => {
     setAssignSelectedPropertyIds(new Set());
-    setAssignSelectedAssigneeId("");
+    setAssignSelectedAssigneeIds([]);
     setAssignNote("");
     setAssignError("");
     setAssignFlowMode(mode);
@@ -808,7 +804,7 @@ export default function DataCallingPage() {
     // Property set changed — an assignee chosen under the old scope may no
     // longer be eligible, so make the admin re-pick rather than silently
     // keep a stale selection.
-    setAssignSelectedAssigneeId("");
+    setAssignSelectedAssigneeIds([]);
   };
   // Queued server-side (POST /leads/bulk-reassign — see jobs/queue.ts's
   // bulk-reassign-leads worker) instead of firing one reassignLead call per
@@ -822,8 +818,9 @@ export default function DataCallingPage() {
   // refetch listener picks up the change without an explicit refetch here.
   const confirmBulkAssign = async () => {
     if (!canConfirmAssign || !assignFlowMode || assignSubmitting) return;
-    const agentId = assignSelectedAssigneeId;
-    const agentName = selectedAssigneeName;
+    // Several assignees: leads are dealt out evenly, one bulk-reassign job each.
+    const agentIds = assignSelectedAssigneeIds;
+    const agentName = agentIds.length === 1 ? users.find(u => u.id === agentIds[0])?.name || "" : `${agentIds.length} members`;
     const note = assignNote.trim();
     const targetIds = flowTargetIds;
     const mode = assignFlowMode;
@@ -831,7 +828,15 @@ export default function DataCallingPage() {
     setAssignSubmitting(true);
     setAssignError("");
     try {
-      const result = await apiBulkReassignLeads(targetIds, agentId, note);
+      const shares = splitEvenly(targetIds, agentIds.length);
+      const result = { moved: 0, skipped: 0, failed: [] as { reason: string }[] };
+      for (let i = 0; i < agentIds.length; i++) {
+        if (shares[i].length === 0) continue;
+        const r = await apiBulkReassignLeads(shares[i], agentIds[i], note);
+        result.moved += r.moved;
+        result.skipped += r.skipped;
+        result.failed.push(...r.failed);
+      }
       setSelectedIds(prev => {
         const next = new Set(prev);
         targetIds.forEach(id => next.delete(id));
@@ -840,7 +845,7 @@ export default function DataCallingPage() {
       setAssignFlowMode(null);
       toast(
         `${mode === "reshuffle" ? "Reshuffled" : "Assigned"} ${result.moved} lead${result.moved === 1 ? "" : "s"} to ${agentName}` +
-          (result.skipped > 0 ? ` (${result.skipped} already with ${agentName}, skipped)` : "") +
+          (result.skipped > 0 ? ` (${result.skipped} already with ${agentIds.length === 1 ? agentName : "the same member"}, skipped)` : "") +
           (result.failed.length > 0 ? ` — ${result.failed.length} could not be moved.` : ""),
         result.failed.length > 0 ? "error" : "success"
       );
@@ -1412,7 +1417,9 @@ export default function DataCallingPage() {
                   Clear all
                 </button>
               )}
-              {activeTab === "DataCalling" && isAdmin && filteredLeads.length > 0 && (
+              {/* Only offered once the header checkbox has selected the whole page —
+                  never shown up front, so it can't read as a pre-selected action. */}
+              {activeTab === "DataCalling" && isAdmin && allOnPageSelected && filteredLeads.length > 0 && (
                 <button
                   type="button"
                   onClick={() => { setDeleteError(""); setDeleteTarget({ ids: filteredLeads.map(l => l.id), isAll: true }); }}
@@ -2105,14 +2112,18 @@ export default function DataCallingPage() {
                 <label className="block text-sm font-bold text-slate-800">
                   {assignFlowMode === "reshuffle" ? "Select Reshuffle Assignee" : "Select Assignee"}
                 </label>
-                <SearchableSelect
-                  value={assignSelectedAssigneeId}
-                  onChange={setAssignSelectedAssigneeId}
+                <SearchableMultiSelect
+                  variant="field"
+                  selected={assignSelectedAssigneeIds}
+                  onChange={setAssignSelectedAssigneeIds}
                   options={eligibleAssignees.map(u => ({ value: u.id, label: u.name }))}
                   disabled={assignSelectedPropertyIds.size === 0}
                   placeholder="Select Member"
                   searchPlaceholder="Search assignee..."
                 />
+                {assignSelectedAssigneeIds.length > 1 && (
+                  <p className="text-[11px] text-slate-400">Leads will be split evenly between the {assignSelectedAssigneeIds.length} selected members.</p>
+                )}
               </div>
 
               <div className="space-y-1.5">
