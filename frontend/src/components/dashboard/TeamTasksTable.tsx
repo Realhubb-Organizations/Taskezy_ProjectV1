@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 import { Minus, Sliders, X } from "lucide-react";
 import { ApiPendingTaskRow } from "@/lib/apiClient";
@@ -54,6 +55,7 @@ export default function TeamTasksTable({
   onTabChange: (tab: Tab) => void;
   isLoading?: boolean;
 }) {
+  const router = useRouter();
   // Buckets are time-based, so re-evaluate periodically.
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
@@ -241,13 +243,20 @@ export default function TeamTasksTable({
               </tr>
             ) : (
               pageRows.map(r => (
-                <tr key={r.name} className="hover:bg-slate-50/60 transition-colors">
+                // The whole row opens this member's task list (same link as the count), when there's anything to show.
+                <tr
+                  key={r.name}
+                  onClick={r.count > 0 ? () => router.push(tasksHref(r.name)) : undefined}
+                  title={r.count > 0 ? `View ${r.name}'s tasks` : undefined}
+                  className={`hover:bg-slate-50/60 transition-colors ${r.count > 0 ? "cursor-pointer" : ""}`}
+                >
                   {visibleColumns.team && <td className="px-4 py-3 text-slate-800 font-medium [overflow-wrap:anywhere]" title={r.name}>{r.name}</td>}
                   {visibleColumns.count && <td className="px-4 py-3 text-slate-800 tabular-nums">
                     {/* Opens this member's task list — same tab + task type, so it lists exactly what was counted */}
                     {r.count > 0 ? (
                       <Link
                         href={tasksHref(r.name)}
+                        onClick={(e) => e.stopPropagation()}
                         className="font-bold text-[#0B1E6E] hover:underline"
                         title={`View ${r.name}'s tasks`}
                       >

@@ -46,6 +46,7 @@ interface OpenFollowupRow {
   lead_status_label: string | null;
   latest_log_message: string | null;
   latest_log_at: string | null;
+  is_data_calling: boolean | null;
 }
 
 interface ActionableLeadRow {
@@ -60,6 +61,7 @@ interface ActionableLeadRow {
   assigned_to_name: string;
   latest_log_message: string | null;
   latest_log_at: string | null;
+  is_data_calling: boolean | null;
 }
 
 export interface PendingTaskRow {
@@ -78,6 +80,8 @@ export interface PendingTaskRow {
   feedback: string;
   taskType: string;
   assignedTo: string;
+  /** The lead is a Data Calling lead (source "Bulk Upload") — lets the per-member task page split Leads / Data Calling. */
+  isDataCalling: boolean;
 }
 
 /**
@@ -107,7 +111,8 @@ tasksRouter.get(
       `SELECT fc.id, fc.lead_id, fc.scheduled_at, fc.status, fc.lead_name, fc.phone AS call_phone, fc.call_type,
               u.first_name || COALESCE(' ' || u.last_name, '') AS assigned_to_name,
               l.name AS lead_full_name, l.phone AS lead_phone, l.email AS lead_email, ls.label AS lead_status_label,
-              ll.message AS latest_log_message, ll.created_at AS latest_log_at
+              ll.message AS latest_log_message, ll.created_at AS latest_log_at,
+              l.source = 'Bulk Upload' AS is_data_calling
        FROM followup_calls fc
        JOIN users u ON u.id = fc.assigned_to_id
        LEFT JOIN leads l ON l.id = fc.lead_id
@@ -129,7 +134,8 @@ tasksRouter.get(
       `SELECT l.id, l.name, l.phone, l.email, l.status_code, ls.label AS status_label,
               l.assigned_at, l.created_at,
               u.first_name || COALESCE(' ' || u.last_name, '') AS assigned_to_name,
-              ll.message AS latest_log_message, ll.created_at AS latest_log_at
+              ll.message AS latest_log_message, ll.created_at AS latest_log_at,
+              l.source = 'Bulk Upload' AS is_data_calling
        FROM leads l
        JOIN lead_statuses ls ON ls.code = l.status_code
        JOIN users u ON u.id = l.assigned_agent_id
@@ -175,7 +181,8 @@ tasksRouter.get(
         status: r.lead_status_label || r.call_type,
         feedback: r.latest_log_message || "No feedback yet",
         taskType: r.call_type,
-        assignedTo: r.assigned_to_name || ""
+        assignedTo: r.assigned_to_name || "",
+        isDataCalling: r.is_data_calling === true
       });
     }
 
@@ -192,7 +199,8 @@ tasksRouter.get(
         status: r.status_label,
         feedback: r.latest_log_message || "No feedback yet",
         taskType: r.status_label,
-        assignedTo: r.assigned_to_name || ""
+        assignedTo: r.assigned_to_name || "",
+        isDataCalling: r.is_data_calling === true
       });
     }
 

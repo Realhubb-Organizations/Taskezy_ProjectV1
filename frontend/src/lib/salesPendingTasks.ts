@@ -23,6 +23,7 @@ export interface PendingTask {
   feedback: string;
   taskType: string; // follow-up call type (Callback / Meeting / Site Visit), or the lead status that makes it a task
   assignedTo: string;
+  isDataCalling: boolean; // a Data Calling lead (source "Bulk Upload") rather than a Leads one
 }
 
 // The server-fetched, not-yet-bucketed shape (AppContext.tsx's pendingTasks,
@@ -45,6 +46,7 @@ export interface PendingTaskRaw {
   feedback: string;
   taskType: string;
   assignedTo: string;
+  isDataCalling?: boolean;
 }
 
 const toDate = (iso: string | null | undefined): Date | null => {
@@ -78,7 +80,8 @@ export function applyTaskBuckets(rawTasks: PendingTaskRaw[], now: Date): Pending
       status: r.status,
       feedback: r.feedback,
       taskType: r.taskType,
-      assignedTo: r.assignedTo
+      assignedTo: r.assignedTo,
+      isDataCalling: r.isDataCalling === true
     };
   });
 
