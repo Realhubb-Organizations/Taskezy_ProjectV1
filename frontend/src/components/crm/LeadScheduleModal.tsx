@@ -36,8 +36,16 @@ export default function LeadScheduleModal({ pending, submitting, error, onCancel
 
   const inputClass = "w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 text-xs font-semibold text-slate-800 focus:outline-none focus:border-brand-500";
 
+  // z-[60], not the z-[9999] CallFeedbackGate uses — this modal contains the
+  // custom DatePicker (@/components/ui/DateRangePicker), whose own
+  // portaled dropdown panel tops out at z-[210] (by design, so it clears
+  // "modals, drawers and scrolling tables" — see that file's own comment).
+  // At z-9999 this modal's backdrop sat ON TOP of that panel instead,
+  // making the calendar unopenable. Every other modal in this app (the
+  // Lead Detail drawer, MetricDetailModal) already sits well under 200,
+  // consistent with that design intent — this just matches them.
   return createPortal(
-    <div className="fixed inset-0 z-[9999] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[60] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4 animate-fade-in">
         <div className="flex items-center gap-2.5">
           <span className="h-9 w-9 rounded-xl bg-brand-50 border border-brand-100 flex items-center justify-center text-brand-600 shrink-0">
