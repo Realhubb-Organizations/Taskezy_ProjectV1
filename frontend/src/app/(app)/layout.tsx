@@ -193,6 +193,40 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   // bar are separate, `md:hidden`-gated UI and are unaffected by this.
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const pushTokenRef = useRef<string | null>(null);
+
+  // Phones: while the on-screen keyboard is up for a text field (lead
+  // search, notes, forms), the fixed bottom tab bar would ride up on top of
+  // the keyboard and cover the results — hide it until the keyboard closes.
+  // "Keyboard up" = a text field has focus AND the visible viewport shrank
+  // well below its normal height (so a focused field after the keyboard was
+  // dismissed with Back doesn't keep the bar hidden).
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  useEffect(() => {
+    const isTextField = (el: Element | null) =>
+      el instanceof HTMLElement &&
+      (el.isContentEditable ||
+        el.tagName === "TEXTAREA" ||
+        (el.tagName === "INPUT" && !["checkbox", "radio", "button", "submit", "reset", "range", "file", "color", "date", "time"].includes((el as HTMLInputElement).type)));
+    const vv = window.visualViewport;
+    let fullHeight = vv ? vv.height : window.innerHeight;
+    const update = () => {
+      const focused = isTextField(document.activeElement);
+      const height = vv ? vv.height : window.innerHeight;
+      if (!focused) fullHeight = Math.max(height, vv ? 0 : fullHeight); // rotation / no keyboard: re-baseline
+      setKeyboardOpen(focused && (!vv || height < fullHeight - 120));
+    };
+    const onFocusChange = () => setTimeout(update, 50);
+    document.addEventListener("focusin", onFocusChange);
+    document.addEventListener("focusout", onFocusChange);
+    vv?.addEventListener("resize", update);
+    window.addEventListener("resize", update);
+    return () => {
+      document.removeEventListener("focusin", onFocusChange);
+      document.removeEventListener("focusout", onFocusChange);
+      vv?.removeEventListener("resize", update);
+      window.removeEventListener("resize", update);
+    };
+  }, []);
   const [expandedGroups, setExpandedGroups] = useState<Set<SystemType>>(new Set());
   const toggleGroup = (key: SystemType) => {
     setExpandedGroups(prev => {
@@ -839,7 +873,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
             matching a native app's tab bar. "More" opens the drawer above,
             which holds everything that doesn't fit as a fixed tab. */}
         <nav
-          className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-slate-200 shadow-[0_-2px_8px_rgba(0,0,0,0.04)] select-none"
+          className={`md:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-slate-200 shadow-[0_-2px_8px_rgba(0,0,0,0.04)] select-none ${keyboardOpen ? "hidden" : ""}`}
           style={{ paddingBottom: "env(safe-area-inset-bottom)", WebkitTouchCallout: "none" }}
         >
           <div className="flex items-end">
@@ -923,7 +957,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
             parent — the other half of the fix above. Without this, <main>
             still grows to fit all its content instead of capping at the
             remaining viewport space and letting overflow-y-auto do its job. */}
-        <main className="flex-1 min-h-0 p-3 sm:p-6 lg:p-8 pb-24 md:pb-8 bg-slate-50/50 overflow-y-auto overflow-x-hidden overscroll-y-none">
+        <main className={`flex-1 min-h-0 p-3 sm:p-6 lg:p-8 ${keyboardOpen ? "pb-3" : "pb-24"} md:pb-8 bg-slate-50/50 overflow-y-auto overflow-x-hidden overscroll-y-none`}>
           <PullToRefresh>
             {hasPageAccess ? children : (
               <div className="min-h-[60vh] flex flex-col items-center justify-center p-6 text-center space-y-6 bg-white border border-slate-200 rounded-3xl shadow-sm max-w-2xl mx-auto my-8 animate-fade-in">
