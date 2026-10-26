@@ -47,10 +47,55 @@ npx cap sync android
 echo "== Building Android debug APK + release AAB =="
 (
   cd android
-  export JAVA_HOME="/c/Program Files/Android/Android Studio/jbr"
+  # This project's Capacitor/AGP version needs Java 21 specifically —
+  # not older (compileDebugJavaWithJavac fails: "invalid source release:
+  # 21") and not newer (Gradle 8.14.3 can't parse build scripts on a
+  # Java 25 JBR: "Unsupported class file major version 69"). A single
+  # hardcoded path here silently broke twice already — once when
+  # Android Studio's bundled JBR auto-updated past 21 to 25 without any
+  # warning, producing a real "BUILD FAILED" that went undetected because
+  # it was being piped through `| tail` elsewhere (not here — this script
+  # already has set -eu top, so it does fail loudly on its own — but the
+  # broken path itself needs to actually resolve to something that works).
+  # Try a short list of known-good install locations before giving up.
+  for candidate in \
+    "/c/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotspot" \
+    "/c/Program Files/Android/Android Studio/jbr" \
+    "/c/Program Files/Android/Android Studio1/jbr"
+  do
+    if [ -f "$candidate/bin/java.exe" ] && "$candidate/bin/java" -version 2>&1 | grep -q '"21\.'; then
+      export JAVA_HOME="$candidate"
+      break
+    fi
+  done
+  if [ -z "${JAVA_HOME:-}" ]; then
+    echo "No working Java 21 install found in the known candidate paths." >&2
+    echo "Install one (e.g. 'winget install EclipseAdoptium.Temurin.21.JDK') or update the candidate list above." >&2
+    exit 1
+  fi
+  echo "Using JAVA_HOME=$JAVA_HOME"
   ./gradlew.bat assembleDebug --no-daemon
   ./gradlew.bat bundleRelease --no-daemon
 )
+
+# Trust but verify — a build that silently reused stale cached output
+# instead of actually rebuilding would still exit 0 above; this is what
+# let v0.12-v0.14 ship as secretly-still-v0.10 binaries for 3 version
+# bumps in a row before anyone noticed (AndroidManifest.xml inside the
+# APK is binary XML, not plain text — a `grep`-based check on it can't
+# reliably confirm this, aapt2 is the real tool for it).
+AAPT2="$(find "${ANDROID_HOME:-$LOCALAPPDATA/Android/Sdk}/build-tools" -maxdepth 2 -iname "aapt2.exe" 2>/dev/null | sort -V | tail -1)"
+if [ -n "$AAPT2" ] && [ -x "$AAPT2" ]; then
+  BUILT="$("$AAPT2" dump badging "android/app/build/outputs/apk/debug/app-debug.apk" 2>/dev/null | head -1)"
+  echo "Built APK reports: $BUILT"
+  if ! echo "$BUILT" | grep -q "versionCode='$VERSION_CODE'"; then
+    echo "ERROR: the built APK's versionCode doesn't match what was just set ($VERSION_CODE) — the build silently used stale output. Run 'cd android && ./gradlew.bat clean' and retry." >&2
+    exit 1
+  fi
+else
+  echo "aapt2 not found — skipping the built-APK version verification. To check manually:" >&2
+  echo "  aapt2 dump badging android/app/build/outputs/apk/debug/app-debug.apk" >&2
+fi
 
 mkdir -p android/releases
 cp "android/app/build/outputs/apk/debug/app-debug.apk" "android/releases/app-debug-v${NEW_VERSION}.apk"
