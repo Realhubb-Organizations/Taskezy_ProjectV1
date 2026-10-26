@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useApp, mapApiPropertyToFrontend, Property, PropertyTeamAssignmentMode, LeadAssignmentMode, PropertyTeamMember } from "@/context/AppContext";
 import { apiListPropertiesPage, type PropertyListFilters } from "@/lib/apiClient";
@@ -29,6 +29,7 @@ import AddPropertyModal, {
 import MetaCampaignLinker from "@/components/properties/MetaCampaignLinker";
 import GoogleCampaignLinker from "@/components/properties/GoogleCampaignLinker";
 import SheetSourceLinker from "@/components/properties/SheetSourceLinker";
+import type { LinkerHandle } from "@/components/properties/linkerHandle";
 import { useDialog } from "@/components/ui/DialogProvider";
 import FieldError, { fieldErrorClass } from "@/components/ui/FieldError";
 import { collectErrors, normalizeIndianMobile, phoneInputProps, sanitizePhoneInput, validateEmail, validatePersonName, validatePhone } from "@/lib/validation";
@@ -148,6 +149,18 @@ export default function PropertiesPage() {
     return assigned.filter(m => myTeamIds.has(m.userId));
   };
 
+  // The names behind a clickable "N Members" / "All Members" label: Admin
+  // sees the property's whole team (every sales member for "All Members"),
+  // a Manager only their own direct reports on it; agents get no names.
+  const teamMembersToList = (p: Property): { userId: string; name: string }[] => {
+    if (isAdmin) {
+      return p.teamAssignmentMode === "CUSTOM_MEMBERS" && p.assignedTeam && p.assignedTeam.length > 0
+        ? p.assignedTeam
+        : salesTeam.map(u => ({ userId: u.id, name: u.name }));
+    }
+    return myTeamMembersOnProperty(p);
+  };
+
   const teamLabelForProperty = (p: Property): string => {
     if (isAdmin) {
       if (p.teamAssignmentMode === "CUSTOM_MEMBERS" && p.assignedTeam && p.assignedTeam.length > 0) {
@@ -217,6 +230,7 @@ export default function PropertiesPage() {
     setEditLeadAssignmentMode(p.leadAssignmentMode || "ROUND_ROBIN");
     setEditSelectedMemberIds((p.assignedTeam || []).map(m => m.userId));
     setEditMemberPercentages(Object.fromEntries((p.assignedTeam || []).map(m => [m.userId, m.percentage || 0])));
+    setExpandedTeamPropertyId(null); // names list starts collapsed each time
     setIsDrawerOpen(true);
   };
 
@@ -225,7 +239,41 @@ export default function PropertiesPage() {
     setTimeout(() => {
       setSelectedProperty(null);
       setIsEditing(false);
+      setLinkerDirty({ meta: false, google: false, sheet: false });
     }, 200);
+  };
+
+  // Connected campaigns / sheet sources stage their changes; the popup's
+  // Save button (and the Edit form's save) persists all the changed ones.
+  const metaLinkerRef = useRef<LinkerHandle>(null);
+  const googleLinkerRef = useRef<LinkerHandle>(null);
+  const sheetLinkerRef = useRef<LinkerHandle>(null);
+  const [linkerDirty, setLinkerDirty] = useState({ meta: false, google: false, sheet: false });
+  const [savingLinkers, setSavingLinkers] = useState(false);
+  const popupDirty = linkerDirty.meta || linkerDirty.google || linkerDirty.sheet;
+  const onMetaDirty = useCallback((d: boolean) => setLinkerDirty(x => (x.meta === d ? x : { ...x, meta: d })), []);
+  const onGoogleDirty = useCallback((d: boolean) => setLinkerDirty(x => (x.google === d ? x : { ...x, google: d })), []);
+  const onSheetDirty = useCallback((d: boolean) => setLinkerDirty(x => (x.sheet === d ? x : { ...x, sheet: d })), []);
+  const saveLinkers = async (): Promise<boolean> => {
+    setSavingLinkers(true);
+    const results = await Promise.all([metaLinkerRef, googleLinkerRef, sheetLinkerRef].map(r => r.current?.save() ?? Promise.resolve(true)));
+    setSavingLinkers(false);
+    return results.every(Boolean);
+  };
+
+  const handleSavePopup = async () => {
+    if (await saveLinkers()) toast("Changes saved.", "success");
+    else toast("Some changes couldn't be saved. Please check and try again.", "error");
+  };
+
+  // X / outside click: don't silently drop unsaved changes.
+  const requestCloseDrawer = async () => {
+    if (popupDirty && !(await confirmDialog({
+      title: "Discard unsaved changes?",
+      message: "You've changed connected campaigns or sheets but haven't saved them.",
+      confirmLabel: "Discard"
+    }))) return;
+    closeDrawer();
   };
 
   // Phones: the share sheet with the brochure PDF + message (pick WhatsApp,
@@ -445,6 +493,11 @@ export default function PropertiesPage() {
           })
         : [];
 
+    if (popupDirty && !(await saveLinkers())) {
+      toast("Couldn't save the connected campaigns / sheets. Please check and try again.", "error");
+      return;
+    }
+
     editProperty(selectedProperty.id, {
       name: editName.trim(),
       developer: editDev.trim(),
@@ -606,24 +659,8 @@ export default function PropertiesPage() {
                     <td className="px-4 py-3 align-top font-semibold text-slate-800 whitespace-nowrap">{p.price ? `${p.price}*` : "—"}</td>
                     <td className="px-4 py-3 align-top text-slate-500"><DateTimeLines {...dateTimeParts(p.createdAt)} /></td>
                     <td className="px-4 py-3 align-top text-slate-600">
-                      <div className="[overflow-wrap:anywhere]">
-                        {currentUser?.role_type === "Manager" && myTeamMembersOnProperty(p).length > 1 ? (
-                          <>
-                            <button type="button" onClick={(e) => { e.stopPropagation(); toggleMyTeamOnProperty(p); }} className="font-semibold text-brand-700 hover:underline">
-                              {teamLabelForProperty(p)}
-                            </button>
-                            {expandedTeamPropertyId === p.id && (
-                              <div className="mt-1.5 flex flex-col gap-1 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 max-w-[140px]">
-                                {myTeamMembersOnProperty(p).map(m => (
-                                  <span key={m.userId} className="text-[11px] font-semibold text-slate-700 truncate" title={m.name}>
-                                    {m.name}
-                                  </span>
-                                ))}
-                              </div>
-                            )}
-                          </>
-                        ) : teamLabelForProperty(p)}
-                      </div>
+                      {/* Just the label here; the names list is in the property popup. */}
+                      <div className="[overflow-wrap:anywhere]">{teamLabelForProperty(p)}</div>
                     </td>
                     {isAdmin && (
                       <td className="px-4 py-3 align-top">
@@ -680,11 +717,11 @@ export default function PropertiesPage() {
         <>
           <div
             className={`fixed inset-0 bg-slate-900/60 z-50 transition-opacity duration-200 ${isDrawerOpen ? "opacity-100" : "opacity-0"}`}
-            onClick={closeDrawer}
+            onClick={requestCloseDrawer}
           />
           <div
             className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4"
-            onClick={(e) => { if (e.target === e.currentTarget) closeDrawer(); }}
+            onClick={(e) => { if (e.target === e.currentTarget) requestCloseDrawer(); }}
           >
           <div
             role="dialog"
@@ -704,7 +741,7 @@ export default function PropertiesPage() {
                 </p>
               </div>
               <div className="flex items-center gap-1 shrink-0">
-                <button onClick={closeDrawer} aria-label="Close" className="h-8 w-8 inline-flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors">
+                <button onClick={requestCloseDrawer} aria-label="Close" className="h-8 w-8 inline-flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors">
                   <X className="h-4 w-4" />
                 </button>
               </div>
@@ -846,13 +883,13 @@ export default function PropertiesPage() {
                   </div>
 
                   <div className="border-t border-slate-200 pt-4">
-                    <MetaCampaignLinker propertyId={selectedProperty.id} isAdmin={isAdmin} />
+                    <MetaCampaignLinker ref={metaLinkerRef} onDirtyChange={onMetaDirty} propertyId={selectedProperty.id} isAdmin={isAdmin} />
                   </div>
                   <div className="border-t border-slate-200 pt-4">
-                    <GoogleCampaignLinker propertyId={selectedProperty.id} isAdmin={isAdmin} />
+                    <GoogleCampaignLinker ref={googleLinkerRef} onDirtyChange={onGoogleDirty} propertyId={selectedProperty.id} isAdmin={isAdmin} />
                   </div>
                   <div className="border-t border-slate-200 pt-4">
-                    <SheetSourceLinker propertyId={selectedProperty.id} isAdmin={isAdmin} />
+                    <SheetSourceLinker ref={sheetLinkerRef} onDirtyChange={onSheetDirty} propertyId={selectedProperty.id} isAdmin={isAdmin} />
                   </div>
 
                   <div className="flex gap-2 pt-2">
@@ -913,7 +950,7 @@ export default function PropertiesPage() {
                     <div>
                       <dt className="text-xs text-slate-500">Assigned team</dt>
                       <dd className="text-sm font-medium text-slate-900 mt-0.5">
-                        {currentUser?.role_type === "Manager" && myTeamMembersOnProperty(selectedProperty).length > 1 ? (
+                        {teamMembersToList(selectedProperty).length > 1 ? (
                           <button type="button" onClick={() => toggleMyTeamOnProperty(selectedProperty)} className="text-brand-700 hover:underline">
                             {teamLabelForProperty(selectedProperty)}
                           </button>
@@ -926,10 +963,10 @@ export default function PropertiesPage() {
                         <dd className="text-sm font-medium text-slate-900 mt-0.5">{selectedProperty.leadAssignmentMode === "ROUND_ROBIN" ? "Round robin" : "Percentage split"}</dd>
                       </div>
                     )}
-                    {currentUser?.role_type === "Manager" && expandedTeamPropertyId === selectedProperty.id && (
+                    {teamMembersToList(selectedProperty).length > 1 && expandedTeamPropertyId === selectedProperty.id && (
                       <div className="col-span-2">
-                        <div className="flex flex-col gap-1 border border-slate-200 rounded-lg px-3 py-2 max-w-[220px]">
-                          {myTeamMembersOnProperty(selectedProperty).map(m => (
+                        <div className="flex flex-col gap-1 border border-slate-200 rounded-lg px-3 py-2 max-w-[260px] max-h-56 overflow-y-auto">
+                          {teamMembersToList(selectedProperty).map(m => (
                             <span key={m.userId} className="text-sm text-slate-700 truncate" title={m.name}>
                               {m.name}
                             </span>
@@ -953,13 +990,13 @@ export default function PropertiesPage() {
                   {isAdmin && (
                     <>
                       <div className="border-t border-slate-200 pt-6">
-                        <MetaCampaignLinker propertyId={selectedProperty.id} isAdmin={isAdmin} />
+                        <MetaCampaignLinker ref={metaLinkerRef} onDirtyChange={onMetaDirty} propertyId={selectedProperty.id} isAdmin={isAdmin} />
                       </div>
                       <div className="border-t border-slate-200 pt-6">
-                        <GoogleCampaignLinker propertyId={selectedProperty.id} isAdmin={isAdmin} />
+                        <GoogleCampaignLinker ref={googleLinkerRef} onDirtyChange={onGoogleDirty} propertyId={selectedProperty.id} isAdmin={isAdmin} />
                       </div>
                       <div className="border-t border-slate-200 pt-6">
-                        <SheetSourceLinker propertyId={selectedProperty.id} isAdmin={isAdmin} />
+                        <SheetSourceLinker ref={sheetLinkerRef} onDirtyChange={onSheetDirty} propertyId={selectedProperty.id} isAdmin={isAdmin} />
                       </div>
                     </>
                   )}
@@ -989,7 +1026,18 @@ export default function PropertiesPage() {
                         <input type="email" maxLength={254} autoComplete="email" placeholder="Email address (optional)" value={interestEmail} onChange={(e) => { setInterestEmail(e.target.value); setInterestErrors(p => ({ ...p, email: undefined })); }} aria-invalid={!!interestErrors.email} className={`w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none ${fieldErrorClass(!!interestErrors.email)}`} />
                         <FieldError message={interestErrors.email} />
                       </div>
-                      <div className="flex justify-end">
+                      <div className="flex justify-end gap-2">
+                        {isAdmin && (
+                          <button
+                            type="button"
+                            onClick={handleSavePopup}
+                            disabled={!popupDirty || savingLinkers}
+                            title={popupDirty ? "Save connected campaigns and sheets" : "No changes to save"}
+                            className="h-9 px-4 border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 font-medium rounded-lg text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            {savingLinkers ? "Saving..." : "Save"}
+                          </button>
+                        )}
                         <button type="submit" className="h-9 px-4 bg-[#0B1E6E] hover:bg-[#081650] text-white font-medium rounded-lg text-sm transition-colors">
                           Register interest
                         </button>

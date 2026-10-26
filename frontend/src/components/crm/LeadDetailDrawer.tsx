@@ -34,7 +34,7 @@ export default function LeadDetailDrawer({
 }: LeadDetailDrawerProps) {
   const { users, currentUser, activeRole, reassignLead, updateLeadNote, recordCallEnded, recordWhatsAppOpened } = useApp();
   const { toast, confirm } = useDialog();
-  const callAllowed = canTriggerLeadCall(activeRole === "ADMIN");
+  const callAllowed = canTriggerLeadCall(activeRole === "ADMIN", currentUser?.email);
   const [localStatus, setLocalStatus] = useState<LeadStatus>("New Lead");
   // RNR/Call Back/Followup/Site Visit Scheduled are gated behind a blocking
   // popup (LeadScheduleModal below) that collects the next-call date/time +
@@ -103,6 +103,7 @@ export default function LeadDetailDrawer({
   const handleCall = () => {
     triggerLeadCall(lead, {
       isAdmin: activeRole === "ADMIN",
+      userEmail: currentUser?.email,
       toast,
       onCallEnded: (leadId, startedAt, durationSeconds) => {
         recordCallEnded(leadId, startedAt, durationSeconds).catch((err) =>

@@ -10,7 +10,7 @@ import { App as CapacitorApp } from "@capacitor/app";
 //
 // Admin: works exactly as before, everywhere (web and native), no
 // return-watching, no feedback gate.
-// Manager/Member: native app only — canTriggerLeadCall() below is what the
+// Manager/Member: native app only (plus WEB_CALL_ALLOWED_EMAILS) — canTriggerLeadCall() below is what the
 // Call button's disabled state on web should check.
 //
 // This used to watch real device call state (idle/offhook) via a native
@@ -41,8 +41,17 @@ import { App as CapacitorApp } from "@capacitor/app";
 // AppContext.tsx's session-restore mount effect (fires on every fresh app
 // load, catching the cold-restart case the in-memory path can't).
 
-export function canTriggerLeadCall(isAdmin: boolean): boolean {
-  return isAdmin || Capacitor.isNativePlatform();
+// Non-admins who may also call from the website (e.g. an agent on an iPhone,
+// where there's no Taskezy app). They get the same feedback gate and call
+// logging as the app — only the device call-log sync (Android-only) is missing.
+const WEB_CALL_ALLOWED_EMAILS = ["jayaraj@realhubb.in"];
+
+export function isWebCallAllowed(email?: string | null): boolean {
+  return !!email && WEB_CALL_ALLOWED_EMAILS.includes(email.trim().toLowerCase());
+}
+
+export function canTriggerLeadCall(isAdmin: boolean, email?: string | null): boolean {
+  return isAdmin || Capacitor.isNativePlatform() || isWebCallAllowed(email);
 }
 
 const PENDING_CALL_KEY = "pendingCallDial";
@@ -63,11 +72,12 @@ export function triggerLeadCall(
   lead: { id: string; phone: string; name: string },
   opts: {
     isAdmin: boolean;
+    userEmail?: string | null;
     onCallEnded: (leadId: string, startedAt: string, durationSeconds: number) => void;
     toast?: (message: string, tone?: "success" | "error" | "info" | "warning") => void;
   }
 ): void {
-  if (!canTriggerLeadCall(opts.isAdmin)) return; // disabled Call button shouldn't even call this, but stay safe
+  if (!canTriggerLeadCall(opts.isAdmin, opts.userEmail)) return; // disabled Call button shouldn't even call this, but stay safe
 
   const startedAt = new Date().toISOString();
   opts.toast?.(`Dialing ${lead.name}...`, "info");

@@ -87,12 +87,13 @@ export function LeadQuickViewDrawer({ lead, onClose }: {
   lead: Lead;
   onClose: () => void;
 }) {
-  const { activeRole, recordCallEnded } = useApp();
+  const { currentUser, activeRole, recordCallEnded } = useApp();
   const [copiedField, setCopiedField] = useState<string | null>(null);
-  const callAllowed = canTriggerLeadCall(activeRole === "ADMIN");
+  const callAllowed = canTriggerLeadCall(activeRole === "ADMIN", currentUser?.email);
   const handleCall = () => {
     triggerLeadCall(lead, {
       isAdmin: activeRole === "ADMIN",
+      userEmail: currentUser?.email,
       onCallEnded: (leadId, startedAt, durationSeconds) => {
         recordCallEnded(leadId, startedAt, durationSeconds).catch((err) =>
           console.warn("Could not record call feedback gate:", err)
@@ -308,10 +309,11 @@ export default function LeadDrillDownPanel({ title, baseFilters, onClose }: {
   // blocking popup (LeadScheduleModal below) before handleDrillStatusChange
   // (which already handles the Booked deal-value prompt) actually runs.
   const statusScheduler = useLeadStatusScheduler(handleDrillStatusChange);
-  const callAllowed = canTriggerLeadCall(activeRole === "ADMIN");
+  const callAllowed = canTriggerLeadCall(activeRole === "ADMIN", currentUser?.email);
   const handleCall = (lead: Lead) => {
     triggerLeadCall(lead, {
       isAdmin: activeRole === "ADMIN",
+      userEmail: currentUser?.email,
       onCallEnded: (leadId, startedAt, durationSeconds) => {
         recordCallEnded(leadId, startedAt, durationSeconds).catch((err) =>
           console.warn("Could not record call feedback gate:", err)

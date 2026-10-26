@@ -100,7 +100,7 @@ import {
 import { dbCodeToFrontendStatus, frontendStatusToDbCode, isRealLeadId, isRealId } from "@/lib/leadStatusMapping";
 import { initNotificationSoundUnlock, playNotificationSound } from "@/lib/notificationSound";
 import { todayIso, toIsoDate } from "@/components/ui/DateRangePicker";
-import { consumePendingCallDial } from "@/lib/callTrigger";
+import { consumePendingCallDial, isWebCallAllowed } from "@/lib/callTrigger";
 import { Capacitor } from "@capacitor/core";
 
 // --- Types ---
@@ -1304,7 +1304,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         loadAllRealData(mapped.role);
         // Re-shows CallFeedbackGate after a force-quit/relaunch mid-feedback
         // — not just within the same in-memory session. Native app only
-        // (web never creates one of these rows in the first place).
+        // (web never creates one of these rows, except for the
+        // WEB_CALL_ALLOWED_EMAILS users in callTrigger.ts, who also get it).
         //
         // Backend-authoritative check first: if there's already an
         // unresolved PENDING_FEEDBACK row, show that — never overwrite it
@@ -1314,7 +1315,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         // the app process got killed mid-call before recordCallEnded ever
         // ran, so no row was created in the first place. See callTrigger.ts
         // for the full reasoning.
-        if (Capacitor.isNativePlatform()) {
+        if (Capacitor.isNativePlatform() || isWebCallAllowed(mapped.email)) {
           apiGetPendingCallAttempt()
             .then(async (existing) => {
               if (existing) {

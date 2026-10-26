@@ -168,10 +168,11 @@ export default function LeadDashboard() {
   // quick-filter stays admin-exclusive; a Sales Member gets the same Leads
   // table and stat bar without it.
   const isAdmin = currentUser?.role === "ADMIN";
-  const callAllowed = canTriggerLeadCall(isAdmin);
+  const callAllowed = canTriggerLeadCall(isAdmin, currentUser?.email);
   const handleCall = (lead: Lead) => {
     triggerLeadCall(lead, {
       isAdmin,
+      userEmail: currentUser?.email,
       toast,
       onCallEnded: (leadId, startedAt, durationSeconds) => {
         recordCallEnded(leadId, startedAt, durationSeconds).catch((err) =>
