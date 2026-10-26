@@ -412,10 +412,20 @@ export async function createLead(caller: AccessTokenPayload, input: CreateLeadIn
 export interface BulkImportLeadRow {
   name: string;
   phone: string;
+  email: string;
 }
 
 export interface BulkImportLeadsInput {
-  subSource: string;
+  subSource?: string;
+  // Omitted (Data Calling's own upload) defaults to "Bulk Upload" below,
+  // same as before this field existed. A real caller (e.g. the main CRM
+  // Leads page's bulk upload) passes the lead's actual channel instead.
+  source?: string;
+  // One batch-level choice, surfaced by the precheck endpoint below — when
+  // true, a row whose phone matches a previously-deleted lead gets its old
+  // notes/call history re-attached after being created; when
+  // false/omitted it's just created fresh, same as any other row.
+  restoreArchivedMatches?: boolean;
   assignmentMode: "PROPERTY" | "AGENT";
   propertyId?: string;
   agentIds?: string[];
@@ -432,6 +442,7 @@ export interface BulkImportLeadsResult {
   created: number;
   duplicates: number;
   skipped: BulkImportSkippedRow[];
+  restored: number;
 }
 
 // How many rows go into one INSERT statement. Postgres/node-pg handle far
@@ -475,9 +486,24 @@ const BULK_IMPORT_CHUNK_SIZE = 1000;
  * property, the admin-defined property team decides). Called by the
  * request handler before the import is queued, since the queued worker
  * runs bulkImportLeads without a caller.
+ *
+ * Also the one place Data Calling's bulk upload and the main CRM Leads
+ * page's bulk upload (built later, same endpoint — see
+ * BulkImportLeadsInput's `source`) actually diverge for a Manager: Data
+ * Calling (no `source`) stays open to every manager as before; the Leads
+ * page's own upload (a real `source`) needs the per-manager Access
+ * Control toggle (Settings > Manage Users, Super Admin only) — off by
+ * default, so this narrows access rather than the reverse.
  */
 export async function assertBulkImportAllowed(caller: AccessTokenPayload, input: Omit<BulkImportLeadsInput, "actor">): Promise<void> {
-  if (caller.role === "ADMIN" || input.assignmentMode !== "AGENT") return;
+  if (caller.role === "ADMIN") return;
+  if (input.source) {
+    const allowed = await usersRepo.isBulkUploadCrmLeadsEnabled(caller.sub);
+    if (!allowed) {
+      throw ApiError.forbidden("You don't have access to bulk-upload leads from the Leads page — ask an admin to enable it for you in Manage Users.");
+    }
+  }
+  if (input.assignmentMode !== "AGENT") return;
   for (const agentId of input.agentIds ?? []) await assertUploadAssigneeAllowed(caller, agentId);
 }
 
@@ -497,6 +523,7 @@ export async function bulkImportLeads(input: BulkImportLeadsInput): Promise<Bulk
     row: number;
     name: string;
     phone: string;
+    email: string | null;
     assignedAgentId: string;
     statusCode: string;
   }
@@ -509,6 +536,11 @@ export async function bulkImportLeads(input: BulkImportLeadsInput): Promise<Bulk
     // Typed/uploaded numbers use the strict rule: an 11-digit typo is reported
     // as skipped instead of being cut down to a different, valid-looking number.
     const phone = normalizeTypedIndianMobile(input.leads[i].phone ?? "");
+    // Lenient on purpose (unlike createLeadSchema's strict email()) — a bad
+    // email in one cell of a 100k-row sheet shouldn't skip an otherwise
+    // valid name+phone row, it just leaves email blank for that lead.
+    const rawEmail = input.leads[i].email?.trim();
+    const email = rawEmail && /^\S+@\S+\.\S+$/.test(rawEmail) ? rawEmail : null;
 
     if (!name) {
       skipped.push({ row, reason: "Name is required" });
@@ -545,24 +577,36 @@ export async function bulkImportLeads(input: BulkImportLeadsInput): Promise<Bulk
     }
 
     seenPhones.add(phone);
-    candidates.push({ row, name, phone, assignedAgentId, statusCode });
+    candidates.push({ row, name, phone, email, assignedAgentId, statusCode });
   }
 
   let created = 0;
+  let restored = 0;
   const notifyCounts = new Map<string, number>();
   const common = {
-    source: "Bulk Upload",
-    subSource: input.subSource,
-    propertyId: input.assignmentMode === "PROPERTY" ? input.propertyId! : null,
+    source: input.source?.trim() || "Bulk Upload",
+    subSource: input.subSource?.trim() || null,
+    // PROPERTY mode's propertyId is required by the schema (used both for
+    // round-robin target selection above and stored here); AGENT mode has
+    // no required property, but a caller may still tag the batch with one
+    // (e.g. the main CRM Leads page's "Property" field) — passed through
+    // as-is rather than always nulled out.
+    propertyId: input.propertyId ?? null,
     uploadedByUserId: input.actor.userId
   };
 
+  // Only looked up when the caller actually asked to restore — an ordinary
+  // import that never sets this flag pays zero extra query cost.
+  const archiveMatches = input.restoreArchivedMatches
+    ? await repo.findArchivedMatchesByPhones(candidates.map(c => c.phone))
+    : new Map<string, repo.ArchivedLeadMatch>();
+
   for (let i = 0; i < candidates.length; i += BULK_IMPORT_CHUNK_SIZE) {
     const chunk = candidates.slice(i, i + BULK_IMPORT_CHUNK_SIZE);
-    let insertedPhones: Set<string>;
+    let insertedLeadIds: Map<string, string>;
     try {
-      insertedPhones = await repo.createBulkLeadsChunk(
-        chunk.map(c => ({ name: c.name, phone: c.phone, assignedAgentId: c.assignedAgentId, statusCode: c.statusCode })),
+      insertedLeadIds = await repo.createBulkLeadsChunk(
+        chunk.map(c => ({ name: c.name, phone: c.phone, email: c.email, assignedAgentId: c.assignedAgentId, statusCode: c.statusCode })),
         common
       );
     } catch (err) {
@@ -572,10 +616,32 @@ export async function bulkImportLeads(input: BulkImportLeadsInput): Promise<Bulk
       throw err;
     }
 
+    // Collected per chunk, inserted once below — so a restore failure for
+    // this chunk can't undo the leads this chunk already successfully
+    // created (see the try/catch around insertRestoredLeadLogsChunk).
+    const restoreTargets: { newLeadId: string; logs: unknown[] }[] = [];
+
     for (const c of chunk) {
-      if (insertedPhones.has(c.phone)) {
+      const newLeadId = insertedLeadIds.get(c.phone);
+      if (newLeadId) {
         created++;
         notifyCounts.set(c.assignedAgentId, (notifyCounts.get(c.assignedAgentId) ?? 0) + 1);
+        const archived = archiveMatches.get(c.phone);
+        if (archived) {
+          restored++;
+          restoreTargets.push({
+            newLeadId,
+            logs: [
+              ...archived.logs,
+              {
+                user_id: input.actor.userId,
+                user_name_snapshot: input.actor.name,
+                message: `Restored from an archived lead deleted on ${new Date(archived.deletedAt).toLocaleDateString("en-IN")} by ${archived.deletedByName}; ${archived.logs.length} historical note(s) re-attached.`,
+                created_at: new Date().toISOString()
+              }
+            ]
+          });
+        }
       } else {
         // Only reachable if this exact phone already existed on another
         // lead before this upload started — in-file repeats were already
@@ -583,7 +649,27 @@ export async function bulkImportLeads(input: BulkImportLeadsInput): Promise<Bulk
         duplicates++;
       }
     }
+
+    if (restoreTargets.length > 0) {
+      try {
+        await repo.insertRestoredLeadLogsChunk(restoreTargets);
+      } catch (err) {
+        // The leads themselves are already safely created above — losing
+        // restored history for this one chunk (e.g. a stale user_id FK on
+        // very old archived history) shouldn't fail an otherwise-successful
+        // import, so this degrades instead of throwing.
+        console.warn("Could not re-attach archived history for a bulk-import chunk:", err);
+        restored -= restoreTargets.length;
+      }
+    }
   }
+
+  // This endpoint is shared with the main CRM Leads page's own bulk upload
+  // (a real `source` means it's not Data Calling, see BulkImportLeadsInput)
+  // — notification wording/links below point wherever the batch actually
+  // landed, instead of always saying "data calling".
+  const isDataCalling = common.source === "Bulk Upload";
+  const destinationLink = isDataCalling ? "/dashboard/crm/data-calling" : "/dashboard/crm";
 
   // One summary notification per agent rather than one per lead — a
   // 100,000-row batch shouldn't flood an agent's notification feed the way
@@ -594,9 +680,11 @@ export async function bulkImportLeads(input: BulkImportLeadsInput): Promise<Bulk
         system: "CRM",
         category: "NEW_LEAD",
         title: "New Bulk Leads",
-        message: `${count} bulk data calling lead${count > 1 ? "s" : ""} assigned to you by ${input.actor.name}.`,
+        message: isDataCalling
+          ? `${count} bulk data calling lead${count > 1 ? "s" : ""} assigned to you by ${input.actor.name}.`
+          : `${count} new lead${count > 1 ? "s" : ""} assigned to you by ${input.actor.name}.`,
         recipientUserId: agentId,
-        link: "/dashboard/crm/data-calling"
+        link: destinationLink
       })
     )
   );
@@ -611,12 +699,49 @@ export async function bulkImportLeads(input: BulkImportLeadsInput): Promise<Bulk
     message:
       `${created} lead${created === 1 ? "" : "s"} uploaded successfully.` +
       (duplicates > 0 ? ` ${duplicates} duplicate${duplicates === 1 ? "" : "s"}.` : "") +
-      (skipped.length > 0 ? ` ${skipped.length} failed.` : ""),
+      (skipped.length > 0 ? ` ${skipped.length} failed.` : "") +
+      (restored > 0 ? ` ${restored} restored from previously-deleted leads.` : ""),
     recipientUserId: input.actor.userId,
-    link: "/dashboard/crm/data-calling"
+    link: destinationLink
   });
 
-  return { created, duplicates, skipped };
+  return { created, duplicates, skipped, restored };
+}
+
+export interface BulkImportPrecheckResult {
+  totalRows: number;
+  activeDuplicateCount: number;
+  archivedMatchCount: number;
+  archivedMatchesPreview: { name: string; phone: string; deletedAt: string; deletedByName: string }[];
+}
+
+/**
+ * Run before the real bulk-import request so the upload modal can ask,
+ * once for the whole batch, whether to restore archived history onto rows
+ * that match a previously-deleted lead — see bulkImportLeads above for
+ * what "restore" actually does. `activeDuplicateCount` is informational
+ * only (today's silent duplicate-skip behavior is unchanged either way).
+ */
+export async function precheckBulkImportLeads(leads: { name: string; phone: string }[]): Promise<BulkImportPrecheckResult> {
+  const phones = Array.from(
+    new Set(leads.map(l => normalizeTypedIndianMobile(l.phone ?? "")).filter((p): p is string => !!p))
+  );
+
+  const [activeDuplicateCount, archiveMatches] = await Promise.all([
+    repo.countLeadsByPhones(phones),
+    repo.findArchivedMatchesByPhones(phones)
+  ]);
+
+  const archivedMatchesPreview = Array.from(archiveMatches.entries())
+    .slice(0, 20)
+    .map(([phone, m]) => ({ name: m.name, phone, deletedAt: m.deletedAt, deletedByName: m.deletedByName }));
+
+  return {
+    totalRows: leads.length,
+    activeDuplicateCount,
+    archivedMatchCount: archiveMatches.size,
+    archivedMatchesPreview
+  };
 }
 
 /** A lead's status can be changed by the agent it's assigned to, that agent's manager, or an admin. */

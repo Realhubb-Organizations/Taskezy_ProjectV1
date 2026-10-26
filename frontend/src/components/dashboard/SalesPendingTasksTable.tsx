@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Search, Copy, Check, X } from "lucide-react";
 import { LeadStatus, useApp } from "@/context/AppContext";
 import { ApiPendingTaskRow } from "@/lib/apiClient";
-import { PICKABLE_STATUS_OPTIONS } from "@/lib/leadStatusMapping";
+import { nextStatusOptions } from "@/lib/leadStatusMapping";
 import { applyTaskBuckets, PendingTask, TaskBucket } from "@/lib/salesPendingTasks";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
@@ -111,7 +111,10 @@ export default function SalesPendingTasksTable({
   // Per-row status editor — only for tasks tied to a real lead.
   const renderStatusCell = (t: PendingTask) => {
     if (!t.leadId) return <span className="font-bold text-slate-900">{t.status}</span>;
-    const options: string[] = PICKABLE_STATUS_OPTIONS.includes(t.status as LeadStatus) ? PICKABLE_STATUS_OPTIONS : [t.status, ...PICKABLE_STATUS_OPTIONS];
+    // Only statuses the transition matrix allows from this lead's current
+    // one are offered — e.g. Site Visit Done only shows once the lead is on
+    // Site Visit Scheduled (or Different Location), not from every status.
+    const options: string[] = [t.status, ...nextStatusOptions(t.status as LeadStatus).map(c => c.status)];
     return (
       <SearchableSelect
         variant="inline"

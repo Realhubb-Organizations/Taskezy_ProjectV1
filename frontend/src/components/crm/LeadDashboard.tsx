@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useApp, Lead, LeadStatus, FollowupCall, mapApiLeadToFrontendLead, mapApiFollowupToFrontend } from "@/context/AppContext";
 import { useDialog } from "@/components/ui/DialogProvider";
 import { Sliders, Sparkles, Plus, Check, ChevronDown, Search, X, Minus, Download, RotateCcw, Users, Trash2, AlertTriangle } from "lucide-react";
-import { STATUS_OPTIONS, PICKABLE_STATUS_OPTIONS, frontendStatusToDbCode, withDeadLeadGate } from "@/lib/leadStatusMapping";
+import { STATUS_OPTIONS, PICKABLE_STATUS_OPTIONS, frontendStatusToDbCode, withDeadLeadGate, nextStatusOptions } from "@/lib/leadStatusMapping";
 import { type LeadSummaryStats } from "@/lib/leadSummaryStats";
 import { apiListLeadsPage, apiGetLead, apiGetLeadStats, apiGetLeadAnalyticsStats, apiGetDistinctCampaigns, apiListFollowupsPage, apiDeleteLead, apiBulkDeleteLeads, apiBulkReassignLeads, type LeadListFilters, type AgentAnalyticsStats } from "@/lib/apiClient";
 import { useServerLeadList } from "@/lib/useServerLeadList";
@@ -20,7 +20,7 @@ import { canChangeLeadStatus, canUploadLeads, eligibleAssignees, isUnassignedLea
 import DateRangePicker, { type DateRangeValue, todayIso } from "@/components/ui/DateRangePicker";
 import DateRangeSelect from "@/components/ui/DateRangeSelect";
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
-import AddLeadModal from "./AddLeadModal";
+import AddLeadModal, { type BulkLeadUploadSubmitInput, type BulkLeadUploadSubmitResult } from "./AddLeadModal";
 import LeadDetailDrawer from "./LeadDetailDrawer";
 import LeadDrillDownPanel from "./LeadDrillDownPanel";
 import LeadScheduleModal from "./LeadScheduleModal";
@@ -134,7 +134,8 @@ export default function LeadDashboard() {
     leadsChangedSignal,
     removeLeadsLocally,
     recordCallEnded,
-    recordWhatsAppOpened
+    recordWhatsAppOpened,
+    bulkImportLeads
   } = useApp();
   const { toast, prompt: promptDialog } = useDialog();
 
@@ -291,7 +292,11 @@ export default function LeadDashboard() {
     if (!canChangeLeadStatus(l, currentUser, users)) {
       return <span className={phoneLayout ? "inline-block rounded-xl bg-slate-100 px-2 py-1.5 text-[11px] font-semibold text-slate-600" : "inline-block max-w-[110px] text-[11px] text-slate-700"} title={STATUS_LOCKED_HINT}>{l.status}</span>;
     }
-    const allOptions = PICKABLE_STATUS_OPTIONS.includes(l.status) ? PICKABLE_STATUS_OPTIONS : [l.status, ...PICKABLE_STATUS_OPTIONS];
+    // Only statuses the transition matrix allows from this lead's current
+    // one are offered — e.g. Site Visit Done only shows once the lead is on
+    // Site Visit Scheduled (or Different Location), not from every status.
+    // The backend re-enforces this independently (leadStatusTransitions.ts).
+    const allOptions = [l.status, ...nextStatusOptions(l.status).map(c => c.status)];
     return (
       <SearchableSelect
         variant="inline"
@@ -334,17 +339,21 @@ export default function LeadDashboard() {
     }
   };
 
-  const handleAddBulkLeads = (data: {
-    assignmentMode: "project" | "agent";
-    target: string;
-    fileName: string;
-  }) => {
-    // This used to inject 3 hardcoded fake leads (Rohit Sharma, Virat Kohli,
-    // Jasprit Bumrah) into the real database on every click, regardless of
-    // the file's actual contents, and then claim the import succeeded.
-    // Bulk CSV/XLSX parsing isn't wired to a real backend endpoint yet.
-    toast("Bulk import isn't wired up to a real backend yet — please use Manual Ingestion Entry for now.", "info");
-    setIsAddOpen(false);
+  // Real bulk-import now — this used to inject 3 hardcoded fake leads
+  // (Rohit Sharma, Virat Kohli, Jasprit Bumrah) into the database on every
+  // click regardless of the uploaded file, then claim success. A real
+  // `source` (not "Bulk Upload") is what keeps these leads out of Data
+  // Calling and inside the normal CRM Leads pipeline — see
+  // leads.service.ts's bulkImportLeads. The modal shows its own result
+  // screen, so this just forwards the call and lets it render that.
+  const handleAddBulkLeads = async (input: BulkLeadUploadSubmitInput): Promise<BulkLeadUploadSubmitResult> => {
+    return bulkImportLeads({
+      source: input.source,
+      assignmentMode: input.assignmentMode,
+      propertyId: input.propertyId,
+      agentIds: input.agentIds,
+      leads: input.leads
+    });
   };
 
   // ===========================================================================
@@ -2200,6 +2209,9 @@ export default function LeadDashboard() {
           onSubmitBulk={handleAddBulkLeads}
           agentsList={uploadAssignableUsers(users, currentUser).map(u => u.name)}
           propertiesList={propertiesList}
+          bulkAgentsList={uploadAssignableUsers(users, currentUser).map(u => ({ id: u.id, name: u.name }))}
+          bulkPropertiesList={properties.map(p => ({ id: p.id, name: p.name }))}
+          canUseBulkTab={isAdmin || !!currentUser?.canBulkUploadCrmLeads}
         />
 
         {/* Assign/Reshuffle Leads modal — same as Data Calling: Property must

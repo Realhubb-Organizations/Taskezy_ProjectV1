@@ -7,6 +7,7 @@ import {
   bulkDeleteLeadsSchema,
   bulkImportJobIdParamSchema,
   bulkImportLeadsSchema,
+  bulkImportPrecheckSchema,
   bulkReassignJobIdParamSchema,
   bulkReassignLeadsSchema,
   createLeadSchema,
@@ -25,6 +26,7 @@ import {
 import {
   bulkDeleteLeadsHandler,
   bulkImportLeadsHandler,
+  bulkImportPrecheckHandler,
   bulkReassignLeadsHandler,
   createLeadHandler,
   deleteLeadHandler,
@@ -88,6 +90,15 @@ leadsRouter.post(
   requireAdminOrManager("upload leads"),
   validate({ body: bulkImportLeadsSchema }),
   asyncHandler(bulkImportLeadsHandler)
+);
+// Run before the above — tells the upload modal how many rows match a
+// previously-deleted lead, so it can ask once (batch-level) whether to
+// restore their archived history before the real import commits.
+leadsRouter.post(
+  "/bulk-import/precheck",
+  requireAdminOrManager("upload leads"),
+  validate({ body: bulkImportPrecheckSchema }),
+  asyncHandler(bulkImportPrecheckHandler)
 );
 // Polled by the upload modal after the above returns a jobId — ADMIN-only,
 // same as the upload itself, since a job's output (names/phones) is the

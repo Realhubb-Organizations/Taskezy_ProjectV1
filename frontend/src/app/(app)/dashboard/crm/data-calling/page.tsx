@@ -2335,6 +2335,7 @@ export default function DataCallingPage() {
           setUploadSuccessMsg(
             `${result.created} lead${result.created === 1 ? "" : "s"} imported` +
               (result.duplicates > 0 ? `, ${result.duplicates} duplicate${result.duplicates === 1 ? "" : "s"} skipped` : "") +
+              (result.restored > 0 ? `, ${result.restored} restored from previously-deleted leads` : "") +
               (result.skipped.length > 0 ? `, ${result.skipped.length} row${result.skipped.length === 1 ? "" : "s"} skipped` : "") +
               "."
           );

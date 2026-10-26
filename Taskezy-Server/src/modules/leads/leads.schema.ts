@@ -173,7 +173,23 @@ export const bulkReassignJobIdParamSchema = z.object({
 // rejecting the whole batch over one bad row.
 export const bulkImportLeadsSchema = z
   .object({
-    subSource: z.string().trim().min(1, "Sub-source is required").max(200),
+    // Data Calling's own free-text batch label — optional here since the
+    // main CRM Leads page's bulk upload (see `source` below) has no
+    // equivalent concept; Data Calling's client always sends one.
+    subSource: z.string().trim().max(200).optional(),
+    // Lets a caller other than Data Calling tag its batch with a real lead
+    // channel (e.g. "Meta Ads") instead of defaulting to "Bulk Upload" —
+    // see leads.service.ts's bulkImportLeads. "Bulk Upload" is also the
+    // literal every SLA/excludeBulkUpload check keys off (see
+    // buildLeadWhereClause), so a real source here is what keeps these
+    // leads out of Data Calling and inside the normal CRM Leads pipeline.
+    source: z.string().trim().min(1).max(200).optional(),
+    // When a row's phone matches a previously-deleted (archived) lead:
+    // true re-attaches that lead's old notes/call history onto the new
+    // row; omitted/false just creates it fresh, same as any other row.
+    // One batch-level choice, not per-row — see leads.service.ts's
+    // bulkImportLeads and the new precheck endpoint below.
+    restoreArchivedMatches: z.boolean().optional(),
     assignmentMode: z.enum(["PROPERTY", "AGENT"]),
     propertyId: z.string().uuid().optional(),
     // Agent mode round-robins rows evenly across every selected agent (see
@@ -184,7 +200,8 @@ export const bulkImportLeadsSchema = z
       .array(
         z.object({
           name: z.string().max(200).optional().default(""),
-          phone: z.string().max(30).optional().default("")
+          phone: z.string().max(30).optional().default(""),
+          email: z.string().trim().max(254).optional().default("")
         })
       )
       .min(1, "At least one lead row is required")
@@ -202,3 +219,20 @@ export const bulkImportLeadsSchema = z
     message: "At least one agentId is required for Agent assignment mode",
     path: ["agentIds"]
   });
+
+// Run before the real bulk-import request — tells the caller how many rows
+// match an existing active lead (informational, today's duplicate-skip
+// behavior is unchanged) and how many match a previously-deleted
+// (archived) one, so the UI can ask once, batch-level, whether to restore
+// those rows' old history before committing to the real import.
+export const bulkImportPrecheckSchema = z.object({
+  leads: z
+    .array(
+      z.object({
+        name: z.string().max(200).optional().default(""),
+        phone: z.string().max(30).optional().default("")
+      })
+    )
+    .min(1, "At least one lead row is required")
+    .max(200_000, "A single upload is limited to 200,000 rows")
+});

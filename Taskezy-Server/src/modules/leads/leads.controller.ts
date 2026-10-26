@@ -98,6 +98,15 @@ export async function bulkImportLeadsHandler(req: Request, res: Response): Promi
   sendOk(res, { jobId }, 202);
 }
 
+// Synchronous (not queued) — a couple of indexed reads, run before the real
+// import so the upload modal can ask once whether to restore any rows that
+// match a previously-deleted lead. See leads.service.ts's
+// precheckBulkImportLeads.
+export async function bulkImportPrecheckHandler(req: Request, res: Response): Promise<void> {
+  const result = await leadsService.precheckBulkImportLeads(req.body.leads);
+  sendOk(res, result);
+}
+
 export async function getBulkImportStatusHandler(req: Request, res: Response): Promise<void> {
   const [job] = await boss.findJobs(BULK_IMPORT_LEADS_QUEUE, { id: req.params.jobId });
   if (!job) throw ApiError.notFound("Import job not found");
