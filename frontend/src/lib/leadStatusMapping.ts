@@ -264,8 +264,8 @@ function deriveLogStateLabel(message: string): string | null {
   return null;
 }
 
-// Oldest first ("down word approach") — Lead Captured at the top, each
-// later update reading downward in the order it actually happened.
+// Newest first — the latest update at the top, Lead Captured at the bottom.
+// from → to labels are worked out in chronological order, then reversed.
 export function deriveActivityTimeline(logs: LeadLog[]): ActivityTimelineEntry[] {
   const chronological = [...logs].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
   let previousLabel: string | null = null;
@@ -274,5 +274,5 @@ export function deriveActivityTimeline(logs: LeadLog[]): ActivityTimelineEntry[]
     const entry: ActivityTimelineEntry = { log, toLabel, fromLabel: previousLabel };
     previousLabel = toLabel ?? previousLabel;
     return entry;
-  });
+  }).reverse();
 }
