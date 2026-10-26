@@ -106,14 +106,14 @@ function AgentTasksView() {
         title={tab === "pending" ? "Pending Task" : "All Task"}
         subtitle={subtitle}
         headerTabs={
-          <div className="flex items-end gap-5 border-b border-slate-200 mt-3">
+          <div className="flex items-end gap-6 mt-5">
             {([["leads", "Leads"], ["dataCalling", "Data Calling"]] as const).map(([value, label]) => (
               <button
                 key={value}
                 type="button"
                 onClick={() => setSource(value)}
-                className={`pb-1.5 -mb-px text-sm font-extrabold border-b-2 transition-colors ${
-                  source === value ? "text-[#0B1E6E] border-[#0B1E6E]" : "text-slate-400 border-transparent hover:text-slate-600"
+                className={`pb-2 text-base font-extrabold border-b-2 transition-colors ${
+                  source === value ? "text-[#0B1E6E] border-[#0B1E6E]" : "text-slate-400 border-slate-200 hover:text-slate-600"
                 }`}
               >
                 {label}
