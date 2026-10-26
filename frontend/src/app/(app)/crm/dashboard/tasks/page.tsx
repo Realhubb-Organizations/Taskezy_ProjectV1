@@ -30,12 +30,15 @@ function AgentTasksView() {
   const taskTypes = useMemo(() => params.getAll("type").filter(t => t && t !== "All"), [params]);
 
   const [range, setRange] = useState<DateRangeValue | null>(null);
+  // Leads vs Data Calling (source "Bulk Upload") — two separate task lists.
+  const [source, setSource] = useState<"leads" | "dataCalling">("leads");
   const [drawerLead, setDrawerLead] = useState<Lead | null>(null);
 
   const taskFilter = useCallback((t: PendingTask) => {
     const assignee = (t.assignedTo || "Unassigned").trim().toLowerCase();
     if (assignee !== agent.trim().toLowerCase()) return false;
     if (!TAB_BUCKETS[tab].includes(t.bucket)) return false;
+    if (t.isDataCalling !== (source === "dataCalling")) return false;
     if (taskTypes.length > 0 && !taskTypes.includes(t.taskType)) return false;
     if (range) {
       if (!t.dueAt) return false;
@@ -44,7 +47,7 @@ function AgentTasksView() {
       if (t.dueAt < from || t.dueAt > to) return false;
     }
     return true;
-  }, [agent, tab, taskTypes, range]);
+  }, [agent, tab, taskTypes, range, source]);
 
   // Same Booking guard as the Leads page and the dashboard: booking a lead
   // auto-generates an invoice from its deal value, so a real value is required.
@@ -98,8 +101,26 @@ function AgentTasksView() {
       </div>
 
       <SalesPendingTasksTable
+        // Remount per tab so search, bucket filter and page start fresh.
+        key={source}
         title={tab === "pending" ? "Pending Task" : "All Task"}
         subtitle={subtitle}
+        headerTabs={
+          <div className="flex items-end gap-5 border-b border-slate-200 mt-3">
+            {([["leads", "Leads"], ["dataCalling", "Data Calling"]] as const).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setSource(value)}
+                className={`pb-1.5 -mb-px text-sm font-extrabold border-b-2 transition-colors ${
+                  source === value ? "text-[#0B1E6E] border-[#0B1E6E]" : "text-slate-400 border-transparent hover:text-slate-600"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        }
         visibleBuckets={(["missed", "pending", "upcoming"] as const).filter(b => TAB_BUCKETS[tab].includes(b))}
         pendingTasks={pendingTasks}
         taskFilter={taskFilter}

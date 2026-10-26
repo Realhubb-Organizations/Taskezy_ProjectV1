@@ -1085,6 +1085,8 @@ export interface ApiPendingTaskRow {
   feedback: string;
   taskType: string;
   assignedTo: string;
+  /** Data Calling lead (source "Bulk Upload"). Missing from older servers — treat as false. */
+  isDataCalling?: boolean;
 }
 // Backs the sales dashboard's Pending Tasks queue (SalesPendingTasksTable/
 // TeamTasksTable/TaskInsightsCharts) — the server-side merge of open

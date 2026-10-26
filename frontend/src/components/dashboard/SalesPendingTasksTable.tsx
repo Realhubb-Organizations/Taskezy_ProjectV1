@@ -35,6 +35,7 @@ export default function SalesPendingTasksTable({
   isLoading = false,
   title = "Pending Tasks",
   subtitle,
+  headerTabs,
   taskFilter,
   visibleBuckets = ["missed", "pending", "upcoming"]
 }: {
@@ -47,6 +48,7 @@ export default function SalesPendingTasksTable({
   isLoading?: boolean;
   title?: string;
   subtitle?: string;
+  headerTabs?: React.ReactNode; // shown under the title/subtitle — e.g. the per-member page's Leads / Data Calling tabs
   taskFilter?: (t: PendingTask) => boolean;
   visibleBuckets?: TaskBucket[]; // legend entries to show — e.g. a Pending Task view has no Upcoming
 }) {
@@ -131,6 +133,7 @@ export default function SalesPendingTasksTable({
         <div>
           <h3 className="text-lg font-extrabold text-slate-900">{title}</h3>
           {subtitle && <p className="text-xs text-slate-400 font-medium mt-0.5">{subtitle}</p>}
+          {headerTabs}
         </div>
         {/* Legend doubles as a filter — click a bucket to show only its
             tasks, click it again (or "All") to clear. */}
