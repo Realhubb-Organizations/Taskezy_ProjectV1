@@ -312,12 +312,13 @@ export default function LeadDetailDrawer({
                 onClick={() => callAllowed && handleCall()}
                 disabled={!callAllowed}
                 aria-label="Call"
+                title={callAllowed ? undefined : "Calling is only available on the mobile app for your role"}
                 className="flex text-slate-600 hover:text-[#0B1E6E] disabled:opacity-40 disabled:hover:text-slate-600"
               >
                 <Phone className="h-5 w-5" />
               </button>
               <div className="absolute left-0 top-full z-20 pt-2 hidden group-hover:block group-focus-within:block">
-                <div className="flex items-center gap-2 whitespace-nowrap bg-white border border-slate-200 rounded-xl shadow-lg px-3 py-2 text-sm text-slate-800">
+                <div className="inline-flex items-center gap-2 whitespace-nowrap bg-white border border-slate-200 rounded-xl shadow-lg px-3 py-2 text-sm text-slate-800">
                   {activeRole === "ADMIN" ? lead.phone : maskPhone(lead.phone)}
                   {activeRole === "ADMIN" && (
                     <button onClick={() => copyToClipboard("phone", lead.phone)} className="text-slate-400 hover:text-brand-700" title="Copy phone">
@@ -325,7 +326,6 @@ export default function LeadDetailDrawer({
                     </button>
                   )}
                 </div>
-                {!callAllowed && <p className="mt-1 text-[10px] text-slate-400 whitespace-nowrap">Calling is only available on the mobile app for your role</p>}
               </div>
             </div>
             {!lead.email ? (
@@ -338,7 +338,7 @@ export default function LeadDetailDrawer({
                   <Mail className="h-6 w-6" />
                 </a>
                 <div className="absolute left-0 top-full z-20 pt-2 hidden group-hover:block group-focus-within:block">
-                  <div className="flex items-center gap-2 whitespace-nowrap bg-white border border-slate-200 rounded-xl shadow-lg px-3 py-2 text-sm text-slate-800">
+                  <div className="inline-flex items-center gap-2 whitespace-nowrap bg-white border border-slate-200 rounded-xl shadow-lg px-3 py-2 text-sm text-slate-800">
                     {activeRole === "ADMIN" ? lead.email : maskEmail(lead.email)}
                     {activeRole === "ADMIN" && (
                       <button onClick={() => copyToClipboard("email", lead.email)} className="text-slate-400 hover:text-brand-700" title="Copy email">
