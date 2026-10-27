@@ -564,7 +564,7 @@ export default function PropertiesPage() {
         <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
         <input
           type="text"
-          placeholder="Search properties by name, builder, or location..."
+          placeholder="Search properties by name, builder, location or agent..."
           value={searchQuery}
           onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
           className="w-full bg-white border border-slate-200 rounded-xl pl-11 pr-4 py-3 text-xs focus:outline-none focus:border-brand-400 shadow-sm"
