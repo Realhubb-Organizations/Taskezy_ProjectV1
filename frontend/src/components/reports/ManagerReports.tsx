@@ -2,7 +2,8 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/context/AppContext";
-import { ChevronDown, ChevronUp, AlertTriangle, Users } from "lucide-react";
+import { AlertTriangle, Users } from "lucide-react";
+import ExpandChevron, { CollapsibleCell } from "@/components/ui/ExpandChevron";
 import { DateRange } from "./DateRangeFilter";
 import { computeROIMultiple, formatCurrency } from "@/lib/reportMetrics";
 import { apiGetManagerReportStats, type ManagerReportAgentStats } from "@/lib/apiClient";
@@ -130,13 +131,16 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
                 <li key={row.manager} className="text-xs">
                   <div className="p-4 space-y-3">
                     <div className="flex items-center justify-between gap-3">
-                      <p className="font-bold text-slate-800 text-sm">{row.manager}</p>
+                      <p className="font-bold text-slate-800 text-sm truncate min-w-0">{row.manager}</p>
                       <button
+                        type="button"
                         onClick={() => setExpanded(expanded === row.manager ? null : row.manager)}
-                        className="inline-flex items-center gap-1 text-brand-600 font-bold whitespace-nowrap shrink-0"
+                        aria-expanded={expanded === row.manager}
+                        title={expanded === row.manager ? "Hide team" : "View team"}
+                        className="group/expand flex items-center gap-2 shrink-0"
                       >
-                        {expanded === row.manager ? "Hide team" : "View team"}
-                        {expanded === row.manager ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                        {row.memberBreakdown.length > 0 && <span className="glass-chip">+{row.memberBreakdown.length}</span>}
+                        <ExpandChevron open={expanded === row.manager} />
                       </button>
                     </div>
 
@@ -177,7 +181,7 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
                     ))}
                   </div>
 
-                  {expanded === row.manager && (
+                  <CollapsibleCell open={expanded === row.manager}>
                     <div className="px-4 pb-4 pt-0 bg-slate-50/60">
                       <p className="text-[9px] uppercase font-extrabold text-slate-400 tracking-wider mb-2">Team breakdown</p>
                       {row.memberBreakdown.length === 0 ? (
@@ -208,7 +212,7 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
                         </div>
                       )}
                     </div>
-                  )}
+                  </CollapsibleCell>
                 </li>
               ))
             )}
@@ -216,8 +220,8 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
           <div className="hidden sm:block overflow-x-auto">
           <table className="table-fixed w-full min-w-[1440px] text-[11px] border-collapse">
             <colgroup>
-              <col />
-              <col />
+              {/* Wider: the name, its "+N" team pill and the chevron share it. */}
+              <col className="w-[220px]" />
               <col />
               <col />
               <col />
@@ -235,7 +239,6 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
                 <th className="px-4 py-3 border-l border-slate-200 bg-blue-50/40 text-left text-xs font-bold text-slate-800 whitespace-nowrap" colSpan={4}>Individual (Self)</th>
                 <th className="px-4 py-3 border-l border-slate-200 bg-indigo-50/40 text-left text-xs font-bold text-slate-800 whitespace-nowrap" colSpan={4}>Team</th>
                 <th className="px-4 py-3 border-l border-slate-200 bg-emerald-50/40 text-left text-xs font-bold text-slate-800 whitespace-nowrap" colSpan={2}>Combined</th>
-                <th className="px-4 py-3 border-l border-slate-200 text-left text-xs font-bold text-slate-800 whitespace-nowrap" rowSpan={2}></th>
               </tr>
               <tr className="bg-slate-50 border-b border-slate-200">
                 <th className="px-4 py-3 border-l border-slate-200 bg-blue-50/40 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Leads</th>
@@ -252,17 +255,29 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
             </thead>
             <tbody className="divide-y divide-slate-100">
               {isDataLoading && managerRows.length === 0 ? (
-                <TableRowsSkeleton rows={6} columns={12} />
+                <TableRowsSkeleton rows={6} columns={11} />
               ) : managerRows.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="p-6 text-center text-slate-400 italic font-semibold">
+                  <td colSpan={11} className="p-6 text-center text-slate-400 italic font-semibold">
                     Manager-level reports aren&apos;t visible at your access level.
                   </td>
                 </tr>
               ) : managerPagination.pageRows.map(row => (
                 <React.Fragment key={row.manager}>
-                  <tr className="hover:bg-slate-50/50">
-                    <td className="px-4 py-3 font-bold text-slate-800">{row.manager}</td>
+                  <tr className={`transition-colors ${expanded === row.manager ? "bg-slate-50/70" : "hover:bg-slate-50/50"}`}>
+                    <td className="px-4 py-3 font-bold text-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => setExpanded(expanded === row.manager ? null : row.manager)}
+                        aria-expanded={expanded === row.manager}
+                        title={expanded === row.manager ? "Hide team" : "View team"}
+                        className="group/expand flex items-center gap-2 w-full min-w-0 text-left hover:text-[#0B1E6E] transition-colors"
+                      >
+                        <span className="truncate">{row.manager}</span>
+                        {row.memberBreakdown.length > 0 && <span className="glass-chip shrink-0">+{row.memberBreakdown.length}</span>}
+                        <span className="ml-auto"><ExpandChevron open={expanded === row.manager} /></span>
+                      </button>
+                    </td>
 
                     {/* Individual */}
                     <td className="px-4 py-3 font-mono text-slate-600 border-l border-slate-100">{row.individualLeadsCount}</td>
@@ -295,21 +310,11 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
                     {/* Combined */}
                     <td className="px-4 py-3 font-mono font-bold text-slate-800 border-l border-slate-100">{row.totalLeadsCount}</td>
                     <td className="px-4 py-3 font-mono font-bold text-emerald-700">{row.combinedROI.toFixed(1)}x</td>
-
-                    <td className="px-4 py-3 border-l border-slate-100 text-right">
-                      <button
-                        onClick={() => setExpanded(expanded === row.manager ? null : row.manager)}
-                        className="inline-flex items-center gap-1 text-brand-600 hover:text-brand-700 font-bold whitespace-nowrap"
-                      >
-                        {expanded === row.manager ? "Hide" : "View"}
-                        {expanded === row.manager ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                      </button>
-                    </td>
                   </tr>
-                  {expanded === row.manager && (
-                    <tr>
-                      <td colSpan={12} className="p-0 bg-slate-50/60">
-                        <div className="p-4 space-y-2">
+                  {/* Team breakdown slides open/closed (always rendered so closing animates too). */}
+                  <tr className={expanded === row.manager ? "" : "!border-t-0"} aria-hidden={expanded !== row.manager}>
+                      <td colSpan={11} className="p-0 bg-slate-50/60">
+                        <CollapsibleCell open={expanded === row.manager} className="p-4 space-y-2">
                           <p className="text-[9px] uppercase font-extrabold text-slate-400 tracking-wider">Team breakdown</p>
                           {row.memberBreakdown.length === 0 ? (
                             <p className="text-[11px] text-slate-400 italic">No direct reports mapped to this manager.</p>
@@ -338,10 +343,9 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
                               ))}
                             </div>
                           )}
-                        </div>
+                        </CollapsibleCell>
                       </td>
                     </tr>
-                  )}
                 </React.Fragment>
               ))}
             </tbody>
