@@ -6,7 +6,7 @@ import { Capacitor } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
 import { PhoneCall, MessageCircle, Check, X } from "lucide-react";
 import { useApp, LeadStatus, Lead, mapApiLeadToFrontendLead } from "@/context/AppContext";
-import { apiCreateFollowup, apiUpdateLeadStatus, apiUpdateCallStatus, apiGetLead } from "@/lib/apiClient";
+import { apiCreateFollowup, apiUpdateLeadStatus, apiUpdateCallStatus, apiUpdateLeadNote, apiGetLead } from "@/lib/apiClient";
 import { nextStatusOptions, frontendStatusToDbCode } from "@/lib/leadStatusMapping";
 import { CALL_SUB_STATUS_OPTIONS, CallSubStatus, callSubStatusOf } from "@/lib/callSubStatus";
 import { SCHEDULER_REQUIRED_STATUSES } from "@/lib/leadScheduler";
@@ -151,9 +151,15 @@ export default function CallFeedbackGate() {
   const nextCallSubStatus = callStatus === "Connected" ? callSubStatus : null;
   const callStatusChanged = !!lead && isDataCallingLead && callStatus !== "" &&
     (callStatus !== (lead.callStatus ?? "") || nextCallSubStatus !== callSubStatusOf(lead));
+  // Regular leads: asked whenever the status IS one of these (not just
+  // when it's CHANGING to one) — a repeat RNR call (still no answer,
+  // status kept as RNR) still needs its own next-call date/time, or the
+  // agent could keep calling the same lead with no follow-up ever
+  // scheduled. Data Calling's own "Not Reachable" branch is unchanged
+  // (narrower scope, not what was reported).
   const needsNextCall = isDataCallingLead
     ? callStatus === "Not Reachable" && callStatusChanged
-    : NEEDS_NEXT_CALL.includes(status) && statusChanged;
+    : NEEDS_NEXT_CALL.includes(status);
   const needsDealValue = !isDataCallingLead && status === "Booked" && statusChanged;
   const somethingChanged = statusChanged || callStatusChanged;
 
@@ -182,6 +188,13 @@ export default function CallFeedbackGate() {
         const code = frontendStatusToDbCode(status);
         if (!code) throw new Error(`"${status}" can't be set here.`);
         await apiUpdateLeadStatus(lead.id, code, deal);
+      }
+      // 1b. Regular leads: this note also becomes the lead's actual Notes
+      // field (same as the Notes column's pencil-edit), not just a line in
+      // the call-attempt's own activity entry below — Data Calling already
+      // did this as part of apiUpdateCallStatus above.
+      if (lead && !isDataCallingLead && note.trim()) {
+        await apiUpdateLeadNote(lead.id, note.trim());
       }
       // 2. Next call — after the status change, which closes older pending follow-ups.
       if (lead && scheduledAt) {
