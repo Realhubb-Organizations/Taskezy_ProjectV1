@@ -44,6 +44,19 @@ body {
   background: rgba(0, 119, 182, 0.4);
 }
 
+/* Table cards round their corners with overflow-hidden, which would stop the
+   sticky pagination footer ([data-table-footer]) from sticking. overflow: clip
+   clips the same way without making the card a scroll box. */
+main .overflow-hidden:has([data-table-footer]) {
+  overflow: clip;
+}
+/* A footer nested inside a table row (e.g. an expanded team's sub-list)
+   stays in place — only a table's own main footer sticks. */
+td [data-table-footer] {
+  position: static !important;
+}
+
+
 @layer utilities {
   .glass-card {
     background: rgba(255, 255, 255, 0.75);
