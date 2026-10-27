@@ -129,12 +129,32 @@ function armReturnWatcher(onReturn: () => void): void {
   }
 }
 
+// Opening WhatsApp message (the team's approved wording), addressed to the
+// lead's first name and signed off with the salesperson's first name and the
+// project the lead enquired about (e.g. "— Priya, Godrej Vanantra"). Either
+// part of the sign-off is left out when it isn't known.
+export function leadWhatsAppMessage(leadName: string, senderName?: string | null, property?: string | null): string {
+  const firstName = leadName.trim().split(/\s+/)[0] || leadName;
+  const sender = senderName?.trim().split(/\s+/)[0];
+  const project = property?.trim();
+  const hasProject = !!project && !["—", "-", "Not set", "Unassigned"].includes(project);
+  const signOff = [sender, hasProject ? project : null].filter(Boolean).join(", ");
+  return [
+    `Hello ${firstName},`,
+    "Thank you for showing interest in our property listings!",
+    "We noticed that you recently enquired about some properties and would love to help you find the right one.",
+    "Could you please share a few more details about your requirements, such as your preferred location, budget, property type, and any specific preferences? This will help us suggest the most suitable options for you.",
+    "Looking forward to assisting you!",
+    ...(signOff ? [`— ${signOff}`] : [])
+  ].join("\n");
+}
+
 export function triggerLeadWhatsApp(
-  lead: { id: string; phone: string; name: string },
-  opts: { isAdmin: boolean; onReturn: (leadId: string) => void }
+  lead: { id: string; phone: string; name: string; property?: string | null },
+  opts: { isAdmin: boolean; senderName?: string | null; onReturn: (leadId: string) => void }
 ): void {
   const formattedPhone = lead.phone.replace(/[^0-9]/g, "");
-  const msg = encodeURIComponent(`Hello ${lead.name}, this is Gautham from TaskEzy regarding your real estate inquiry.`);
+  const msg = encodeURIComponent(leadWhatsAppMessage(lead.name, opts.senderName, lead.property));
   window.open(`https://wa.me/${formattedPhone}?text=${msg}`, "_blank");
 
   if (opts.isAdmin) return; // Admin: no feedback gate, unchanged from before.

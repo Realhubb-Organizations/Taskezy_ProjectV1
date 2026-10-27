@@ -63,8 +63,9 @@ export default function PendingLeadsTable({
       window.open(`https://wa.me/${row.phone.replace(/[^0-9]/g, "")}`, "_blank");
       return;
     }
-    triggerLeadWhatsApp({ id: row.leadId, phone: row.phone, name: row.name }, {
+    triggerLeadWhatsApp({ id: row.leadId, phone: row.phone, name: row.name, property: row.property }, {
       isAdmin,
+      senderName: currentUser?.name,
       onReturn: (leadId) => {
         recordWhatsAppOpened(leadId).catch((err) => console.warn("Could not record WhatsApp feedback gate:", err));
       }
