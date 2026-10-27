@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { X, Phone, Mail, ArrowRight, Copy, Check, User, Pencil, ChevronDown } from "lucide-react";
 import { useApp, Lead, LeadStatus } from "@/context/AppContext";
@@ -55,7 +55,19 @@ export default function LeadDetailDrawer({
   const [copiedField, setCopiedField] = useState<string | null>(null);
   // "Notes ▾" next to the status — the note editor opens under the status row.
   const [notesOpen, setNotesOpen] = useState(false);
-  useEffect(() => { setNotesOpen(false); }, [lead?.id]);
+  // "Campaign ▾" — opens the lead's ad details (Meta Page, Form ID, Campaign).
+  const [campaignOpen, setCampaignOpen] = useState(false);
+  useEffect(() => { setNotesOpen(false); setCampaignOpen(false); }, [lead?.id]);
+  // Any click outside the Campaign button/panel closes it.
+  const campaignRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!campaignOpen) return;
+    const onDown = (e: PointerEvent) => {
+      if (campaignRef.current && !campaignRef.current.contains(e.target as Node)) setCampaignOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    return () => document.removeEventListener("pointerdown", onDown, true);
+  }, [campaignOpen]);
 
   // Who this lead can be handed to: an ADMIN — any active sales user; a
   // Manager — herself or her direct reports; agents can't reassign at all.
@@ -206,7 +218,7 @@ export default function LeadDetailDrawer({
   // Assigned/Property/Reassigned/Captured grid, plus ad-footprint fields
   // (Campaign/Meta Page/Lead Form ID) only when the lead actually carries
   // them — no empty rows for manually-entered or non-Meta leads.
-  const metaFields: { label: string; value: React.ReactNode }[] = [
+  const metaFields: { label: string; labelExtra?: React.ReactNode; value: React.ReactNode }[] = [
     {
       label: "Assigned To",
       value: (
@@ -217,17 +229,15 @@ export default function LeadDetailDrawer({
     },
     {
       label: "Property",
-      value: (
-        <span className="flex items-center gap-1.5 flex-wrap">
-          {lead.property || "Not set"}
-          <span
-            className={`shrink-0 border rounded-lg px-1.5 py-0.5 text-[10px] font-semibold ${lead.property ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-slate-50 text-slate-500 border-slate-200"}`}
-            title={lead.property ? "This lead has a property linked" : "No property linked yet"}
-          >
-            {lead.property ? "Assigned" : "Unassigned"}
-          </span>
+      labelExtra: (
+        <span
+          className={`shrink-0 border rounded-lg px-1.5 py-0.5 text-[10px] font-semibold ${lead.property ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-slate-50 text-slate-500 border-slate-200"}`}
+          title={lead.property ? "This lead has a property linked" : "No property linked yet"}
+        >
+          {lead.property ? "Assigned" : "Unassigned"}
         </span>
-      )
+      ),
+      value: <span title={lead.property || undefined}>{lead.property || "Not set"}</span>
     },
     {
       label: "Reassigned To",
@@ -249,13 +259,17 @@ export default function LeadDetailDrawer({
         </span>
       )
     },
-    { label: "Captured at", value: lead.createdAtStr ? formatLogTimestamp(lead.createdAtStr) : "—" },
-    // Ad-source attribution (ad-platform/marketing concern) — Admin-only,
-    // not just "shown when the lead has it" (2026-10-10).
-    ...(activeRole === "ADMIN" && lead.campaign ? [{ label: "Campaign", value: lead.campaign as React.ReactNode }] : []),
-    ...(activeRole === "ADMIN" && lead.metaPageName ? [{ label: "Meta Page", value: lead.metaPageName as React.ReactNode }] : []),
-    ...(activeRole === "ADMIN" && lead.metaFormId ? [{ label: "Lead Form ID", value: lead.metaFormId as React.ReactNode }] : [])
+    { label: "Captured at", value: lead.createdAtStr ? formatLogTimestamp(lead.createdAtStr) : "—" }
   ];
+  // Ad-source attribution (ad-platform/marketing concern) — Admin-only, and
+  // only the fields the lead actually carries. Shown under "Campaign ▾".
+  const adFields: { label: string; value: string }[] = activeRole === "ADMIN"
+    ? [
+        ...(lead.metaPageName ? [{ label: "Meta Page", value: lead.metaPageName }] : []),
+        ...(lead.metaFormId ? [{ label: "Lead Form ID", value: lead.metaFormId }] : []),
+        ...(lead.campaign ? [{ label: "Campaign", value: lead.campaign }] : [])
+      ]
+    : [];
 
   // Rendered via a portal straight into <body> — the caller (the Leads page)
   // wraps its whole page in a div with the `animate-fade-in` utility, whose
@@ -285,35 +299,79 @@ export default function LeadDetailDrawer({
               always sees the real value. Calling still dials the real number
               (masking is display-only), and the copy buttons are Admin-only
               since copying would leak the real value despite the masked text. */}
-          <div className="mt-3 space-y-2">
-            <div className="flex items-center gap-3 text-sm text-slate-700">
-              <button type="button" onClick={handleWhatsApp} className="shrink-0 hover:opacity-80" title="WhatsApp message" aria-label="WhatsApp message">
-                <WhatsAppIcon className="h-6 w-6" />
-              </button>
+          <div className="mt-3 flex items-center gap-4">
+            {/* contact icons, then Campaign ▾ pushed to the right */}
+            <button type="button" onClick={handleWhatsApp} className="shrink-0 hover:opacity-80" title="WhatsApp message" aria-label="WhatsApp message">
+              <WhatsAppIcon className="h-6 w-6" />
+            </button>
+            {/* Phone — the number shows on hover (stays open while the pointer
+                is on it, so it can be copied); clicking the icon calls. */}
+            <div className="relative group">
               <button
                 type="button"
                 onClick={() => callAllowed && handleCall()}
                 disabled={!callAllowed}
-                className="flex items-center gap-2 hover:text-brand-700 disabled:opacity-40 disabled:hover:text-slate-700"
-                title={callAllowed ? "Call" : "Calling is only available on the mobile app for your role"}
+                aria-label="Call"
+                className="flex text-slate-600 hover:text-[#0B1E6E] disabled:opacity-40 disabled:hover:text-slate-600"
               >
-                <Phone className="h-5 w-5 text-slate-600 shrink-0" />
-                {activeRole === "ADMIN" ? lead.phone : maskPhone(lead.phone)}
+                <Phone className="h-5 w-5" />
               </button>
-              {activeRole === "ADMIN" && (
-                <button onClick={() => copyToClipboard("phone", lead.phone)} className="text-slate-400 hover:text-brand-700" title="Copy phone">
-                  {copiedField === "phone" ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
-                </button>
-              )}
+              <div className="absolute left-0 top-full z-20 pt-2 hidden group-hover:block group-focus-within:block">
+                <div className="flex items-center gap-2 whitespace-nowrap bg-white border border-slate-200 rounded-xl shadow-lg px-3 py-2 text-sm text-slate-800">
+                  {activeRole === "ADMIN" ? lead.phone : maskPhone(lead.phone)}
+                  {activeRole === "ADMIN" && (
+                    <button onClick={() => copyToClipboard("phone", lead.phone)} className="text-slate-400 hover:text-brand-700" title="Copy phone">
+                      {copiedField === "phone" ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+                    </button>
+                  )}
+                </div>
+                {!callAllowed && <p className="mt-1 text-[10px] text-slate-400 whitespace-nowrap">Calling is only available on the mobile app for your role</p>}
+              </div>
             </div>
-            {lead.email && (
-              <div className="flex items-center gap-3 text-sm text-slate-700">
-                <Mail className="h-5 w-5 text-slate-600 shrink-0 mx-0.5" />
-                <a href={`mailto:${lead.email}`} className="underline underline-offset-2 hover:text-brand-700 truncate">{activeRole === "ADMIN" ? lead.email : maskEmail(lead.email)}</a>
-                {activeRole === "ADMIN" && (
-                  <button onClick={() => copyToClipboard("email", lead.email)} className="text-slate-400 hover:text-brand-700 shrink-0" title="Copy email">
-                    {copiedField === "email" ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
-                  </button>
+            {!lead.email ? (
+              <span className="flex text-slate-300 cursor-default" title="No email" aria-label="No email">
+                <Mail className="h-6 w-6" />
+              </span>
+            ) : (
+              <div className="relative group">
+                <a href={`mailto:${lead.email}`} aria-label="Email" className="flex text-slate-600 hover:text-[#0B1E6E]">
+                  <Mail className="h-6 w-6" />
+                </a>
+                <div className="absolute left-0 top-full z-20 pt-2 hidden group-hover:block group-focus-within:block">
+                  <div className="flex items-center gap-2 whitespace-nowrap bg-white border border-slate-200 rounded-xl shadow-lg px-3 py-2 text-sm text-slate-800">
+                    {activeRole === "ADMIN" ? lead.email : maskEmail(lead.email)}
+                    {activeRole === "ADMIN" && (
+                      <button onClick={() => copyToClipboard("email", lead.email)} className="text-slate-400 hover:text-brand-700" title="Copy email">
+                        {copiedField === "email" ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+            {adFields.length > 0 && (
+              <div ref={campaignRef} className="relative ml-auto">
+                <button
+                  type="button"
+                  onClick={() => setCampaignOpen(o => !o)}
+                  aria-expanded={campaignOpen}
+                  title={lead.campaign || undefined}
+                  className="flex items-center gap-1 text-[11px] font-semibold text-slate-700 hover:text-[#0B1E6E]"
+                >
+                  Campaign
+                  <ChevronDown className={`h-3.5 w-3.5 transition-transform ${campaignOpen ? "rotate-180" : ""}`} />
+                </button>
+                {campaignOpen && (
+                  <>
+                    <div className="absolute right-0 top-full mt-2 z-30 w-64 bg-white border border-slate-200 rounded-xl shadow-lg px-3 py-2.5 space-y-2">
+                      {adFields.map(f => (
+                        <div key={f.label}>
+                          <span className="text-slate-500 font-bold text-[11px] block">{f.label} :</span>
+                          <span className="text-xs text-slate-800 font-medium [overflow-wrap:anywhere]">{f.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
                 )}
               </div>
             )}
@@ -414,7 +472,7 @@ export default function LeadDetailDrawer({
         <div className="px-6 py-4 border-b border-slate-200 grid grid-cols-2 gap-x-4 gap-y-4 text-xs">
           {metaFields.map(f => (
             <div key={f.label} className="min-w-0">
-              <span className="text-slate-800 font-extrabold text-xs block mb-1">{f.label} :</span>
+              <span className="text-slate-800 font-extrabold text-xs flex items-center gap-1.5 mb-1">{f.label} :{f.labelExtra}</span>
               <span className="text-slate-700 font-medium block truncate">{f.value}</span>
             </div>
           ))}
