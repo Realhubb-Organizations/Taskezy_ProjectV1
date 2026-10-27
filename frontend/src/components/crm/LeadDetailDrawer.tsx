@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
-import { X, Phone, Mail, Share2, ArrowRight, Repeat, Copy, Check, User, Pencil } from "lucide-react";
-import { useApp, Lead, LeadStatus, mapApiLeadToFrontendLead } from "@/context/AppContext";
+import { X, Phone, Mail, ArrowRight, Copy, Check, User, Pencil, ChevronDown } from "lucide-react";
+import { useApp, Lead, LeadStatus } from "@/context/AppContext";
 import { useDialog } from "@/components/ui/DialogProvider";
 import { SearchableSelect } from "@/components/ui/SearchableDropdown";
 import { apiSetLeadProperty } from "@/lib/apiClient";
@@ -9,7 +9,7 @@ import { deriveActivityTimeline, nextStatusOptions, statusBadgeClasses, withDead
 import { canChangeLeadStatus, canReassignThisLead, isLeadAssignableUser, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
 import { maskPhone, maskEmail } from "@/lib/maskPII";
 import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/callTrigger";
-import { WhatsAppIcon } from "@/components/icons/ContactIcons";
+import { WhatsAppIcon, PlatformLabel } from "@/components/icons/ContactIcons";
 import { callSubStatusOf } from "@/lib/callSubStatus";
 import { useLeadStatusScheduler } from "@/lib/leadScheduler";
 import LeadScheduleModal from "./LeadScheduleModal";
@@ -36,8 +36,8 @@ export default function LeadDetailDrawer({
   onNoteSaved,
   onPropertySaved
 }: LeadDetailDrawerProps) {
-  const { users, properties, currentUser, activeRole, reassignLead, updateLeadNote, recordCallEnded, recordWhatsAppOpened } = useApp();
-  const { toast, confirm } = useDialog();
+  const { users, currentUser, activeRole, reassignLead, updateLeadNote, recordCallEnded, recordWhatsAppOpened } = useApp();
+  const { toast, confirm, prompt: promptDialog } = useDialog();
   const callAllowed = canTriggerLeadCall(activeRole === "ADMIN", currentUser?.email);
   const [localStatus, setLocalStatus] = useState<LeadStatus>("New Lead");
   // Same Admin/Manager gate as the Leads table's own inline Property
@@ -56,15 +56,27 @@ export default function LeadDetailDrawer({
     onUpdateStatus(id, status);
     setLocalStatus(status);
   });
-  const [reassignTarget, setReassignTarget] = useState("");
   const [reassigning, setReassigning] = useState(false);
-  const [reassignError, setReassignError] = useState("");
-  const [reassignNote, setReassignNote] = useState("");
   // The lead's current note: what's saved, and the text being edited.
   const [savedNote, setSavedNote] = useState("");
   const [noteDraft, setNoteDraft] = useState("");
   const [savingNote, setSavingNote] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  // "Notes ▾" next to the status — the note editor opens under the status row.
+  const [notesOpen, setNotesOpen] = useState(false);
+  // "Campaign ▾" — opens the lead's ad details (Meta Page, Form ID, Campaign).
+  const [campaignOpen, setCampaignOpen] = useState(false);
+  useEffect(() => { setNotesOpen(false); setCampaignOpen(false); }, [lead?.id]);
+  // Any click outside the Campaign button/panel closes it.
+  const campaignRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!campaignOpen) return;
+    const onDown = (e: PointerEvent) => {
+      if (campaignRef.current && !campaignRef.current.contains(e.target as Node)) setCampaignOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    return () => document.removeEventListener("pointerdown", onDown, true);
+  }, [campaignOpen]);
 
   // Who this lead can be handed to: an ADMIN — any active sales user; a
   // Manager — herself or her direct reports; agents can't reassign at all.
@@ -83,25 +95,10 @@ export default function LeadDetailDrawer({
     return [];
   }, [users, currentUser, activeRole, lead?.assignedAgent]);
 
-  // Admins and managers pick the new agent first; the required note box only
-  // opens once someone is picked. Sales agents keep the note box always shown.
-  const noteAfterPick = activeRole === "ADMIN" || currentUser?.role_type === "Manager";
-  const showReassignNote = reassignTargets.length > 0 && (!noteAfterPick || !!reassignTarget);
-  const reassignNoteRef = useRef<HTMLTextAreaElement>(null);
-  const pickReassignTarget = (name: string) => {
-    const firstPick = !reassignTarget && !!name;
-    setReassignTarget(name);
-    setReassignError("");
-    if (noteAfterPick && firstPick) setTimeout(() => reassignNoteRef.current?.focus(), 320);
-  };
-
   useEffect(() => {
     if (lead) {
       setLocalStatus(lead.status);
       setCopiedField(null);
-      setReassignTarget("");
-      setReassignError("");
-      setReassignNote("");
       setSavedNote(lead.notes ?? "");
       setNoteDraft(lead.notes ?? "");
     }
@@ -125,6 +122,7 @@ export default function LeadDetailDrawer({
   const handleWhatsApp = () => {
     triggerLeadWhatsApp(lead, {
       isAdmin: activeRole === "ADMIN",
+      senderName: currentUser?.name,
       onReturn: (leadId) => {
         recordWhatsAppOpened(leadId).catch((err) => console.warn("Could not record WhatsApp feedback gate:", err));
       }
@@ -162,6 +160,7 @@ export default function LeadDetailDrawer({
       setSavedNote(note);
       setNoteDraft(note);
       onNoteSaved?.(lead.id, note, updated);
+      setNotesOpen(false);
       toast("Note saved.", "success");
     } catch (err) {
       toast(err instanceof Error ? err.message : "Could not save the note. Please try again.", "error");
@@ -170,18 +169,28 @@ export default function LeadDetailDrawer({
     }
   };
 
-  const handleReassign = async () => {
-    if (!reassignTarget || !reassignNote.trim() || reassigning) return;
+  // "Reassigned To" dropdown: picking a teammate asks for the required
+  // handover note, then reassigns (the server enforces who may go to whom).
+  const handleReassign = async (target: string) => {
+    if (!target || reassigning) return;
+    const note = await promptDialog({
+      title: `Reassign to ${target}`,
+      message: lead.name,
+      label: "Note for the new agent",
+      placeholder: "e.g. Prefers WhatsApp, site visit pending",
+      confirmLabel: "Reassign",
+      multiline: true,
+      validate: (v) => (!v ? "Please write a note." : v.length > 2000 ? "Notes are limited to 2,000 characters." : null)
+    });
+    if (!note) return;
     setReassigning(true);
-    setReassignError("");
     try {
-      await reassignLead(lead.id, reassignTarget, reassignNote.trim());
-      setReassignTarget("");
-      setReassignNote("");
+      await reassignLead(lead.id, target, note);
+      toast(`Lead reassigned to ${target}.`, "success");
       onReassigned?.(lead.id);
       onClose();
     } catch (err) {
-      setReassignError(err instanceof Error ? err.message : "Could not reassign this lead. Please try again.");
+      toast(err instanceof Error ? err.message : "Could not reassign this lead. Please try again.", "error");
     } finally {
       setReassigning(false);
     }
@@ -230,42 +239,66 @@ export default function LeadDetailDrawer({
     });
   };
 
-  const shareLeadProfile = () => {
-    // API Integration Point: Trigger Native Share API or Copy Link to Clipboard
-    navigator.clipboard.writeText(`TaskEzy Lead Profile:\nName: ${lead.name}\nPhone: ${lead.phone}\nStatus: ${lead.status}`);
-    toast("Lead link and summary copied to clipboard!", "success");
-  };
+  // Assigned To = who first had the lead; Reassigned To = who has it now
+  // (only once it has moved). Admins/managers change it from that dropdown.
+  const canReassign = canReassignThisLead(lead, currentUser, users) && reassignTargets.length > 0;
+  const reassignedToLabel = lead.previousAgent ? (lead.assignedAgent || "Unassigned") : "—";
 
   // Assigned/Property/Reassigned/Captured grid, plus ad-footprint fields
   // (Campaign/Meta Page/Lead Form ID) only when the lead actually carries
   // them — no empty rows for manually-entered or non-Meta leads.
-  const metaFields: { label: string; value: React.ReactNode }[] = [
+  const metaFields: { label: string; labelExtra?: React.ReactNode; value: React.ReactNode }[] = [
     {
       label: "Assigned To",
       value: (
         <span className="flex items-center gap-1">
-          <User className="h-3 w-3 text-slate-400" /> {lead.assignedAgent || "Unassigned"}
+          <User className="h-3 w-3 text-slate-400" /> {lead.previousAgent || lead.assignedAgent || "Unassigned"}
         </span>
       )
     },
     {
-      label: "Reassign From",
-      value: lead.previousAgent ? (
-        <span className="flex flex-col">
-          <span className="flex items-center gap-1">
-            <User className="h-3 w-3 text-slate-400" /> {lead.assignedAgent || "Unassigned"}
-          </span>
-          <span className="text-[10px] text-slate-400 font-normal">from {lead.previousAgent}</span>
+      label: "Property",
+      labelExtra: (
+        <span
+          className={`shrink-0 border rounded-lg px-1.5 py-0.5 text-[10px] font-semibold ${lead.property ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-slate-50 text-slate-500 border-slate-200"}`}
+          title={lead.property ? "This lead has a property linked" : "No property linked yet"}
+        >
+          {lead.property ? "Assigned" : "Unassigned"}
         </span>
-      ) : "—"
+      ),
+      value: <span title={lead.property || undefined}>{lead.property || "Not set"}</span>
     },
-    { label: "Captured at", value: lead.createdAtStr ? formatLogTimestamp(lead.createdAtStr) : "—" },
-    // Ad-source attribution (ad-platform/marketing concern) — Admin-only,
-    // not just "shown when the lead has it" (2026-10-10).
-    ...(activeRole === "ADMIN" && lead.campaign ? [{ label: "Campaign", value: lead.campaign as React.ReactNode }] : []),
-    ...(activeRole === "ADMIN" && lead.metaPageName ? [{ label: "Meta Page", value: lead.metaPageName as React.ReactNode }] : []),
-    ...(activeRole === "ADMIN" && lead.metaFormId ? [{ label: "Lead Form ID", value: lead.metaFormId as React.ReactNode }] : [])
+    {
+      label: "Reassigned To",
+      value: canReassign ? (
+        <SearchableSelect
+          variant="inline"
+          value=""
+          onChange={handleReassign}
+          options={reassignTargets.map(u => u.name)}
+          placeholder={reassigning ? "Saving..." : reassignedToLabel === "—" ? "Select" : reassignedToLabel}
+          searchPlaceholder="Search team members..."
+          panelWidth={220}
+          disabled={reassigning}
+          className="max-w-full text-xs font-semibold text-slate-800"
+        />
+      ) : (
+        <span className="flex items-center gap-1">
+          {reassignedToLabel !== "—" && <User className="h-3 w-3 text-slate-400" />} {reassignedToLabel}
+        </span>
+      )
+    },
+    { label: "Captured at", value: lead.createdAtStr ? formatLogTimestamp(lead.createdAtStr) : "—" }
   ];
+  // Ad-source attribution (ad-platform/marketing concern) — Admin-only, and
+  // only the fields the lead actually carries. Shown under "Campaign ▾".
+  const adFields: { label: string; value: string }[] = activeRole === "ADMIN"
+    ? [
+        ...(lead.metaPageName ? [{ label: "Meta Page", value: lead.metaPageName }] : []),
+        ...(lead.metaFormId ? [{ label: "Lead Form ID", value: lead.metaFormId }] : []),
+        ...(lead.campaign ? [{ label: "Campaign", value: lead.campaign }] : [])
+      ]
+    : [];
 
   // Rendered via a portal straight into <body> — the caller (the Leads page)
   // wraps its whole page in a div with the `animate-fade-in` utility, whose
@@ -283,84 +316,104 @@ export default function LeadDetailDrawer({
 
       {/* Drawer Panel (Right slide-out) */}
       <div className="fixed inset-y-0 right-0 w-full max-w-md bg-white border-l border-slate-200 shadow-2xl z-[60] flex flex-col animate-slide-in">
-        {/* Header — name, contact details (with copy), quick actions */}
-        <div className="px-5 pt-5 pb-4 border-b border-slate-100 shrink-0">
+        {/* Header — name, contact row (WhatsApp, call, copy), email */}
+        <div className="px-6 pt-6 pb-4 shrink-0">
           <div className="flex items-start justify-between gap-2">
-            <h3 className="text-base font-extrabold text-slate-900 truncate">{lead.name}</h3>
-            <button onClick={onClose} className="text-slate-400 hover:text-slate-700 -mt-1 shrink-0">
+            <h3 className="text-lg font-extrabold text-slate-900 truncate">{lead.name}</h3>
+            <button onClick={onClose} className="text-slate-400 hover:text-slate-700 -mt-1 shrink-0" aria-label="Close">
               <X className="h-4.5 w-4.5" />
             </button>
           </div>
           {/* Phone/email text is masked for Manager/sales agent — Admin
-              always sees the real value. The tel:/mailto: hrefs always use
-              the REAL lead.phone/lead.email regardless of role (masking is
-              display-only; calling/emailing still has to work), and the
-              copy button is removed entirely for non-admin since copying
-              would otherwise leak the real value despite the masked text.
-              See project_crm_role_based_lead_scoping memory (2026-10-10). */}
-          <div className="mt-2 space-y-1">
-            <div className="flex items-center gap-1.5 text-xs text-slate-600">
-              <Phone className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+              always sees the real value. Calling still dials the real number
+              (masking is display-only), and the copy buttons are Admin-only
+              since copying would leak the real value despite the masked text. */}
+          <div className="mt-3 flex items-center gap-4">
+            {/* contact icons, then Campaign ▾ pushed to the right */}
+            <button type="button" onClick={handleWhatsApp} className="shrink-0 hover:opacity-80" title="WhatsApp message" aria-label="WhatsApp message">
+              <WhatsAppIcon className="h-6 w-6" />
+            </button>
+            {/* Phone — the number shows on hover (stays open while the pointer
+                is on it, so it can be copied); clicking the icon calls. */}
+            <div className="relative group">
               <button
                 type="button"
                 onClick={() => callAllowed && handleCall()}
                 disabled={!callAllowed}
-                className="hover:text-brand-700 disabled:opacity-30 disabled:hover:text-slate-600"
+                aria-label="Call"
                 title={callAllowed ? undefined : "Calling is only available on the mobile app for your role"}
+                className="flex text-slate-600 hover:text-[#0B1E6E] disabled:opacity-40 disabled:hover:text-slate-600"
               >
-                {activeRole === "ADMIN" ? lead.phone : maskPhone(lead.phone)}
+                <Phone className="h-5 w-5" />
               </button>
-              {activeRole === "ADMIN" && (
-                <button onClick={() => copyToClipboard("phone", lead.phone)} className="text-slate-350 hover:text-brand-700" title="Copy phone">
-                  {copiedField === "phone" ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
-                </button>
-              )}
+              <div className="absolute left-0 top-full z-20 pt-2 hidden group-hover:block group-focus-within:block">
+                <div className="inline-flex items-center gap-2 whitespace-nowrap bg-white border border-slate-200 rounded-xl shadow-lg px-3 py-2 text-sm text-slate-800">
+                  {activeRole === "ADMIN" ? lead.phone : maskPhone(lead.phone)}
+                  {activeRole === "ADMIN" && (
+                    <button onClick={() => copyToClipboard("phone", lead.phone)} className="text-slate-400 hover:text-brand-700" title="Copy phone">
+                      {copiedField === "phone" ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
-            {lead.email && (
-              <div className="flex items-center gap-1.5 text-xs text-slate-600">
-                <Mail className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                <a href={`mailto:${lead.email}`} className="hover:text-brand-700 truncate">{activeRole === "ADMIN" ? lead.email : maskEmail(lead.email)}</a>
-                {activeRole === "ADMIN" && (
-                  <button onClick={() => copyToClipboard("email", lead.email)} className="text-slate-350 hover:text-brand-700 shrink-0" title="Copy email">
-                    {copiedField === "email" ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
-                  </button>
+            {!lead.email ? (
+              <span className="flex text-slate-300 cursor-default" title="No email" aria-label="No email">
+                <Mail className="h-6 w-6" />
+              </span>
+            ) : (
+              <div className="relative group">
+                <a href={`mailto:${lead.email}`} aria-label="Email" className="flex text-slate-600 hover:text-[#0B1E6E]">
+                  <Mail className="h-6 w-6" />
+                </a>
+                <div className="absolute left-0 top-full z-20 pt-2 hidden group-hover:block group-focus-within:block">
+                  <div className="inline-flex items-center gap-2 whitespace-nowrap bg-white border border-slate-200 rounded-xl shadow-lg px-3 py-2 text-sm text-slate-800">
+                    {activeRole === "ADMIN" ? lead.email : maskEmail(lead.email)}
+                    {activeRole === "ADMIN" && (
+                      <button onClick={() => copyToClipboard("email", lead.email)} className="text-slate-400 hover:text-brand-700" title="Copy email">
+                        {copiedField === "email" ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+            {adFields.length > 0 && (
+              <div ref={campaignRef} className="relative ml-auto">
+                <button
+                  type="button"
+                  onClick={() => setCampaignOpen(o => !o)}
+                  aria-expanded={campaignOpen}
+                  title={lead.campaign || undefined}
+                  className="flex items-center gap-1 text-[11px] font-semibold text-slate-700 hover:text-[#0B1E6E]"
+                >
+                  Campaign
+                  <ChevronDown className={`h-3.5 w-3.5 transition-transform ${campaignOpen ? "rotate-180" : ""}`} />
+                </button>
+                {campaignOpen && (
+                  <>
+                    <div className="absolute right-0 top-full mt-2 z-30 w-64 bg-white border border-slate-200 rounded-xl shadow-lg px-3 py-2.5 space-y-2">
+                      {adFields.map(f => (
+                        <div key={f.label}>
+                          <span className="text-slate-500 font-bold text-[11px] block">{f.label} :</span>
+                          <span className="text-xs text-slate-800 font-medium [overflow-wrap:anywhere]">{f.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
                 )}
               </div>
             )}
           </div>
-          <div className="flex items-center gap-2 mt-3">
-            <button
-              type="button"
-              onClick={handleWhatsApp}
-              className="inline-flex h-10 w-10 sm:h-7 sm:w-7 bg-slate-50 hover:bg-emerald-50 border border-slate-200 rounded-lg items-center justify-center text-slate-500 hover:text-emerald-600 transition-colors"
-              title="WhatsApp Message"
-            >
-              <WhatsAppIcon className="h-4 w-4" />
-            </button>
-            {/* Share Summary — Admin-only; it copies the real phone number
-                to the clipboard, the same leak vector the copy buttons
-                above are removed for. */}
-            {activeRole === "ADMIN" && (
-              <button
-                onClick={shareLeadProfile}
-                className="inline-flex h-10 w-10 sm:h-7 sm:w-7 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg items-center justify-center text-slate-500 hover:text-slate-700 transition-colors"
-                title="Copy Summary"
-              >
-                <Share2 className="h-3.5 w-3.5" />
-              </button>
-            )}
-          </div>
         </div>
 
-        {/* Scrollable body — everything below the header scrolls together so
-            the reminder and reassign controls stay reachable on short phone
-            viewports. The header above stays pinned. */}
+        {/* Body — scrolls as one; Activity History takes the rest of the height. */}
         <div className="flex-1 min-h-0 overflow-y-auto flex flex-col">
-        {/* Status + meta */}
-        <div className="px-5 py-3 border-b border-slate-100 space-y-1.5">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-slate-500">Current Status :</span>
-            <div className="flex items-center gap-1.5">
+        {/* Current Status (+ Notes ▾) */}
+        <div className="px-6 py-3 border-b border-slate-200 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-extrabold text-slate-800">Current Status :</span>
               {callSubStatusOf(lead) && (
                 <span
                   className={`text-[10px] font-extrabold px-2 py-0.5 rounded-lg border ${
@@ -381,7 +434,6 @@ export default function LeadDetailDrawer({
                   options={statusOptionsList}
                   searchPlaceholder="Search status..."
                   panelWidth={224}
-                  align="right"
                   className={`border rounded-lg px-2 py-0.5 text-[11px] transition-colors focus:outline-none ${statusBadgeClasses(localStatus)}`}
                 />
               ) : (
@@ -390,176 +442,94 @@ export default function LeadDetailDrawer({
                 </span>
               )}
             </div>
+            <button
+              type="button"
+              onClick={() => setNotesOpen(o => !o)}
+              aria-expanded={notesOpen}
+              className="flex items-center gap-1 text-[11px] font-semibold text-slate-700 hover:text-[#0B1E6E]"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              Notes
+              <ChevronDown className={`h-3.5 w-3.5 transition-transform ${notesOpen ? "rotate-180" : ""}`} />
+            </button>
           </div>
-          <div className="flex items-center justify-between text-[10px] text-slate-400 font-semibold">
+          <div className="flex items-center justify-between text-[10px] text-slate-500 font-medium">
             <span>Last Updated : {lastActivityTime(lead)}</span>
-            {/* Ad-source attribution — Admin-only, same tier as Campaign/Meta
-                Page/Lead Form ID below. See project_crm_role_based_lead_scoping
-                memory (2026-10-10). */}
-            {activeRole === "ADMIN" && <span>Source : {lead.source || lead.campaign || "Direct / Manual Entry"}</span>}
+            {/* Ad-source attribution — Admin-only. */}
+            {activeRole === "ADMIN" && (
+              <span className="flex items-center gap-1.5">Source : <PlatformLabel text={lead.source || lead.campaign || "Direct / Manual Entry"} iconOnly /></span>
+            )}
           </div>
+
+          {/* Notes — the lead's current note (people only, not system events) */}
+          {notesOpen && (
+            <div className="pt-1 space-y-2">
+              {canChangeLeadStatus(lead, currentUser, users) ? (
+                <>
+                  <textarea
+                    aria-label="Lead note"
+                    value={noteDraft}
+                    onChange={(e) => setNoteDraft(e.target.value)}
+                    rows={3}
+                    maxLength={2000}
+                    placeholder="Write a note about this lead — e.g. Wants a 3BHK under 1.5 Cr, call after 6 pm"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 resize-y focus:outline-none focus:border-brand-500"
+                  />
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] text-slate-400">
+                      {lead.notesUpdatedBy && savedNote === (lead.notes ?? "") ? `Last edited by ${lead.notesUpdatedBy}` : ""}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleSaveNote}
+                      disabled={!noteDraft.trim() || noteDraft.trim() === savedNote || savingNote}
+                      className="shrink-0 bg-[#0B1E6E] hover:bg-[#081650] disabled:opacity-40 text-white font-bold px-4 py-1.5 rounded-xl text-xs transition-all"
+                    >
+                      {savingNote ? "Saving..." : savedNote ? "Update note" : "Save note"}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <p className="text-xs text-slate-700 whitespace-pre-line [overflow-wrap:anywhere]">{savedNote || "No note yet."}</p>
+              )}
+            </div>
+          )}
         </div>
 
-        {/* Assigned / Property / Reassigned / Captured (+ ad footprint, when
-            present and Admin — see metaFields above) */}
-        <div className="px-5 py-3 border-b border-slate-100 grid grid-cols-2 gap-x-3 gap-y-2.5 text-xs">
+        {/* Assigned To / Property / Reassigned To / Captured at (+ ad
+            footprint for Admin — see metaFields above) */}
+        <div className="px-6 py-4 border-b border-slate-200 grid grid-cols-2 gap-x-4 gap-y-4 text-xs">
           {metaFields.map(f => (
-            <div key={f.label}>
-              <span className="text-slate-400 font-bold text-[10px] block mb-0.5">{f.label} :</span>
-              <span className="text-slate-800 font-semibold truncate block">{f.value}</span>
+            <div key={f.label} className="min-w-0">
+              <span className="text-slate-800 font-extrabold text-xs flex items-center gap-1.5 mb-1">{f.label} :{f.labelExtra}</span>
+              <span className="text-slate-700 font-medium block truncate">{f.value}</span>
             </div>
           ))}
         </div>
 
-        {/* Property — editable for Admin/Manager (same gate as the Leads
-            table's own inline dropdown); read-only badge for everyone else,
-            same look the old metaFields row had. */}
-        <div className="px-5 py-3 border-b border-slate-100">
-          <span className="text-slate-400 font-bold text-[10px] block mb-1">Property :</span>
-          {canEditProperty ? (
-            <SearchableSelect
-              variant="field"
-              value={lead.property || NO_PROPERTY}
-              onChange={handlePropertyChange}
-              options={[NO_PROPERTY, ...properties.map(p => p.name)]}
-              disabled={savingProperty}
-              placeholder="Select property"
-              searchPlaceholder="Search property..."
-            />
-          ) : (
-            <span className="flex items-center gap-1.5 flex-wrap text-xs text-slate-800 font-semibold">
-              {lead.property || "Not set"}
-              <span
-                className={`shrink-0 border rounded-lg px-1.5 py-0.5 text-[10px] font-semibold ${lead.property ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-slate-50 text-slate-500 border-slate-200"}`}
-                title={lead.property ? "This lead has a property linked" : "No property linked yet"}
-              >
-                {lead.property ? "Assigned" : "Unassigned"}
-              </span>
-            </span>
-          )}
-        </div>
-
-        {/* Reassign — admins and managers only (agents never see it), scoped
-            to who this caller is actually allowed to hand the lead to */}
-        {canReassignThisLead(lead, currentUser, users) && (
-        <div className="px-5 py-3 border-b border-slate-100 space-y-2">
-          <span className="text-[11px] font-bold text-slate-500 flex items-center gap-1.5">
-            <Repeat className="h-3.5 w-3.5 text-slate-400" />
-            Reassign Lead
-          </span>
-          {reassignTargets.length === 0 ? (
-            <p className="text-[10px] text-slate-400 italic">No eligible teammates to reassign to.</p>
-          ) : (
-            <div className="flex gap-2">
-              <div className="flex-1 min-w-0">
-                <SearchableSelect
-                  value={reassignTarget}
-                  onChange={pickReassignTarget}
-                  options={reassignTargets.map(u => ({ value: u.name, label: u.name }))}
-                  placeholder="Select a team member…"
-                  searchPlaceholder="Search team members..."
-                />
-              </div>
-              <button
-                type="button"
-                onClick={handleReassign}
-                disabled={!reassignTarget || !reassignNote.trim() || reassigning}
-                className="shrink-0 bg-[#0B1E6E] hover:bg-[#081650] disabled:opacity-40 text-white font-bold px-5 py-2 rounded-xl text-sm transition-all"
-              >
-                {reassigning ? "Saving..." : "Reassign"}
-              </button>
-            </div>
-          )}
-          {reassignTargets.length > 0 && (
-            // Slides open (grid row 0fr → 1fr) once an agent is picked.
-            <div
-              className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out ${showReassignNote ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"}`}
-              aria-hidden={!showReassignNote}
-            >
-              <div className="overflow-hidden">
-                <textarea
-                  ref={reassignNoteRef}
-                  aria-label="Reassign note"
-                  value={reassignNote}
-                  onChange={(e) => setReassignNote(e.target.value)}
-                  rows={2}
-                  maxLength={2000}
-                  tabIndex={showReassignNote ? 0 : -1}
-                  placeholder={reassignTarget
-                    ? `Note for ${reassignTarget} (required) — e.g. Prefers WhatsApp, site visit pending`
-                    : "Note for the new agent (required) — e.g. Prefers WhatsApp, site visit pending"}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 resize-y focus:outline-none focus:border-brand-500"
-                />
-              </div>
-            </div>
-          )}
-          {reassignError && (
-            <p className="text-[11px] text-red-600 font-semibold">{reassignError}</p>
-          )}
-        </div>
-        )}
-
-        {/* Notes — the lead's current note (people only, not system events) */}
-        <div className="px-5 py-3 border-b border-slate-100 space-y-2">
-          <span className="text-[11px] font-bold text-slate-500 flex items-center gap-1.5">
-            <Pencil className="h-3.5 w-3.5 text-slate-400" />
-            Notes
-          </span>
-          {canChangeLeadStatus(lead, currentUser, users) ? (
-            <>
-              <textarea
-                aria-label="Lead note"
-                value={noteDraft}
-                onChange={(e) => setNoteDraft(e.target.value)}
-                rows={3}
-                maxLength={2000}
-                placeholder="Write a note about this lead — e.g. Wants a 3BHK under 1.5 Cr, call after 6 pm"
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 resize-y focus:outline-none focus:border-brand-500"
-              />
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[10px] text-slate-400">
-                  {lead.notesUpdatedBy && savedNote === (lead.notes ?? "") ? `Last edited by ${lead.notesUpdatedBy}` : ""}
-                </span>
-                <button
-                  type="button"
-                  onClick={handleSaveNote}
-                  disabled={!noteDraft.trim() || noteDraft.trim() === savedNote || savingNote}
-                  className="shrink-0 bg-[#0B1E6E] hover:bg-[#081650] disabled:opacity-40 text-white font-bold px-4 py-1.5 rounded-xl text-xs transition-all"
-                >
-                  {savingNote ? "Saving..." : savedNote ? "Update note" : "Save note"}
-                </button>
-              </div>
-            </>
-          ) : (
-            <p className="text-xs text-slate-700 whitespace-pre-line [overflow-wrap:anywhere]">{savedNote || "No note yet."}</p>
-          )}
-        </div>
-
         {/* Activity History — a real vertical timeline (connecting line +
-            node per entry, newest first) inside its own bordered,
-            independently-scrollable card. Transition labels (e.g.
-            "Call Back → Follow Up") are parsed from the lead's real log
-            messages via deriveActivityTimeline — never invented; see that
-            function's comment for exactly which formats it reads and how
-            it falls back when a message doesn't match one. */}
-        <div className="px-5 py-3 flex-1 min-h-[14rem] flex flex-col">
-          <span className="text-[11px] font-bold text-slate-500 block mb-2 shrink-0">Activity History :</span>
-          <div className="bg-[#F5F9FF] border border-slate-200 rounded-2xl shadow-sm flex-1 min-h-0 overflow-y-auto p-4">
+            node per entry, newest first) in a large bordered card that fills
+            the rest of the drawer. Transition labels (e.g. "Call Back →
+            Follow Up") are parsed from the lead's real log messages via
+            deriveActivityTimeline — never invented. */}
+        <div className="px-6 py-4 flex-1 min-h-[28rem] flex flex-col">
+          <span className="text-xs font-extrabold text-slate-800 block mb-3 shrink-0">Activity History :</span>
+          <div className="bg-[#F5F9FF] border border-slate-300 rounded-2xl shadow-sm flex-1 min-h-0 overflow-y-auto p-4">
             {lead.logs.length === 0 ? (
-              <p className="text-[11px] text-slate-400 italic">No activity recorded yet.</p>
+              <p className="text-[12px] text-slate-400 italic">No activity recorded yet.</p>
             ) : (
               <div className="relative pl-5">
                 <div className="absolute left-[5px] top-2 bottom-2 w-0.5 bg-blue-400" />
                 {deriveActivityTimeline(lead.logs).map((entry, idx) => (
                   <div key={idx} className="relative pb-4 last:pb-0">
                     <span className="absolute -left-5 top-1.5 h-3 w-3 rounded-full bg-blue-100 border-2 border-blue-500 z-10" />
-                    <div className="inline-block bg-[#0B1E6E] text-white text-[10px] font-bold px-2.5 py-1 rounded-lg mb-1.5">
+                    <div className="inline-block bg-[#0B1E6E] text-white text-[11px] font-bold px-2.5 py-1 rounded-lg mb-1.5">
                       {formatLogTimestamp(entry.log.timestamp)}
                     </div>
-                    <div className="bg-[#EAF3FF] rounded-xl px-3 py-2.5">
-                      <p className="text-[11px] text-slate-700 leading-snug">{entry.log.message}</p>
+                    <div className="bg-[#EAF3FF] rounded-xl px-3.5 py-3">
+                      <p className="text-[13px] text-slate-700 leading-relaxed [overflow-wrap:anywhere]">{entry.log.message}</p>
                       {entry.toLabel || entry.fromLabel ? (
-                        <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-blue-100 text-[9px]">
+                        <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-blue-100 text-[11px]">
                           <span className="text-slate-500 font-bold flex items-center gap-1">
                             {entry.fromLabel && entry.toLabel && entry.fromLabel !== entry.toLabel ? (
                               <>{entry.fromLabel} <ArrowRight className="h-2.5 w-2.5 shrink-0" /> {entry.toLabel}</>
@@ -567,10 +537,10 @@ export default function LeadDetailDrawer({
                               entry.toLabel || entry.fromLabel
                             )}
                           </span>
-                          <span className="text-slate-400 font-semibold shrink-0">{entry.log.user}</span>
+                          <span className="text-slate-500 font-bold shrink-0">{entry.log.user}</span>
                         </div>
                       ) : (
-                        <p className="text-[9px] text-slate-400 font-semibold mt-1.5 pt-1.5 border-t border-blue-100 text-right">by {entry.log.user}</p>
+                        <p className="text-[11px] text-slate-500 font-bold mt-2 pt-2 border-t border-blue-100 text-right">by {entry.log.user}</p>
                       )}
                     </div>
                   </div>

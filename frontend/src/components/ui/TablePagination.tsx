@@ -58,7 +58,10 @@ export default function TablePagination({
   const navBtn = "p-1 h-9 w-9 sm:h-auto sm:w-auto rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent";
 
   return (
-    <div className={`px-5 py-3 flex flex-wrap justify-between items-center gap-3 border-t border-slate-100 text-[11px] text-slate-500 font-semibold ${className}`}>
+    // Desktop: sticks to the bottom of the screen while its table is on
+    // screen (see globals.css's [data-table-footer] rule and
+    // StickyHorizontalScrollbar, which sits right above it).
+    <div data-table-footer className={`px-5 py-3 flex flex-wrap justify-between items-center gap-3 border-t border-slate-100 bg-white md:sticky md:-bottom-8 md:z-20 text-[11px] text-slate-500 font-semibold ${className}`}>
       <span className="text-slate-800 font-bold">
         {totalRows} {totalRows === 1 ? rowLabel : pluralize(rowLabel)}
       </span>

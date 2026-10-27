@@ -13,6 +13,8 @@ import NotificationBell from "@/components/dashboard/NotificationBell";
 import NotificationPopup from "@/components/dashboard/NotificationPopup";
 import LoginAnimationOverlay from "@/components/LoginAnimationOverlay";
 import PullToRefresh from "@/components/PullToRefresh";
+import StickyHorizontalScrollbar from "@/components/ui/StickyHorizontalScrollbar";
+import TruncatedTextTooltips from "@/components/ui/TruncatedTextTooltips";
 import {
   LayoutDashboard,
   LayoutGrid,
@@ -985,6 +987,10 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
             )}
           </PullToRefresh>
         </main>
+        {/* Wide tables: keeps a horizontal scrollbar at the bottom of the window. */}
+        <StickyHorizontalScrollbar />
+        {/* Table cells cut off with "…": full text on hover. */}
+        <TruncatedTextTooltips />
       </div>
 
       {showLoginSplash && (

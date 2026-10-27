@@ -11,6 +11,7 @@ import { type LeadSummaryStats } from "@/lib/leadSummaryStats";
 import { apiListLeadsPage, apiGetLead, apiGetLeadStats, apiGetLeadAnalyticsStats, apiGetDistinctCampaigns, apiListFollowupsPage, apiDeleteLead, apiBulkDeleteLeads, apiBulkReassignLeads, apiBulkSetLeadProperty, apiSetLeadProperty, apiSearchLeadsByPhones, type LeadListFilters, type AgentAnalyticsStats } from "@/lib/apiClient";
 import { useServerLeadList } from "@/lib/useServerLeadList";
 import { PlatformLabel } from "@/components/icons/ContactIcons";
+import ExpandChevron, { CollapsibleCell } from "@/components/ui/ExpandChevron";
 import { isPhoneLayout } from "@/lib/viewport";
 import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/callTrigger";
 import { LineSkeleton, TableRowsSkeleton } from "@/components/ui/Skeletons";
@@ -69,9 +70,9 @@ const ADMIN_DEFAULT_VISIBLE_COLUMNS: Record<AdminColumnKey, boolean> = {
 // Every number (and the manager/team-member name) in the Leads Analytics
 // breakdown table drills into the Leads tab pre-filtered to exactly the
 // leads that number represents — this is the shared clickable-cell look.
-function StatCell({ value, onClick }: { value: string | number; onClick: () => void }) {
+function StatCell({ value, onClick, className = "" }: { value: string | number; onClick: () => void; className?: string }) {
   return (
-    <button type="button" onClick={onClick} className="hover:underline hover:text-[#0B1E6E] transition-colors text-left">
+    <button type="button" onClick={onClick} className={`hover:underline hover:text-[#0B1E6E] transition-colors text-left ${className}`}>
       {value}
     </button>
   );
@@ -185,6 +186,7 @@ export default function LeadDashboard() {
   const handleWhatsApp = (lead: Lead) => {
     triggerLeadWhatsApp(lead, {
       isAdmin,
+      senderName: currentUser?.name,
       onReturn: (leadId) => {
         recordWhatsAppOpened(leadId).catch((err) => console.warn("Could not record WhatsApp feedback gate:", err));
       }
@@ -1912,7 +1914,8 @@ export default function LeadDashboard() {
                       style={{ minWidth: (1 + ANALYTICS_COLUMNS.filter(c => analyticsVisibleColumns[c.key]).length) * 150 }}
                     >
                       <colgroup>
-                        <col />
+                        {/* Wider name column: the name, its "+N" team pill and the chevron share it. */}
+                        <col className="w-[220px]" />
                         {analyticsVisibleColumns.teamTotal && <col />}
                         {analyticsVisibleColumns.total && <col />}
                         {analyticsVisibleColumns.qualified && <col />}
@@ -1979,19 +1982,22 @@ export default function LeadDashboard() {
                             <React.Fragment key={row.agentName}>
                               <tr className={`transition-colors ${isExpanded ? "bg-slate-50" : "hover:bg-slate-50/60"}`}>
                                 <td className="px-4 py-3 font-bold">
-                                  <div className="flex items-center gap-2">
+                                  <div className="flex items-center gap-2 min-w-0">
                                     <StatCell
                                       value={row.agentName}
                                       onClick={() => openAnalyticsDrilldown(teamNames, null, `${row.agentName}'s Team — All Leads`)}
+                                      className="truncate min-w-0"
                                     />
                                     {row.isManager && (
                                       <button
                                         type="button"
                                         onClick={() => toggleManagerExpand(row.agentName)}
                                         title={isExpanded ? "Collapse team" : "Expand team"}
-                                        className="h-4 w-4 shrink-0 flex items-center justify-center rounded-full border border-[#0B1E6E] text-[#0B1E6E] hover:bg-[#0B1E6E]/10 transition-colors"
+                                        aria-expanded={isExpanded}
+                                        className="group/expand ml-auto flex items-center gap-2 shrink-0"
                                       >
-                                        {isExpanded ? <Minus className="h-2.5 w-2.5" /> : <Plus className="h-2.5 w-2.5" />}
+                                        {row.directReports.length > 0 && <span className="glass-chip">+{row.directReports.length}</span>}
+                                        <ExpandChevron open={isExpanded} />
                                       </button>
                                     )}
                                   </div>
@@ -2032,10 +2038,12 @@ export default function LeadDashboard() {
                                   </td>
                                 )}
                               </tr>
-                              {row.isManager && isExpanded && (
-                                <tr>
+                              {/* Team rows slide open/closed (always rendered so the
+                                  close animates too). */}
+                              {row.isManager && (
+                                <tr className={isExpanded ? "" : "!border-t-0"} aria-hidden={!isExpanded}>
                                   <td colSpan={1 + visibleColCount} className="p-0 bg-slate-50/60">
-                                    <div className="px-4 py-3">
+                                    <CollapsibleCell open={isExpanded} className="px-4 py-3">
                                       {row.directReports.length === 0 ? (
                                         <p className="text-[11px] text-slate-400 italic py-1">No team members reporting to {row.agentName} yet.</p>
                                       ) : (
@@ -2105,7 +2113,7 @@ export default function LeadDashboard() {
                                           )}
                                         </PaginatedSubList>
                                       )}
-                                    </div>
+                                    </CollapsibleCell>
                                   </td>
                                 </tr>
                               )}
