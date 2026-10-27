@@ -141,6 +141,10 @@ export const reassignLeadSchema = z.object({
   note: noteText
 });
 
+export const setLeadPropertySchema = z.object({
+  propertyId: z.string().uuid().nullable()
+});
+
 export const updateLeadNoteSchema = z.object({
   note: noteText
 });

@@ -21,6 +21,7 @@ import {
   reassignLeadSchema,
   updateCallStatusSchema,
   updateLeadNoteSchema,
+  setLeadPropertySchema,
   updateLeadStatusSchema
 } from "./leads.schema";
 import {
@@ -45,6 +46,7 @@ import {
   reassignLeadHandler,
   updateCallStatusHandler,
   updateLeadNoteHandler,
+  setLeadPropertyHandler,
   reassignUnassignedSheetLeadsHandler,
   updateLeadStatusHandler,
   verifyLeadKycHandler
@@ -163,6 +165,14 @@ leadsRouter.patch(
   "/:id/notes",
   validate({ params: leadIdParamSchema, body: updateLeadNoteSchema }),
   asyncHandler(updateLeadNoteHandler)
+);
+// Linking a lead to a property (or changing / clearing it) — admins and
+// managers only; logged in Activity History (leads.service.ts).
+leadsRouter.patch(
+  "/:id/property",
+  requireAdminOrManager("change a lead's property"),
+  validate({ params: leadIdParamSchema, body: setLeadPropertySchema }),
+  asyncHandler(setLeadPropertyHandler)
 );
 // Agents work the leads they're given; only admins and managers move leads
 // between people (managers within their own team — see leads.service.ts).
