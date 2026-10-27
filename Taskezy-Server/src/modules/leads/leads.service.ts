@@ -42,6 +42,7 @@ export async function listLeads(caller: AccessTokenPayload, filter: {
   assignedAgentId?: string[];
   campaign?: string[];
   propertyId?: string[];
+  noProperty?: boolean;
   dateFrom?: string;
   dateTo?: string;
   search?: string;
@@ -56,6 +57,7 @@ export async function listLeads(caller: AccessTokenPayload, filter: {
     assignedAgentId: filter.assignedAgentId,
     campaign: filter.campaign,
     propertyId: filter.propertyId,
+    noProperty: filter.noProperty,
     dateFrom: filter.dateFrom,
     dateTo: filter.dateTo,
     search: filter.search,
@@ -117,6 +119,7 @@ export async function getLeadStats(caller: AccessTokenPayload, filter: {
   assignedAgentId?: string[];
   campaign?: string[];
   propertyId?: string[];
+  noProperty?: boolean;
   dateFrom?: string;
   dateTo?: string;
   search?: string;
@@ -129,6 +132,7 @@ export async function getLeadStats(caller: AccessTokenPayload, filter: {
     assignedAgentId: filter.assignedAgentId,
     campaign: filter.campaign,
     propertyId: filter.propertyId,
+    noProperty: filter.noProperty,
     dateFrom: filter.dateFrom,
     dateTo: filter.dateTo,
     search: filter.search,
@@ -163,6 +167,7 @@ export async function getDistinctCampaigns(caller: AccessTokenPayload, filter: {
   status?: string[];
   assignedAgentId?: string[];
   propertyId?: string[];
+  noProperty?: boolean;
   dateFrom?: string;
   dateTo?: string;
   excludeBulkUpload?: boolean;
@@ -173,6 +178,7 @@ export async function getDistinctCampaigns(caller: AccessTokenPayload, filter: {
     statusCodes: filter.status,
     assignedAgentId: filter.assignedAgentId,
     propertyId: filter.propertyId,
+    noProperty: filter.noProperty,
     dateFrom: filter.dateFrom,
     dateTo: filter.dateTo,
     excludeBulkUpload: filter.excludeBulkUpload,

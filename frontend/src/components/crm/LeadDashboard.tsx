@@ -520,6 +520,7 @@ export default function LeadDashboard() {
       assignedAgentId: assignedAgentIds.length > 0 ? assignedAgentIds : undefined,
       campaign: adminCampaignFilter.length > 0 ? adminCampaignFilter : undefined,
       propertyId: propertyIds.length > 0 ? propertyIds : undefined,
+      noProperty: adminPropertyFilter.includes(NO_PROPERTY) || undefined,
       dateFrom,
       dateTo,
       search: debouncedAdminSearch || undefined,
@@ -1480,7 +1481,7 @@ export default function LeadDashboard() {
                           <SearchableMultiSelect
                             variant="inline"
                             label="Property"
-                            options={propertiesList}
+                            options={[NO_PROPERTY, ...propertiesList]}
                             selected={adminPropertyFilter}
                             onChange={(next) => { setAdminPage(1); setAdminPropertyFilter(next); }}
                             searchPlaceholder="Search properties..."
