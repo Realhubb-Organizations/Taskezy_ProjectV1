@@ -638,10 +638,12 @@ export default function DataCallingPage() {
   const [dataCallSourceFilters, setDataCallSourceFilters] = useState<string[]>([]);
   // Property column-header filter.
   const [propertyFilters, setPropertyFilters] = useState<string[]>([]);
-  const propertyFilterOptions = useMemo(
-    () => Array.from(new Set(leads.map(l => l.property).filter(Boolean) as string[])).sort(),
-    [leads]
-  );
+  // "Not set" picks leads with no property linked yet.
+  const PROPERTY_NOT_SET = "Not set";
+  const propertyFilterOptions = useMemo(() => {
+    const names = Array.from(new Set(leads.map(l => l.property).filter(Boolean) as string[])).sort();
+    return leads.some(l => !l.property) ? [PROPERTY_NOT_SET, ...names] : names;
+  }, [leads]);
   const dataCallSourceOptions = useMemo(
     () => Array.from(new Set(leads.map(l => l.subSource || l.source).filter(Boolean) as string[])).sort(),
     [leads]
@@ -955,7 +957,7 @@ export default function DataCallingPage() {
       const matchesStatus = statusFilters.length === 0 || statusFilters.includes(l.callStatus || CALL_STATUS_NONE);
       const matchesAssigned = assignedFilters.length === 0 || assignedFilters.includes(l.assignedAgent);
       const matchesDataCallSource = dataCallSourceFilters.length === 0 || dataCallSourceFilters.includes(l.subSource || l.source || "");
-      const matchesProperty = propertyFilters.length === 0 || propertyFilters.includes(l.property || "");
+      const matchesProperty = propertyFilters.length === 0 || propertyFilters.includes(l.property || PROPERTY_NOT_SET);
       const matchesSubStatus = subStatusFilters.length === 0 || subStatusFilters.includes(qualificationStatusOf(l));
       const matchesDate = appliedCustomRange
         ? (() => {

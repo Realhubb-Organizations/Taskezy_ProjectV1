@@ -45,6 +45,9 @@ export const listLeadsQuerySchema = z.object({
   // Already supported by buildLeadWhereClause/findMany (used by the Leads
   // Analytics tab's own aggregate) — just not previously exposed here.
   propertyId: uuidToArray,
+  // "true" = also (or only, with no propertyId) leads with no property set —
+  // the Property filter's "Not set" option. ORed with propertyId.
+  noProperty: z.enum(["true", "false"]).optional().transform(v => v === "true"),
   // Live-clock SLA check (same predicate getAgentReportStats already counts
   // with), not a stored column — "true" keeps only leads not yet responded
   // to within SLA_MINUTES, or responded to later than that.

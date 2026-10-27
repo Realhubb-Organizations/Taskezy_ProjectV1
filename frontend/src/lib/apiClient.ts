@@ -305,6 +305,8 @@ export interface LeadListFilters {
   assignedAgentId?: string[];
   campaign?: string[];
   propertyId?: string[];
+  /** Also include leads with no property (the Property filter's "Not set"). */
+  noProperty?: boolean;
   dateFrom?: string;
   dateTo?: string;
   search?: string;
@@ -320,6 +322,7 @@ function buildLeadFilterParams(filters: LeadListFilters): URLSearchParams {
   filters.assignedAgentId?.forEach(a => params.append("assignedAgentId", a));
   filters.campaign?.forEach(c => params.append("campaign", c));
   filters.propertyId?.forEach(p => params.append("propertyId", p));
+  if (filters.noProperty) params.set("noProperty", "true");
   if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
   if (filters.dateTo) params.set("dateTo", filters.dateTo);
   if (filters.search) params.set("search", filters.search);

@@ -77,6 +77,8 @@ export interface LeadFilterConditions {
   campaign?: string[];
   /** Not exposed on GET /leads or /leads/stats today — only the Leads Analytics tab's aggregate (getAnalyticsStatsByAgent) takes this, to mirror that tab's Property toolbar filter. */
   propertyId?: string[];
+  /** Also match leads with no property (the "Not set" filter option) — ORed with propertyId. */
+  noProperty?: boolean;
   /** Inclusive calendar-date bounds (YYYY-MM-DD) on created_at. */
   dateFrom?: string;
   dateTo?: string;
@@ -135,9 +137,14 @@ function buildLeadWhereClause(filter: LeadFilterConditions): { whereClause: stri
     conditions.push(`COALESCE(l.campaign, l.source) = ANY($${params.length}::text[])`);
   }
 
-  if (filter.propertyId && filter.propertyId.length > 0) {
+  const hasPropertyIds = !!filter.propertyId && filter.propertyId.length > 0;
+  if (hasPropertyIds) {
     params.push(filter.propertyId);
-    conditions.push(`l.property_id = ANY($${params.length}::uuid[])`);
+    conditions.push(filter.noProperty
+      ? `(l.property_id = ANY($${params.length}::uuid[]) OR l.property_id IS NULL)`
+      : `l.property_id = ANY($${params.length}::uuid[])`);
+  } else if (filter.noProperty) {
+    conditions.push(`l.property_id IS NULL`);
   }
 
   // dateFrom/dateTo are business-calendar days, so each bound is midnight in
