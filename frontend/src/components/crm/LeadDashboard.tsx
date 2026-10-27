@@ -185,6 +185,7 @@ export default function LeadDashboard() {
   const handleWhatsApp = (lead: Lead) => {
     triggerLeadWhatsApp(lead, {
       isAdmin,
+      senderName: currentUser?.name,
       onReturn: (leadId) => {
         recordWhatsAppOpened(leadId).catch((err) => console.warn("Could not record WhatsApp feedback gate:", err));
       }
