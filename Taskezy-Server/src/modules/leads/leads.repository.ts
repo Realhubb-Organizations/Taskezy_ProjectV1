@@ -710,6 +710,10 @@ export async function setNote(client: PoolClient, leadId: string, note: string, 
   );
 }
 
+export async function setPropertyId(client: PoolClient, leadId: string, propertyId: string | null): Promise<void> {
+  await client.query(`UPDATE leads SET property_id = $1 WHERE id = $2`, [propertyId, leadId]);
+}
+
 /** Locks and returns every lead held by `agentId`, oldest first (for handing them over before the agent is deleted). */
 export async function lockLeadIdsForAgent(client: PoolClient, agentId: string): Promise<string[]> {
   const { rows } = await client.query<{ id: string }>(

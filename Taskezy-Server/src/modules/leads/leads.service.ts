@@ -6,7 +6,7 @@ import * as repo from "./leads.repository";
 import { CreateLeadInput } from "./leads.repository";
 import * as usersRepo from "../users/users.repository";
 import { createNotification, deleteLeadActivityNotifications } from "../notifications/notifications.service";
-import { findPropertyIdBySheetSource } from "../properties/properties.repository";
+import { findPropertyIdBySheetSource, findById as findPropertyById } from "../properties/properties.repository";
 import { pickAgentForProperty, createPropertyAgentPicker } from "../properties/properties.assignment";
 import { broadcastLeadChanged } from "./leads.realtime";
 import { HANDOVER_NOTE_PREFIX } from "./leads.handover";
@@ -933,6 +933,34 @@ export async function updateLeadNote(caller: AccessTokenPayload, leadId: string,
     await repo.setNote(client, leadId, note, caller.sub);
     await repo.insertLeadLog(client, leadId, caller.sub, caller.name, `Note: ${note}`);
   });
+  return repo.findById(leadId, scopedToAgentIds);
+}
+
+/**
+ * Admins and managers (route-gated) link a lead to a property, change it or
+ * clear it. A manager only reaches their own team's leads (scopeForCaller).
+ * Every change is written to Activity History, old and new property named.
+ */
+export async function setLeadProperty(caller: AccessTokenPayload, leadId: string, propertyId: string | null) {
+  const scopedToAgentIds = await scopeForCaller(caller);
+  const existing = await repo.findById(leadId, scopedToAgentIds);
+  if (!existing) throw ApiError.notFound("Lead not found");
+  if ((existing.property_id ?? null) === propertyId) return existing;
+
+  const next = propertyId ? await findPropertyById(propertyId) : undefined;
+  if (propertyId && !next) throw ApiError.badRequest("That property no longer exists.");
+  const before = existing.property_name;
+  const message = !next
+    ? `Property removed (was "${before}")`
+    : before
+      ? `Property changed from "${before}" to "${next.name}"`
+      : `Property set to "${next.name}"`;
+
+  await withTransaction(async (client) => {
+    await repo.setPropertyId(client, leadId, propertyId);
+    await repo.insertLeadLog(client, leadId, caller.sub, caller.name, message);
+  });
+  broadcastLeadChanged(leadId);
   return repo.findById(leadId, scopedToAgentIds);
 }
 

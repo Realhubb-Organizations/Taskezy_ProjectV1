@@ -8,7 +8,7 @@ import { useDialog } from "@/components/ui/DialogProvider";
 import { Sliders, Sparkles, Plus, Check, ChevronDown, Search, X, Minus, Download, RotateCcw, Users, Trash2, AlertTriangle } from "lucide-react";
 import { STATUS_OPTIONS, PICKABLE_STATUS_OPTIONS, frontendStatusToDbCode, withDeadLeadGate, nextStatusOptions } from "@/lib/leadStatusMapping";
 import { type LeadSummaryStats } from "@/lib/leadSummaryStats";
-import { apiListLeadsPage, apiGetLead, apiGetLeadStats, apiGetLeadAnalyticsStats, apiGetDistinctCampaigns, apiListFollowupsPage, apiDeleteLead, apiBulkDeleteLeads, apiBulkReassignLeads, type LeadListFilters, type AgentAnalyticsStats } from "@/lib/apiClient";
+import { apiListLeadsPage, apiGetLead, apiGetLeadStats, apiGetLeadAnalyticsStats, apiGetDistinctCampaigns, apiListFollowupsPage, apiDeleteLead, apiBulkDeleteLeads, apiBulkReassignLeads, apiSetLeadProperty, type LeadListFilters, type AgentAnalyticsStats } from "@/lib/apiClient";
 import { useServerLeadList } from "@/lib/useServerLeadList";
 import { PlatformLabel } from "@/components/icons/ContactIcons";
 import { isPhoneLayout } from "@/lib/viewport";
@@ -309,6 +309,22 @@ export default function LeadDashboard() {
         className={phoneLayout ? "max-w-full rounded-xl bg-blue-50 px-2 py-1.5 text-[11px] font-semibold text-blue-600 [&_svg]:h-3 [&_svg]:w-3" : "max-w-[110px] text-[11px] text-slate-700"}
       />
     );
+  };
+
+  // Property cell: admins and managers can link, change or clear a lead's
+  // property; the server logs every change in Activity History.
+  const NO_PROPERTY = "Not set";
+  const canAssignProperty = isAdmin || isManager;
+  const handlePropertyChange = async (l: Lead, name: string) => {
+    if (name === (l.property || NO_PROPERTY)) return;
+    const propertyId = name === NO_PROPERTY ? null : properties.find(p => p.name === name)?.id ?? null;
+    try {
+      const updated = mapApiLeadToFrontendLead(await apiSetLeadProperty(l.id, propertyId));
+      setServerLeads(prev => prev.map(r => (r.id === l.id ? { ...r, ...updated } : r)));
+      toast(propertyId ? `Property set to ${name}.` : "Property removed.", "success");
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Could not change the property. Please try again.", "error");
+    }
   };
 
   const handleAddManualLead = (data: {
@@ -1555,7 +1571,17 @@ export default function LeadDashboard() {
                           {adminVisibleColumns.property && (
                             <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]">
                               <span className="flex items-center gap-1.5 flex-wrap" title={l.property || "Not set"}>
-                                {l.property || "Not set"}
+                                {canAssignProperty ? (
+                                  <SearchableSelect
+                                    variant="inline"
+                                    options={[NO_PROPERTY, ...properties.map(p => p.name)]}
+                                    value={l.property || NO_PROPERTY}
+                                    onChange={(v) => handlePropertyChange(l, v)}
+                                    searchPlaceholder="Search property..."
+                                    panelWidth={220}
+                                    className="max-w-[150px] text-left"
+                                  />
+                                ) : (l.property || "Not set")}
                                 <span
                                   className={`shrink-0 border rounded-lg px-1.5 py-0.5 text-[10px] font-semibold ${l.property ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-slate-50 text-slate-500 border-slate-200"}`}
                                   title={l.property ? "This lead has a property linked" : "No property linked yet"}

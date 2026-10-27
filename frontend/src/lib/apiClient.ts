@@ -589,6 +589,14 @@ export function apiReassignLead(leadId: string, newAgentId: string, note: string
   });
 }
 
+/** Admin / manager: link the lead to a property, change it, or clear it (null). Logged in Activity History. */
+export function apiSetLeadProperty(leadId: string, propertyId: string | null): Promise<ApiLeadRow> {
+  return request<ApiLeadRow>(`/api/v1/leads/${leadId}/property`, {
+    method: "PATCH",
+    body: JSON.stringify({ propertyId })
+  });
+}
+
 export function apiUpdateLeadNote(leadId: string, note: string): Promise<ApiLeadRow> {
   return request<ApiLeadRow>(`/api/v1/leads/${leadId}/notes`, {
     method: "PATCH",

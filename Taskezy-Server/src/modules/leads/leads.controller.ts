@@ -126,6 +126,11 @@ export async function updateLeadNoteHandler(req: Request, res: Response): Promis
   sendOk(res, leadForCaller(req.user!, lead));
 }
 
+export async function setLeadPropertyHandler(req: Request, res: Response): Promise<void> {
+  const lead = await leadsService.setLeadProperty(req.user!, req.params.id, req.body.propertyId);
+  sendOk(res, leadForCaller(req.user!, lead));
+}
+
 export async function reassignUnassignedSheetLeadsHandler(req: Request, res: Response): Promise<void> {
   const result = await leadsService.reassignUnassignedSheetLeads(req.user!);
   sendOk(res, result);
