@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { X, Phone, Mail, Share2, ArrowRight, Repeat, Copy, Check, User, Pencil } from "lucide-react";
-import { useApp, Lead, LeadStatus } from "@/context/AppContext";
+import { useApp, Lead, LeadStatus, mapApiLeadToFrontendLead } from "@/context/AppContext";
 import { useDialog } from "@/components/ui/DialogProvider";
 import { SearchableSelect } from "@/components/ui/SearchableDropdown";
+import { apiSetLeadProperty } from "@/lib/apiClient";
 import { deriveActivityTimeline, nextStatusOptions, statusBadgeClasses, withDeadLeadGate } from "@/lib/leadStatusMapping";
 import { canChangeLeadStatus, canReassignThisLead, isLeadAssignableUser, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
 import { maskPhone, maskEmail } from "@/lib/maskPII";
@@ -22,6 +23,8 @@ interface LeadDetailDrawerProps {
   onReassigned?: (leadId: string) => void;
   /** Called after the lead's note is saved, so the caller can update its list. */
   onNoteSaved?: (leadId: string, note: string, updated: Lead | null) => void;
+  /** Called after the lead's property is saved, so the caller can update its list. */
+  onPropertySaved?: (leadId: string, updated: Lead | null) => void;
 }
 
 export default function LeadDetailDrawer({
@@ -30,12 +33,18 @@ export default function LeadDetailDrawer({
   onClose,
   onUpdateStatus,
   onReassigned,
-  onNoteSaved
+  onNoteSaved,
+  onPropertySaved
 }: LeadDetailDrawerProps) {
-  const { users, currentUser, activeRole, reassignLead, updateLeadNote, recordCallEnded, recordWhatsAppOpened } = useApp();
+  const { users, properties, currentUser, activeRole, reassignLead, updateLeadNote, recordCallEnded, recordWhatsAppOpened } = useApp();
   const { toast, confirm } = useDialog();
   const callAllowed = canTriggerLeadCall(activeRole === "ADMIN", currentUser?.email);
   const [localStatus, setLocalStatus] = useState<LeadStatus>("New Lead");
+  // Same Admin/Manager gate as the Leads table's own inline Property
+  // editor (LeadDashboard.tsx's canAssignProperty) — kept in sync here so
+  // this drawer and the table never disagree on who can edit it.
+  const canEditProperty = activeRole === "ADMIN" || currentUser?.role_type === "Manager";
+  const [savingProperty, setSavingProperty] = useState(false);
   // RNR/Call Back/Followup/Site Visit Scheduled are gated behind a blocking
   // popup (LeadScheduleModal below) that collects the next-call date/time +
   // a note before the status actually changes — every other status still
@@ -178,6 +187,26 @@ export default function LeadDetailDrawer({
     }
   };
 
+  // Same endpoint and NO_PROPERTY-sentinel convention as the Leads table's
+  // own inline Property dropdown (LeadDashboard.tsx's handlePropertyChange)
+  // — this just gives the drawer the same control, editable from both
+  // places now, not just the table.
+  const NO_PROPERTY = "Not set";
+  const handlePropertyChange = async (name: string) => {
+    if (savingProperty || name === (lead.property || NO_PROPERTY)) return;
+    const propertyId = name === NO_PROPERTY ? null : properties.find(p => p.name === name)?.id ?? null;
+    setSavingProperty(true);
+    try {
+      const updated = mapApiLeadToFrontendLead(await apiSetLeadProperty(lead.id, propertyId));
+      onPropertySaved?.(lead.id, updated);
+      toast(propertyId ? `Property set to ${name}.` : "Property removed.", "success");
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Could not change the property. Please try again.", "error");
+    } finally {
+      setSavingProperty(false);
+    }
+  };
+
   // "21 Jun 2026, 08:21 pm" — real timestamp formatting for the activity
   // timeline, replacing the previous raw ISO string.
   const formatLogTimestamp = (iso: string): string => {
@@ -216,20 +245,6 @@ export default function LeadDetailDrawer({
       value: (
         <span className="flex items-center gap-1">
           <User className="h-3 w-3 text-slate-400" /> {lead.assignedAgent || "Unassigned"}
-        </span>
-      )
-    },
-    {
-      label: "Property",
-      value: (
-        <span className="flex items-center gap-1.5 flex-wrap">
-          {lead.property || "Not set"}
-          <span
-            className={`shrink-0 border rounded-lg px-1.5 py-0.5 text-[10px] font-semibold ${lead.property ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-slate-50 text-slate-500 border-slate-200"}`}
-            title={lead.property ? "This lead has a property linked" : "No property linked yet"}
-          >
-            {lead.property ? "Assigned" : "Unassigned"}
-          </span>
         </span>
       )
     },
@@ -396,6 +411,33 @@ export default function LeadDetailDrawer({
           ))}
         </div>
 
+        {/* Property — editable for Admin/Manager (same gate as the Leads
+            table's own inline dropdown); read-only badge for everyone else,
+            same look the old metaFields row had. */}
+        <div className="px-5 py-3 border-b border-slate-100">
+          <span className="text-slate-400 font-bold text-[10px] block mb-1">Property :</span>
+          {canEditProperty ? (
+            <SearchableSelect
+              variant="field"
+              value={lead.property || NO_PROPERTY}
+              onChange={handlePropertyChange}
+              options={[NO_PROPERTY, ...properties.map(p => p.name)]}
+              disabled={savingProperty}
+              placeholder="Select property"
+              searchPlaceholder="Search property..."
+            />
+          ) : (
+            <span className="flex items-center gap-1.5 flex-wrap text-xs text-slate-800 font-semibold">
+              {lead.property || "Not set"}
+              <span
+                className={`shrink-0 border rounded-lg px-1.5 py-0.5 text-[10px] font-semibold ${lead.property ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-slate-50 text-slate-500 border-slate-200"}`}
+                title={lead.property ? "This lead has a property linked" : "No property linked yet"}
+              >
+                {lead.property ? "Assigned" : "Unassigned"}
+              </span>
+            </span>
+          )}
+        </div>
 
         {/* Reassign — admins and managers only (agents never see it), scoped
             to who this caller is actually allowed to hand the lead to */}

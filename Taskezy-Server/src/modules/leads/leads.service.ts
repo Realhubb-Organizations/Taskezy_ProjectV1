@@ -77,6 +77,46 @@ export async function listLeads(caller: AccessTokenPayload, filter: {
   };
 }
 
+export interface SearchLeadsByPhonesResult {
+  rows: repo.LeadListRow[];
+  notFound: string[];
+  meta: { page: number; pageSize: number; totalCount: number; totalPages: number };
+}
+
+/**
+ * Admin-only Leads page feature: paste or upload a list of phone numbers
+ * (a recruiter's export, a purchased list, etc.) and the Leads table
+ * filters down to exactly those that already exist as leads — a real
+ * filter, not a separate popup list, so every other table feature (status
+ * editing, row click, pagination) keeps working unchanged against `rows`.
+ * The full match set is bounded by the <=2000-phone input, so pagination
+ * here is an in-memory slice, not a second SQL query. `notFound` is built
+ * from the caller's own original strings (not the normalized form) and is
+ * NOT paginated — it's independent of which page is showing.
+ */
+export async function searchLeadsByPhones(rawPhones: string[], page: number, pageSize: number): Promise<SearchLeadsByPhonesResult> {
+  const trimmed = Array.from(new Set(rawPhones.map(p => p.trim()).filter(Boolean)));
+  const normalizedSet = new Set<string>();
+  for (const raw of trimmed) {
+    const n = normalizeTypedIndianMobile(raw);
+    if (n) normalizedSet.add(n);
+  }
+
+  const allMatched = await repo.findManyByPhones(Array.from(normalizedSet));
+  const matchedPhones = new Set(allMatched.map(m => m.phone));
+
+  const notFound = trimmed.filter(raw => {
+    const n = normalizeTypedIndianMobile(raw);
+    return !n || !matchedPhones.has(n);
+  });
+
+  const totalCount = allMatched.length;
+  const offset = (page - 1) * pageSize;
+  const rows = allMatched.slice(offset, offset + pageSize);
+
+  return { rows, notFound, meta: { page, pageSize, totalCount, totalPages: Math.max(1, Math.ceil(totalCount / pageSize)) } };
+}
+
 // Maps lead_statuses.code -> the 7 admin CRM stat-card buckets. Mirrors
 // frontend/src/lib/leadStatusMapping.ts's DB_CODE_TO_FRONTEND_STATUS combined
 // with frontend/src/lib/leadSummaryStats.ts's computeLeadSummaryStats, i.e.
@@ -947,7 +987,10 @@ export async function updateLeadNote(caller: AccessTokenPayload, leadId: string,
  * clear it. A manager only reaches their own team's leads (scopeForCaller).
  * Every change is written to Activity History, old and new property named.
  */
-export async function setLeadProperty(caller: AccessTokenPayload, leadId: string, propertyId: string | null) {
+// `note` is optional from the single-lead API (no schema field for it
+// today) but required from the bulk one below (bulkSetLeadPropertySchema)
+// — same shape as reassignLead's own optional/required split.
+export async function setLeadProperty(caller: AccessTokenPayload, leadId: string, propertyId: string | null, note?: string) {
   const scopedToAgentIds = await scopeForCaller(caller);
   const existing = await repo.findById(leadId, scopedToAgentIds);
   if (!existing) throw ApiError.notFound("Lead not found");
@@ -964,10 +1007,67 @@ export async function setLeadProperty(caller: AccessTokenPayload, leadId: string
 
   await withTransaction(async (client) => {
     await repo.setPropertyId(client, leadId, propertyId);
-    await repo.insertLeadLog(client, leadId, caller.sub, caller.name, message);
+    if (note) await repo.setNote(client, leadId, note, caller.sub);
+    await repo.insertLeadLog(client, leadId, caller.sub, caller.name, note ? `${message}. Note: ${note}` : message);
   });
   broadcastLeadChanged(leadId);
   return repo.findById(leadId, scopedToAgentIds);
+}
+
+export interface BulkSetLeadPropertyResult {
+  requested: number;
+  updated: number;
+  skipped: number; // already on this property
+  failed: { id: string; reason: string }[];
+}
+
+// Bulk counterpart to setLeadProperty above — same per-lead-loop shape as
+// bulkReassignLeads (one lead's failure can't block the rest; each call
+// reuses the single-lead function's own validation/logging).
+export async function bulkSetLeadProperty(
+  caller: AccessTokenPayload,
+  leadIds: string[],
+  propertyId: string | null,
+  note: string
+): Promise<BulkSetLeadPropertyResult> {
+  const ids = Array.from(new Set(leadIds));
+  let updated = 0;
+  let skipped = 0;
+  const failed: { id: string; reason: string }[] = [];
+
+  for (const id of ids) {
+    try {
+      const before = await repo.findById(id, await scopeForCaller(caller));
+      if (!before) {
+        failed.push({ id, reason: "Lead not found" });
+        continue;
+      }
+      if ((before.property_id ?? null) === propertyId) {
+        skipped++;
+        continue;
+      }
+      await setLeadProperty(caller, id, propertyId, note);
+      updated++;
+    } catch (err) {
+      failed.push({ id, reason: err instanceof ApiError ? err.message : "Unexpected error" });
+    }
+  }
+
+  return { requested: ids.length, updated, skipped, failed };
+}
+
+/**
+ * Bulk "change leads' property" is Admin-always, Manager-by-toggle — the
+ * Access Control switch in Settings > Manage Users (Super Admin only),
+ * off by default. Mirrors assertBulkImportAllowed's shape; checked once
+ * before queueing, since the queued worker runs without a caller.
+ */
+export async function assertBulkPropertyChangeAllowed(caller: AccessTokenPayload): Promise<void> {
+  if (caller.role === "ADMIN") return;
+  const allowed = await usersRepo.isBulkChangeLeadPropertyEnabled(caller.sub);
+  if (!allowed) {
+    throw ApiError.forbidden("You don't have access to bulk-change leads' property — ask an admin to enable it for you in Manage Users.");
+  }
 }
 
 // `note` is required from the API (reassignLeadSchema); automatic internal

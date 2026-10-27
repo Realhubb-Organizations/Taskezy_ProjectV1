@@ -12,8 +12,9 @@ export interface UserDirectoryRow {
   designation: string | null;
   manager_id: string | null;
   manager_name: string | null;
-  /** Access Control toggle — only populated by findManyUsers (Manage Users' own query); undefined elsewhere. */
+  /** Access Control toggles — only populated by findManyUsers (Manage Users' own query); undefined elsewhere. */
   can_bulk_upload_crm_leads?: boolean;
+  can_bulk_change_lead_property?: boolean;
 }
 
 // Read-only directory (no password_hash) — used by other modules to resolve
@@ -78,7 +79,7 @@ export async function findManyUsers(filter: UserListFilter): Promise<{ rows: Use
   const { rows } = await query<UserDirectoryRow>(
     `SELECT u.id, u.first_name, u.last_name, u.email, u.role, u.department, u.role_type, u.designation,
             u.manager_id, m.first_name || COALESCE(' ' || m.last_name, '') AS manager_name,
-            u.can_bulk_upload_crm_leads
+            u.can_bulk_upload_crm_leads, u.can_bulk_change_lead_property
      FROM users u
      LEFT JOIN users m ON m.id = u.manager_id
      ${whereClause}
@@ -99,7 +100,7 @@ export interface FullUserRow extends UserDirectoryRow {
 const FULL_SELECT = `
   SELECT u.id, u.first_name, u.last_name, u.email, u.phone_number, u.role, u.department, u.role_type,
          u.employment_type, u.designation, u.status, u.created_at, u.manager_id,
-         m.first_name || COALESCE(' ' || m.last_name, '') AS manager_name, u.can_bulk_upload_crm_leads
+         m.first_name || COALESCE(' ' || m.last_name, '') AS manager_name, u.can_bulk_upload_crm_leads, u.can_bulk_change_lead_property
   FROM users u
   LEFT JOIN users m ON m.id = u.manager_id
 `;
@@ -131,6 +132,15 @@ export async function isBulkUploadCrmLeadsEnabled(id: string): Promise<boolean> 
     [id]
   );
   return rows[0]?.can_bulk_upload_crm_leads ?? false;
+}
+
+/** Access Control toggle (Settings > Manage Users, Super Admin only) — whether this manager may run the bulk "change leads' property" action. See leads.service.ts's assertBulkPropertyChangeAllowed. */
+export async function isBulkChangeLeadPropertyEnabled(id: string): Promise<boolean> {
+  const { rows } = await query<{ can_bulk_change_lead_property: boolean }>(
+    `SELECT can_bulk_change_lead_property FROM users WHERE id = $1`,
+    [id]
+  );
+  return rows[0]?.can_bulk_change_lead_property ?? false;
 }
 
 /** Every active admin — the follow-up SLA scheduler escalates a missed reminder to all of them. */
@@ -204,6 +214,7 @@ export interface EditUserInput {
   status?: string;
   managerId?: string | null;
   canBulkUploadCrmLeads?: boolean;
+  canBulkChangeLeadProperty?: boolean;
 }
 
 export async function update(id: string, input: EditUserInput): Promise<void> {
@@ -212,7 +223,7 @@ export async function update(id: string, input: EditUserInput): Promise<void> {
   const columnMap: Record<string, string> = {
     firstName: "first_name", lastName: "last_name", email: "email", designation: "designation",
     roleType: "role_type", department: "department", status: "status", managerId: "manager_id",
-    canBulkUploadCrmLeads: "can_bulk_upload_crm_leads"
+    canBulkUploadCrmLeads: "can_bulk_upload_crm_leads", canBulkChangeLeadProperty: "can_bulk_change_lead_property"
   };
 
   for (const [field, value] of Object.entries(input)) {

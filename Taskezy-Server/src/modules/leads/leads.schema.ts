@@ -173,6 +173,35 @@ export const bulkReassignJobIdParamSchema = z.object({
   jobId: z.string().uuid()
 });
 
+// Backs the main CRM Leads page's bulk "Change Property" toolbar action —
+// same note requirement as single-lead setLeadProperty when a note is
+// given, and the same leadIds cap as bulk reassign.
+export const bulkSetLeadPropertySchema = z.object({
+  leadIds: z.array(z.string().uuid()).min(1).max(5000),
+  propertyId: z.string().uuid().nullable(),
+  note: noteText
+});
+
+export const bulkSetPropertyJobIdParamSchema = z.object({
+  jobId: z.string().uuid()
+});
+
+// Admin-only Leads page feature: paste or upload many phone numbers at
+// once (a recruiter's list, a data-provider export, etc.) and see which
+// ones match an existing lead. Raw strings, not pre-validated here — each
+// one is normalized/matched server-side (leads.service.ts's
+// searchLeadsByPhones) the same lenient way bulk-import rows are, so a
+// stray "+91", space or dash doesn't make an otherwise-valid number
+// falsely report as not found.
+export const searchLeadsByPhonesSchema = z.object({
+  phones: z.array(z.string()).min(1).max(2000),
+  // Shows as a real filter on the Leads table (not a popup list) — paged
+  // the same way the normal GET /leads is, just sliced from the already-
+  // bounded (<=2000) match set in memory rather than a second SQL query.
+  page: z.number().int().positive().optional(),
+  pageSize: z.number().int().positive().max(200).optional()
+});
+
 // Bulk upload rows are deliberately NOT phone-regex-validated here the way
 // createLeadSchema is — an admin's Excel sheet is messy (formatting,
 // +91 prefixes, stray spaces), so invalid rows are normalized/validated

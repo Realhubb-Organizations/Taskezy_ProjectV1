@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import { sendOk, sendPaginated } from "../../utils/apiResponse";
 import { ApiError } from "../../utils/ApiError";
-import { boss, BULK_IMPORT_LEADS_QUEUE, BULK_DELETE_LEADS_QUEUE, BULK_REASSIGN_LEADS_QUEUE } from "../../jobs/queue";
+import { boss, BULK_IMPORT_LEADS_QUEUE, BULK_DELETE_LEADS_QUEUE, BULK_REASSIGN_LEADS_QUEUE, BULK_SET_PROPERTY_QUEUE } from "../../jobs/queue";
 import { leadForCaller } from "./leads.handover";
 import * as leadsService from "./leads.service";
 
@@ -12,6 +12,13 @@ export async function listLeadsHandler(req: Request, res: Response): Promise<voi
   };
   const { rows, meta } = await leadsService.listLeads(req.user!, { page, pageSize, status, assignedAgentId, campaign, propertyId, noProperty, dateFrom, dateTo, search, excludeBulkUpload, missedOnly });
   sendPaginated(res, rows.map(r => leadForCaller(req.user!, r)), meta);
+}
+
+export async function searchLeadsByPhonesHandler(req: Request, res: Response): Promise<void> {
+  const page = req.body.page ?? 1;
+  const pageSize = req.body.pageSize ?? 20;
+  const { rows, notFound, meta } = await leadsService.searchLeadsByPhones(req.body.phones, page, pageSize);
+  sendOk(res, { matched: rows.map(r => leadForCaller(req.user!, r)), notFound, ...meta });
 }
 
 export async function getLeadStatsHandler(req: Request, res: Response): Promise<void> {
@@ -186,6 +193,24 @@ export async function getBulkReassignStatusHandler(req: Request, res: Response):
   sendOk(res, {
     state: job.state,
     result: job.state === "completed" ? (job.output as leadsService.BulkReassignLeadsResult) : undefined
+  });
+}
+
+export async function bulkSetLeadPropertyHandler(req: Request, res: Response): Promise<void> {
+  // Checked here, before queueing — the worker runs without a caller.
+  await leadsService.assertBulkPropertyChangeAllowed(req.user!);
+  const { leadIds, propertyId, note } = req.body;
+  const jobId = await boss.send(BULK_SET_PROPERTY_QUEUE, { caller: req.user!, leadIds, propertyId, note });
+  if (!jobId) throw ApiError.internal("Could not queue the property change — try again.");
+  sendOk(res, { jobId }, 202);
+}
+
+export async function getBulkSetPropertyStatusHandler(req: Request, res: Response): Promise<void> {
+  const [job] = await boss.findJobs(BULK_SET_PROPERTY_QUEUE, { id: req.params.jobId });
+  if (!job) throw ApiError.notFound("Property-change job not found");
+  sendOk(res, {
+    state: job.state,
+    result: job.state === "completed" ? (job.output as leadsService.BulkSetLeadPropertyResult) : undefined
   });
 }
 
