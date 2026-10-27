@@ -4,6 +4,7 @@ import { X, Phone, Mail, ArrowRight, Copy, Check, User, Pencil, ChevronDown } fr
 import { useApp, Lead, LeadStatus } from "@/context/AppContext";
 import { useDialog } from "@/components/ui/DialogProvider";
 import { SearchableSelect } from "@/components/ui/SearchableDropdown";
+import { apiSetLeadProperty } from "@/lib/apiClient";
 import { deriveActivityTimeline, nextStatusOptions, statusBadgeClasses, withDeadLeadGate } from "@/lib/leadStatusMapping";
 import { canChangeLeadStatus, canReassignThisLead, isLeadAssignableUser, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
 import { maskPhone, maskEmail } from "@/lib/maskPII";
@@ -22,6 +23,8 @@ interface LeadDetailDrawerProps {
   onReassigned?: (leadId: string) => void;
   /** Called after the lead's note is saved, so the caller can update its list. */
   onNoteSaved?: (leadId: string, note: string, updated: Lead | null) => void;
+  /** Called after the lead's property is saved, so the caller can update its list. */
+  onPropertySaved?: (leadId: string, updated: Lead | null) => void;
 }
 
 export default function LeadDetailDrawer({
@@ -30,12 +33,18 @@ export default function LeadDetailDrawer({
   onClose,
   onUpdateStatus,
   onReassigned,
-  onNoteSaved
+  onNoteSaved,
+  onPropertySaved
 }: LeadDetailDrawerProps) {
   const { users, currentUser, activeRole, reassignLead, updateLeadNote, recordCallEnded, recordWhatsAppOpened } = useApp();
   const { toast, confirm, prompt: promptDialog } = useDialog();
   const callAllowed = canTriggerLeadCall(activeRole === "ADMIN", currentUser?.email);
   const [localStatus, setLocalStatus] = useState<LeadStatus>("New Lead");
+  // Same Admin/Manager gate as the Leads table's own inline Property
+  // editor (LeadDashboard.tsx's canAssignProperty) — kept in sync here so
+  // this drawer and the table never disagree on who can edit it.
+  const canEditProperty = activeRole === "ADMIN" || currentUser?.role_type === "Manager";
+  const [savingProperty, setSavingProperty] = useState(false);
   // RNR/Call Back/Followup/Site Visit Scheduled are gated behind a blocking
   // popup (LeadScheduleModal below) that collects the next-call date/time +
   // a note before the status actually changes — every other status still
@@ -184,6 +193,26 @@ export default function LeadDetailDrawer({
       toast(err instanceof Error ? err.message : "Could not reassign this lead. Please try again.", "error");
     } finally {
       setReassigning(false);
+    }
+  };
+
+  // Same endpoint and NO_PROPERTY-sentinel convention as the Leads table's
+  // own inline Property dropdown (LeadDashboard.tsx's handlePropertyChange)
+  // — this just gives the drawer the same control, editable from both
+  // places now, not just the table.
+  const NO_PROPERTY = "Not set";
+  const handlePropertyChange = async (name: string) => {
+    if (savingProperty || name === (lead.property || NO_PROPERTY)) return;
+    const propertyId = name === NO_PROPERTY ? null : properties.find(p => p.name === name)?.id ?? null;
+    setSavingProperty(true);
+    try {
+      const updated = mapApiLeadToFrontendLead(await apiSetLeadProperty(lead.id, propertyId));
+      onPropertySaved?.(lead.id, updated);
+      toast(propertyId ? `Property set to ${name}.` : "Property removed.", "success");
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Could not change the property. Please try again.", "error");
+    } finally {
+      setSavingProperty(false);
     }
   };
 

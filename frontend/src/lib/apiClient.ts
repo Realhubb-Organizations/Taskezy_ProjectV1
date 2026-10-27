@@ -649,8 +649,49 @@ export async function apiBulkReassignLeads(leadIds: string[], newAgentId: string
   );
 }
 
+export interface BulkSetLeadPropertyApiResult {
+  requested: number;
+  updated: number;
+  skipped: number;
+  failed: { id: string; reason: string }[];
+}
+// Queued (bulk-set-property worker) — the main CRM Leads page's bulk
+// "Change Property" toolbar action. Admin always allowed; a Manager needs
+// the Access Control toggle (Settings > Manage Users, Super Admin only) —
+// a 403 here means it's off for them.
+export async function apiBulkSetLeadProperty(leadIds: string[], propertyId: string | null, note: string): Promise<BulkSetLeadPropertyApiResult> {
+  const { jobId } = await request<{ jobId: string }>("/api/v1/leads/bulk-set-property", {
+    method: "POST",
+    body: JSON.stringify({ leadIds, propertyId, note })
+  });
+  return pollJob<BulkSetLeadPropertyApiResult>(() =>
+    request<JobStatus<BulkSetLeadPropertyApiResult>>(`/api/v1/leads/bulk-set-property/${jobId}/status`)
+  );
+}
+
 export function apiVerifyLeadKyc(leadId: string): Promise<ApiLeadRow> {
   return request<ApiLeadRow>(`/api/v1/leads/${leadId}/kyc`, { method: "PATCH" });
+}
+
+export interface SearchLeadsByPhonesApiResult {
+  matched: ApiLeadRow[];
+  /** Exactly what was typed/pasted/uploaded — not the normalized form — for every number that didn't match a lead (including ones that weren't even valid phone numbers). Independent of page/pageSize. */
+  notFound: string[];
+  page: number;
+  pageSize: number;
+  totalCount: number;
+  totalPages: number;
+}
+// Admin-only Leads page feature — paste or upload a list of phone numbers;
+// shows as a real filter on the Leads table (not a popup list), same
+// page/pageSize shape as apiListLeadsPage so the table's own pagination
+// controls work unchanged against it. Not queued — a single indexed
+// = ANY(...) lookup, fast even at the 2000-number cap, sliced in memory.
+export function apiSearchLeadsByPhones(phones: string[], page: number, pageSize: number): Promise<SearchLeadsByPhonesApiResult> {
+  return request<SearchLeadsByPhonesApiResult>("/api/v1/leads/search-by-phones", {
+    method: "POST",
+    body: JSON.stringify({ phones, page, pageSize })
+  });
 }
 
 export interface ApiUserDirectoryEntry {
@@ -664,8 +705,9 @@ export interface ApiUserDirectoryEntry {
   designation: string | null;
   manager_id: string | null;
   manager_name: string | null;
-  /** Access Control toggle (Settings > Manage Users, Super Admin only) — whether this manager may use the main CRM Leads page's bulk upload. Only populated by apiListUsersPage. */
+  /** Access Control toggles (Settings > Manage Users, Super Admin only). Only populated by apiListUsersPage. */
   can_bulk_upload_crm_leads?: boolean;
+  can_bulk_change_lead_property?: boolean;
 }
 
 export function apiListUsers(): Promise<ApiUserDirectoryEntry[]> {
@@ -748,8 +790,9 @@ export interface EditUserApiInput {
   department?: "SALES" | "TECH" | "MARKETING" | "FINANCE";
   status?: "ACTIVE" | "INACTIVE";
   managerId?: string | null;
-  // Super-Admin-only field — the server rejects it from any other admin.
+  // Super-Admin-only fields — the server rejects either from any other admin.
   canBulkUploadCrmLeads?: boolean;
+  canBulkChangeLeadProperty?: boolean;
 }
 
 export function apiEditUser(userId: string, input: EditUserApiInput): Promise<ApiFullUser> {

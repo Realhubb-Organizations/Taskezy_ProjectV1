@@ -10,7 +10,10 @@ import {
   bulkImportPrecheckSchema,
   bulkReassignJobIdParamSchema,
   bulkReassignLeadsSchema,
+  bulkSetLeadPropertySchema,
+  bulkSetPropertyJobIdParamSchema,
   createLeadSchema,
+  searchLeadsByPhonesSchema,
   distinctCampaignsQuerySchema,
   editLeadSchema,
   leadAnalyticsStatsQuerySchema,
@@ -29,6 +32,7 @@ import {
   bulkImportLeadsHandler,
   bulkImportPrecheckHandler,
   bulkReassignLeadsHandler,
+  bulkSetLeadPropertyHandler,
   createLeadHandler,
   deleteLeadHandler,
   editLeadHandler,
@@ -37,6 +41,7 @@ import {
   getBulkDeleteStatusHandler,
   getBulkImportStatusHandler,
   getBulkReassignStatusHandler,
+  getBulkSetPropertyStatusHandler,
   getDistinctCampaignsHandler,
   getLeadAnalyticsStatsHandler,
   getLeadHandler,
@@ -48,6 +53,7 @@ import {
   updateLeadNoteHandler,
   setLeadPropertyHandler,
   reassignUnassignedSheetLeadsHandler,
+  searchLeadsByPhonesHandler,
   updateLeadStatusHandler,
   verifyLeadKycHandler
 } from "./leads.controller";
@@ -82,6 +88,15 @@ leadsRouter.get("/manager-report-stats", validate({ query: managerReportStatsQue
 // LeadDrillDownPanel's Campaign filter dropdown — distinct campaign names
 // for the caller's own scope, same no-extra-role-gate reasoning as above.
 leadsRouter.get("/campaigns", validate({ query: distinctCampaignsQuerySchema }), asyncHandler(getDistinctCampaignsHandler));
+// Admin-only: paste/upload many phone numbers at once, see which already
+// exist as leads and which don't (leads.service.ts's searchLeadsByPhones).
+// Not paginated — returns every match in one response.
+leadsRouter.post(
+  "/search-by-phones",
+  requireRole("ADMIN"),
+  validate({ body: searchLeadsByPhonesSchema }),
+  asyncHandler(searchLeadsByPhonesHandler)
+);
 leadsRouter.get("/:id", validate({ params: leadIdParamSchema }), asyncHandler(getLeadHandler));
 // Uploading leads (single entry or Data Calling's bulk Excel) is for admins
 // and managers only — agents work leads, they don't add them. Managers can
@@ -137,6 +152,23 @@ leadsRouter.get(
   "/bulk-reassign/:jobId/status",
   validate({ params: bulkReassignJobIdParamSchema }),
   asyncHandler(getBulkReassignStatusHandler)
+);
+// Bulk "change leads' property" — Admin and Manager at the route level
+// (matches the single-lead PATCH /:id/property below); the finer-grained
+// per-manager Access Control toggle is checked inside the handler before
+// queueing (assertBulkPropertyChangeAllowed), same pre-queue-check shape
+// as bulk-import's own Manager-access gate.
+leadsRouter.post(
+  "/bulk-set-property",
+  requireAdminOrManager("change leads' property"),
+  validate({ body: bulkSetLeadPropertySchema }),
+  asyncHandler(bulkSetLeadPropertyHandler)
+);
+leadsRouter.get(
+  "/bulk-set-property/:jobId/status",
+  requireAdminOrManager("change leads' property"),
+  validate({ params: bulkSetPropertyJobIdParamSchema }),
+  asyncHandler(getBulkSetPropertyStatusHandler)
 );
 leadsRouter.patch(
   "/:id/status",

@@ -2,7 +2,7 @@ import { PgBoss } from "pg-boss";
 import { env } from "../config/env";
 import { logger } from "../utils/logger";
 import { AccessTokenPayload } from "../utils/tokens";
-import { bulkImportLeads, BulkImportLeadsInput, bulkDeleteLeads, bulkReassignLeads } from "../modules/leads/leads.service";
+import { bulkImportLeads, BulkImportLeadsInput, bulkDeleteLeads, bulkReassignLeads, bulkSetLeadProperty } from "../modules/leads/leads.service";
 
 // Postgres-backed job queue (same RDS instance, its own `pgboss` schema —
 // see migrations-archive/031_pgboss_grants.sql for the one-time setup).
@@ -50,6 +50,16 @@ interface BulkReassignLeadsJobData {
   note: string;
 }
 
+// Main CRM Leads page's bulk "Change Property" toolbar action — same
+// queued shape as bulk reassign (leads.service.ts's bulkSetLeadProperty).
+export const BULK_SET_PROPERTY_QUEUE = "bulk-set-property";
+interface BulkSetPropertyJobData {
+  caller: AccessTokenPayload;
+  leadIds: string[];
+  propertyId: string | null;
+  note: string;
+}
+
 /**
  * Starts the queue and registers every job worker this process handles.
  * Same process as the API server (see server.ts) — this app is already
@@ -92,6 +102,12 @@ export async function startQueue(): Promise<void> {
   await boss.work<BulkReassignLeadsJobData>(BULK_REASSIGN_LEADS_QUEUE, async ([job]) => {
     logger.info({ jobId: job.id }, "Processing queued bulk lead reassignment");
     return bulkReassignLeads(job.data.caller, job.data.leadIds, job.data.newAgentId, job.data.note);
+  });
+
+  await boss.createQueue(BULK_SET_PROPERTY_QUEUE);
+  await boss.work<BulkSetPropertyJobData>(BULK_SET_PROPERTY_QUEUE, async ([job]) => {
+    logger.info({ jobId: job.id }, "Processing queued bulk lead property change");
+    return bulkSetLeadProperty(job.data.caller, job.data.leadIds, job.data.propertyId, job.data.note);
   });
 }
 

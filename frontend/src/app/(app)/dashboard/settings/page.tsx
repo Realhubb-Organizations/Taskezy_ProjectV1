@@ -628,6 +628,17 @@ export default function SettingsPage() {
       setTogglingAccessControlUserId(null);
     }
   };
+  const handleToggleBulkChangePropertyAccess = async (user: User, next: boolean) => {
+    setTogglingAccessControlUserId(user.id);
+    try {
+      await apiEditUser(user.id, { canBulkChangeLeadProperty: next });
+      setServerUsers(prev => prev.map(u => (u.id === user.id ? { ...u, canBulkChangeLeadProperty: next } : u)));
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Could not update bulk property-change access.", "error");
+    } finally {
+      setTogglingAccessControlUserId(null);
+    }
+  };
 
   useEffect(() => {
     if (activeTab !== "Manage Users") return;
@@ -1750,7 +1761,7 @@ export default function SettingsPage() {
                     {isSuperAdmin && user.role_type === "Manager" && (
                       <div className={`grid transition-[grid-template-rows] duration-300 ease-out ${expandedAccessControlUserId === user.id ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
                         <div className="overflow-hidden">
-                          <div className="border-t border-slate-100 bg-slate-50/70 px-4 py-3">
+                          <div className="border-t border-slate-100 bg-slate-50/70 px-4 py-3 space-y-2">
                             <div className="flex items-center justify-between gap-4 bg-white border border-slate-150 rounded-xl px-3.5 py-2.5">
                               <div className="min-w-0">
                                 <p className="text-xs font-bold text-slate-700">CRM Leads bulk upload</p>
@@ -1772,6 +1783,31 @@ export default function SettingsPage() {
                                 <span
                                   className={`absolute top-0.5 left-0.5 h-6 w-6 rounded-full bg-white shadow-md ring-1 ring-black/5 transition-transform duration-200 ease-in-out ${
                                     user.canBulkUploadCrmLeads ? "translate-x-5" : "translate-x-0"
+                                  }`}
+                                />
+                              </button>
+                            </div>
+                            <div className="flex items-center justify-between gap-4 bg-white border border-slate-150 rounded-xl px-3.5 py-2.5">
+                              <div className="min-w-0">
+                                <p className="text-xs font-bold text-slate-700">Bulk change lead property</p>
+                                <p className="text-[10px] text-slate-500 mt-0.5">
+                                  Lets {user.name} select many leads at once and change their Property in one go, from the Leads page toolbar.
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                role="switch"
+                                aria-checked={!!user.canBulkChangeLeadProperty}
+                                aria-label="Bulk change lead property access"
+                                disabled={togglingAccessControlUserId === user.id}
+                                onClick={() => handleToggleBulkChangePropertyAccess(user, !user.canBulkChangeLeadProperty)}
+                                className={`relative shrink-0 h-7 w-12 rounded-full transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#0B1E6E] disabled:opacity-60 ${
+                                  user.canBulkChangeLeadProperty ? "bg-[#0B1E6E]" : "bg-slate-300"
+                                }`}
+                              >
+                                <span
+                                  className={`absolute top-0.5 left-0.5 h-6 w-6 rounded-full bg-white shadow-md ring-1 ring-black/5 transition-transform duration-200 ease-in-out ${
+                                    user.canBulkChangeLeadProperty ? "translate-x-5" : "translate-x-0"
                                   }`}
                                 />
                               </button>

@@ -519,6 +519,16 @@ export async function findById(id: string, scopedToAgentIds?: string[]): Promise
   return rows[0];
 }
 
+/** Exact-match bulk lookup (Admin-only Leads page feature: paste/upload many phone numbers at once) — not routed through buildLeadWhereClause's paginated filter machinery since this always wants every match in one shot, not a page. */
+export async function findManyByPhones(phones: string[]): Promise<LeadListRow[]> {
+  if (phones.length === 0) return [];
+  const { rows } = await query<LeadListRow>(
+    `${LIST_SELECT} WHERE l.phone = ANY($1::text[]) ORDER BY l.assigned_at DESC NULLS LAST`,
+    [phones]
+  );
+  return rows;
+}
+
 export async function findByPhone(phone: string): Promise<{ id: string } | undefined> {
   const { rows } = await query<{ id: string }>(`SELECT id FROM leads WHERE phone = $1`, [phone]);
   return rows[0];

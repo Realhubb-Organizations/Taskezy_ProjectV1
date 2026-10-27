@@ -140,12 +140,12 @@ usersRouter.patch(
     const existing = await repo.findById(req.params.id);
     if (!existing) throw ApiError.notFound("User not found");
 
-    // Access Control toggle is Super-Admin-only — every other admin can
-    // still edit everything else about a user, just not this one field.
-    if (req.body.canBulkUploadCrmLeads !== undefined) {
+    // Access Control toggles are Super-Admin-only — every other admin can
+    // still edit everything else about a user, just not these fields.
+    if (req.body.canBulkUploadCrmLeads !== undefined || req.body.canBulkChangeLeadProperty !== undefined) {
       const caller = await repo.findById(req.user!.sub);
       if (caller?.email !== SUPER_ADMIN_EMAIL) {
-        throw ApiError.forbidden("Only the Super Admin can change bulk-upload access control.");
+        throw ApiError.forbidden("Only the Super Admin can change bulk-action access control.");
       }
     }
 

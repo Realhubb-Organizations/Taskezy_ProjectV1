@@ -5,10 +5,10 @@ import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useApp, Lead, LeadStatus, FollowupCall, mapApiLeadToFrontendLead, mapApiFollowupToFrontend } from "@/context/AppContext";
 import { useDialog } from "@/components/ui/DialogProvider";
-import { Sliders, Sparkles, Plus, Check, ChevronDown, Search, X, Minus, Download, RotateCcw, Users, Trash2, AlertTriangle } from "lucide-react";
+import { Sliders, Sparkles, Plus, Check, ChevronDown, Search, X, Minus, Download, RotateCcw, Users, Trash2, AlertTriangle, Building2, ClipboardList, Upload } from "lucide-react";
 import { STATUS_OPTIONS, PICKABLE_STATUS_OPTIONS, frontendStatusToDbCode, withDeadLeadGate, nextStatusOptions } from "@/lib/leadStatusMapping";
 import { type LeadSummaryStats } from "@/lib/leadSummaryStats";
-import { apiListLeadsPage, apiGetLead, apiGetLeadStats, apiGetLeadAnalyticsStats, apiGetDistinctCampaigns, apiListFollowupsPage, apiDeleteLead, apiBulkDeleteLeads, apiBulkReassignLeads, apiSetLeadProperty, type LeadListFilters, type AgentAnalyticsStats } from "@/lib/apiClient";
+import { apiListLeadsPage, apiGetLead, apiGetLeadStats, apiGetLeadAnalyticsStats, apiGetDistinctCampaigns, apiListFollowupsPage, apiDeleteLead, apiBulkDeleteLeads, apiBulkReassignLeads, apiBulkSetLeadProperty, apiSetLeadProperty, apiSearchLeadsByPhones, type LeadListFilters, type AgentAnalyticsStats } from "@/lib/apiClient";
 import { useServerLeadList } from "@/lib/useServerLeadList";
 import { PlatformLabel } from "@/components/icons/ContactIcons";
 import ExpandChevron, { CollapsibleCell } from "@/components/ui/ExpandChevron";
@@ -202,6 +202,11 @@ export default function LeadDashboard() {
   // Bulk select + Assign/Reshuffle (same workflow as Data Calling) — Admin
   // and Manager only; who they can pick is scoped in lib/leadAssignment.ts.
   const canBulkAssign = isAdmin || currentUser?.role_type === "Manager";
+  // Bulk "Change Property" — Admin always; a Manager needs the Access
+  // Control toggle (Settings > Manage Users, Super Admin only), off by
+  // default. The server re-checks this independently (leads.service.ts's
+  // assertBulkPropertyChangeAllowed), this just hides the button.
+  const canBulkChangeProperty = isAdmin || !!currentUser?.canBulkChangeLeadProperty;
 
   // Data scoping based on role. The backend's own GET /api/v1/leads already
   // restricts what a sales Member/Manager's session ever receives (see
@@ -426,6 +431,13 @@ export default function LeadDashboard() {
   const [adminPropertyFilter, setAdminPropertyFilter] = useState<string[]>([]);
   const [adminPage, setAdminPage] = useState(1);
   const [adminRowsPerPage, setAdminRowsPerPage] = useState(100);
+  // Admin-only bulk phone-number search — a real filter on this same table
+  // (see the fetch effect below), exclusive with the filters above while
+  // active. Declared here (not alongside the rest of its own UI state
+  // further down) since the fetch effect needs it before that point.
+  const [adminPhoneFilter, setAdminPhoneFilter] = useState<string[] | null>(null);
+  const [phoneFilterNotFound, setPhoneFilterNotFound] = useState<string[]>([]);
+  const [showPhoneFilterNotFound, setShowPhoneFilterNotFound] = useState(false);
 
   // ---- Server-paginated Leads tab data (real fetch-per-page, not the old
   // "load every lead into the browser" pattern) ----
@@ -537,6 +549,29 @@ export default function LeadDashboard() {
     if (adminTab !== "leads") return;
     let cancelled = false;
     setServerLeadsLoading(true);
+
+    // Phone-number search is a real filter on this same table, exclusive
+    // with every other filter below (the search-by-phones endpoint doesn't
+    // combine with status/property/etc.) — see the banner above the table
+    // and runPhoneSearch, which sets adminPhoneFilter instead of opening a
+    // popup result list.
+    if (adminPhoneFilter) {
+      apiSearchLeadsByPhones(adminPhoneFilter, adminPage, adminRowsPerPage)
+        .then((result) => {
+          if (cancelled) return;
+          setServerLeads(result.matched.map(mapApiLeadToFrontendLead));
+          setServerTotalCount(result.totalCount);
+          setPhoneFilterNotFound(result.notFound);
+        })
+        .catch((err) => {
+          if (!cancelled) console.error("Could not run the phone number search:", err);
+        })
+        .finally(() => {
+          if (!cancelled) setServerLeadsLoading(false);
+        });
+      return () => { cancelled = true; };
+    }
+
     const filters = buildAdminServerFilters();
     // Wait a moment before loading, so ticking several campaigns/statuses in
     // a row sends one request pair for the final selection instead of a
@@ -567,7 +602,7 @@ export default function LeadDashboard() {
     // so this effect re-fires exactly when a real filter value changes,
     // without needing every individual filter piece listed separately.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adminTab, adminPage, adminRowsPerPage, adminServerFiltersKey, leadsRefreshKey, leadsChangedSignal]);
+  }, [adminTab, adminPage, adminRowsPerPage, adminServerFiltersKey, leadsRefreshKey, leadsChangedSignal, adminPhoneFilter]);
 
   // Filter button → Settings panel for which table columns are shown — both
   // roles get the full-height right-docked drawer (same pattern as the lead
@@ -933,6 +968,88 @@ export default function LeadDashboard() {
     } finally {
       setAssignSubmitting(false);
     }
+  };
+
+  // ---- Bulk Change Property (same selection, separate toolbar action —
+  // not every bulk-selected lead is unassigned/assigned like Assign/
+  // Reshuffle needs, Change Property applies to any selected lead). ----
+  const [propertyFlowOpen, setPropertyFlowOpen] = useState(false);
+  const [bulkPropertyId, setBulkPropertyId] = useState("");
+  const [bulkPropertyNote, setBulkPropertyNote] = useState("");
+  const [bulkPropertySubmitting, setBulkPropertySubmitting] = useState(false);
+  const [bulkPropertyError, setBulkPropertyError] = useState("");
+  const openPropertyFlow = () => {
+    setBulkPropertyId("");
+    setBulkPropertyNote("");
+    setBulkPropertyError("");
+    setPropertyFlowOpen(true);
+  };
+  const closePropertyFlow = () => { if (!bulkPropertySubmitting) setPropertyFlowOpen(false); };
+  const confirmBulkSetProperty = async () => {
+    if (!bulkPropertyId || !bulkPropertyNote.trim() || bulkPropertySubmitting) return;
+    const targetIds = selectedLeadList.map(l => l.id);
+    setBulkPropertySubmitting(true);
+    setBulkPropertyError("");
+    try {
+      const result = await apiBulkSetLeadProperty(targetIds, bulkPropertyId, bulkPropertyNote.trim());
+      clearSelected(targetIds);
+      if (result.updated > 0) setLeadsRefreshKey(k => k + 1);
+      if (result.failed.length > 0) {
+        setBulkPropertyError(
+          `${result.updated > 0 ? `${result.updated} lead${result.updated === 1 ? "" : "s"} updated, but ` : ""}` +
+          `${result.failed.length} could not be changed: ${result.failed[0].reason}`
+        );
+        return;
+      }
+      setPropertyFlowOpen(false);
+      setSuccessMsg(
+        `Property changed for ${result.updated} lead${result.updated === 1 ? "" : "s"}` +
+        (result.skipped > 0 ? ` (${result.skipped} already on that property, skipped)` : "") + "."
+      );
+      setTimeout(() => setSuccessMsg(""), 4000);
+    } catch (err) {
+      setBulkPropertyError(err instanceof Error ? err.message : "Could not complete this action. Please try again.");
+    } finally {
+      setBulkPropertySubmitting(false);
+    }
+  };
+
+  // ---- Admin-only: bulk phone-number search (paste a list or upload a
+  // .csv/.txt file) — shows as a real filter on the table below, not a
+  // popup list (see the fetch effect further down, which branches on
+  // adminPhoneFilter). Exclusive with the other filters while active. ----
+  const [phoneSearchOpen, setPhoneSearchOpen] = useState(false);
+  const [phoneSearchInput, setPhoneSearchInput] = useState("");
+  const [phoneSearchError, setPhoneSearchError] = useState("");
+  const phoneSearchFileRef = useRef<HTMLInputElement>(null);
+  const openPhoneSearch = () => {
+    setPhoneSearchInput("");
+    setPhoneSearchError("");
+    setPhoneSearchOpen(true);
+  };
+  const closePhoneSearch = () => setPhoneSearchOpen(false);
+  // Splits on newlines/commas/semicolons/tabs — a pasted column, a one-
+  // per-line list, or a plain-text .csv/.txt upload all parse the same
+  // way. No format validation here; the server normalizes/matches each
+  // token the same lenient way bulk-import rows are, and reports back
+  // exactly what didn't match.
+  const parsePhoneTokens = (text: string): string[] =>
+    Array.from(new Set(text.split(/[\n\r,;\t]+/).map(s => s.trim()).filter(Boolean)));
+  const handlePhoneSearchFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setPhoneSearchInput(prev => (prev ? `${prev}\n${reader.result as string}` : (reader.result as string)));
+    reader.readAsText(file);
+    e.target.value = "";
+  };
+  const runPhoneSearch = () => {
+    const tokens = parsePhoneTokens(phoneSearchInput);
+    if (tokens.length === 0) { setPhoneSearchError("Paste or upload at least one phone number."); return; }
+    setShowPhoneFilterNotFound(false);
+    setAdminPage(1);
+    setAdminPhoneFilter(tokens);
+    setPhoneSearchOpen(false);
   };
 
   // ---- Admin delete (single from row, bulk from toolbar) ----
@@ -1301,6 +1418,36 @@ export default function LeadDashboard() {
               />
             )}
 
+            {/* Phone-number search filter banner — exclusive with every
+                other filter/toolbar control below while active (the
+                search-by-phones endpoint doesn't combine with them); Clear
+                reverts to the normal table. */}
+            {isAdmin && adminPhoneFilter && (
+              <div className="flex flex-wrap items-center gap-2 px-3.5 py-2.5 bg-blue-50 border border-blue-100 rounded-xl text-xs">
+                <ClipboardList className="h-3.5 w-3.5 text-blue-600 shrink-0" />
+                <span className="font-bold text-blue-900">
+                  Phone number search: {serverTotalCount} matched{phoneFilterNotFound.length > 0 ? `, ${phoneFilterNotFound.length} not found` : ""}
+                </span>
+                {phoneFilterNotFound.length > 0 && (
+                  <button type="button" onClick={() => setShowPhoneFilterNotFound(v => !v)} className="text-blue-700 font-bold hover:underline">
+                    {showPhoneFilterNotFound ? "Hide not found" : "View not found"}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => { setAdminPhoneFilter(null); setPhoneFilterNotFound([]); setShowPhoneFilterNotFound(false); setAdminPage(1); }}
+                  className="ml-auto inline-flex items-center gap-1 text-blue-700 hover:text-blue-900 font-bold"
+                >
+                  <X className="h-3.5 w-3.5" /> Clear
+                </button>
+              </div>
+            )}
+            {isAdmin && adminPhoneFilter && showPhoneFilterNotFound && phoneFilterNotFound.length > 0 && (
+              <div className="px-3.5 py-2.5 bg-amber-50 border border-amber-100 rounded-xl text-[11px] font-mono text-amber-800 break-all">
+                {phoneFilterNotFound.join(", ")}
+              </div>
+            )}
+
             {/* Date badge (opens the shared range calendar) + Filter row.
                 Applying a range switches the Date Range select above to
                 Custom (it shows the picked dates); the × on the badge
@@ -1335,6 +1482,16 @@ export default function LeadDashboard() {
                   >
                     <Trash2 className="h-4 w-4 text-red-600" />
                     Delete ({selectedLeads.size})
+                  </button>
+                )}
+                {canBulkChangeProperty && selectedLeads.size > 0 && (
+                  <button
+                    type="button"
+                    onClick={openPropertyFlow}
+                    className="inline-flex items-center justify-center gap-2 h-9 px-3.5 border border-slate-200 bg-white rounded-xl text-xs text-slate-700 font-bold shadow-sm hover:bg-slate-50 transition-all"
+                  >
+                    <Building2 className="h-4 w-4 text-blue-600" />
+                    Change Property ({selectedLeads.size})
                   </button>
                 )}
                 <DateRangePicker
@@ -1454,6 +1611,11 @@ export default function LeadDashboard() {
                             <button onClick={() => setAdminSearchOpen(true)} className="text-slate-400 hover:text-brand-700" title="Search">
                               <Search className="h-3.5 w-3.5" />
                             </button>
+                            {isAdmin && (
+                              <button onClick={openPhoneSearch} className="text-slate-400 hover:text-brand-700" title="Search multiple phone numbers at once">
+                                <ClipboardList className="h-3.5 w-3.5" />
+                              </button>
+                            )}
                           </div>
                         )}
                       </th>
@@ -2364,6 +2526,146 @@ export default function LeadDashboard() {
           document.body
         )}
 
+        {/* Bulk Change Property — same modal shell as Assign/Reshuffle,
+            simpler: one property picker (no assignee split) + required note. */}
+        {canBulkChangeProperty && propertyFlowOpen && createPortal(
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <div className="fixed inset-0 bg-slate-900/40" onClick={closePropertyFlow} />
+            <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md">
+              <div className="px-6 pt-6 pb-4 border-b border-slate-100">
+                <h3 className="text-xl font-extrabold text-slate-900">Change Property</h3>
+              </div>
+              <div className="px-6 py-5 space-y-5">
+                <p className="text-xs text-slate-500">
+                  Changing the property for {selectedLeadList.length} selected lead{selectedLeadList.length === 1 ? "" : "s"}.
+                </p>
+
+                <div className="space-y-1.5">
+                  <label className="block text-sm font-bold text-slate-800">New Property</label>
+                  <SearchableSelect
+                    variant="field"
+                    value={bulkPropertyId}
+                    onChange={setBulkPropertyId}
+                    options={properties.map(p => ({ value: p.id, label: p.name }))}
+                    placeholder="Select property"
+                    searchPlaceholder="Search property..."
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label htmlFor="bulk-property-note" className="block text-sm font-bold text-slate-800">
+                    Note <span className="text-red-600">*</span>
+                  </label>
+                  <textarea
+                    id="bulk-property-note"
+                    value={bulkPropertyNote}
+                    onChange={(e) => setBulkPropertyNote(e.target.value)}
+                    rows={3}
+                    maxLength={2000}
+                    placeholder="Why are these leads moving to this property?"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-slate-800 resize-y focus:outline-none focus:border-brand-500"
+                  />
+                  <p className="text-[11px] text-slate-400">Required. Saved as each lead&apos;s note and in its activity history.</p>
+                </div>
+              </div>
+              {bulkPropertyError && (
+                <div className="mx-6 mb-4 p-2.5 bg-red-50 border border-red-100 text-[11px] text-red-700 rounded-xl font-bold flex items-center gap-2">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                  <span>{bulkPropertyError}</span>
+                </div>
+              )}
+              <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100">
+                <button
+                  type="button"
+                  disabled={bulkPropertySubmitting}
+                  onClick={closePropertyFlow}
+                  className="px-5 py-2 rounded-xl border border-slate-300 font-bold text-slate-700 text-sm hover:bg-slate-50 transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={!bulkPropertyId || !bulkPropertyNote.trim() || bulkPropertySubmitting}
+                  onClick={confirmBulkSetProperty}
+                  className={`px-5 py-2 rounded-xl font-bold text-sm text-white transition-colors ${
+                    bulkPropertyId && bulkPropertyNote.trim() && !bulkPropertySubmitting ? "bg-[#0B1E6E] hover:bg-[#081650]" : "bg-slate-300 cursor-not-allowed"
+                  }`}
+                >
+                  {bulkPropertySubmitting ? "Saving..." : "Change Property"}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
+        {/* Admin-only: bulk phone-number search — paste a list or upload a
+            .csv/.txt file, see which already exist as leads. */}
+        {isAdmin && phoneSearchOpen && createPortal(
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <div className="fixed inset-0 bg-slate-900/40" onClick={closePhoneSearch} />
+            <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col">
+              <div className="px-6 pt-6 pb-4 border-b border-slate-100 shrink-0">
+                <h3 className="text-xl font-extrabold text-slate-900">Search Multiple Phone Numbers</h3>
+                <p className="text-xs text-slate-500 mt-1">Paste a list (one per line, or comma-separated) or upload a .csv/.txt file. Up to 2,000 at once.</p>
+              </div>
+
+              <div className="px-6 py-5 space-y-4 overflow-y-auto">
+                <textarea
+                  value={phoneSearchInput}
+                  onChange={(e) => setPhoneSearchInput(e.target.value)}
+                  rows={10}
+                  placeholder={"8520837019\n8680013313\n8178060283\n..."}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-mono text-slate-800 resize-y focus:outline-none focus:border-brand-500"
+                />
+                <div className="flex items-center justify-between gap-3">
+                  <input
+                    type="file"
+                    ref={phoneSearchFileRef}
+                    onChange={handlePhoneSearchFile}
+                    accept=".csv,.txt"
+                    className="hidden"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => phoneSearchFileRef.current?.click()}
+                    className="inline-flex items-center gap-1.5 text-xs font-bold text-[#0B1E6E] hover:underline"
+                  >
+                    <Upload className="h-3.5 w-3.5" />
+                    Upload .csv / .txt
+                  </button>
+                  <span className="text-[11px] text-slate-400">
+                    {parsePhoneTokens(phoneSearchInput).length} number{parsePhoneTokens(phoneSearchInput).length === 1 ? "" : "s"} ready
+                  </span>
+                </div>
+              </div>
+              {phoneSearchError && (
+                <div className="mx-6 mb-4 p-2.5 bg-red-50 border border-red-100 text-[11px] text-red-700 rounded-xl font-bold flex items-center gap-2 shrink-0">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                  <span>{phoneSearchError}</span>
+                </div>
+              )}
+              <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 shrink-0">
+                <button
+                  type="button"
+                  onClick={closePhoneSearch}
+                  className="px-5 py-2 rounded-xl border border-slate-300 font-bold text-slate-700 text-sm hover:bg-slate-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={runPhoneSearch}
+                  className="px-5 py-2 rounded-xl font-bold text-sm text-white bg-[#0B1E6E] hover:bg-[#081650] transition-colors"
+                >
+                  Search
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
         {/* Delete confirmation — same modal shell as the Assign/Reshuffle flow. */}
         {isAdmin && deleteTarget && createPortal(
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
@@ -2420,6 +2722,7 @@ export default function LeadDashboard() {
           onUpdateStatus={handleUpdateLeadStatus}
           onReassigned={() => setLeadsRefreshKey(k => k + 1)}
           onNoteSaved={handleNoteSaved}
+          onPropertySaved={(leadId, updated) => setServerLeads(prev => prev.map(r => (r.id === leadId ? (updated ? { ...r, ...updated } : r) : r)))}
         />
 
         {/* Scheduler popup for the main table's inline Status dropdown —

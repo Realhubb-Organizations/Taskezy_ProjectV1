@@ -69,7 +69,10 @@ export const editUserSchema = z.object({
   // may use the main CRM Leads page's bulk upload, on top of their always-
   // on Data Calling access. Super-Admin-only to set (checked in
   // users.routes.ts, not here — this schema only validates shape).
-  canBulkUploadCrmLeads: z.boolean().optional()
+  canBulkUploadCrmLeads: z.boolean().optional(),
+  // Second Access Control toggle, same rules — whether this manager may
+  // run the bulk "change leads' property" action.
+  canBulkChangeLeadProperty: z.boolean().optional()
 }).refine((data) => Object.keys(data).length > 0, { message: "At least one field must be provided" });
 
 export const resetPasswordSchema = z.object({
