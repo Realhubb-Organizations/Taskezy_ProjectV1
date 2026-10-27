@@ -57,7 +57,7 @@ const SELECT = `
 
 /** Filters for the paginated admin list (findMany) — kept as its own interface in case other callers need the predicate without page/pageSize later, same convention as leads.repository.ts's LeadFilterConditions/LeadListFilter split. */
 export interface PropertyFilterConditions {
-  /** Matches name/developer/location, mirroring the frontend's client-side search. */
+  /** Matches name/developer/location, or a salesperson assigned to the property. */
   search?: string;
   /** Multi-select; matches if ANY selected type is one of a property's own (comma-joined) types. */
   propertyType?: string[];
@@ -76,7 +76,20 @@ function buildPropertyWhereClause(filter: PropertyFilterConditions): { whereClau
 
   if (filter.search) {
     params.push(`%${filter.search}%`);
-    conditions.push(`(p.name ILIKE $${params.length} OR p.developer ILIKE $${params.length} OR p.location ILIKE $${params.length})`);
+    // Also matches a salesperson's name: properties they're on as a custom
+    // team member, and "All Members" properties (every active sales user is
+    // on those) whenever the name belongs to such a user.
+    const n = params.length;
+    conditions.push(`(p.name ILIKE $${n} OR p.developer ILIKE $${n} OR p.location ILIKE $${n}
+      OR EXISTS (
+        SELECT 1 FROM property_team_members ptm JOIN users u ON u.id = ptm.user_id
+        WHERE ptm.property_id = p.id AND (u.first_name || COALESCE(' ' || u.last_name, '')) ILIKE $${n}
+      )
+      OR (p.team_assignment_mode = 'ALL_MEMBERS' AND EXISTS (
+        SELECT 1 FROM users u
+        WHERE u.department = 'SALES' AND u.role <> 'ADMIN' AND u.status IS DISTINCT FROM 'INACTIVE'
+          AND (u.first_name || COALESCE(' ' || u.last_name, '')) ILIKE $${n}
+      )))`);
   }
 
   if (filter.propertyType && filter.propertyType.length > 0) {
