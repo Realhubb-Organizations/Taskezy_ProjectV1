@@ -5,6 +5,7 @@ import { useApp, Lead, LeadStatus, mapApiLeadToFrontendLead } from "@/context/Ap
 import { useDialog } from "@/components/ui/DialogProvider";
 import { SearchableSelect } from "@/components/ui/SearchableDropdown";
 import { apiSetLeadProperty } from "@/lib/apiClient";
+import { isSuperAdminUser } from "@/lib/superAdmin";
 import { deriveActivityTimeline, nextStatusOptions, statusBadgeClasses, withDeadLeadGate } from "@/lib/leadStatusMapping";
 import { canChangeLeadStatus, canReassignThisLead, isLeadAssignableUser, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
 import { maskPhone, maskEmail } from "@/lib/maskPII";
@@ -40,10 +41,11 @@ export default function LeadDetailDrawer({
   const { toast, confirm } = useDialog();
   const callAllowed = canTriggerLeadCall(activeRole === "ADMIN", currentUser?.email);
   const [localStatus, setLocalStatus] = useState<LeadStatus>("New Lead");
-  // Same Admin/Manager gate as the Leads table's own inline Property
-  // editor (LeadDashboard.tsx's canAssignProperty) — kept in sync here so
-  // this drawer and the table never disagree on who can edit it.
-  const canEditProperty = activeRole === "ADMIN" || currentUser?.role_type === "Manager";
+  // Same gate as the Leads table's own inline Property editor
+  // (LeadDashboard.tsx's canAssignProperty) — Super Admin + any manager,
+  // every other admin is blocked. Kept in sync here so this drawer and the
+  // table never disagree on who can edit it.
+  const canEditProperty = isSuperAdminUser(currentUser?.email) || currentUser?.role_type === "Manager";
   const [savingProperty, setSavingProperty] = useState(false);
   // RNR/Call Back/Followup/Site Visit Scheduled are gated behind a blocking
   // popup (LeadScheduleModal below) that collects the next-call date/time +

@@ -17,7 +17,7 @@ export async function listLeadsHandler(req: Request, res: Response): Promise<voi
 export async function searchLeadsByPhonesHandler(req: Request, res: Response): Promise<void> {
   const page = req.body.page ?? 1;
   const pageSize = req.body.pageSize ?? 20;
-  const { rows, notFound, meta } = await leadsService.searchLeadsByPhones(req.body.phones, page, pageSize);
+  const { rows, notFound, meta } = await leadsService.searchLeadsByPhones(req.user!, req.body.phones, page, pageSize);
   sendOk(res, { matched: rows.map(r => leadForCaller(req.user!, r)), notFound, ...meta });
 }
 

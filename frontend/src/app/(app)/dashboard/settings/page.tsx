@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useApp, User, Role, mapApiUserDirectoryEntryToFrontendUser } from "@/context/AppContext";
+import { isSuperAdminUser } from "@/lib/superAdmin";
 import {
   apiDisconnectMeta,
   apiGetMetaConnectUrl,
@@ -130,7 +131,7 @@ export default function SettingsPage() {
   const { users, leads, activeRole, activeSystem, logout, updateUserFields, addTeamMember, resetRosterPassword, refreshMetaConnectionStatus, tenantSettings, updateTenantSettings, isDataLoading, manualRefreshSignal, currentUser } = useApp();
   // The one informal "Super Admin" account — only this admin may delete
   // another admin (mirrors the same check enforced server-side).
-  const isSuperAdmin = currentUser?.email === "admin@realhubb.in";
+  const isSuperAdmin = isSuperAdminUser(currentUser?.email);
   const { toast, confirm: confirmDialog } = useDialog();
 
   const initialTabParam = searchParams.get("tab");

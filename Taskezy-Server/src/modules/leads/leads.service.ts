@@ -84,17 +84,22 @@ export interface SearchLeadsByPhonesResult {
 }
 
 /**
- * Admin-only Leads page feature: paste or upload a list of phone numbers
- * (a recruiter's export, a purchased list, etc.) and the Leads table
- * filters down to exactly those that already exist as leads — a real
- * filter, not a separate popup list, so every other table feature (status
- * editing, row click, pagination) keeps working unchanged against `rows`.
- * The full match set is bounded by the <=2000-phone input, so pagination
- * here is an in-memory slice, not a second SQL query. `notFound` is built
- * from the caller's own original strings (not the normalized form) and is
- * NOT paginated — it's independent of which page is showing.
+ * Super-Admin-only Leads page feature (every other admin is blocked, per
+ * explicit product decision — route-gated ADMIN broadly, this is the fine
+ * check): paste or upload a list of phone numbers (a recruiter's export, a
+ * purchased list, etc.) and the Leads table filters down to exactly those
+ * that already exist as leads — a real filter, not a separate popup list,
+ * so every other table feature (status editing, row click, pagination)
+ * keeps working unchanged against `rows`. The full match set is bounded by
+ * the <=2000-phone input, so pagination here is an in-memory slice, not a
+ * second SQL query. `notFound` is built from the caller's own original
+ * strings (not the normalized form) and is NOT paginated — it's
+ * independent of which page is showing.
  */
-export async function searchLeadsByPhones(rawPhones: string[], page: number, pageSize: number): Promise<SearchLeadsByPhonesResult> {
+export async function searchLeadsByPhones(caller: AccessTokenPayload, rawPhones: string[], page: number, pageSize: number): Promise<SearchLeadsByPhonesResult> {
+  if (!(await usersRepo.isSuperAdmin(caller.sub))) {
+    throw ApiError.forbidden("Only the Super Admin can search leads by phone number.");
+  }
   const trimmed = Array.from(new Set(rawPhones.map(p => p.trim()).filter(Boolean)));
   const normalizedSet = new Set<string>();
   for (const raw of trimmed) {
@@ -983,14 +988,19 @@ export async function updateLeadNote(caller: AccessTokenPayload, leadId: string,
 }
 
 /**
- * Admins and managers (route-gated) link a lead to a property, change it or
- * clear it. A manager only reaches their own team's leads (scopeForCaller).
+ * Managers (route-gated) link a lead to a property, change it or clear it,
+ * reaching only their own team's leads (scopeForCaller). Admins can too,
+ * but only the one Super Admin account — every other admin is blocked,
+ * per explicit product decision (managers keep their existing access).
  * Every change is written to Activity History, old and new property named.
  */
 // `note` is optional from the single-lead API (no schema field for it
 // today) but required from the bulk one below (bulkSetLeadPropertySchema)
 // — same shape as reassignLead's own optional/required split.
 export async function setLeadProperty(caller: AccessTokenPayload, leadId: string, propertyId: string | null, note?: string) {
+  if (caller.role === "ADMIN" && !(await usersRepo.isSuperAdmin(caller.sub))) {
+    throw ApiError.forbidden("Only the Super Admin can change a lead's property.");
+  }
   const scopedToAgentIds = await scopeForCaller(caller);
   const existing = await repo.findById(leadId, scopedToAgentIds);
   if (!existing) throw ApiError.notFound("Lead not found");
@@ -1057,13 +1067,17 @@ export async function bulkSetLeadProperty(
 }
 
 /**
- * Bulk "change leads' property" is Admin-always, Manager-by-toggle — the
- * Access Control switch in Settings > Manage Users (Super Admin only),
- * off by default. Mirrors assertBulkImportAllowed's shape; checked once
- * before queueing, since the queued worker runs without a caller.
+ * Bulk "change leads' property" is Super-Admin-always (every other admin
+ * is blocked), Manager-by-toggle — the Access Control switch in Settings >
+ * Manage Users (Super Admin only), off by default. Mirrors
+ * assertBulkImportAllowed's shape; checked once before queueing, since the
+ * queued worker runs without a caller.
  */
 export async function assertBulkPropertyChangeAllowed(caller: AccessTokenPayload): Promise<void> {
-  if (caller.role === "ADMIN") return;
+  if (caller.role === "ADMIN") {
+    if (await usersRepo.isSuperAdmin(caller.sub)) return;
+    throw ApiError.forbidden("Only the Super Admin can bulk-change leads' property.");
+  }
   const allowed = await usersRepo.isBulkChangeLeadPropertyEnabled(caller.sub);
   if (!allowed) {
     throw ApiError.forbidden("You don't have access to bulk-change leads' property — ask an admin to enable it for you in Manage Users.");

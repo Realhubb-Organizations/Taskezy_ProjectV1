@@ -13,15 +13,11 @@ import * as leadsRepo from "../leads/leads.repository";
 import * as leadsService from "../leads/leads.service";
 import { broadcastLeadChanged } from "../leads/leads.realtime";
 import { createNotification } from "../notifications/notifications.service";
+import { SUPER_ADMIN_EMAIL } from "../../config/superAdmin";
 
 export const usersRouter = Router();
 
 usersRouter.use(requireAuth);
-
-// The one informal "Super Admin" account (no distinct role in the schema —
-// every other admin is a plain ADMIN) — only this account may delete
-// another admin, per explicit product decision.
-const SUPER_ADMIN_EMAIL = "admin@realhubb.in";
 
 // Same three-way split as leads.service.ts's scopeForCaller — duplicated
 // rather than imported (see call-log's, followups', invoices', attendance's
