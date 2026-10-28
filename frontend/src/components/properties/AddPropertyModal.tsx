@@ -246,7 +246,7 @@ export default function AddPropertyModal({ isOpen, onClose, onSuccess, duplicate
         <div className="w-full sm:max-w-3xl h-[95vh] sm:h-auto sm:max-h-[90vh] bg-white border-0 sm:border border-slate-200 rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden">
           {/* Header */}
           <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 shrink-0">
-            <h3 className="text-sm font-bold text-slate-800">Add Property details</h3>
+            <h3 className="ui-title">Add Property details</h3>
             <button onClick={handleClose} className="text-slate-400 hover:text-slate-600">
               <X className="h-5 w-5" />
             </button>
@@ -445,14 +445,14 @@ export default function AddPropertyModal({ isOpen, onClose, onSuccess, duplicate
           <div className="flex justify-end items-center gap-2 px-6 py-4 border-t border-slate-100 shrink-0">
             <button
               onClick={handleClose}
-              className="px-5 py-2 rounded-xl text-sm font-bold border border-slate-200 text-slate-600 hover:bg-slate-50 transition-all"
+              className="ui-btn ui-btn-secondary border"
             >
               Cancel
             </button>
             {activeTab === "details" ? (
               <button
                 onClick={handleSaveAndNext}
-                className="px-5 py-2 rounded-xl text-sm font-bold bg-[#0B1E6E] hover:bg-[#081650] text-white transition-all shadow-sm"
+                className="ui-btn ui-btn-primary"
               >
                 Save &amp; Next
               </button>
@@ -460,7 +460,7 @@ export default function AddPropertyModal({ isOpen, onClose, onSuccess, duplicate
               <button
                 onClick={handleCreateProperty}
                 disabled={isSubmitting}
-                className="px-5 py-2 rounded-xl text-sm font-bold bg-[#0B1E6E] hover:bg-[#081650] text-white transition-all shadow-sm disabled:opacity-60"
+                className="ui-btn ui-btn-primary disabled:opacity-60"
               >
                 {isSubmitting ? "Creating..." : "Create Property"}
               </button>

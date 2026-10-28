@@ -121,14 +121,12 @@ function ReportsPageContent() {
           Campaigns tab toggles (bg-slate-200/70 track, bg-white active pill),
           not a standalone page title: the top bar already shows "Reports". */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div className="bg-slate-200/70 p-1 rounded-xl flex items-center gap-1 overflow-x-auto">
+        <div className="ui-toggle overflow-x-auto max-w-full">
           {visibleTabs.map(t => (
             <button
               key={t.key}
               onClick={() => handleTabChange(t.key)}
-              className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold transition-all shrink-0 ${
-                activeTab === t.key ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-800"
-              }`}
+              className={`ui-toggle-item shrink-0 ${activeTab === t.key ? "ui-toggle-item-active" : ""}`}
             >
               <t.icon className="h-3.5 w-3.5" />
               {t.label}
@@ -144,7 +142,7 @@ function ReportsPageContent() {
           <button
             onClick={handleExportCSV}
             disabled={exportingCSV}
-            className="inline-flex items-center justify-center gap-2 h-9 px-3.5 bg-[#0B1E6E] hover:bg-[#081650] text-white rounded-xl text-xs font-bold transition-all shadow-md shrink-0 disabled:opacity-60 disabled:cursor-not-allowed"
+            className="ui-btn ui-btn-primary shrink-0 disabled:opacity-60 disabled:cursor-not-allowed"
           >
             <Download className="h-4 w-4" />
             {exportingCSV ? "Exporting…" : "Export Leads CSV"}
@@ -209,7 +207,7 @@ function ReportsPageContent() {
           <button
             type="button"
             onClick={triggerManualRefresh}
-            className="px-4 py-1.5 rounded-lg bg-[#0B1E6E] hover:bg-[#081650] text-white text-xs font-bold transition-colors"
+            className="ui-btn ui-btn-primary"
           >
             Retry
           </button>

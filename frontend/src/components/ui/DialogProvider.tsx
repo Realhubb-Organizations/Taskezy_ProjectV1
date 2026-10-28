@@ -162,7 +162,7 @@ function DialogModal({ dialog, onClose }: { dialog: ActiveDialog; onClose: (resu
         onSubmit={(e) => { e.preventDefault(); submit(); }}
       >
         <div className="px-6 pt-6 pb-4 border-b border-slate-100">
-          <h3 className="text-lg font-extrabold text-slate-900">{opts.title}</h3>
+          <h3 className="ui-title">{opts.title}</h3>
         </div>
         <div className="px-6 py-5 space-y-3">
           {opts.message && <div className="text-sm text-slate-700 whitespace-pre-line">{opts.message}</div>}
@@ -205,13 +205,13 @@ function DialogModal({ dialog, onClose }: { dialog: ActiveDialog; onClose: (resu
           <button
             type="button"
             onClick={cancel}
-            className="px-5 py-2 rounded-xl border border-slate-300 font-bold text-slate-700 text-sm hover:bg-slate-50 transition-colors"
+            className="ui-btn ui-btn-secondary border"
           >
             {cancelLabel}
           </button>
           <button
             type="submit"
-            className={`px-5 py-2 rounded-xl font-bold text-sm text-white transition-colors ${danger ? "bg-red-600 hover:bg-red-700" : "bg-[#0B1E6E] hover:bg-[#081650]"}`}
+            className={`ui-btn ui-btn-primary ${danger ? "bg-red-600 hover:bg-red-700" : " "}`}
           >
             {confirmLabel}
           </button>

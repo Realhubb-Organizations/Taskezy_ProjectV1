@@ -5,7 +5,8 @@ import Link from "next/link";
 import { useApp, Lead, mapApiLeadToFrontendLead } from "@/context/AppContext";
 import { useDialog } from "@/components/ui/DialogProvider";
 import AddLeadModal, { type BulkLeadUploadSubmitInput, type BulkLeadUploadSubmitResult } from "@/components/crm/AddLeadModal";
-import LeadDrillDownPanel, { LeadQuickViewDrawer, useLeadStatusChange } from "@/components/crm/LeadDrillDownPanel";
+import LeadDrillDownPanel, { useLeadStatusChange } from "@/components/crm/LeadDrillDownPanel";
+import LeadDetailDrawer from "@/components/crm/LeadDetailDrawer";
 import LeadScheduleModal from "@/components/crm/LeadScheduleModal";
 import { useLeadStatusScheduler } from "@/lib/leadScheduler";
 import TeamTasksTable, { TeamTaskTab } from "@/components/dashboard/TeamTasksTable";
@@ -17,6 +18,8 @@ import { canUploadLeads, uploadAssignableUsers } from "@/lib/leadAssignment";
 import { ChevronDown, Plus, CheckCircle } from "lucide-react";
 import { LineSkeleton } from "@/components/ui/Skeletons";
 import DateRangeSelect from "@/components/ui/DateRangeSelect";
+import { dateRangeLabel } from "@/lib/dateRangeLabel";
+import TaskSourceTabs, { TaskSource } from "@/components/dashboard/TaskSourceTabs";
 import { DateRangeValue, toIsoDate } from "@/components/ui/DateRangePicker";
 
 // CRM's own overview — moved out of the old bare /dashboard route (which
@@ -184,6 +187,24 @@ export default function CrmDashboardPage() {
 
   // Pending Follow ups/Call Backs rows only carry a summary shape
   // (PendingRow), not the full Lead the quick-view needs — fetch it by id.
+  // Task tables follow the Date Range card above, by each task's Task Time
+  // (due date). "All Time" keeps every task, including ones with no due time.
+  const rangeLabel = dateRangeLabel(DATE_RANGE_OPTIONS.find(o => o.value === dateRange)?.label ?? "Custom", dateRange === "custom" ? customRange : null);
+  const rangedTasks = (() => {
+    const { dateFrom, dateTo } = serverDateBounds();
+    if (!dateFrom || !dateTo) return pendingTasks;
+    return pendingTasks.filter(t => {
+      if (!t.dueAt) return false;
+      const d = new Date(t.dueAt);
+      if (isNaN(d.getTime())) return false;
+      const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      return day >= dateFrom && day <= dateTo;
+    });
+  })();
+
+  // Agent's Pending Tasks: Leads vs Data Calling (bulk-uploaded) tasks.
+  const [taskSource, setTaskSource] = useState<TaskSource>("leads");
+
   const openQuickView = (leadId: string) => {
     apiGetLead(leadId).then(row => setQuickViewLead(mapApiLeadToFrontendLead(row))).catch(() => {});
   };
@@ -247,7 +268,7 @@ export default function CrmDashboardPage() {
       <div className="flex justify-end">
         <button
           onClick={() => setIsUploadOpen(true)}
-          className="inline-flex items-center justify-center gap-2 h-9 px-3.5 bg-[#0B1E6E] hover:bg-[#081650] text-white rounded-xl text-xs font-bold transition-all shadow-md shrink-0"
+          className="ui-btn ui-btn-primary shrink-0"
         >
           <Plus className="h-4 w-4" />
           Upload Leads
@@ -336,7 +357,12 @@ export default function CrmDashboardPage() {
         // is already scoped server-side (GET /tasks/pending) to the agent's
         // own leads/calls — same scoping tasks.routes.ts applies for every role.
         <SalesPendingTasksTable
-          pendingTasks={pendingTasks}
+          // Remount per tab so search, bucket filter and page start fresh.
+          key={taskSource}
+          pendingTasks={rangedTasks}
+          title={`Pending Tasks (${rangeLabel})`}
+          headerTabs={<TaskSourceTabs value={taskSource} onChange={setTaskSource} />}
+          taskFilter={(t) => t.isDataCalling === (taskSource === "dataCalling")}
           onViewLead={openQuickView}
           onStatusChange={(task, status) => pendingTaskScheduler.requestChange(
             { id: task.leadId!, name: task.name, phone: task.phone, assignedAgent: task.assignedTo },
@@ -349,8 +375,8 @@ export default function CrmDashboardPage() {
         // Pending Task), then the same open tasks charted by due date and
         // by task type.
         <>
-          <TeamTasksTable pendingTasks={pendingTasks} teamMembers={agentsList} tab={teamTaskTab} onTabChange={setTeamTaskTab} isLoading={isDataLoading} />
-          <TaskInsightsCharts pendingTasks={pendingTasks} agents={chartAgents} tab={teamTaskTab} />
+          <TeamTasksTable pendingTasks={rangedTasks} teamMembers={agentsList} tab={teamTaskTab} onTabChange={setTeamTaskTab} isLoading={isDataLoading} rangeLabel={rangeLabel} dateBounds={serverDateBounds()} />
+          <TaskInsightsCharts pendingTasks={rangedTasks} agents={chartAgents} tab={teamTaskTab} />
         </>
       )}
 
@@ -369,7 +395,14 @@ export default function CrmDashboardPage() {
       {/* Lead quick-view for the sales Pending Tasks table above (the
           drill-down panel opens its own). */}
       {quickViewLead && (
-        <LeadQuickViewDrawer lead={quickViewLead} onClose={() => setQuickViewLead(null)} />
+        // Same full lead panel as everywhere else (status, notes, contact,
+        // history) — role rules (agent vs manager vs admin) live inside it.
+        <LeadDetailDrawer
+          lead={quickViewLead}
+          isOpen={quickViewLead !== null}
+          onClose={() => setQuickViewLead(null)}
+          onUpdateStatus={handleDrillStatusChange}
+        />
       )}
     </div>
   );

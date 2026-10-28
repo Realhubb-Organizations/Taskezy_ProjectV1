@@ -61,8 +61,8 @@ export default function LeadScheduleModal({ pending, submitting, error, onCancel
             <CalendarClock className="h-4.5 w-4.5" />
           </span>
           <div className="min-w-0">
-            <h3 className="text-sm font-extrabold text-slate-900">Schedule {pending.status}</h3>
-            <p className="text-[11px] text-slate-500 truncate">{pending.leadName}</p>
+            <h3 className="ui-title">Schedule {pending.status}</h3>
+            <p className="ui-desc truncate">{pending.leadName}</p>
           </div>
         </div>
 
@@ -87,7 +87,7 @@ export default function LeadScheduleModal({ pending, submitting, error, onCancel
             <button type="button" disabled={submitting} onClick={onCancel} className="px-4 py-2.5 rounded-xl text-sm font-bold text-slate-600 bg-slate-100 disabled:opacity-60">
               Cancel
             </button>
-            <button type="submit" disabled={submitting} className="flex-1 bg-[#0B1E6E] hover:bg-[#081650] disabled:opacity-60 text-white font-bold px-5 py-2.5 rounded-xl text-sm transition-all">
+            <button type="submit" disabled={submitting} className="ui-btn ui-btn-primary flex-1 disabled:opacity-60">
               {submitting ? "Saving..." : "Save & Continue"}
             </button>
           </div>

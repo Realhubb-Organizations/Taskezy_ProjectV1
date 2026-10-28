@@ -94,8 +94,8 @@ export default function MetricDetailModal({
         <div className="px-5 sm:px-6 pt-4 sm:pt-5 pb-4 border-b border-slate-100">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <h3 className="text-lg font-extrabold text-slate-900">{title}</h3>
-              <p className="text-xs text-slate-500 mt-0.5">{subtitle}</p>
+              <h3 className="ui-title">{title}</h3>
+              <p className="ui-desc mt-0.5">{subtitle}</p>
             </div>
             <button type="button" onClick={close} className="text-slate-400 hover:text-slate-700 p-1 -mr-1 shrink-0" aria-label="Close">
               <X className="h-5 w-5" />

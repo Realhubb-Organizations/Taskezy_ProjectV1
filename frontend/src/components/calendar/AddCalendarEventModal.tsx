@@ -66,7 +66,7 @@ export default function AddCalendarEventModal({
       <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center sm:p-4">
       <div className="w-full sm:max-w-md max-h-[92vh] overflow-y-auto bg-white border-0 sm:border border-slate-200 p-5 sm:p-6 rounded-t-3xl sm:rounded-2xl shadow-2xl space-y-4">
         <div className="flex justify-between items-center border-b border-slate-200 pb-2">
-          <h3 className="text-sm font-bold text-brand-700">{heading}</h3>
+          <h3 className="ui-title text-brand-700">{heading}</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-655">
             <X className="h-5 w-5" />
           </button>
@@ -138,7 +138,7 @@ export default function AddCalendarEventModal({
 
           <button
             type="submit"
-            className="w-full bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold px-5 py-2 rounded-xl text-sm transition-all shadow-sm"
+            className="ui-btn ui-btn-primary w-full"
           >
             Save
           </button>

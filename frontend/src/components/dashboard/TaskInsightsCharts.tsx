@@ -318,8 +318,8 @@ export default function TaskInsightsCharts({
       <div className={cardClass}>
         <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
           <div>
-            <h3 className="text-base font-extrabold text-slate-900">{tab === "all" ? "All Task" : "Pending Task"}</h3>
-            <p className="text-[11px] text-slate-500">
+            <h3 className="ui-section-title">{tab === "all" ? "All Task" : "Pending Task"}</h3>
+            <p className="ui-desc">
               {trend.total} {tab === "all" ? "open" : "overdue"} task{trend.total === 1 ? "" : "s"} by due date · colored by {trend.splitBy === "agent" ? "agent" : "task type"}
               {trend.noDueDate > 0 && ` · ${trend.noDueDate} with no due date`}
             </p>
@@ -365,8 +365,8 @@ export default function TaskInsightsCharts({
       <div className={cardClass}>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h3 className="text-base font-extrabold text-slate-900">{tab === "all" ? "All Task" : "Pending Task"} Type</h3>
-            <p className="text-[11px] text-slate-500">
+            <h3 className="ui-section-title">{tab === "all" ? "All Task" : "Pending Task"} Type</h3>
+            <p className="ui-desc">
               {pie.total} {tab === "all" ? "open" : "overdue"} task{pie.total === 1 ? "" : "s"} by type
             </p>
           </div>

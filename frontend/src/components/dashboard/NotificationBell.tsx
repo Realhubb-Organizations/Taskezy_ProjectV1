@@ -353,7 +353,7 @@ export default function NotificationBell() {
                 <button onClick={() => setIsOpen(false)} className="text-slate-500 hover:text-slate-800 -ml-1.5 p-1 shrink-0">
                   <ChevronLeft className="h-5 w-5" />
                 </button>
-                <h3 className="text-base font-extrabold text-slate-900 shrink-0">Notifications</h3>
+                <h3 className="ui-section-title shrink-0">Notifications</h3>
               </div>
               {/* System scope picker — anyone with more than one system
                   (admins across CRM/HRMS/Finance, SALES agents/managers
@@ -397,14 +397,12 @@ export default function NotificationBell() {
                 Calling page's tab bar, instead of a native select. */}
             {groups.length > 1 && (
               <div className="px-5 pt-3 pb-1 shrink-0">
-                <div className="bg-slate-200/70 p-1 rounded-xl flex items-center gap-1 overflow-x-auto">
+                <div className="ui-toggle overflow-x-auto max-w-full">
                   {groups.map(g => (
                     <button
                       key={g.key}
                       onClick={() => setActiveGroupKey(g.key)}
-                      className={`flex-none px-3 py-1.5 rounded-lg text-[11px] font-semibold whitespace-nowrap transition-all ${
-                        activeGroupKey === g.key ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-800"
-                      }`}
+                      className={`ui-toggle-item flex-none ${activeGroupKey === g.key ? "ui-toggle-item-active" : ""}`}
                     >
                       {g.label}{g.count > 0 ? ` (${g.count})` : ""}
                     </button>
@@ -460,7 +458,7 @@ export default function NotificationBell() {
               <div className="fixed inset-0 bg-slate-900/40" onClick={closeClearConfirm} />
               <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md">
                 <div className="px-6 pt-6 pb-4 border-b border-slate-100">
-                  <h3 className="text-xl font-extrabold text-slate-900">Clear Notifications</h3>
+                  <h3 className="ui-title">Clear Notifications</h3>
                 </div>
                 <div className="px-6 py-5 space-y-3">
                   <p className="text-sm text-slate-700">
@@ -478,7 +476,7 @@ export default function NotificationBell() {
                     type="button"
                     disabled={clearing}
                     onClick={closeClearConfirm}
-                    className="px-5 py-2 rounded-xl border border-slate-300 font-bold text-slate-700 text-sm hover:bg-slate-50 transition-colors disabled:opacity-50"
+                    className="ui-btn ui-btn-secondary border disabled:opacity-50"
                   >
                     Cancel
                   </button>
@@ -486,7 +484,7 @@ export default function NotificationBell() {
                     type="button"
                     disabled={clearing}
                     onClick={confirmClearAll}
-                    className="px-5 py-2 rounded-xl font-bold text-sm text-white bg-red-600 hover:bg-red-700 transition-colors disabled:bg-slate-300 disabled:cursor-not-allowed"
+                    className="ui-btn ui-btn-danger disabled:bg-slate-300 disabled:cursor-not-allowed"
                   >
                     {clearing ? "Clearing..." : "Clear all"}
                   </button>

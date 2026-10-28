@@ -361,8 +361,8 @@ export default function UploadLeadsModal({ isOpen, onClose, onSubmit, properties
         <div className="w-full sm:max-w-2xl max-h-[90vh] max-h-[90dvh] flex flex-col bg-white border-0 sm:border border-slate-200 rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-hidden animate-fade-in">
           <div className="flex justify-between items-start px-6 pt-6 pb-3 shrink-0">
             <div>
-              <h3 className="text-base font-extrabold text-slate-900">Upload Bulk Leads</h3>
-              <p className="text-xs text-slate-500 mt-1">Upload multiple leads using an Excel file upload template.</p>
+              <h3 className="ui-title">Upload Bulk Leads</h3>
+              <p className="ui-desc mt-1">Upload multiple leads using an Excel file upload template.</p>
             </div>
             <button
               onClick={onClose}
@@ -414,18 +414,18 @@ export default function UploadLeadsModal({ isOpen, onClose, onSubmit, properties
                 {/* Assignment mode — Property-wise runs each row through that
                     property's configured Round Robin/Percentage team; Agent
                     puts the whole batch directly on one chosen person. */}
-                <div className="flex bg-slate-100 rounded-xl p-1 text-xs font-bold">
+                <div className="ui-toggle flex w-full">
                   <button
                     type="button"
                     onClick={() => setAssignmentMode("PROPERTY")}
-                    className={`flex-1 py-2 rounded-lg transition-all ${assignmentMode === "PROPERTY" ? "bg-white text-[#0B1E6E] shadow-sm" : "text-slate-500"}`}
+                    className={`ui-toggle-item flex-1 ${assignmentMode === "PROPERTY" ? "ui-toggle-item-active" : ""}`}
                   >
                     Assign by Property
                   </button>
                   <button
                     type="button"
                     onClick={() => setAssignmentMode("AGENT")}
-                    className={`flex-1 py-2 rounded-lg transition-all ${assignmentMode === "AGENT" ? "bg-white text-[#0B1E6E] shadow-sm" : "text-slate-500"}`}
+                    className={`ui-toggle-item flex-1 ${assignmentMode === "AGENT" ? "ui-toggle-item-active" : ""}`}
                   >
                     Assign to Agent
                   </button>
@@ -527,7 +527,7 @@ export default function UploadLeadsModal({ isOpen, onClose, onSubmit, properties
               <button
                 type="button"
                 onClick={onClose}
-                className="bg-slate-100 border border-slate-200 text-slate-750 font-bold px-5 py-2 rounded-xl text-sm hover:bg-slate-200 transition-colors"
+                className="ui-btn ui-btn-secondary border"
               >
                 {result ? "Close" : "Cancel"}
               </button>
@@ -536,7 +536,7 @@ export default function UploadLeadsModal({ isOpen, onClose, onSubmit, properties
                   type="button"
                   onClick={handleUpload}
                   disabled={isSubmitting}
-                  className="bg-[#0B1E6E] hover:bg-[#081650] disabled:opacity-60 text-white font-bold px-5 py-2 rounded-xl text-sm transition-all shadow-md shadow-[#0B1E6E]/10"
+                  className="ui-btn ui-btn-primary disabled:opacity-60 shadow-[#0B1E6E]/10"
                 >
                   {isSubmitting ? "Checking file…" : "Upload"}
                 </button>

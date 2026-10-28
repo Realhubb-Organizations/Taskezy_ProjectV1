@@ -124,7 +124,7 @@ export default function CallLogPage() {
                       <button
                         type="button"
                         onClick={() => setCallLogRefreshNonce(n => n + 1)}
-                        className="px-4 py-1.5 rounded-lg bg-[#0B1E6E] hover:bg-[#081650] text-white text-xs font-bold transition-colors"
+                        className="ui-btn ui-btn-primary"
                       >
                         Retry
                       </button>

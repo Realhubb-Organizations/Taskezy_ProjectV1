@@ -112,7 +112,7 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
       </div>
 
       <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 space-y-4">
-        <h3 className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+        <h3 className="ui-section-title flex items-center gap-1.5">
           <Users className="h-4 w-4 text-slate-500" />
           Manager / TL Performance
         </h3>
