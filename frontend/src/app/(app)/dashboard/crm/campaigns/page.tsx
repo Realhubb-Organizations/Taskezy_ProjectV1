@@ -50,9 +50,6 @@ import {
   apiGetAdLevelLeadStats, type AdLevelLeadStat,
   apiListLeadsPage, apiListFollowupsPage
 } from "@/lib/apiClient";
-import { apiGetLead } from "@/lib/apiClient";
-import { useLeadStatusChange } from "@/components/crm/LeadDrillDownPanel";
-import { openOnRowClick, LEAD_ROW_CLASS } from "@/lib/rowClick";
 import { useServerLeadList } from "@/lib/useServerLeadList";
 import type { LeadSummaryStats } from "@/lib/leadSummaryStats";
 
@@ -242,13 +239,6 @@ export default function AdminCampaignsPage() {
   const [searchQuery, setSearchQuery] = useState("");
 
   const [quickViewLead, setQuickViewLead] = useState<Lead | null>(null);
-  // Open a lead in the full lead panel: show the row straight away, then
-  // swap in the full record (with Activity History).
-  const openLeadPanel = (l: Lead) => {
-    setQuickViewLead(l);
-    apiGetLead(l.id).then(row => setQuickViewLead(mapApiLeadToFrontendLead(row))).catch(() => {});
-  };
-  const handleLeadStatusChange = useLeadStatusChange();
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
   // Filter button → Settings panel for which table columns are shown — a
@@ -1364,7 +1354,17 @@ export default function AdminCampaignsPage() {
                           </tr>
                         ) : (
                           categoryDrillList.rows.map((l) => (
-                            <tr key={l.id} onClick={openOnRowClick(() => openLeadPanel(l))} className={LEAD_ROW_CLASS}>
+                            <tr
+                              key={l.id}
+                              onClick={(e) => {
+                                const target = e.target as HTMLElement;
+                                if (!e.currentTarget.contains(target)) return;
+                                if (target.closest("button, a, input, select, textarea, label, [role='button'], [role='combobox'], [role='listbox']")) return;
+                                if (window.getSelection()?.toString()) return;
+                                setQuickViewLead(l);
+                              }}
+                              className="cursor-pointer hover:bg-slate-50/50 transition-colors"
+                            >
                               <td className="px-4 py-2.5 font-semibold text-slate-900 [overflow-wrap:anywhere]">{l.name}</td>
                               <td className="px-4 py-2.5 font-mono [overflow-wrap:anywhere]">{isAdmin ? l.phone : maskPhone(l.phone)}</td>
                               <td className="px-4 py-2.5">{l.status}</td>
@@ -1468,7 +1468,17 @@ export default function AdminCampaignsPage() {
                         </tr>
                       ) : (
                         qualifiedLeadsList.rows.map(l => (
-                          <tr key={l.id} onClick={openOnRowClick(() => openLeadPanel(l))} className={LEAD_ROW_CLASS}>
+                          <tr
+                            key={l.id}
+                            onClick={(e) => {
+                              const target = e.target as HTMLElement;
+                              if (!e.currentTarget.contains(target)) return;
+                              if (target.closest("button, a, input, select, textarea, label, [role='button'], [role='combobox'], [role='listbox']")) return;
+                              if (window.getSelection()?.toString()) return;
+                              setQuickViewLead(l);
+                            }}
+                            className="cursor-pointer hover:bg-slate-50/50 transition-colors"
+                          >
                             <td className="px-4 py-3 text-slate-900 font-semibold [overflow-wrap:anywhere]">{l.name}</td>
                             <td className="px-4 py-3 [overflow-wrap:anywhere]" title={isAdmin ? l.email : undefined}>{l.email ? (isAdmin ? l.email : maskEmail(l.email)) : "—"}</td>
                             <td className="px-4 py-3 whitespace-nowrap">{l.status}</td>
@@ -2418,7 +2428,7 @@ export default function AdminCampaignsPage() {
         lead={quickViewLead}
         isOpen={quickViewLead !== null}
         onClose={() => setQuickViewLead(null)}
-        onUpdateStatus={handleLeadStatusChange}
+        onUpdateStatus={updateLeadStatus}
       />
     </div>
   );

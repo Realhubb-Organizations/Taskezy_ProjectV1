@@ -15,7 +15,6 @@ import { PlatformLabel, platformFromText } from "@/components/icons/ContactIcons
 import ExpandChevron, { CollapsibleCell } from "@/components/ui/ExpandChevron";
 import { isPhoneLayout } from "@/lib/viewport";
 import { dateRangeLabel } from "@/lib/dateRangeLabel";
-import { openOnRowClick, LEAD_ROW_CLASS } from "@/lib/rowClick";
 import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/callTrigger";
 import { LineSkeleton, TableRowsSkeleton } from "@/components/ui/Skeletons";
 import Tooltip from "@/components/ui/Tooltip";
@@ -2592,7 +2591,7 @@ export default function LeadDashboard() {
                               <TableRowsSkeleton rows={6} columns={8} />
                             ) : (
                               analyticsDrilldownRows.map((l) => (
-                              <tr key={l.id} onClick={openOnRowClick(() => setSelectedLead(l))} className={LEAD_ROW_CLASS}>
+                              <tr key={l.id} onClick={(e) => handleLeadRowClick(e, l)} className="cursor-pointer hover:bg-slate-50/60 transition-colors">
                                 <td className="px-4 py-3 align-top overflow-hidden">
                                   <button
                                     onClick={() => setSelectedLead(l)}
