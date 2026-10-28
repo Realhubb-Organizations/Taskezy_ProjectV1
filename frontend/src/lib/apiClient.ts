@@ -420,6 +420,9 @@ export interface AgentReportStats {
   allocatedSpend: number;
   missedLeads: number;
   missedFollowups: number;
+  // Manager/Admin-only (migration 047) — undefined for a Member viewing
+  // their own report.
+  totalMissedTasks?: number;
 }
 // Backs the Agent report tab's 4 funnel KPI cards, booking value/count,
 // campaign-attributed spend, and missed-lead/missed-follow-up counts
