@@ -1,5 +1,6 @@
 import type { PoolClient } from "pg";
 import { pool, query } from "../../db/pool";
+import { SUPER_ADMIN_EMAIL } from "../../config/superAdmin";
 
 export interface UserDirectoryRow {
   id: string;
@@ -114,6 +115,12 @@ export async function findById(id: string): Promise<FullUserRow | undefined> {
 export async function findDirectReportIds(managerId: string): Promise<string[]> {
   const { rows } = await query<{ id: string }>(`SELECT id FROM users WHERE manager_id = $1`, [managerId]);
   return rows.map(r => r.id);
+}
+
+/** True if `id` is the one Super Admin account — see config/superAdmin.ts. */
+export async function isSuperAdmin(id: string): Promise<boolean> {
+  const { rows } = await query<{ email: string }>(`SELECT email FROM users WHERE id = $1`, [id]);
+  return rows[0]?.email === SUPER_ADMIN_EMAIL;
 }
 
 /** True if `id` refers to an ACTIVE user with role_type MANAGER — the only valid managerId target. */

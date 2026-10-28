@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useApp, Lead, LeadStatus, FollowupCall, mapApiLeadToFrontendLead, mapApiFollowupToFrontend } from "@/context/AppContext";
 import { useDialog } from "@/components/ui/DialogProvider";
+import { isSuperAdminUser } from "@/lib/superAdmin";
 import { Sliders, Sparkles, Plus, Check, ChevronDown, Search, X, Minus, Download, RotateCcw, Users, Trash2, AlertTriangle, Building2, ClipboardList, Upload } from "lucide-react";
 import { STATUS_OPTIONS, PICKABLE_STATUS_OPTIONS, frontendStatusToDbCode, withDeadLeadGate, nextStatusOptions } from "@/lib/leadStatusMapping";
 import { type LeadSummaryStats } from "@/lib/leadSummaryStats";
@@ -170,6 +171,11 @@ export default function LeadDashboard() {
   // quick-filter stays admin-exclusive; a Sales Member gets the same Leads
   // table and stat bar without it.
   const isAdmin = currentUser?.role === "ADMIN";
+  // Lead property editing (single + bulk) and the bulk phone-number search
+  // are Super-Admin-only among admins — every other admin is blocked, per
+  // explicit product decision. Managers are unaffected (unconditional for
+  // single-lead edit, toggle-gated for bulk — see canBulkChangeProperty).
+  const isSuperAdmin = isSuperAdminUser(currentUser?.email);
   const callAllowed = canTriggerLeadCall(isAdmin, currentUser?.email);
   const handleCall = (lead: Lead) => {
     triggerLeadCall(lead, {
@@ -202,11 +208,12 @@ export default function LeadDashboard() {
   // Bulk select + Assign/Reshuffle (same workflow as Data Calling) — Admin
   // and Manager only; who they can pick is scoped in lib/leadAssignment.ts.
   const canBulkAssign = isAdmin || currentUser?.role_type === "Manager";
-  // Bulk "Change Property" — Admin always; a Manager needs the Access
-  // Control toggle (Settings > Manage Users, Super Admin only), off by
-  // default. The server re-checks this independently (leads.service.ts's
-  // assertBulkPropertyChangeAllowed), this just hides the button.
-  const canBulkChangeProperty = isAdmin || !!currentUser?.canBulkChangeLeadProperty;
+  // Bulk "Change Property" — Super Admin always (every other admin is
+  // blocked); a Manager needs the Access Control toggle (Settings > Manage
+  // Users, Super Admin only), off by default. The server re-checks this
+  // independently (leads.service.ts's assertBulkPropertyChangeAllowed),
+  // this just hides the button.
+  const canBulkChangeProperty = isSuperAdmin || !!currentUser?.canBulkChangeLeadProperty;
 
   // Data scoping based on role. The backend's own GET /api/v1/leads already
   // restricts what a sales Member/Manager's session ever receives (see
@@ -318,10 +325,12 @@ export default function LeadDashboard() {
     );
   };
 
-  // Property cell: admins and managers can link, change or clear a lead's
-  // property; the server logs every change in Activity History.
+  // Property cell: the Super Admin and any manager can link, change or
+  // clear a lead's property (every other admin is blocked — see
+  // leads.service.ts's setLeadProperty); the server logs every change in
+  // Activity History.
   const NO_PROPERTY = "Not set";
-  const canAssignProperty = isAdmin || isManager;
+  const canAssignProperty = isSuperAdmin || isManager;
   const handlePropertyChange = async (l: Lead, name: string) => {
     if (name === (l.property || NO_PROPERTY)) return;
     const propertyId = name === NO_PROPERTY ? null : properties.find(p => p.name === name)?.id ?? null;
@@ -1422,7 +1431,7 @@ export default function LeadDashboard() {
                 other filter/toolbar control below while active (the
                 search-by-phones endpoint doesn't combine with them); Clear
                 reverts to the normal table. */}
-            {isAdmin && adminPhoneFilter && (
+            {isSuperAdmin && adminPhoneFilter && (
               <div className="flex flex-wrap items-center gap-2 px-3.5 py-2.5 bg-blue-50 border border-blue-100 rounded-xl text-xs">
                 <ClipboardList className="h-3.5 w-3.5 text-blue-600 shrink-0" />
                 <span className="font-bold text-blue-900">
@@ -1442,7 +1451,7 @@ export default function LeadDashboard() {
                 </button>
               </div>
             )}
-            {isAdmin && adminPhoneFilter && showPhoneFilterNotFound && phoneFilterNotFound.length > 0 && (
+            {isSuperAdmin && adminPhoneFilter && showPhoneFilterNotFound && phoneFilterNotFound.length > 0 && (
               <div className="px-3.5 py-2.5 bg-amber-50 border border-amber-100 rounded-xl text-[11px] font-mono text-amber-800 break-all">
                 {phoneFilterNotFound.join(", ")}
               </div>
@@ -1611,7 +1620,7 @@ export default function LeadDashboard() {
                             <button onClick={() => setAdminSearchOpen(true)} className="text-slate-400 hover:text-brand-700" title="Search">
                               <Search className="h-3.5 w-3.5" />
                             </button>
-                            {isAdmin && (
+                            {isSuperAdmin && (
                               <button onClick={openPhoneSearch} className="text-slate-400 hover:text-brand-700" title="Search multiple phone numbers at once">
                                 <ClipboardList className="h-3.5 w-3.5" />
                               </button>
@@ -2601,7 +2610,7 @@ export default function LeadDashboard() {
 
         {/* Admin-only: bulk phone-number search — paste a list or upload a
             .csv/.txt file, see which already exist as leads. */}
-        {isAdmin && phoneSearchOpen && createPortal(
+        {isSuperAdmin && phoneSearchOpen && createPortal(
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
             <div className="fixed inset-0 bg-slate-900/40" onClick={closePhoneSearch} />
             <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col">

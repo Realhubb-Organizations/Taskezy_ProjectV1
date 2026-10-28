@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { X, Phone, Mail, ArrowRight, Copy, Check, User, Pencil, ChevronDown } from "lucide-react";
-import { useApp, Lead, LeadStatus } from "@/context/AppContext";
+import { useApp, Lead, LeadStatus, mapApiLeadToFrontendLead } from "@/context/AppContext";
 import { useDialog } from "@/components/ui/DialogProvider";
 import { SearchableSelect } from "@/components/ui/SearchableDropdown";
 import { apiSetLeadProperty } from "@/lib/apiClient";
+import { isSuperAdminUser } from "@/lib/superAdmin";
 import { deriveActivityTimeline, nextStatusOptions, statusBadgeClasses, withDeadLeadGate } from "@/lib/leadStatusMapping";
 import { canChangeLeadStatus, canReassignThisLead, isLeadAssignableUser, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
 import { maskPhone, maskEmail } from "@/lib/maskPII";
@@ -36,14 +37,15 @@ export default function LeadDetailDrawer({
   onNoteSaved,
   onPropertySaved
 }: LeadDetailDrawerProps) {
-  const { users, currentUser, activeRole, reassignLead, updateLeadNote, recordCallEnded, recordWhatsAppOpened } = useApp();
+  const { users, properties, currentUser, activeRole, reassignLead, updateLeadNote, recordCallEnded, recordWhatsAppOpened } = useApp();
   const { toast, confirm, prompt: promptDialog } = useDialog();
   const callAllowed = canTriggerLeadCall(activeRole === "ADMIN", currentUser?.email);
   const [localStatus, setLocalStatus] = useState<LeadStatus>("New Lead");
-  // Same Admin/Manager gate as the Leads table's own inline Property
-  // editor (LeadDashboard.tsx's canAssignProperty) — kept in sync here so
-  // this drawer and the table never disagree on who can edit it.
-  const canEditProperty = activeRole === "ADMIN" || currentUser?.role_type === "Manager";
+  // Same gate as the Leads table's own inline Property editor
+  // (LeadDashboard.tsx's canAssignProperty) — Super Admin + any manager,
+  // every other admin is blocked. Kept in sync here so this drawer and the
+  // table never disagree on who can edit it.
+  const canEditProperty = isSuperAdminUser(currentUser?.email) || currentUser?.role_type === "Manager";
   const [savingProperty, setSavingProperty] = useState(false);
   // RNR/Call Back/Followup/Site Visit Scheduled are gated behind a blocking
   // popup (LeadScheduleModal below) that collects the next-call date/time +
@@ -266,7 +268,21 @@ export default function LeadDetailDrawer({
           {lead.property ? "Assigned" : "Unassigned"}
         </span>
       ),
-      value: <span title={lead.property || undefined}>{lead.property || "Not set"}</span>
+      value: canEditProperty ? (
+        <SearchableSelect
+          variant="inline"
+          value={lead.property || NO_PROPERTY}
+          onChange={handlePropertyChange}
+          options={[NO_PROPERTY, ...properties.map(p => p.name)]}
+          placeholder={savingProperty ? "Saving..." : undefined}
+          searchPlaceholder="Search property..."
+          panelWidth={220}
+          disabled={savingProperty}
+          className="max-w-full text-xs font-semibold text-slate-800"
+        />
+      ) : (
+        <span title={lead.property || undefined}>{lead.property || "Not set"}</span>
+      )
     },
     {
       label: "Reassigned To",
