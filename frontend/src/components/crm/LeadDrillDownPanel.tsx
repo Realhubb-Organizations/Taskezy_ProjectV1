@@ -399,14 +399,16 @@ export default function LeadDrillDownPanel({ title, baseFilters, onClose }: {
   const [drillCampaignOptions, setDrillCampaignOptions] = useState<string[]>([]);
   const baseFiltersKey = JSON.stringify(baseFilters);
   useEffect(() => {
-    if (!title) return;
+    // The Campaign column/filter is Admin-only (see the <th>/<td> below) —
+    // skip fetching options nobody will see.
+    if (!title || activeRole !== "ADMIN") return;
     let cancelled = false;
     apiGetDistinctCampaigns(baseFilters)
       .then(result => { if (!cancelled) setDrillCampaignOptions(result); })
       .catch(() => { if (!cancelled) setDrillCampaignOptions([]); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [baseFiltersKey, title]);
+  }, [baseFiltersKey, title, activeRole]);
 
   const drillScrollRef = useRef<HTMLDivElement>(null);
   const keepDrillTableInView = () => {
@@ -482,7 +484,7 @@ export default function LeadDrillDownPanel({ title, baseFilters, onClose }: {
                 <col />
                 <col />
                 <col />
-                <col />
+                {activeRole === "ADMIN" && <col />}
                 <col />
                 <col className="w-[110px]" />
               </colgroup>
@@ -541,26 +543,32 @@ export default function LeadDrillDownPanel({ title, baseFilters, onClose }: {
                   <th className="px-4 py-3 whitespace-nowrap">Date</th>
                   <th className="px-4 py-3 whitespace-nowrap">Feedback</th>
                   <th className="px-4 py-3 whitespace-nowrap">Next Call Date</th>
-                  <th className="px-4 py-3 whitespace-nowrap">
-                    <SearchableMultiSelect
-                      variant="inline"
-                      label="Campaign"
-                      options={drillCampaignOptions}
-                      selected={drillCampaignFilter}
-                      onChange={setDrillFilter(setDrillCampaignFilter)}
-                      align="right"
-                      panelWidth={224}
-                    />
-                  </th>
+                  {/* Campaign/Source attribution — Admin-only, same tier as
+                      the shared LeadDetailDrawer/LeadQuickViewDrawer's
+                      Source/Campaign field and the main Leads table's
+                      campaign column. */}
+                  {activeRole === "ADMIN" && (
+                    <th className="px-4 py-3 whitespace-nowrap">
+                      <SearchableMultiSelect
+                        variant="inline"
+                        label="Campaign"
+                        options={drillCampaignOptions}
+                        selected={drillCampaignFilter}
+                        onChange={setDrillFilter(setDrillCampaignFilter)}
+                        align="right"
+                        panelWidth={224}
+                      />
+                    </th>
+                  )}
                   <th className="px-4 py-3 text-right whitespace-nowrap">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-xs">
                 {drillLoading && drillPageLeads.length === 0 ? (
-                  <TableRowsSkeleton rows={6} columns={9} />
+                  <TableRowsSkeleton rows={6} columns={activeRole === "ADMIN" ? 9 : 8} />
                 ) : totalCount === 0 ? (
                   <tr>
-                    <td colSpan={9} className="px-4 py-8 text-center text-slate-400 font-semibold italic">
+                    <td colSpan={activeRole === "ADMIN" ? 9 : 8} className="px-4 py-8 text-center text-slate-400 font-semibold italic">
                       No leads in this category for the selected date range.
                     </td>
                   </tr>
@@ -595,7 +603,9 @@ export default function LeadDrillDownPanel({ title, baseFilters, onClose }: {
                       <td className="px-4 py-3 text-slate-500 align-top"><DateTimeLines {...dateTimeParts(l.createdAtStr)} /></td>
                       <td className="px-4 py-3 text-slate-600 align-top"><div className="line-clamp-3 [overflow-wrap:anywhere]" title={latestLogMessage(l)}>{latestLogMessage(l)}</div></td>
                       <td className="px-4 py-3 text-slate-500 align-top"><NextCallCell next={nextCallDateFor(l.id)} /></td>
-                      <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]" title={l.campaign || l.source || "—"}>{l.campaign || l.source || "—"}</td>
+                      {activeRole === "ADMIN" && (
+                        <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]" title={l.campaign || l.source || "—"}>{l.campaign || l.source || "—"}</td>
+                      )}
                       <td className="px-4 py-3 align-top text-right">
                         <LeadRowActionsMenu onWhatsApp={() => handleWhatsApp(l)} onCall={() => handleCall(l)} callAllowed={callAllowed} />
                       </td>
