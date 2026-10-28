@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { openOnRowClick, LEAD_ROW_CLASS } from "@/lib/rowClick";
 import LeadRowActionsMenu from "@/components/crm/LeadRowActionsMenu";
 import { Search, Copy, Check, X } from "lucide-react";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
@@ -159,7 +160,7 @@ export default function PendingLeadsTable({
   return (
     <div className="bg-white rounded-2xl shadow-md">
       <div className="px-4 py-3 border-b border-slate-100">
-        <h3 className="text-sm font-extrabold text-slate-900">{title}</h3>
+        <h3 className="ui-section-title">{title}</h3>
       </div>
 
       <div ref={scrollRef} className="overflow-x-auto">
@@ -243,7 +244,8 @@ export default function PendingLeadsTable({
                 <tr
                   key={row.id}
                   ref={idx % rowsPerPage === 0 ? (el) => { pageRowRefs.current[Math.floor(idx / rowsPerPage)] = el; } : undefined}
-                  className="hover:bg-slate-50/60 transition-colors text-xs"
+                  onClick={row.leadId && onViewLead ? openOnRowClick(() => onViewLead(row.leadId!)) : undefined}
+                  className={`text-xs ${row.leadId && onViewLead ? LEAD_ROW_CLASS : "hover:bg-slate-50/60 transition-colors"}`}
                 >
                   <td className="px-4 py-3 font-mono text-slate-700 [overflow-wrap:anywhere] align-top">{row.time}</td>
                   <td className="px-4 py-3 align-top overflow-hidden">

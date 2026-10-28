@@ -42,11 +42,11 @@ export default function MarketingOperations({
     <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-5 animate-fade-in">
       <div className="flex justify-between items-center border-b border-slate-100 pb-3">
         <div>
-          <h3 className="text-sm font-extrabold text-slate-705 flex items-center gap-2">
+          <h3 className="ui-section-title flex items-center gap-2">
             <Globe className="h-4.5 w-4.5 text-blue-600" />
             Marketing Operations &amp; Spends
           </h3>
-          <p className="text-[10px] text-slate-450 mt-0.5">Unified dashboard for Meta Ads and Google Search campaigns telemetry.</p>
+          <p className="ui-desc mt-0.5">Unified dashboard for Meta Ads and Google Search campaigns telemetry.</p>
         </div>
         <span className="text-[9px] bg-blue-50 border border-blue-100 text-blue-655 px-2 py-0.5 rounded-lg font-bold">
           Live Campaigns
@@ -62,7 +62,7 @@ export default function MarketingOperations({
           <div className="flex justify-between items-start">
             <div className="flex items-center gap-2">
               <span className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
-              <h4 className="text-xs font-black text-slate-750">Meta Ads Manager</h4>
+              <h4 className="ui-subheading">Meta Ads Manager</h4>
             </div>
             <SubActionsMenu actions={getCampaignActions("Meta Ads")} />
           </div>
@@ -94,7 +94,7 @@ export default function MarketingOperations({
           <div className="flex justify-between items-start">
             <div className="flex items-center gap-2">
               <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-              <h4 className="text-xs font-black text-slate-750">Google Adwords</h4>
+              <h4 className="ui-subheading">Google Adwords</h4>
             </div>
             <SubActionsMenu actions={getCampaignActions("Google Ads")} />
           </div>

@@ -143,7 +143,7 @@ function PlaceholderDetail({ name }: { name: string }) {
       </div>
       <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-3">
         <div className="flex items-center gap-2">
-          <h2 className="text-lg font-extrabold text-slate-900">{name}</h2>
+          <h2 className="ui-title">{name}</h2>
           {statusPill(false)}
         </div>
         <p className="text-xs text-slate-500 max-w-md">{description}</p>
@@ -387,7 +387,7 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
   const pagesTable = (
     <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
       <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5 border-b border-slate-100">
-        <h3 className="text-sm font-extrabold text-slate-900">
+        <h3 className="ui-section-title">
           {key === "meta" ? `Connected Pages (${activeMetaConnections.length})` : `Connected Accounts (${activeGoogleAccounts.length})`}
         </h3>
         <div className="flex items-center gap-2">
@@ -404,7 +404,7 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
             <button
               onClick={handleConnectMeta}
               disabled={metaLoading}
-              className="inline-flex items-center gap-1.5 bg-[#0B1E6E] hover:bg-[#081650] text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-all disabled:opacity-50"
+              className="ui-btn ui-btn-primary disabled:opacity-50"
             >
               {metaLoading ? "Redirecting…" : "Connect Another Page"}
             </button>
@@ -539,7 +539,7 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
             </div>
             <div className="flex-1 min-w-[240px]">
               <div className="flex items-center gap-2 flex-wrap">
-                <h2 className="text-lg font-extrabold text-slate-900">{info.name}</h2>
+                <h2 className="ui-title">{info.name}</h2>
                 {checkError ? (
                   <span className="inline-flex items-center gap-1 text-[10px] font-bold border px-2 py-0.5 rounded-full shrink-0 bg-amber-50 text-amber-700 border-amber-150">
                     <AlertTriangle className="h-2.5 w-2.5" />
@@ -632,7 +632,7 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
             <div className="space-y-4">
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
                 <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-3">
-                  <h3 className="text-sm font-extrabold text-slate-900">Integration Status</h3>
+                  <h3 className="ui-section-title">Integration Status</h3>
                   {checkError ? (
                     <div className="rounded-xl px-3.5 py-3 border bg-amber-50 border-amber-150">
                       <p className="text-xs font-extrabold flex items-center gap-1.5 text-amber-700">
@@ -680,7 +680,7 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
                             }))) return;
                             Promise.all(activeMetaConnections.map(c => apiDisconnectMeta(c.id))).then(loadMetaConnections);
                           }}
-                          className="w-full px-3.5 py-2 rounded-lg text-xs font-bold border bg-red-50 border-red-200 text-red-700 hover:bg-red-100 transition-all"
+                          className="ui-btn ui-btn-secondary w-full border bg-red-50 border-red-200 text-red-700 hover:bg-red-100"
                         >
                           Disconnect
                         </button>
@@ -721,7 +721,7 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
 
                 <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4">
                   <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-extrabold text-slate-900">Account Information</h3>
+                    <h3 className="ui-section-title">Account Information</h3>
                     {key === "meta" && active && (
                       <button
                         onClick={handleConnectMeta}
@@ -800,8 +800,8 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
           {tab === "mapping" && key === "meta" && (
             <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
               <div className="px-5 py-3.5 border-b border-slate-100">
-                <h3 className="text-sm font-extrabold text-slate-900">Lead Mapping</h3>
-                <p className="text-[11px] text-slate-500 mt-0.5">How an inbound Meta Lead Ads submission becomes a lead in this CRM — fixed by the integration, not configurable per Page.</p>
+                <h3 className="ui-section-title">Lead Mapping</h3>
+                <p className="ui-desc mt-0.5">How an inbound Meta Lead Ads submission becomes a lead in this CRM — fixed by the integration, not configurable per Page.</p>
               </div>
               <div className="divide-y divide-slate-100">
                 {META_FIELD_MAPPING.map((row, i) => (
@@ -817,8 +817,8 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
 
           {tab === "webhooks" && key === "meta" && (
             <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-3">
-              <h3 className="text-sm font-extrabold text-slate-900">Webhook Endpoint</h3>
-              <p className="text-[11px] text-slate-500">
+              <h3 className="ui-section-title">Webhook Endpoint</h3>
+              <p className="ui-desc">
                 Meta delivers new Lead Ads submissions to this endpoint in real time — every connected Page above is subscribed to it automatically when connected, no manual setup needed.
               </p>
               <div className="flex items-center gap-2 bg-slate-50 border border-slate-150 rounded-lg px-3 py-2">
@@ -830,8 +830,8 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
 
           {tab === "sync" && key === "meta" && (
             <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-2">
-              <h3 className="text-sm font-extrabold text-slate-900">Sync History</h3>
-              <p className="text-[11px] text-slate-500 max-w-lg">
+              <h3 className="ui-section-title">Sync History</h3>
+              <p className="ui-desc max-w-lg">
                 Meta Ads is real-time and event-driven, not a periodic batch sync — there&apos;s no sync run history to show. Every new lead lands in the Leads table the moment Meta sends it; check a lead&apos;s Activity Log there for exactly when it arrived.
               </p>
             </div>
@@ -839,7 +839,7 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
 
           {tab === "settings" && key === "meta" && (
             <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-3">
-              <h3 className="text-sm font-extrabold text-slate-900">Connection Settings</h3>
+              <h3 className="ui-section-title">Connection Settings</h3>
               {active ? (
                 <>
                   <p className="text-[11px] text-slate-500">Disconnecting stops new leads from every connected Page below from arriving until you reconnect.</p>

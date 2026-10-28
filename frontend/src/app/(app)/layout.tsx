@@ -967,8 +967,8 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                   <Shield className="h-8 w-8 animate-pulse" />
                 </div>
                 <div className="space-y-2 max-w-md">
-                  <h3 className="text-lg font-black text-slate-800 tracking-tight">Security Access Gated</h3>
-                  <p className="text-xs text-slate-500 leading-relaxed font-semibold">
+                  <h3 className="ui-title tracking-tight">Security Access Gated</h3>
+                  <p className="ui-desc leading-relaxed">
                     Your profile <span className="text-brand-700 font-bold">({currentUser?.email})</span> in the <span className="font-semibold text-brand-700">{currentUser?.department || "unassigned"}</span> department is unauthorized to access <span className="font-mono bg-slate-100 text-red-650 px-1 py-0.5 rounded font-bold">{pathname}</span>.
                   </p>
                   <p className="text-[10px] text-slate-400 leading-relaxed">

@@ -544,7 +544,7 @@ export default function PropertiesPage() {
         <div className="flex justify-end">
           <button
             onClick={() => { setDuplicateSource(null); setIsAddOpen(true); }}
-            className="inline-flex items-center justify-center gap-2 h-9 px-3.5 bg-[#0B1E6E] hover:bg-[#081650] text-white rounded-xl text-xs font-bold transition-all shadow-md"
+            className="ui-btn ui-btn-primary"
           >
             <Plus className="h-4 w-4" />
             Add Property
@@ -630,7 +630,7 @@ export default function PropertiesPage() {
                       <button
                         type="button"
                         onClick={() => setPropertiesRefreshNonce(n => n + 1)}
-                        className="px-4 py-1.5 rounded-lg bg-[#0B1E6E] hover:bg-[#081650] text-white text-xs font-bold transition-colors"
+                        className="ui-btn ui-btn-primary"
                       >
                         Retry
                       </button>
@@ -733,7 +733,7 @@ export default function PropertiesPage() {
           >
             <div className="shrink-0 flex items-start justify-between gap-6 px-6 sm:px-8 pt-6 pb-5 border-b border-slate-200">
               <div className="min-w-0">
-                <h3 id="property-dialog-title" className="text-base font-semibold text-slate-900">
+                <h3 id="property-dialog-title" className="ui-title">
                   {isEditing && isAdmin ? `Edit ${selectedProperty.name}` : selectedProperty.name}
                 </h3>
                 <p className="text-sm text-slate-500 mt-0.5 line-clamp-2">
@@ -893,10 +893,10 @@ export default function PropertiesPage() {
                   </div>
 
                   <div className="flex gap-2 pt-2">
-                    <button type="submit" className="flex-1 bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold px-5 py-2 rounded-xl text-sm transition-all shadow-sm">
+                    <button type="submit" className="ui-btn ui-btn-primary flex-1">
                       Save Changes
                     </button>
-                    <button type="button" onClick={() => handleDeleteProperty(selectedProperty)} className="bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 font-bold px-5 py-2 rounded-xl text-sm transition-all flex items-center justify-center">
+                    <button type="button" onClick={() => handleDeleteProperty(selectedProperty)} className="ui-btn ui-btn-secondary bg-red-50 hover:bg-red-100 text-red-700 border border-red-200">
                       <Trash2 className="h-4 w-4" />
                     </button>
                   </div>
@@ -978,7 +978,7 @@ export default function PropertiesPage() {
 
                   {selectedProperty.description && (
                     <div className="border-t border-slate-200 pt-6">
-                      <h4 className="text-sm font-semibold text-slate-900">Overview</h4>
+                      <h4 className="ui-subheading">Overview</h4>
                       <p className="text-sm text-slate-600 leading-6 whitespace-pre-line mt-2">{selectedProperty.description}</p>
                     </div>
                   )}
@@ -1003,8 +1003,8 @@ export default function PropertiesPage() {
 
                   <div className="border-t border-slate-200 pt-6 space-y-4">
                     <div>
-                      <h4 className="text-sm font-semibold text-slate-900">Register client interest</h4>
-                      <p className="text-xs text-slate-500 mt-0.5">Adds the client as a lead for this property.</p>
+                      <h4 className="ui-subheading">Register client interest</h4>
+                      <p className="ui-desc mt-0.5">Adds the client as a lead for this property.</p>
                     </div>
 
                     {interestSuccess && (
@@ -1033,12 +1033,12 @@ export default function PropertiesPage() {
                             onClick={handleSavePopup}
                             disabled={!popupDirty || savingLinkers}
                             title={popupDirty ? "Save connected campaigns and sheets" : "No changes to save"}
-                            className="h-9 px-4 border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 font-medium rounded-lg text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                            className="ui-btn ui-btn-secondary border disabled:opacity-40 disabled:cursor-not-allowed"
                           >
                             {savingLinkers ? "Saving..." : "Save"}
                           </button>
                         )}
-                        <button type="submit" className="h-9 px-4 bg-[#0B1E6E] hover:bg-[#081650] text-white font-medium rounded-lg text-sm transition-colors">
+                        <button type="submit" className="ui-btn ui-btn-primary">
                           Register interest
                         </button>
                       </div>

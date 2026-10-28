@@ -3,7 +3,7 @@
 import React, { useState, useRef, useMemo, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useApp, Lead, FollowupCall, mapApiFollowupToFrontend } from "@/context/AppContext";
-import { ChevronRight, Search, Sliders, Minus, X, Copy, Users, Plus, Check, Trash2, AlertTriangle } from "lucide-react";
+import { ChevronDown, Search, Sliders, Minus, X, Copy, Users, Plus, Check, Trash2, AlertTriangle } from "lucide-react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine } from "recharts";
 import UploadLeadsModal from "@/components/crm/UploadLeadsModal";
 import LeadDetailDrawer from "@/components/crm/LeadDetailDrawer";
@@ -20,6 +20,7 @@ import { useDialog } from "@/components/ui/DialogProvider";
 import LeadNoteCell from "@/components/crm/LeadNoteCell";
 import LeadRowActionsMenu from "@/components/crm/LeadRowActionsMenu";
 import { isPhoneLayout } from "@/lib/viewport";
+import { dateRangeLabel } from "@/lib/dateRangeLabel";
 import { apiBulkDeleteLeads, apiBulkReassignLeads, apiDeleteLead } from "@/lib/apiClient";
 import { maskPhone, maskEmail } from "@/lib/maskPII";
 import { ExcelIcon } from "@/components/icons/ContactIcons";
@@ -971,9 +972,11 @@ export default function DataCallingPage() {
             return d >= start && d <= end;
           })()
         : true;
-      return matchesSearch && matchesStatus && matchesAssigned && matchesDataCallSource && matchesProperty && matchesSubStatus && matchesDate;
+      // Also follows the Date Range card above (same range as the stat cards).
+      return matchesSearch && matchesStatus && matchesAssigned && matchesDataCallSource && matchesProperty && matchesSubStatus && matchesDate && leadInSelectedRange(l);
     });
-  }, [leads, searchQuery, statusFilters, assignedFilters, dataCallSourceFilters, propertyFilters, subStatusFilters, appliedCustomRange]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leads, searchQuery, statusFilters, assignedFilters, dataCallSourceFilters, propertyFilters, subStatusFilters, appliedCustomRange, dateRange, summaryCustomRange]);
 
   const totalPages = Math.max(1, Math.ceil(filteredLeads.length / rowsPerPage));
   const currentPageClamped = Math.min(currentPage, totalPages);
@@ -989,6 +992,9 @@ export default function DataCallingPage() {
   // current table page (not the whole company's follow-up table).
   const [pageFollowups, setPageFollowups] = useState<FollowupCall[]>([]);
   const pageLeadIds = paginatedLeads.map(l => l.id).join(",");
+  // Re-fetch Next Call Dates when a call is scheduled anywhere (addFollowupCall
+  // updates this list), not only when the rows change.
+  const { followupCalls: liveFollowups } = useApp();
   useEffect(() => {
     if (!pageLeadIds) { setPageFollowups([]); return; }
     let cancelled = false;
@@ -996,7 +1002,7 @@ export default function DataCallingPage() {
       .then(({ rows }) => { if (!cancelled) setPageFollowups(rows.map(mapApiFollowupToFrontend)); })
       .catch(() => { if (!cancelled) setPageFollowups([]); });
     return () => { cancelled = true; };
-  }, [pageLeadIds]);
+  }, [pageLeadIds, liveFollowups]);
   const nextCallDateFor = (leadId: string) => nextFollowupFor(leadId, pageFollowups);
 
   // WhatsApp / Call buttons — rendered right after Status on phones, at the
@@ -1032,22 +1038,18 @@ export default function DataCallingPage() {
   return (
     <div className="space-y-4 pb-8 animate-fade-in text-slate-800">
       {/* Top Toggle Switcher: Data Calling vs Data Calling Analytics */}
-      <div className="flex items-center justify-between gap-1.5">
-        <div className="bg-slate-200/70 p-1 rounded-xl flex items-center gap-1">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="ui-toggle">
           <button
             onClick={() => setActiveTab("DataCalling")}
-            className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-              activeTab === "DataCalling" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-800"
-            }`}
+            className={`ui-toggle-item ${activeTab === "DataCalling" ? "ui-toggle-item-active" : ""}`}
           >
             Data Calling
           </button>
           {canViewDataCallingAnalytics && (
             <button
               onClick={() => setActiveTab("Analytics")}
-              className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                activeTab === "Analytics" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-800"
-              }`}
+              className={`ui-toggle-item ${activeTab === "Analytics" ? "ui-toggle-item-active" : ""}`}
             >
               Data Calling Analytics
             </button>
@@ -1057,7 +1059,7 @@ export default function DataCallingPage() {
         {canUploadLeads(currentUser) && activeTab === "DataCalling" && (
           <button
             onClick={() => setIsUploadLeadsOpen(true)}
-            className="inline-flex items-center justify-center gap-2 h-9 px-3.5 bg-[#0B1E6E] hover:bg-[#081650] text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer shrink-0"
+            className="ui-btn ui-btn-primary cursor-pointer shrink-0 ml-auto"
           >
             <Plus className="h-4 w-4" />
             Upload Leads
@@ -1091,7 +1093,7 @@ export default function DataCallingPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 bg-white divide-y sm:divide-y-0 sm:divide-x divide-slate-100">
+        <div className="flex md:grid md:grid-cols-5 bg-white divide-x divide-slate-100 overflow-x-auto min-w-full">
           {([
             { label: "Total Leads Assigned", value: summaryMetrics.totalAssigned, color: "text-slate-900" },
             { label: "Calls Made", value: summaryMetrics.callsMade, color: "text-slate-900" },
@@ -1105,17 +1107,17 @@ export default function DataCallingPage() {
                 key={s.label}
                 type="button"
                 onClick={() => toggleCategory(s.label)}
-                className={`p-3 flex items-center justify-between text-left group transition-colors ${
+                className={`p-3 flex flex-col justify-between min-h-[70px] min-w-[110px] md:min-w-0 flex-1 text-left group transition-colors ${
                   isActive ? "bg-blue-50/70" : "hover:bg-slate-50/50"
                 }`}
               >
-                <div>
-                  <span className="text-[11px] font-medium text-slate-500 block">{s.label}</span>
-                  <span className={`text-lg font-extrabold mt-1.5 block ${s.color}`}>
-                    {isDataLoading ? <LineSkeleton width={32} height={18} /> : s.value}
-                  </span>
-                </div>
-                <ChevronRight className={`h-4 w-4 text-slate-300 shrink-0 transition-transform ${isActive ? "rotate-90 text-blue-500" : "group-hover:translate-x-0.5"}`} />
+                <span className="flex items-center justify-between gap-1 text-[11px] font-medium text-slate-500">
+                  {s.label}
+                  <ChevronDown className={`h-3 w-3 text-slate-300 shrink-0 transition-transform ${isActive ? "rotate-180 text-blue-500" : ""}`} />
+                </span>
+                <span className={`text-lg font-extrabold block mt-1.5 ${s.color}`}>
+                  {isDataLoading ? <LineSkeleton width={32} height={18} /> : s.value}
+                </span>
               </button>
             );
           })}
@@ -1143,7 +1145,7 @@ export default function DataCallingPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 bg-white divide-y sm:divide-y-0 sm:divide-x divide-slate-100">
+        <div className="flex md:grid md:grid-cols-5 bg-white divide-x divide-slate-100 overflow-x-auto min-w-full">
           {([
             { label: "Total Leads Assigned", value: analyticsSummaryMetrics.totalAssigned, color: "text-slate-900" },
             { label: "Calls Made", value: analyticsSummaryMetrics.callsMade, color: "text-slate-900" },
@@ -1157,17 +1159,17 @@ export default function DataCallingPage() {
                 key={s.label}
                 type="button"
                 onClick={() => toggleAnalyticsCategory(s.label)}
-                className={`p-3 flex items-center justify-between text-left group transition-colors ${
+                className={`p-3 flex flex-col justify-between min-h-[70px] min-w-[110px] md:min-w-0 flex-1 text-left group transition-colors ${
                   isActive ? "bg-blue-50/70" : "hover:bg-slate-50/50"
                 }`}
               >
-                <div>
-                  <span className="text-[11px] font-medium text-slate-500 block">{s.label}</span>
-                  <span className={`text-lg font-extrabold mt-1.5 block ${s.color}`}>
-                    {isDataLoading ? <LineSkeleton width={32} height={18} /> : s.value}
-                  </span>
-                </div>
-                <ChevronRight className={`h-4 w-4 text-slate-300 shrink-0 transition-transform ${isActive ? "rotate-90 text-blue-500" : "group-hover:translate-x-0.5"}`} />
+                <span className="flex items-center justify-between gap-1 text-[11px] font-medium text-slate-500">
+                  {s.label}
+                  <ChevronDown className={`h-3 w-3 text-slate-300 shrink-0 transition-transform ${isActive ? "rotate-180 text-blue-500" : ""}`} />
+                </span>
+                <span className={`text-lg font-extrabold block mt-1.5 ${s.color}`}>
+                  {isDataLoading ? <LineSkeleton width={32} height={18} /> : s.value}
+                </span>
               </button>
             );
           })}
@@ -1189,7 +1191,7 @@ export default function DataCallingPage() {
         return (
           <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden animate-fade-in">
             <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-200/80 gap-3">
-              <h3 className="text-sm font-bold text-slate-900 whitespace-nowrap">
+              <h3 className="ui-section-title whitespace-nowrap">
                 {analyticsSelectedCategory}
                 <span className="text-slate-400 font-medium ml-1.5">({shownCount})</span>
               </h3>
@@ -1289,7 +1291,7 @@ export default function DataCallingPage() {
         return (
           <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden animate-fade-in">
             <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-200/80 gap-3">
-              <h3 className="text-sm font-bold text-slate-900 whitespace-nowrap">
+              <h3 className="ui-section-title whitespace-nowrap">
                 {selectedCategory}
                 <span className="text-slate-400 font-medium ml-1.5">({shownCount})</span>
               </h3>
@@ -1385,7 +1387,7 @@ export default function DataCallingPage() {
                 <button
                   type="button"
                   onClick={() => openAssignFlow("assign")}
-                  className="inline-flex items-center justify-center gap-2 h-9 bg-white border border-slate-300/80 rounded-xl px-3.5 text-xs text-slate-700 font-bold hover:bg-slate-50 shadow-2xs transition-colors"
+                  className="ui-btn ui-btn-secondary border"
                 >
                   <Users className="h-4 w-4 text-blue-600" />
                   Assign
@@ -1395,7 +1397,7 @@ export default function DataCallingPage() {
                 <button
                   type="button"
                   onClick={() => openAssignFlow("reshuffle")}
-                  className="inline-flex items-center justify-center gap-2 h-9 bg-white border border-slate-300/80 rounded-xl px-3.5 text-xs text-slate-700 font-bold hover:bg-slate-50 shadow-2xs transition-colors"
+                  className="ui-btn ui-btn-secondary border"
                 >
                   <Users className="h-4 w-4 text-blue-600" />
                   Reshuffle
@@ -1405,7 +1407,7 @@ export default function DataCallingPage() {
                 <button
                   type="button"
                   onClick={() => { setDeleteError(""); setDeleteTarget({ ids: Array.from(selectedIds) }); }}
-                  className="inline-flex items-center justify-center gap-2 h-9 bg-white border border-slate-300/80 rounded-xl px-3.5 text-xs text-red-600 font-bold hover:bg-red-50 shadow-2xs transition-colors"
+                  className="ui-btn ui-btn-secondary border text-red-600 hover:bg-red-50"
                 >
                   <Trash2 className="h-4 w-4 text-red-600" />
                   Delete ({selectedIds.size})
@@ -1415,7 +1417,7 @@ export default function DataCallingPage() {
                 <button
                   type="button"
                   onClick={() => setSelectedIds(new Set())}
-                  className="inline-flex items-center justify-center gap-2 h-9 bg-white border border-slate-300/80 rounded-xl px-3.5 text-xs text-slate-700 font-bold hover:bg-slate-50 shadow-2xs transition-colors"
+                  className="ui-btn ui-btn-secondary border"
                 >
                   Clear all
                 </button>
@@ -1426,7 +1428,7 @@ export default function DataCallingPage() {
                 <button
                   type="button"
                   onClick={() => { setDeleteError(""); setDeleteTarget({ ids: filteredLeads.map(l => l.id), isAll: true }); }}
-                  className="inline-flex items-center justify-center gap-2 h-9 bg-white border border-slate-300/80 rounded-xl px-3.5 text-xs text-red-600 font-bold hover:bg-red-50 shadow-2xs transition-colors"
+                  className="ui-btn ui-btn-secondary border text-red-600 hover:bg-red-50"
                 >
                   <Trash2 className="h-4 w-4 text-red-600" />
                   Delete All ({filteredLeads.length})
@@ -1446,7 +1448,7 @@ export default function DataCallingPage() {
               <button
                 type="button"
                 onClick={() => (activeTab === "DataCalling" ? setIsFilterOpen(true) : setIsAnalyticsFilterOpen(true))}
-                className="inline-flex items-center justify-center gap-2 h-9 border border-slate-300/80 bg-white rounded-xl px-3.5 text-xs text-slate-700 font-bold hover:bg-slate-50 shadow-2xs transition-colors"
+                className="ui-btn ui-btn-secondary border"
               >
                 <Sliders className="h-4 w-4 text-blue-600" />
                 Filter
@@ -1459,7 +1461,7 @@ export default function DataCallingPage() {
             {/* Salesperson Performance */}
             <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden">
               <div className="px-5 py-3.5 border-b border-slate-200/80">
-                <h3 className="text-sm font-bold text-slate-900">Salesperson Performance</h3>
+                <h3 className="ui-section-title">Salesperson Performance</h3>
               </div>
               <div className="overflow-x-auto md:overflow-y-auto md:max-h-[55vh]">
                 <table className="table-fixed w-full text-left border-collapse min-w-[1050px]">
@@ -1534,7 +1536,7 @@ export default function DataCallingPage() {
             {/* Performance Line Graph */}
             <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm p-5">
               <div className="flex items-center justify-between mb-3 gap-2">
-                <h3 className="text-sm font-bold text-slate-900">Performance Line Graph</h3>
+                <h3 className="ui-section-title">Performance Line Graph</h3>
                 <SearchableMultiSelect
                   selected={analyticsSubSources}
                   onChange={setAnalyticsSubSources}
@@ -1579,7 +1581,7 @@ export default function DataCallingPage() {
                 the Salesperson Performance/Performance Line Graph cards
                 above rather than standing out oversized. */}
             <div className="bg-white rounded-2xl p-5">
-              <h3 className="text-sm font-bold text-slate-900 mb-4">Source Performance</h3>
+              <h3 className="ui-section-title mb-4">Source Performance</h3>
               <div className="overflow-x-auto md:overflow-y-auto md:max-h-[55vh]">
                 <table className="table-fixed w-full text-left border-collapse" style={{ minWidth: (7 + ANALYTICS_COLUMNS.filter(c => c.key !== "qualifiedLeads" && analyticsVisibleColumns[c.key]).length) * 150 }}>
                   <colgroup>
@@ -1980,6 +1982,7 @@ export default function DataCallingPage() {
 
             <TablePagination
               totalRows={filteredLeads.length}
+              countSuffix={dateRangeLabel(dateRange, dateRange === "Custom" ? summaryCustomRange : null)}
               page={currentPageClamped}
               rowsPerPage={rowsPerPage}
               onPageChange={setCurrentPage}
@@ -1997,7 +2000,7 @@ export default function DataCallingPage() {
           <div className="fixed inset-0" onClick={() => setIsFilterOpen(false)} />
           <div className="fixed inset-y-0 right-0 w-full max-w-sm bg-white border-l border-slate-200 shadow-2xl flex flex-col animate-slide-in">
             <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-slate-100 shrink-0">
-              <h3 className="text-base font-extrabold text-slate-900">Filter</h3>
+              <h3 className="ui-title">Filter</h3>
               <button onClick={() => setIsFilterOpen(false)} className="text-slate-400 hover:text-slate-700">
                 <X className="h-4.5 w-4.5" />
               </button>
@@ -2047,7 +2050,7 @@ export default function DataCallingPage() {
           <div className="fixed inset-0" onClick={() => setIsAnalyticsFilterOpen(false)} />
           <div className="fixed inset-y-0 right-0 w-full max-w-sm bg-white border-l border-slate-200 shadow-2xl flex flex-col animate-slide-in">
             <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-slate-100 shrink-0">
-              <h3 className="text-base font-extrabold text-slate-900">Filter</h3>
+              <h3 className="ui-title">Filter</h3>
               <button onClick={() => setIsAnalyticsFilterOpen(false)} className="text-slate-400 hover:text-slate-700">
                 <X className="h-4.5 w-4.5" />
               </button>
@@ -2099,7 +2102,7 @@ export default function DataCallingPage() {
           <div className="fixed inset-0 bg-slate-900/40" onClick={closeAssignFlow} />
           <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md">
             <div className="px-6 pt-6 pb-4 border-b border-slate-100">
-              <h3 className="text-xl font-extrabold text-slate-900">
+              <h3 className="ui-title">
                 {assignFlowMode === "reshuffle" ? "Reshuffle Leads" : "Assign Leads"}
               </h3>
             </div>
@@ -2164,7 +2167,7 @@ export default function DataCallingPage() {
                 type="button"
                 disabled={assignSubmitting}
                 onClick={closeAssignFlow}
-                className="px-5 py-2 rounded-xl border border-slate-300 font-bold text-slate-700 text-sm hover:bg-slate-50 transition-colors disabled:opacity-50"
+                className="ui-btn ui-btn-secondary border disabled:opacity-50"
               >
                 Cancel
               </button>
@@ -2172,9 +2175,9 @@ export default function DataCallingPage() {
                 type="button"
                 disabled={!canConfirmAssign || assignSubmitting}
                 onClick={confirmBulkAssign}
-                className={`px-5 py-2 rounded-xl font-bold text-sm text-white transition-colors ${
-                  canConfirmAssign && !assignSubmitting ? "bg-[#0B1E6E] hover:bg-[#081650]" : "bg-slate-300 cursor-not-allowed"
-                }`}
+                className={`ui-btn ui-btn-primary ${
+ canConfirmAssign && !assignSubmitting ? " " : "bg-slate-300 cursor-not-allowed"
+ }`}
               >
                 {assignSubmitting ? "Working…" : assignFlowMode === "reshuffle" ? "Reshuffle" : "Assign"}
               </button>
@@ -2209,7 +2212,7 @@ export default function DataCallingPage() {
           <div className="fixed inset-0 bg-slate-900/40" onClick={closeDeleteDialog} />
           <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md">
             <div className="px-6 pt-6 pb-4 border-b border-slate-100">
-              <h3 className="text-xl font-extrabold text-slate-900">{deleteTarget.ids.length === 1 ? "Delete Lead" : "Delete Leads"}</h3>
+              <h3 className="ui-title">{deleteTarget.ids.length === 1 ? "Delete Lead" : "Delete Leads"}</h3>
             </div>
             <div className="px-6 py-5 space-y-3">
               <p className="text-sm text-slate-700">
@@ -2234,7 +2237,7 @@ export default function DataCallingPage() {
                 type="button"
                 disabled={deleteSubmitting}
                 onClick={closeDeleteDialog}
-                className="px-5 py-2 rounded-xl border border-slate-300 font-bold text-slate-700 text-sm hover:bg-slate-50 transition-colors disabled:opacity-50"
+                className="ui-btn ui-btn-secondary border disabled:opacity-50"
               >
                 Cancel
               </button>
@@ -2242,7 +2245,7 @@ export default function DataCallingPage() {
                 type="button"
                 disabled={deleteSubmitting}
                 onClick={confirmDelete}
-                className="px-5 py-2 rounded-xl font-bold text-sm text-white bg-red-600 hover:bg-red-700 transition-colors disabled:bg-slate-300 disabled:cursor-not-allowed"
+                className="ui-btn ui-btn-danger disabled:bg-slate-300 disabled:cursor-not-allowed"
               >
                 {deleteSubmitting ? "Deleting..." : "Delete"}
               </button>
@@ -2257,8 +2260,8 @@ export default function DataCallingPage() {
           <div className="fixed inset-0 bg-slate-900/40 z-[80]" onClick={() => !callUpdateSaving && setCallUpdate(null)} />
           <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 pointer-events-none">
             <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-slate-200 p-6 pointer-events-auto">
-              <h3 className="text-sm font-extrabold text-slate-900">Update Call Status</h3>
-              <p className="text-xs text-slate-500 mt-1">
+              <h3 className="ui-title">Update Call Status</h3>
+              <p className="ui-desc mt-1">
                 {callUpdate.leadName} · <span className="font-semibold text-slate-700">{callUpdate.callStatus}</span>
               </p>
 
@@ -2333,7 +2336,7 @@ export default function DataCallingPage() {
                     type="button"
                     disabled={callUpdateSaving}
                     onClick={() => setCallUpdate(null)}
-                    className="bg-slate-100 border border-slate-200 text-slate-700 font-bold px-5 py-2 rounded-xl text-sm hover:bg-slate-200 transition-colors disabled:opacity-60"
+                    className="ui-btn ui-btn-secondary border disabled:opacity-60"
                   >
                     Cancel
                   </button>
@@ -2341,7 +2344,7 @@ export default function DataCallingPage() {
                     type="button"
                     disabled={callUpdateSaving}
                     onClick={confirmCallUpdate}
-                    className="bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold px-5 py-2 rounded-xl text-sm transition-colors disabled:opacity-60"
+                    className="ui-btn ui-btn-primary disabled:opacity-60"
                   >
                     {callUpdateSaving ? "Saving..." : "Save"}
                   </button>

@@ -51,7 +51,7 @@ const todayIso = () => {
 };
 
 export default function CallFeedbackGate() {
-  const { pendingCallAttempt, submitCallFeedback, users, currentUser } = useApp();
+  const { pendingCallAttempt, submitCallFeedback, users, currentUser, recordFollowupCreated } = useApp();
   const isWhatsApp = pendingCallAttempt?.channel === "WHATSAPP";
 
   // Fetched directly by id instead of scanning the bulk leads/dataCallingLeads
@@ -200,7 +200,8 @@ export default function CallFeedbackGate() {
       if (lead && scheduledAt) {
         const ownerId = users.find(u => u.name === lead.assignedAgent)?.id ?? currentUser?.id;
         if (ownerId) {
-          await apiCreateFollowup({ scheduledAt: scheduledAt.toISOString(), leadId: lead.id, leadName: lead.name, phone: lead.phone, callType: "CALLBACK", assignedToId: ownerId });
+          const created = await apiCreateFollowup({ scheduledAt: scheduledAt.toISOString(), leadId: lead.id, leadName: lead.name, phone: lead.phone, callType: "CALLBACK", assignedToId: ownerId });
+          recordFollowupCreated(created); // tables showing Next Call Date re-fetch
         }
       }
       // 3. Close the attempt (logged on the lead's timeline) — unlocks the app.
@@ -232,7 +233,7 @@ export default function CallFeedbackGate() {
             {isWhatsApp ? <MessageCircle className="h-4.5 w-4.5" /> : <PhoneCall className="h-4.5 w-4.5" />}
           </span>
           <div className="min-w-0">
-            <h3 className="text-sm font-extrabold text-slate-900">{title}</h3>
+            <h3 className="ui-title">{title}</h3>
             {lead && (
               <p className="text-[11px] text-slate-500 truncate">
                 {lead.name}
@@ -279,7 +280,7 @@ export default function CallFeedbackGate() {
             )}
             <div className="flex gap-2.5">
               <button type="button" onClick={() => { setStep("ask"); setError(""); }} className="px-4 py-2.5 rounded-xl text-sm font-bold text-slate-600 bg-slate-100">Back</button>
-              <button type="button" onClick={confirmReason} className="flex-1 bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold px-5 py-2.5 rounded-xl text-sm transition-all">Next</button>
+              <button type="button" onClick={confirmReason} className="ui-btn ui-btn-primary flex-1">Next</button>
             </div>
           </div>
         )}
@@ -351,7 +352,7 @@ export default function CallFeedbackGate() {
             </div>
             <div className="flex gap-2.5">
               <button type="button" disabled={submitting} onClick={() => { setStep(happened ? "ask" : "reason"); setError(""); }} className="px-4 py-2.5 rounded-xl text-sm font-bold text-slate-600 bg-slate-100 disabled:opacity-60">Back</button>
-              <button type="submit" disabled={submitting} className="flex-1 bg-[#0B1E6E] hover:bg-[#081650] disabled:opacity-60 text-white font-bold px-5 py-2.5 rounded-xl text-sm transition-all">
+              <button type="submit" disabled={submitting} className="ui-btn ui-btn-primary flex-1 disabled:opacity-60">
                 {submitting ? "Saving..." : "Save & Continue"}
               </button>
             </div>
