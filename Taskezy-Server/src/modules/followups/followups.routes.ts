@@ -186,6 +186,21 @@ followupsRouter.post(
     if (req.body.leadId) await assertCanScheduleFor(req.user!, req.body.leadId);
     let insertedId: string;
     try {
+      // Rescheduling a lead (RNR -> Call Back -> Followup, etc.) creates a
+      // new row here every time rather than editing the old one — without
+      // this, every prior reminder stays "Upcoming"/"Missed" forever, so
+      // Next Call Date columns (nextFollowupFor, lib/followups.ts) keep
+      // showing a stale overdue date instead of the one just set, since
+      // overdue rows are always preferred over upcoming ones there. Mark
+      // the lead's older pending reminders done before inserting the new
+      // one, so only the current schedule stays active for it.
+      if (req.body.leadId) {
+        await pool.query(
+          `UPDATE followup_calls SET status = 'COMPLETED' WHERE lead_id = $1 AND status <> 'COMPLETED'`,
+          [req.body.leadId]
+        );
+        await deleteLeadActivityNotifications(req.body.leadId, ["REMINDER"]);
+      }
       const { rows } = await pool.query(
         `INSERT INTO followup_calls (scheduled_at, lead_id, lead_name, phone, call_type, assigned_to_id)
          VALUES ($1, $2, $3, $4, $5, $6)
