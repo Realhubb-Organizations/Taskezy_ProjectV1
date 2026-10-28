@@ -80,6 +80,14 @@ async function notifySlaViolations(): Promise<void> {
   );
   if (rows.length === 0) return;
 
+  // Permanent per-lead counter (migration 047) — survives this follow-up
+  // row later being superseded/completed, unlike reading status='MISSED'
+  // live. Manager/Admin-only field, shown nowhere to the agent themselves.
+  const missedLeadIds = Array.from(new Set(rows.map(r => r.lead_id).filter((id): id is string => !!id)));
+  if (missedLeadIds.length > 0) {
+    await pool.query(`UPDATE leads SET missed_task_count = missed_task_count + 1 WHERE id = ANY($1::uuid[])`, [missedLeadIds]);
+  }
+
   const adminIds = await listActiveAdminIds();
 
   for (const row of rows) {

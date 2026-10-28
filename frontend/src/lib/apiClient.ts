@@ -263,6 +263,10 @@ export interface ApiLeadRow {
   // the Dead Lead status option is disabled client-side until this reaches
   // leadStatusMapping.ts's DEAD_LEAD_MIN_CALL_DAYS (also enforced server-side).
   dead_lead_call_days: string;
+  // Manager/Admin-only (migration 047) — how many times a follow-up tied to
+  // this lead was flagged MISSED. Stripped server-side for agents (see
+  // leads.handover.ts's leadForCaller), so missing/undefined for them.
+  missed_task_count?: number;
   logs: { message: string; timestamp: string; user: string }[];
 }
 
@@ -416,6 +420,9 @@ export interface AgentReportStats {
   allocatedSpend: number;
   missedLeads: number;
   missedFollowups: number;
+  // Manager/Admin-only (migration 047) — undefined for a Member viewing
+  // their own report.
+  totalMissedTasks?: number;
 }
 // Backs the Agent report tab's 4 funnel KPI cards, booking value/count,
 // campaign-attributed spend, and missed-lead/missed-follow-up counts

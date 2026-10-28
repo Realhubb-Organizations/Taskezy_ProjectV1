@@ -303,6 +303,10 @@ export interface AgentReportStats {
   allocatedSpend: number;
   missedLeads: number;
   missedFollowups: number;
+  // Manager/Admin-only (migration 047) — undefined for a Member viewing
+  // their own report, same boundary as leadForCaller's missed_task_count
+  // stripping on individual leads.
+  totalMissedTasks?: number;
 }
 
 // Mirrors reportMetrics.ts's SLA_MINUTES — the response-time window a lead
@@ -350,7 +354,8 @@ export async function getAgentReportStats(caller: AccessTokenPayload, filter: {
     bookingCount: Number(row.booking_count),
     allocatedSpend: Number(row.allocated_spend),
     missedLeads: Number(row.missed_leads),
-    missedFollowups
+    missedFollowups,
+    totalMissedTasks: (caller.role === "ADMIN" || caller.roleType === "MANAGER") ? Number(row.total_missed_tasks) : undefined
   };
 }
 

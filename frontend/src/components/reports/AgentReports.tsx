@@ -8,7 +8,7 @@ import { useDialog } from "@/components/ui/DialogProvider";
 import { maskPhone } from "@/lib/maskPII";
 import { apiGetAgentReportStats, apiGetManagerReportStats, apiListFollowupsPage, apiGetLead, type AgentReportStats, type ManagerReportAgentStats, type LeadListFilters } from "@/lib/apiClient";
 import { useServerLeadList } from "@/lib/useServerLeadList";
-import { AlertTriangle, ArrowRight, CheckSquare, Clock, DollarSign, Info, MapPin, Phone, TrendingUp, Users, RefreshCw } from "lucide-react";
+import { AlertTriangle, ArrowRight, CheckSquare, Clock, DollarSign, History, Info, MapPin, Phone, TrendingUp, Users, RefreshCw } from "lucide-react";
 import { DateRange } from "./DateRangeFilter";
 import MetricDetailModal, { MetricDetailRow } from "./MetricDetailModal";
 import LeadDetailDrawer from "@/components/crm/LeadDetailDrawer";
@@ -522,8 +522,20 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                 <div className="lg:col-span-5 bg-white border border-slate-100 rounded-2xl shadow-sm p-5 space-y-3 min-w-0">
                   <h3 className="ui-section-title">Action Required</h3>
                   {[
-                    { key: "missedLeads", label: "Missed Leads", value: reportStats.missedLeads, sub: `Leads not contacted within ${SLA_MINUTES} min SLA`, icon: AlertTriangle, tone: "bg-red-50 border-red-100", iconTone: "bg-red-100 text-red-600", btn: "bg-red-100/70 text-red-700 hover:bg-red-100", cta: "View Leads", tab: "leads" as const },
-                    { key: "missedFollowups", label: "Missed Follow-ups", value: reportStats.missedFollowups, sub: "Follow-ups past reminder due time", icon: Clock, tone: "bg-amber-50 border-amber-100", iconTone: "bg-amber-100 text-amber-600", btn: "bg-amber-100/70 text-amber-800 hover:bg-amber-100", cta: "View Follow-ups", tab: "followups" as const }
+                    { key: "missedLeads", label: "Missed Leads", value: reportStats.missedLeads, sub: `Leads not contacted within ${SLA_MINUTES} min SLA`, icon: AlertTriangle, tone: "bg-red-50 border-red-100", iconTone: "bg-red-100 text-red-600", btn: "bg-red-100/70 text-red-700 hover:bg-red-100", cta: "View Leads", tab: "leads" as "leads" | "followups" | null },
+                    { key: "missedFollowups", label: "Missed Follow-ups", value: reportStats.missedFollowups, sub: "Follow-ups past reminder due time", icon: Clock, tone: "bg-amber-50 border-amber-100", iconTone: "bg-amber-100 text-amber-600", btn: "bg-amber-100/70 text-amber-800 hover:bg-amber-100", cta: "View Follow-ups", tab: "followups" as "leads" | "followups" | null },
+                    // Manager/Admin-only — undefined for a Member viewing their
+                    // own report (reportStats.totalMissedTasks is stripped
+                    // server-side there), so this card simply never renders
+                    // for the agent themselves. Lifetime count (migration
+                    // 047), not bounded to the selected date range, and has
+                    // no drill-down list of its own — just a tally.
+                    ...(reportStats.totalMissedTasks !== undefined ? [{
+                      key: "totalMissedTasks", label: "Total Missed Tasks", value: reportStats.totalMissedTasks,
+                      sub: "Times this agent's leads were marked missed (lifetime)", icon: History,
+                      tone: "bg-slate-50 border-slate-200", iconTone: "bg-slate-200 text-slate-600",
+                      btn: "", cta: "", tab: null
+                    }] : [])
                   ].map(a => (
                     <div key={a.label} className={`flex items-center gap-3 rounded-xl border p-3.5 ${a.tone}`}>
                       <span className={`h-11 w-11 rounded-full flex items-center justify-center shrink-0 ${a.iconTone}`}>
@@ -535,9 +547,9 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                         <p className="text-[10px] text-slate-500">{a.sub}</p>
                       </div>
                       {/* Agent login only: jumps to the matching tab of the card below. */}
-                      {isScopedToSelf && <button
+                      {isScopedToSelf && a.tab && <button
                         type="button"
-                        onClick={() => openMissedTab(a.tab)}
+                        onClick={() => openMissedTab(a.tab!)}
                         className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[11px] font-bold transition-colors shrink-0 ${a.btn}`}
                       >
                         {a.cta} <ArrowRight className="h-3.5 w-3.5" />
@@ -580,7 +592,17 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                         const activityTime = latestLog ? new Date(latestLog.timestamp).getTime() : Date.now();
                         const overdueMinutes = missedAtTime !== undefined ? Math.round((activityTime - missedAtTime) / 60000) : undefined;
                         return (
-                          <li key={lead.id} className="p-4 space-y-3 text-xs">
+                          <li
+                            key={lead.id}
+                            onClick={(e) => {
+                              const target = e.target as HTMLElement;
+                              if (!e.currentTarget.contains(target)) return;
+                              if (target.closest("button, a, input, select, textarea, label, [role='button'], [role='combobox'], [role='listbox']")) return;
+                              if (window.getSelection()?.toString()) return;
+                              setDrawerLeadId(lead.id);
+                            }}
+                            className="p-4 space-y-3 text-xs cursor-pointer"
+                          >
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
                                 <p className="font-bold text-slate-800">{lead.name}</p>
@@ -677,7 +699,17 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                           const activityTime = latestLog ? new Date(latestLog.timestamp).getTime() : Date.now();
                           const overdueMinutes = missedAtTime !== undefined ? Math.round((activityTime - missedAtTime) / 60000) : undefined;
                           return (
-                            <tr key={lead.id} className="hover:bg-slate-50/50">
+                            <tr
+                              key={lead.id}
+                              onClick={(e) => {
+                                const target = e.target as HTMLElement;
+                                if (!e.currentTarget.contains(target)) return;
+                                if (target.closest("button, a, input, select, textarea, label, [role='button'], [role='combobox'], [role='listbox']")) return;
+                                if (window.getSelection()?.toString()) return;
+                                setDrawerLeadId(lead.id);
+                              }}
+                              className="cursor-pointer hover:bg-slate-50/50"
+                            >
                               <td className="px-4 py-3">
                                 <p className="font-bold text-slate-800">{lead.name}</p>
                                 <p className="text-[9px] text-slate-450 font-mono">{activeRole === "ADMIN" ? lead.phone : maskPhone(lead.phone)}</p>
@@ -743,7 +775,17 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                           : new Date(`${f.date}T00:00:00`).getTime();
                         const overdueMinutes = Math.round((Date.now() - missedAtTime) / 60000);
                         return (
-                          <li key={f.id} className="p-4 space-y-3 text-xs">
+                          <li
+                            key={f.id}
+                            onClick={f.leadId ? (e) => {
+                              const target = e.target as HTMLElement;
+                              if (!e.currentTarget.contains(target)) return;
+                              if (target.closest("button, a, input, select, textarea, label, [role='button'], [role='combobox'], [role='listbox']")) return;
+                              if (window.getSelection()?.toString()) return;
+                              setDrawerLeadId(f.leadId!);
+                            } : undefined}
+                            className={`p-4 space-y-3 text-xs ${f.leadId ? "cursor-pointer" : ""}`}
+                          >
                             <div>
                               <p className="font-bold text-slate-800">{f.leadName}</p>
                               <p className="text-[10px] text-slate-450 font-mono">{activeRole === "ADMIN" ? f.phone : maskPhone(f.phone)}</p>
@@ -807,7 +849,17 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                             : new Date(`${f.date}T00:00:00`).getTime();
                           const overdueMinutes = Math.round((Date.now() - missedAtTime) / 60000);
                           return (
-                            <tr key={f.id} className="hover:bg-slate-50/50">
+                            <tr
+                              key={f.id}
+                              onClick={f.leadId ? (e) => {
+                                const target = e.target as HTMLElement;
+                                if (!e.currentTarget.contains(target)) return;
+                                if (target.closest("button, a, input, select, textarea, label, [role='button'], [role='combobox'], [role='listbox']")) return;
+                                if (window.getSelection()?.toString()) return;
+                                setDrawerLeadId(f.leadId!);
+                              } : undefined}
+                              className={`hover:bg-slate-50/50 ${f.leadId ? "cursor-pointer" : ""}`}
+                            >
                               <td className="px-4 py-3">
                                 <p className="font-bold text-slate-800">{f.leadName}</p>
                                 <p className="text-[9px] text-slate-450 font-mono">{activeRole === "ADMIN" ? f.phone : maskPhone(f.phone)}</p>
