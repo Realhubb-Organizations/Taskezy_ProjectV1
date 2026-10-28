@@ -214,6 +214,7 @@ export default function DataCallingPage() {
   const handleWhatsApp = (lead: Lead) => {
     triggerLeadWhatsApp(lead, {
       isAdmin,
+      senderName: currentUser?.name,
       onReturn: (leadId) => {
         recordWhatsAppOpened(leadId).catch((err) => console.warn("Could not record WhatsApp feedback gate:", err));
       }
@@ -1832,7 +1833,20 @@ export default function DataCallingPage() {
                     </tr>
                   ) : (
                     paginatedLeads.map(l => (
-                      <tr key={l.id} className="hover:bg-slate-50/50 transition-colors">
+                      <tr
+                        key={l.id}
+                        // Clicking anywhere on the row opens the lead — except
+                        // its own controls (checkbox, dropdowns, notes, ⋯ menu),
+                        // their portaled panels, or while selecting text.
+                        onClick={(e) => {
+                          const target = e.target as HTMLElement;
+                          if (!e.currentTarget.contains(target)) return;
+                          if (target.closest("button, a, input, select, textarea, label, [role='menu'], [role='listbox']")) return;
+                          if (window.getSelection()?.toString()) return;
+                          setSelectedLead(l);
+                        }}
+                        className="hover:bg-slate-50/50 transition-colors cursor-pointer"
+                      >
                         {showAdminCols && (
                           <td className="px-3.5 py-3.5">
                             <input
