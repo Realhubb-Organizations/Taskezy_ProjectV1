@@ -6,12 +6,12 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useApp, Lead, LeadStatus, FollowupCall, mapApiLeadToFrontendLead, mapApiFollowupToFrontend } from "@/context/AppContext";
 import { useDialog } from "@/components/ui/DialogProvider";
 import { isSuperAdminUser } from "@/lib/superAdmin";
-import { Sliders, Sparkles, Plus, Check, ChevronDown, Search, X, Minus, Download, RotateCcw, Users, Trash2, AlertTriangle, Building2, ClipboardList, Upload } from "lucide-react";
+import { Sliders, Sparkles, Plus, Check, ChevronDown, Search, X, Minus, Download, RotateCcw, Users, Trash2, AlertTriangle, Building2, ClipboardList, Upload, GripVertical } from "lucide-react";
 import { STATUS_OPTIONS, PICKABLE_STATUS_OPTIONS, frontendStatusToDbCode, withDeadLeadGate, nextStatusOptions } from "@/lib/leadStatusMapping";
 import { type LeadSummaryStats } from "@/lib/leadSummaryStats";
 import { apiListLeadsPage, apiGetLead, apiGetLeadStats, apiGetLeadAnalyticsStats, apiGetDistinctCampaigns, apiListFollowupsPage, apiDeleteLead, apiBulkDeleteLeads, apiBulkReassignLeads, apiBulkSetLeadProperty, apiSetLeadProperty, apiSearchLeadsByPhones, type LeadListFilters, type AgentAnalyticsStats } from "@/lib/apiClient";
 import { useServerLeadList } from "@/lib/useServerLeadList";
-import { PlatformLabel } from "@/components/icons/ContactIcons";
+import { PlatformLabel, platformFromText } from "@/components/icons/ContactIcons";
 import ExpandChevron, { CollapsibleCell } from "@/components/ui/ExpandChevron";
 import { isPhoneLayout } from "@/lib/viewport";
 import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/callTrigger";
@@ -436,6 +436,13 @@ export default function LeadDashboard() {
   const [adminStatusFilter, setAdminStatusFilter] = useState<string[]>([]);
   const [adminAssignedFilter, setAdminAssignedFilter] = useState<string[]>([]);
   const [adminCampaignFilter, setAdminCampaignFilter] = useState<string[]>([]);
+  // Source column's own filter — a flat 3-way platform bucket (Meta/Google/
+  // Data), not the individual-campaign picker above. Expanded into real
+  // campaign/source values (via SOURCE_PLATFORM_VALUES below) and unioned
+  // into the same `campaign` server filter adminCampaignFilter already
+  // uses, so picking "Meta" here shows every Meta lead in one click instead
+  // of checking each individual Meta campaign by hand.
+  const [adminSourcePlatformFilter, setAdminSourcePlatformFilter] = useState<string[]>([]);
   // Property column-header filter (by name; sent to the server as ids).
   const [adminPropertyFilter, setAdminPropertyFilter] = useState<string[]>([]);
   const [adminPage, setAdminPage] = useState(1);
@@ -516,6 +523,45 @@ export default function LeadDashboard() {
     sitevisit_sched: "Site Visit Scheduled", sitevisit_done: "Site Visit Done"
   };
 
+  // Real distinct campaign names (server-scoped the same way scopedLeads
+  // was client-side) — shared by this tab's own Campaigns dropdown and the
+  // Analytics tab's identical one below, fetched once instead of scanning
+  // the bulk leads array twice. Declared up here (not alongside the rest
+  // of the Campaigns-dropdown helpers further down) because
+  // buildAdminServerFilters below needs expandSourcePlatforms, and it's
+  // called (via adminServerFiltersKey) before that later block would
+  // otherwise have run this render.
+  const [distinctCampaigns, setDistinctCampaigns] = useState<string[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    apiGetDistinctCampaigns({})
+      .then(result => { if (!cancelled) setDistinctCampaigns(result); })
+      .catch(() => { if (!cancelled) setDistinctCampaigns([]); });
+    return () => { cancelled = true; };
+  }, []);
+  const adminCampaignsList = distinctCampaigns;
+
+  // Source column's filter — the fixed 3-way bucket shown as icons in the
+  // Source column itself (platformFromText's own classification: Meta /
+  // Google / Excel, labeled "Data" here to match what that bucket actually
+  // means — see ContactIcons.tsx). Picking one expands to every distinct
+  // campaign/source value that classifies into it, so it unions cleanly
+  // into the same `campaign` server filter the Campaigns picker already
+  // uses — one click for "every Meta lead" instead of checking each
+  // individual Meta campaign by hand.
+  const SOURCE_PLATFORM_OPTIONS = ["Meta", "Google", "Data"];
+  const expandSourcePlatforms = (platforms: string[]): string[] => {
+    if (platforms.length === 0) return [];
+    // "Meta"/"Google"/"Data" are themselves valid input to platformFromText
+    // (it matches "Data" the same as "Bulk Upload" — see ContactIcons.tsx),
+    // so the option labels classify directly, no separate mapping needed.
+    const wanted = new Set(platforms.map(p => platformFromText(p)).filter(Boolean));
+    return adminCampaignsList.filter(c => {
+      const p = platformFromText(c);
+      return !!p && wanted.has(p);
+    });
+  };
+
   const buildAdminServerFilters = (): LeadListFilters => {
     const { dateFrom, dateTo } = adminServerDateBounds();
     const statusCodes = new Set<string>();
@@ -538,10 +584,14 @@ export default function LeadDashboard() {
       .map(name => nameToId.get(name))
       .filter((id): id is string => !!id);
     const propertyIds = properties.filter(p => adminPropertyFilter.includes(p.name)).map(p => p.id);
+    // Unions the individual-campaign picker with the Source column's flat
+    // platform-bucket filter — both ultimately narrow the same `campaign`
+    // server filter, so picking from either (or both) just OR-combines.
+    const combinedCampaignFilter = Array.from(new Set([...adminCampaignFilter, ...expandSourcePlatforms(adminSourcePlatformFilter)]));
     return {
       status: statusCodes.size > 0 ? Array.from(statusCodes) : undefined,
       assignedAgentId: assignedAgentIds.length > 0 ? assignedAgentIds : undefined,
-      campaign: adminCampaignFilter.length > 0 ? adminCampaignFilter : undefined,
+      campaign: combinedCampaignFilter.length > 0 ? combinedCampaignFilter : undefined,
       propertyId: propertyIds.length > 0 ? propertyIds : undefined,
       noProperty: adminPropertyFilter.includes(NO_PROPERTY) || undefined,
       dateFrom,
@@ -745,7 +795,86 @@ export default function LeadDashboard() {
   const [phoneLayout] = useState(isPhoneLayout);
   // Bulk select is a laptop task; the phone table matches the 4-column design.
   const showBulkSelect = canBulkAssign && !phoneLayout;
-  const adminVisibleColumnList = ADMIN_COLUMNS.filter(c => adminVisibleColumns[c.key] && (isAdmin || !["campaign", "adSetName"].includes(c.key)) && (c.key !== "source" || canSeeSource));
+
+  // Column order — drag-and-drop reorderable by everyone (Filter panel's
+  // column list and the live table headers both write here), remembered
+  // per browser. Unlike adminVisibleColumns above, this IS persisted —
+  // same taskezy_-prefixed localStorage convention as AddLeadModal.tsx's
+  // custom lead sources, same try/catch-wrapped read/write.
+  const COLUMN_ORDER_STORAGE_KEY = "taskezy_leads_column_order";
+  const [adminColumnOrder, setAdminColumnOrderState] = useState<AdminColumnKey[]>(() => ADMIN_COLUMNS.map(c => c.key));
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(COLUMN_ORDER_STORAGE_KEY);
+      if (!stored) return;
+      const parsed: unknown = JSON.parse(stored);
+      if (!Array.isArray(parsed)) return;
+      const validKeys = new Set(ADMIN_COLUMNS.map(c => c.key));
+      const kept = parsed.filter((k): k is AdminColumnKey => validKeys.has(k as AdminColumnKey));
+      // Any column that exists today but wasn't in the stored order (a
+      // new column shipped after the user last saved one) is appended at
+      // the end, so it doesn't silently vanish from the table.
+      const missing = ADMIN_COLUMNS.map(c => c.key).filter(k => !kept.includes(k));
+      setAdminColumnOrderState([...kept, ...missing]);
+    } catch {
+      // Corrupt/inaccessible storage — fall back to the default order.
+    }
+  }, []);
+  const persistColumnOrder = (next: AdminColumnKey[]) => {
+    setAdminColumnOrderState(next);
+    try {
+      window.localStorage.setItem(COLUMN_ORDER_STORAGE_KEY, JSON.stringify(next));
+    } catch {
+      // Storage full/unavailable — the new order still works for this session.
+    }
+  };
+
+  // Shared drag-and-drop reorder logic — used identically by the Filter
+  // panel's column list and the live table's own headers, so dragging in
+  // either place updates the exact same adminColumnOrder.
+  const [draggedColumnKey, setDraggedColumnKey] = useState<AdminColumnKey | null>(null);
+  const handleColumnDragStart = (key: AdminColumnKey) => (e: React.DragEvent) => {
+    setDraggedColumnKey(key);
+    e.dataTransfer.effectAllowed = "move";
+  };
+  const handleColumnDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+  };
+  const handleColumnDrop = (targetKey: AdminColumnKey) => (e: React.DragEvent) => {
+    e.preventDefault();
+    if (!draggedColumnKey || draggedColumnKey === targetKey) return;
+    const order = [...adminColumnOrder];
+    const from = order.indexOf(draggedColumnKey);
+    const to = order.indexOf(targetKey);
+    if (from === -1 || to === -1) return;
+    order.splice(from, 1);
+    order.splice(to, 0, draggedColumnKey);
+    persistColumnOrder(order);
+    setDraggedColumnKey(null);
+  };
+  const handleColumnDragEnd = () => setDraggedColumnKey(null);
+  // Only this small handle (not the whole <th>) is draggable — several
+  // headers already hold a SearchableMultiSelect filter, and making the
+  // entire header draggable would fight with clicking/typing into those.
+  // onDragOver/onDrop stay on the <th> itself (added per-column below) so
+  // dropping anywhere on that header's width still works.
+  const ColumnDragHandle = ({ columnKey }: { columnKey: AdminColumnKey }) => (
+    <span
+      draggable
+      onDragStart={handleColumnDragStart(columnKey)}
+      onDragEnd={handleColumnDragEnd}
+      onClick={(e) => e.stopPropagation()}
+      title="Drag to reorder"
+      className="shrink-0 cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500"
+    >
+      <GripVertical className="h-3 w-3" />
+    </span>
+  );
+
+  const adminVisibleColumnList = ADMIN_COLUMNS
+    .filter(c => adminVisibleColumns[c.key] && (isAdmin || !["campaign", "adSetName"].includes(c.key)) && (c.key !== "source" || canSeeSource))
+    .sort((a, b) => adminColumnOrder.indexOf(a.key) - adminColumnOrder.indexOf(b.key));
 
   const [analyticsVisibleColumns, setAnalyticsVisibleColumns] = useState<Record<AnalyticsColumnKey, boolean>>(ANALYTICS_DEFAULT_VISIBLE_COLUMNS);
 
@@ -807,19 +936,6 @@ export default function LeadDashboard() {
     campaign: adminCampaignFilter.length > 0 ? adminCampaignFilter : undefined
   };
 
-  // Real distinct campaign names (server-scoped the same way scopedLeads
-  // was client-side) — shared by this tab's own Campaigns dropdown and the
-  // Analytics tab's identical one below, fetched once instead of scanning
-  // the bulk leads array twice.
-  const [distinctCampaigns, setDistinctCampaigns] = useState<string[]>([]);
-  useEffect(() => {
-    let cancelled = false;
-    apiGetDistinctCampaigns({})
-      .then(result => { if (!cancelled) setDistinctCampaigns(result); })
-      .catch(() => { if (!cancelled) setDistinctCampaigns([]); });
-    return () => { cancelled = true; };
-  }, []);
-  const adminCampaignsList = distinctCampaigns;
   // "Unassigned" (leads nobody owns yet) lives here, not under Status.
   const UNASSIGNED_OPTION = "Unassigned";
   // Unassigned leads are outside a manager's scope, so they don't get that option.
@@ -1628,75 +1744,186 @@ export default function LeadDashboard() {
                           </div>
                         )}
                       </th>
-                      {adminVisibleColumns.email && <th className="px-4 py-3 whitespace-nowrap">Email</th>}
-                      {adminVisibleColumns.assignedTo && <th className="px-4 py-3 whitespace-nowrap">
-                        <SearchableMultiSelect
-                          variant="inline"
-                          label="Assigned To"
-                          options={adminAssignedOptions}
-                          selected={adminAssignedFilter}
-                          onChange={(next) => {
-                            setAdminPage(1);
-                            // "Unassigned" can't be combined with agents (an
-                            // unassigned lead has no agent), so the latest pick wins.
-                            const pickedUnassigned = next.includes(UNASSIGNED_OPTION) && !adminAssignedFilter.includes(UNASSIGNED_OPTION);
-                            setAdminAssignedFilter(pickedUnassigned ? [UNASSIGNED_OPTION] : next.filter(n => n !== UNASSIGNED_OPTION || next.length === 1));
-                          }}
-                          searchPlaceholder="Search agents..."
-                          panelWidth={208}
-                        />
-                      </th>}
-
-                      {/* Togglable, in the same order as the Filter panel */}
-                      {adminVisibleColumns.date && <th className="px-4 py-3 whitespace-nowrap">Date</th>}
-                      {adminVisibleColumns.property && (
-                        <th className="px-4 py-3 whitespace-nowrap">
-                          <SearchableMultiSelect
-                            variant="inline"
-                            label="Property"
-                            options={[NO_PROPERTY, ...propertiesList]}
-                            selected={adminPropertyFilter}
-                            onChange={(next) => { setAdminPage(1); setAdminPropertyFilter(next); }}
-                            searchPlaceholder="Search properties..."
-                            panelWidth={240}
-                          />
-                        </th>
-                      )}
-                      {adminVisibleColumns.reassignedTo && <th className="px-4 py-3 whitespace-nowrap">Reassign From</th>}
-                      {canSeeSource && adminVisibleColumns.source && <th className="px-4 py-3 whitespace-nowrap">Source</th>}
-                      {adminVisibleColumns.status && (
-                        <th className="px-4 py-3 whitespace-nowrap">
-                          <SearchableMultiSelect
-                            variant="inline"
-                            label="Status"
-                            options={PICKABLE_STATUS_OPTIONS}
-                            selected={adminStatusFilter}
-                            onChange={(next) => { setAdminPage(1); setAdminStatusFilter(next); }}
-                            searchPlaceholder="Search status..."
-                            panelWidth={208}
-                          />
-                        </th>
-                      )}
-                      {adminVisibleColumns.nextCallDate && <th className="px-4 py-3 whitespace-nowrap">Next Call Date</th>}
-                      {adminVisibleColumns.actions && <th className="px-4 py-3 whitespace-nowrap">{phoneLayout ? "Action" : "Actions"}</th>}
-                      {isAdmin && adminVisibleColumns.adSetName && <th className="px-4 py-3 whitespace-nowrap">Ad Set Name</th>}
-                      {isAdmin && adminVisibleColumns.campaign && (
-                        <th className="px-4 py-3 whitespace-nowrap">
-                          {/* Same filter as the "Campaigns" button above the table. */}
-                          <SearchableMultiSelect
-                            variant="inline"
-                            label="Campaign"
-                            options={adminCampaignOptions}
-                            selected={adminCampaignFilter}
-                            onChange={(next) => { setAdminPage(1); setAdminCampaignFilter(next); }}
-                            searchPlaceholder="Search campaigns..."
-                            renderLabel={(l) => <PlatformLabel text={l} />}
-                            panelWidth={260}
-                          />
-                        </th>
-                      )}
-                      {adminVisibleColumns.notes && <th className="px-4 py-3 whitespace-nowrap">Notes</th>}
-                      {adminVisibleColumns.propertyMatch && <th className="px-4 py-3 whitespace-nowrap">Property Match</th>}
+                      {/* Togglable columns, draggable to reorder (both here and
+                          in the Filter panel — same adminColumnOrder). Each
+                          entry below is unchanged from before except for the
+                          added drag handle/onDragOver/onDrop; wrapping them in
+                          an array + sort is what makes the order dynamic —
+                          plain JSX can't do this since CSS `order` has no
+                          effect on <td>/<th> inside a real <table>. */}
+                      {([
+                        adminVisibleColumns.email && {
+                          key: "email" as const,
+                          node: (
+                            <th className="px-4 py-3 whitespace-nowrap" onDragOver={handleColumnDragOver} onDrop={handleColumnDrop("email")}>
+                              <span className="inline-flex items-center gap-1"><ColumnDragHandle columnKey="email" />Email</span>
+                            </th>
+                          )
+                        },
+                        adminVisibleColumns.assignedTo && {
+                          key: "assignedTo" as const,
+                          node: (
+                            <th className="px-4 py-3 whitespace-nowrap" onDragOver={handleColumnDragOver} onDrop={handleColumnDrop("assignedTo")}>
+                              <div className="flex items-center gap-1">
+                                <ColumnDragHandle columnKey="assignedTo" />
+                                <div className="min-w-0 flex-1">
+                                  <SearchableMultiSelect
+                                    variant="inline"
+                                    label="Assigned To"
+                                    options={adminAssignedOptions}
+                                    selected={adminAssignedFilter}
+                                    onChange={(next) => {
+                                      setAdminPage(1);
+                                      // "Unassigned" can't be combined with agents (an
+                                      // unassigned lead has no agent), so the latest pick wins.
+                                      const pickedUnassigned = next.includes(UNASSIGNED_OPTION) && !adminAssignedFilter.includes(UNASSIGNED_OPTION);
+                                      setAdminAssignedFilter(pickedUnassigned ? [UNASSIGNED_OPTION] : next.filter(n => n !== UNASSIGNED_OPTION || next.length === 1));
+                                    }}
+                                    searchPlaceholder="Search agents..."
+                                    panelWidth={208}
+                                  />
+                                </div>
+                              </div>
+                            </th>
+                          )
+                        },
+                        adminVisibleColumns.date && {
+                          key: "date" as const,
+                          node: (
+                            <th className="px-4 py-3 whitespace-nowrap" onDragOver={handleColumnDragOver} onDrop={handleColumnDrop("date")}>
+                              <span className="inline-flex items-center gap-1"><ColumnDragHandle columnKey="date" />Date</span>
+                            </th>
+                          )
+                        },
+                        adminVisibleColumns.property && {
+                          key: "property" as const,
+                          node: (
+                            <th className="px-4 py-3 whitespace-nowrap" onDragOver={handleColumnDragOver} onDrop={handleColumnDrop("property")}>
+                              <div className="flex items-center gap-1">
+                                <ColumnDragHandle columnKey="property" />
+                                <div className="min-w-0 flex-1">
+                                  <SearchableMultiSelect
+                                    variant="inline"
+                                    label="Property"
+                                    options={[NO_PROPERTY, ...propertiesList]}
+                                    selected={adminPropertyFilter}
+                                    onChange={(next) => { setAdminPage(1); setAdminPropertyFilter(next); }}
+                                    searchPlaceholder="Search properties..."
+                                    panelWidth={240}
+                                  />
+                                </div>
+                              </div>
+                            </th>
+                          )
+                        },
+                        adminVisibleColumns.reassignedTo && {
+                          key: "reassignedTo" as const,
+                          node: (
+                            <th className="px-4 py-3 whitespace-nowrap" onDragOver={handleColumnDragOver} onDrop={handleColumnDrop("reassignedTo")}>
+                              <span className="inline-flex items-center gap-1"><ColumnDragHandle columnKey="reassignedTo" />Reassign From</span>
+                            </th>
+                          )
+                        },
+                        canSeeSource && adminVisibleColumns.source && {
+                          key: "source" as const,
+                          node: (
+                            <th className="px-4 py-3 whitespace-nowrap" onDragOver={handleColumnDragOver} onDrop={handleColumnDrop("source")}>
+                              <div className="flex items-center gap-1">
+                                <ColumnDragHandle columnKey="source" />
+                                <div className="min-w-0 flex-1">
+                                  <SearchableMultiSelect
+                                    variant="inline"
+                                    label="Source"
+                                    options={SOURCE_PLATFORM_OPTIONS}
+                                    selected={adminSourcePlatformFilter}
+                                    onChange={(next) => { setAdminPage(1); setAdminSourcePlatformFilter(next); }}
+                                    renderLabel={(l) => <PlatformLabel text={l} />}
+                                    panelWidth={160}
+                                  />
+                                </div>
+                              </div>
+                            </th>
+                          )
+                        },
+                        adminVisibleColumns.status && {
+                          key: "status" as const,
+                          node: (
+                            <th className="px-4 py-3 whitespace-nowrap" onDragOver={handleColumnDragOver} onDrop={handleColumnDrop("status")}>
+                              <div className="flex items-center gap-1">
+                                <ColumnDragHandle columnKey="status" />
+                                <div className="min-w-0 flex-1">
+                                  <SearchableMultiSelect
+                                    variant="inline"
+                                    label="Status"
+                                    options={PICKABLE_STATUS_OPTIONS}
+                                    selected={adminStatusFilter}
+                                    onChange={(next) => { setAdminPage(1); setAdminStatusFilter(next); }}
+                                    searchPlaceholder="Search status..."
+                                    panelWidth={208}
+                                  />
+                                </div>
+                              </div>
+                            </th>
+                          )
+                        },
+                        adminVisibleColumns.nextCallDate && {
+                          key: "nextCallDate" as const,
+                          node: (
+                            <th className="px-4 py-3 whitespace-nowrap" onDragOver={handleColumnDragOver} onDrop={handleColumnDrop("nextCallDate")}>
+                              <span className="inline-flex items-center gap-1"><ColumnDragHandle columnKey="nextCallDate" />Next Call Date</span>
+                            </th>
+                          )
+                        },
+                        adminVisibleColumns.actions && {
+                          key: "actions" as const,
+                          node: (
+                            <th className="px-4 py-3 whitespace-nowrap" onDragOver={handleColumnDragOver} onDrop={handleColumnDrop("actions")}>
+                              <span className="inline-flex items-center gap-1"><ColumnDragHandle columnKey="actions" />{phoneLayout ? "Action" : "Actions"}</span>
+                            </th>
+                          )
+                        },
+                        isAdmin && adminVisibleColumns.adSetName && {
+                          key: "adSetName" as const,
+                          node: (
+                            <th className="px-4 py-3 whitespace-nowrap" onDragOver={handleColumnDragOver} onDrop={handleColumnDrop("adSetName")}>
+                              <span className="inline-flex items-center gap-1"><ColumnDragHandle columnKey="adSetName" />Ad Set Name</span>
+                            </th>
+                          )
+                        },
+                        // No filter on this header — campaign filtering happens
+                        // via the Source column's platform filter (and the
+                        // "Campaigns" button above the table, for individual
+                        // campaigns) rather than duplicating it here.
+                        isAdmin && adminVisibleColumns.campaign && {
+                          key: "campaign" as const,
+                          node: (
+                            <th className="px-4 py-3 whitespace-nowrap" onDragOver={handleColumnDragOver} onDrop={handleColumnDrop("campaign")}>
+                              <span className="inline-flex items-center gap-1"><ColumnDragHandle columnKey="campaign" />Campaign</span>
+                            </th>
+                          )
+                        },
+                        adminVisibleColumns.notes && {
+                          key: "notes" as const,
+                          node: (
+                            <th className="px-4 py-3 whitespace-nowrap" onDragOver={handleColumnDragOver} onDrop={handleColumnDrop("notes")}>
+                              <span className="inline-flex items-center gap-1"><ColumnDragHandle columnKey="notes" />Notes</span>
+                            </th>
+                          )
+                        },
+                        adminVisibleColumns.propertyMatch && {
+                          key: "propertyMatch" as const,
+                          node: (
+                            <th className="px-4 py-3 whitespace-nowrap" onDragOver={handleColumnDragOver} onDrop={handleColumnDrop("propertyMatch")}>
+                              <span className="inline-flex items-center gap-1"><ColumnDragHandle columnKey="propertyMatch" />Property Match</span>
+                            </th>
+                          )
+                        }
+                      ] as (false | { key: AdminColumnKey; node: React.ReactNode })[])
+                        .filter((x): x is { key: AdminColumnKey; node: React.ReactNode } => !!x)
+                        .sort((a, b) => adminColumnOrder.indexOf(a.key) - adminColumnOrder.indexOf(b.key))
+                        .map(({ key, node }) => (
+                          <React.Fragment key={key}>{node}</React.Fragment>
+                        ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-xs">
@@ -1736,84 +1963,115 @@ export default function LeadDashboard() {
                             </button>
                             <p className={phoneLayout ? "mt-0.5 truncate font-mono text-[11px] text-slate-500" : "text-[11px] text-slate-500 font-mono mt-0.5 [overflow-wrap:anywhere]"}>{isAdmin ? l.phone : maskPhone(l.phone)}</p>
                           </td>
-                          {adminVisibleColumns.email && <td className="px-4 py-3 text-slate-600 align-top [overflow-wrap:anywhere]" title={l.email ? (isAdmin ? l.email : maskEmail(l.email)) : "—"}>{l.email ? (isAdmin ? l.email : maskEmail(l.email)) : "—"}</td>}
-                          {adminVisibleColumns.assignedTo && <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]" title={l.assignedAgent || "Unassigned"}>{l.assignedAgent || "Unassigned"}</td>}
-
-                          {adminVisibleColumns.date && (
-                            <td className="px-4 py-3 text-slate-500 align-top"><DateTimeLines {...dateTimeParts(l.createdAtStr)} /></td>
-                          )}
-                          {adminVisibleColumns.property && (
-                            <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]">
-                              <span className="flex items-center gap-1.5 flex-wrap" title={l.property || "Not set"}>
-                                {canAssignProperty ? (
-                                  <SearchableSelect
-                                    variant="inline"
-                                    options={[NO_PROPERTY, ...properties.map(p => p.name)]}
-                                    value={l.property || NO_PROPERTY}
-                                    onChange={(v) => handlePropertyChange(l, v)}
-                                    searchPlaceholder="Search property..."
-                                    panelWidth={220}
-                                    className="max-w-[150px] text-left"
+                          {/* Same column set/order as the header above — one
+                              array, filtered+sorted by the same adminColumnOrder,
+                              so a row's cells always line up with their header
+                              regardless of the custom order. */}
+                          {([
+                            adminVisibleColumns.email && {
+                              key: "email" as const,
+                              node: <td className="px-4 py-3 text-slate-600 align-top [overflow-wrap:anywhere]" title={l.email ? (isAdmin ? l.email : maskEmail(l.email)) : "—"}>{l.email ? (isAdmin ? l.email : maskEmail(l.email)) : "—"}</td>
+                            },
+                            adminVisibleColumns.assignedTo && {
+                              key: "assignedTo" as const,
+                              node: <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]" title={l.assignedAgent || "Unassigned"}>{l.assignedAgent || "Unassigned"}</td>
+                            },
+                            adminVisibleColumns.date && {
+                              key: "date" as const,
+                              node: <td className="px-4 py-3 text-slate-500 align-top"><DateTimeLines {...dateTimeParts(l.createdAtStr)} /></td>
+                            },
+                            adminVisibleColumns.property && {
+                              key: "property" as const,
+                              node: (
+                                <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]">
+                                  <span className="flex items-center gap-1.5 flex-wrap" title={l.property || "Not set"}>
+                                    {canAssignProperty ? (
+                                      <SearchableSelect
+                                        variant="inline"
+                                        options={[NO_PROPERTY, ...properties.map(p => p.name)]}
+                                        value={l.property || NO_PROPERTY}
+                                        onChange={(v) => handlePropertyChange(l, v)}
+                                        searchPlaceholder="Search property..."
+                                        panelWidth={220}
+                                        className="max-w-[150px] text-left"
+                                      />
+                                    ) : (l.property || "Not set")}
+                                    <span
+                                      className={`shrink-0 border rounded-lg px-1.5 py-0.5 text-[10px] font-semibold ${l.property ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-slate-50 text-slate-500 border-slate-200"}`}
+                                      title={l.property ? "This lead has a property linked" : "No property linked yet"}
+                                    >
+                                      {l.property ? "Assigned" : "Unassigned"}
+                                    </span>
+                                  </span>
+                                </td>
+                              )
+                            },
+                            adminVisibleColumns.reassignedTo && {
+                              key: "reassignedTo" as const,
+                              node: (
+                                <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]">
+                                  {l.previousAgent ? (
+                                    <Tooltip text="Click to see activity log of this lead">
+                                      <button type="button" onClick={() => setSelectedLead(l)} className="text-left hover:text-[#0B1E6E] hover:underline">
+                                        <span className="block">{l.assignedAgent || "Unassigned"}</span>
+                                        <span className="block text-[11px] text-slate-400 font-normal">from {l.previousAgent}</span>
+                                      </button>
+                                    </Tooltip>
+                                  ) : "—"}
+                                </td>
+                              )
+                            },
+                            canSeeSource && adminVisibleColumns.source && {
+                              key: "source" as const,
+                              node: (
+                                <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]" title={l.source || "—"}>
+                                  <PlatformLabel text={l.source || "—"} iconOnly />
+                                </td>
+                              )
+                            },
+                            adminVisibleColumns.status && {
+                              key: "status" as const,
+                              node: <td className="px-4 py-3 align-top">{renderStatusCell(l)}</td>
+                            },
+                            adminVisibleColumns.nextCallDate && {
+                              key: "nextCallDate" as const,
+                              node: <td className="px-4 py-3 text-slate-500 align-top"><NextCallCell next={adminNextCallDateFor(l.id)} /></td>
+                            },
+                            adminVisibleColumns.actions && {
+                              key: "actions" as const,
+                              node: (
+                                <td className="px-4 py-3 align-top">
+                                  <LeadRowActionsMenu
+                                    onWhatsApp={() => handleWhatsApp(l)}
+                                    onCall={() => handleCall(l)}
+                                    callAllowed={callAllowed}
+                                    onDelete={isAdmin ? () => openSingleDelete(l) : undefined}
                                   />
-                                ) : (l.property || "Not set")}
-                                <span
-                                  className={`shrink-0 border rounded-lg px-1.5 py-0.5 text-[10px] font-semibold ${l.property ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-slate-50 text-slate-500 border-slate-200"}`}
-                                  title={l.property ? "This lead has a property linked" : "No property linked yet"}
-                                >
-                                  {l.property ? "Assigned" : "Unassigned"}
-                                </span>
-                              </span>
-                            </td>
-                          )}
-                          {adminVisibleColumns.reassignedTo && (
-                            <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]">
-                              {l.previousAgent ? (
-                                <Tooltip text="Click to see activity log of this lead">
-                                  <button type="button" onClick={() => setSelectedLead(l)} className="text-left hover:text-[#0B1E6E] hover:underline">
-                                    <span className="block">{l.assignedAgent || "Unassigned"}</span>
-                                    <span className="block text-[11px] text-slate-400 font-normal">from {l.previousAgent}</span>
-                                  </button>
-                                </Tooltip>
-                              ) : "—"}
-                            </td>
-                          )}
-                          {canSeeSource && adminVisibleColumns.source && (
-                            <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]" title={l.source || "—"}>
-                              <PlatformLabel text={l.source || "—"} iconOnly />
-                            </td>
-                          )}
-                          {adminVisibleColumns.status && (
-                            <td className="px-4 py-3 align-top">
-                              {renderStatusCell(l)}
-                            </td>
-                          )}
-                          {adminVisibleColumns.nextCallDate && (
-                            <td className="px-4 py-3 text-slate-500 align-top"><NextCallCell next={adminNextCallDateFor(l.id)} /></td>
-                          )}
-                          {adminVisibleColumns.actions && (
-                            <td className="px-4 py-3 align-top">
-                              <LeadRowActionsMenu
-                                onWhatsApp={() => handleWhatsApp(l)}
-                                onCall={() => handleCall(l)}
-                                callAllowed={callAllowed}
-                                onDelete={isAdmin ? () => openSingleDelete(l) : undefined}
-                              />
-                            </td>
-                          )}
-                          {isAdmin && adminVisibleColumns.adSetName && (
-                            <td className="px-4 py-3 text-slate-400 align-top [overflow-wrap:anywhere] italic" title="Not tracked yet — no ad-set-level data ingested">—</td>
-                          )}
-                          {isAdmin && adminVisibleColumns.campaign && (
-                            <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]" title={l.campaign || "—"}>
-                              {l.campaign ? <PlatformLabel text={l.campaign} classifyBy={l.source || l.campaign} wrap /> : "—"}
-                            </td>
-                          )}
-                          {adminVisibleColumns.notes && (
-                            <td className="px-4 py-3 text-slate-600 align-top"><LeadNoteCell lead={l} onSaved={handleNoteSaved} compact={phoneLayout} /></td>
-                          )}
-                          {adminVisibleColumns.propertyMatch && (
-                            <td className="px-4 py-3 text-slate-400 align-top [overflow-wrap:anywhere] italic" title="Not tracked yet — no property-match scoring implemented">—</td>
-                          )}
+                                </td>
+                              )
+                            },
+                            isAdmin && adminVisibleColumns.adSetName && {
+                              key: "adSetName" as const,
+                              node: <td className="px-4 py-3 text-slate-400 align-top [overflow-wrap:anywhere] italic" title="Not tracked yet — no ad-set-level data ingested">—</td>
+                            },
+                            isAdmin && adminVisibleColumns.campaign && {
+                              key: "campaign" as const,
+                              node: <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]" title={l.campaign || "—"}>{l.campaign || "—"}</td>
+                            },
+                            adminVisibleColumns.notes && {
+                              key: "notes" as const,
+                              node: <td className="px-4 py-3 text-slate-600 align-top"><LeadNoteCell lead={l} onSaved={handleNoteSaved} compact={phoneLayout} /></td>
+                            },
+                            adminVisibleColumns.propertyMatch && {
+                              key: "propertyMatch" as const,
+                              node: <td className="px-4 py-3 text-slate-400 align-top [overflow-wrap:anywhere] italic" title="Not tracked yet — no property-match scoring implemented">—</td>
+                            }
+                          ] as (false | { key: AdminColumnKey; node: React.ReactNode })[])
+                            .filter((x): x is { key: AdminColumnKey; node: React.ReactNode } => !!x)
+                            .sort((a, b) => adminColumnOrder.indexOf(a.key) - adminColumnOrder.indexOf(b.key))
+                            .map(({ key, node }) => (
+                              <React.Fragment key={key}>{node}</React.Fragment>
+                            ))}
                         </tr>
                       )))
                     )}
@@ -2352,7 +2610,7 @@ export default function LeadDashboard() {
                                 <td className="px-4 py-3 text-slate-600 align-top"><LeadNoteCell lead={l} onSaved={handleNoteSaved} /></td>
                                 <td className="px-4 py-3 text-slate-500 align-top"><NextCallCell next={nextFollowupFor(l.id, analyticsDrillPageFollowups)} /></td>
                                 <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]" title={l.campaign || "—"}>
-                              {l.campaign ? <PlatformLabel text={l.campaign} classifyBy={l.source || l.campaign} wrap /> : "—"}
+                              {l.campaign || "—"}
                             </td>
                               </tr>
                               ))
@@ -2802,20 +3060,34 @@ export default function LeadDashboard() {
                           </button>
                         );
                       })
-                    : ADMIN_COLUMNS.map(c => {
+                    : [...ADMIN_COLUMNS].sort((a, b) => adminColumnOrder.indexOf(a.key) - adminColumnOrder.indexOf(b.key)).map(c => {
                         const isOn = adminVisibleColumns[c.key];
                         return (
                           <button
                             key={c.key}
                             type="button"
                             onClick={() => toggleAdminColumn(c.key)}
-                            className={`text-left pl-2.5 py-2 text-xs transition-colors truncate ${
+                            onDragOver={handleColumnDragOver}
+                            onDrop={handleColumnDrop(c.key)}
+                            className={`flex items-center gap-1 text-left pl-1 py-2 text-xs transition-colors ${
+                              draggedColumnKey === c.key ? "opacity-40" : ""
+                            } ${
                               isOn
                                 ? "border-l-[3px] border-[#0B1E6E] font-extrabold text-slate-900"
                                 : "border-l-[3px] border-transparent font-semibold text-slate-400 hover:text-slate-600"
                             }`}
                           >
-                            {c.label}
+                            <span
+                              draggable
+                              onDragStart={handleColumnDragStart(c.key)}
+                              onDragEnd={handleColumnDragEnd}
+                              onClick={(e) => e.stopPropagation()}
+                              title="Drag to reorder"
+                              className="shrink-0 cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500"
+                            >
+                              <GripVertical className="h-3.5 w-3.5" />
+                            </span>
+                            <span className="truncate">{c.label}</span>
                           </button>
                         );
                       })}
@@ -2851,20 +3123,37 @@ export default function LeadDashboard() {
                     </button>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
-                    {ADMIN_COLUMNS.filter(c => c.key !== "campaign" && c.key !== "adSetName" && (c.key !== "source" || canSeeSource)).map(c => {
+                    {ADMIN_COLUMNS
+                      .filter(c => c.key !== "campaign" && c.key !== "adSetName" && (c.key !== "source" || canSeeSource))
+                      .sort((a, b) => adminColumnOrder.indexOf(a.key) - adminColumnOrder.indexOf(b.key))
+                      .map(c => {
                       const isOn = adminVisibleColumns[c.key];
                       return (
                         <button
                           key={c.key}
                           type="button"
                           onClick={() => toggleAdminColumn(c.key)}
-                          className={`text-left pl-3 pr-2.5 py-2.5 text-xs rounded-lg border transition-colors truncate ${
+                          onDragOver={handleColumnDragOver}
+                          onDrop={handleColumnDrop(c.key)}
+                          className={`flex items-center gap-1 text-left pl-1.5 pr-2.5 py-2.5 text-xs rounded-lg border transition-colors ${
+                            draggedColumnKey === c.key ? "opacity-40" : ""
+                          } ${
                             isOn
                               ? "border-slate-200 border-l-[3px] border-l-[#0B1E6E] font-extrabold text-slate-900"
                               : "border-slate-200 font-semibold text-slate-400 hover:text-slate-600 hover:bg-slate-50"
                           }`}
                         >
-                          {c.label}
+                          <span
+                            draggable
+                            onDragStart={handleColumnDragStart(c.key)}
+                            onDragEnd={handleColumnDragEnd}
+                            onClick={(e) => e.stopPropagation()}
+                            title="Drag to reorder"
+                            className="shrink-0 cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500"
+                          >
+                            <GripVertical className="h-3.5 w-3.5" />
+                          </span>
+                          <span className="truncate">{c.label}</span>
                         </button>
                       );
                     })}
