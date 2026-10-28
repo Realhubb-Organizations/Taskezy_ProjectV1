@@ -262,6 +262,11 @@ export interface Lead {
   // DEAD_LEAD_MIN_CALL_DAYS / isDeadLeadEligible. undefined for a
   // locally-created lead that hasn't round-tripped through the API yet.
   deadLeadCallDays?: number;
+  // Manager/Admin-only (migration 047) — how many times a follow-up tied
+  // to this lead was flagged MISSED. Stripped server-side for agents, so
+  // undefined there (never something to branch display logic on alone —
+  // also gate by activeRole, same as handover notes elsewhere).
+  missedTaskCount?: number;
 }
 
 export interface AdSpendRecord {
@@ -776,7 +781,8 @@ export function mapApiLeadToFrontendLead(row: ApiLeadRow): Lead {
     assignedAt: row.assigned_at || undefined,
     firstResponseAt: row.first_response_at || undefined,
     createdAtStr: row.created_at,
-    deadLeadCallDays: Number(row.dead_lead_call_days ?? 0)
+    deadLeadCallDays: Number(row.dead_lead_call_days ?? 0),
+    missedTaskCount: row.missed_task_count
   };
 }
 
@@ -2001,6 +2007,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
     }
     setAllLeads([...allLeads]);
+    // pendingTasks is only ever fetched at login + pull-to-refresh (see that
+    // effect's own comment — refetching it on every lead change anywhere in
+    // the company was too expensive), so without this a task the agent just
+    // acted on keeps sitting in Missed/Pending until their next refresh.
+    // Dropping it here instead of waiting for a server round-trip; if the
+    // lead is still genuinely actionable (e.g. still RNR), the next real
+    // fetch naturally re-adds it with an up-to-date due time.
+    setPendingTasks(prev => prev.filter(t => t.leadId !== leadId));
 
     // Best-effort background persist — only for leads that actually exist in
     // the real database (real UUID ids); locally-only mock leads are skipped.

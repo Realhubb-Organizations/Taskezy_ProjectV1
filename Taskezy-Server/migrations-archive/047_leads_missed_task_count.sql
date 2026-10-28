@@ -1,0 +1,12 @@
+-- Persistent per-lead counter: how many times a follow-up/reminder tied to
+-- this lead was ever flagged MISSED by the SLA scheduler
+-- (jobs/followupScheduler.ts's notifySlaViolations). Kept as its own
+-- counter rather than derived from followup_calls.status at read time,
+-- since that status gets flipped to COMPLETED once the agent reschedules
+-- or the lead's status changes (see leads.service.ts::updateLeadStatus and
+-- the bulk-set-property/followups POST superseding logic) — a live COUNT
+-- would silently lose history the moment that happens. Manager/Admin-only
+-- in the UI (agents don't see their own count), same client-side
+-- visibility convention already used for phone/email masking — paste-ready
+-- for TablePlus.
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS missed_task_count INTEGER NOT NULL DEFAULT 0;

@@ -263,6 +263,10 @@ export interface ApiLeadRow {
   // the Dead Lead status option is disabled client-side until this reaches
   // leadStatusMapping.ts's DEAD_LEAD_MIN_CALL_DAYS (also enforced server-side).
   dead_lead_call_days: string;
+  // Manager/Admin-only (migration 047) — how many times a follow-up tied to
+  // this lead was flagged MISSED. Stripped server-side for agents (see
+  // leads.handover.ts's leadForCaller), so missing/undefined for them.
+  missed_task_count?: number;
   logs: { message: string; timestamp: string; user: string }[];
 }
 

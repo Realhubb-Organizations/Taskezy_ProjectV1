@@ -64,6 +64,12 @@ export interface LeadListRow {
   // DEAD_LEAD_MIN_CALL_DAYS threshold is met, instead of only finding out
   // on a rejected save.
   dead_lead_call_days: string;
+  // Permanent counter (migration 047), incremented by the SLA scheduler
+  // (jobs/followupScheduler.ts) every time a follow-up tied to this lead
+  // is flagged MISSED — survives that follow-up row later being
+  // superseded/completed, unlike reading status='MISSED' live. The
+  // controller strips this for Agent/Member callers (manager/admin-only).
+  missed_task_count: number;
   logs: { message: string; timestamp: string; user: string }[];
 }
 
@@ -190,6 +196,7 @@ const LIST_SELECT = `
     l.source, l.sub_source, l.call_status, l.call_sub_status, l.campaign, l.meta_page_name, l.meta_form_id, l.meta_ad_id,
     (SELECT count(DISTINCT (ca.created_at AT TIME ZONE '${BUSINESS_TIMEZONE}')::date)
      FROM call_attempts ca WHERE ca.lead_id = l.id AND ca.channel = 'CALL') AS dead_lead_call_days,
+    l.missed_task_count,
     COALESCE(
       (SELECT json_agg(json_build_object('message', ll.message, 'timestamp', ll.created_at, 'user', ll.user_name_snapshot) ORDER BY ll.created_at)
        FROM lead_logs ll
