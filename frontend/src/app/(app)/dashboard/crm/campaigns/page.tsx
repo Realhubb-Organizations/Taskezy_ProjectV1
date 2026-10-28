@@ -4,6 +4,7 @@ import React, { useState, useRef, useMemo, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useApp, Lead, AdSpendRecord, FollowupCall, mapApiLeadToFrontendLead, mapApiFollowupToFrontend } from "@/context/AppContext";
+import LeadDetailDrawer from "@/components/crm/LeadDetailDrawer";
 import { computeCPL } from "@/lib/reportMetrics";
 import { WhatsAppIcon, CallIcon, PlatformLabel, platformFromText } from "@/components/icons/ContactIcons";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
@@ -177,7 +178,7 @@ const STATUS_DEFAULT_VISIBLE_COLUMNS: Record<StatusColumnKey, boolean> = {
 };
 
 export default function AdminCampaignsPage() {
-  const { adSpendRecords, adLevelSpendRecords, refetchAdLevelSpend, triggerAdSpendSync, isDataLoading, activeRole } = useApp();
+  const { adSpendRecords, adLevelSpendRecords, refetchAdLevelSpend, triggerAdSpendSync, isDataLoading, activeRole, updateLeadStatus } = useApp();
   const isAdmin = activeRole === "ADMIN";
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -1354,7 +1355,17 @@ export default function AdminCampaignsPage() {
                           </tr>
                         ) : (
                           categoryDrillList.rows.map((l) => (
-                            <tr key={l.id} className="hover:bg-slate-50/50 transition-colors">
+                            <tr
+                              key={l.id}
+                              onClick={(e) => {
+                                const target = e.target as HTMLElement;
+                                if (!e.currentTarget.contains(target)) return;
+                                if (target.closest("button, a, input, select, textarea, label, [role='button'], [role='combobox'], [role='listbox']")) return;
+                                if (window.getSelection()?.toString()) return;
+                                setQuickViewLead(l);
+                              }}
+                              className="cursor-pointer hover:bg-slate-50/50 transition-colors"
+                            >
                               <td className="px-4 py-2.5 font-semibold text-slate-900 [overflow-wrap:anywhere]">{l.name}</td>
                               <td className="px-4 py-2.5 font-mono [overflow-wrap:anywhere]">{isAdmin ? l.phone : maskPhone(l.phone)}</td>
                               <td className="px-4 py-2.5">{l.status}</td>
@@ -1458,7 +1469,17 @@ export default function AdminCampaignsPage() {
                         </tr>
                       ) : (
                         qualifiedLeadsList.rows.map(l => (
-                          <tr key={l.id} className="hover:bg-slate-50/50 transition-colors">
+                          <tr
+                            key={l.id}
+                            onClick={(e) => {
+                              const target = e.target as HTMLElement;
+                              if (!e.currentTarget.contains(target)) return;
+                              if (target.closest("button, a, input, select, textarea, label, [role='button'], [role='combobox'], [role='listbox']")) return;
+                              if (window.getSelection()?.toString()) return;
+                              setQuickViewLead(l);
+                            }}
+                            className="cursor-pointer hover:bg-slate-50/50 transition-colors"
+                          >
                             <td className="px-4 py-3 text-slate-900 font-semibold [overflow-wrap:anywhere]">{l.name}</td>
                             <td className="px-4 py-3 [overflow-wrap:anywhere]" title={isAdmin ? l.email : undefined}>{l.email ? (isAdmin ? l.email : maskEmail(l.email)) : "—"}</td>
                             <td className="px-4 py-3 whitespace-nowrap">{l.status}</td>
@@ -2403,24 +2424,12 @@ export default function AdminCampaignsPage() {
         document.body
       )}
 
-      {/* Quick View Drawer if needed */}
-      {quickViewLead && createPortal(
-        <div className="fixed inset-0 z-50">
-          <div className="fixed inset-0 bg-slate-900/20 backdrop-blur-xs" onClick={() => setQuickViewLead(null)} />
-          <div className="fixed inset-y-0 right-0 w-full max-w-sm bg-white border-l border-slate-200 shadow-2xl flex flex-col animate-slide-in z-10">
-            <div className="px-5 pt-5 pb-4 border-b border-slate-100 flex items-start justify-between">
-              <div>
-                <p className="text-base font-bold text-slate-900">{quickViewLead.name}</p>
-                <p className="text-xs text-slate-500 font-mono mt-0.5">{isAdmin ? quickViewLead.phone : maskPhone(quickViewLead.phone)}</p>
-              </div>
-              <button onClick={() => setQuickViewLead(null)} className="text-slate-400 hover:text-slate-700">
-                <X className="h-4.5 w-4.5" />
-              </button>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
+      <LeadDetailDrawer
+        lead={quickViewLead}
+        isOpen={quickViewLead !== null}
+        onClose={() => setQuickViewLead(null)}
+        onUpdateStatus={updateLeadStatus}
+      />
     </div>
   );
 }

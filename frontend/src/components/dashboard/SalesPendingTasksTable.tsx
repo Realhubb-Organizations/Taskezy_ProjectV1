@@ -241,7 +241,17 @@ export default function SalesPendingTasksTable({
               pageRows.map(t => {
                 const cell = `py-3 align-middle border-y ${BUCKET_STYLES[t.bucket].row}`;
                 return (
-                  <tr key={t.id}>
+                  <tr
+                    key={t.id}
+                    onClick={t.leadId ? (e) => {
+                      const target = e.target as HTMLElement;
+                      if (!e.currentTarget.contains(target)) return;
+                      if (target.closest("button, a, input, select, textarea, label, [role='button'], [role='combobox'], [role='listbox']")) return;
+                      if (window.getSelection()?.toString()) return;
+                      onViewLead(t.leadId!);
+                    } : undefined}
+                    className={t.leadId ? "cursor-pointer" : undefined}
+                  >
                     <td className={`${cell} px-4 border-l rounded-l-lg text-slate-700`}>
                       {t.dueAt ? (
                         <>

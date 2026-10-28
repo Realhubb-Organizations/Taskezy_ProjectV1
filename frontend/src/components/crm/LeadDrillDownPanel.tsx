@@ -568,7 +568,14 @@ export default function LeadDrillDownPanel({ title, baseFilters, onClose }: {
                   drillPageLeads.map((l) => (
                     <tr
                       key={l.id}
-                      className="hover:bg-slate-50/60 transition-colors"
+                      onClick={(e) => {
+                        const target = e.target as HTMLElement;
+                        if (!e.currentTarget.contains(target)) return;
+                        if (target.closest("button, a, input, select, textarea, label, [role='button'], [role='combobox'], [role='listbox']")) return;
+                        if (window.getSelection()?.toString()) return;
+                        setQuickViewLead(l);
+                      }}
+                      className="cursor-pointer hover:bg-slate-50/60 transition-colors"
                     >
                       <td className="px-4 py-3 align-top overflow-hidden">
                         <button

@@ -1323,7 +1323,14 @@ export default function DataCallingPage() {
                       <tr
                         key={l.id}
                         ref={idx % analyticsDrillRowsPerPage === 0 ? (el) => { analyticsDrillPageRowRefs.current[Math.floor(idx / analyticsDrillRowsPerPage)] = el; } : undefined}
-                        className="hover:bg-slate-50/50 transition-colors"
+                        onClick={(e) => {
+                          const target = e.target as HTMLElement;
+                          if (!e.currentTarget.contains(target)) return;
+                          if (target.closest("button, a, input, select, textarea, label, [role='button'], [role='combobox'], [role='listbox']")) return;
+                          if (window.getSelection()?.toString()) return;
+                          setSelectedLead(l);
+                        }}
+                        className="cursor-pointer hover:bg-slate-50/50 transition-colors"
                       >
                         <td className="px-4 py-2.5 font-semibold text-slate-900 [overflow-wrap:anywhere]">{l.name}</td>
                         <td className="px-4 py-2.5 font-mono [overflow-wrap:anywhere]">{isAdmin ? l.phone : maskPhone(l.phone)}</td>
@@ -1423,7 +1430,14 @@ export default function DataCallingPage() {
                       <tr
                         key={l.id}
                         ref={idx % drillRowsPerPage === 0 ? (el) => { drillPageRowRefs.current[Math.floor(idx / drillRowsPerPage)] = el; } : undefined}
-                        className="hover:bg-slate-50/50 transition-colors"
+                        onClick={(e) => {
+                          const target = e.target as HTMLElement;
+                          if (!e.currentTarget.contains(target)) return;
+                          if (target.closest("button, a, input, select, textarea, label, [role='button'], [role='combobox'], [role='listbox']")) return;
+                          if (window.getSelection()?.toString()) return;
+                          setSelectedLead(l);
+                        }}
+                        className="cursor-pointer hover:bg-slate-50/50 transition-colors"
                       >
                         <td className="px-4 py-2.5 font-semibold text-slate-900 [overflow-wrap:anywhere]">{l.name}</td>
                         <td className="px-4 py-2.5 font-mono [overflow-wrap:anywhere]">{isAdmin ? l.phone : maskPhone(l.phone)}</td>
