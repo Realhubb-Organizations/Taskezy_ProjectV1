@@ -51,7 +51,6 @@ import {
   apiListLeadsPage, apiListFollowupsPage
 } from "@/lib/apiClient";
 import { apiGetLead } from "@/lib/apiClient";
-import LeadDetailDrawer from "@/components/crm/LeadDetailDrawer";
 import { useLeadStatusChange } from "@/components/crm/LeadDrillDownPanel";
 import { openOnRowClick, LEAD_ROW_CLASS } from "@/lib/rowClick";
 import { useServerLeadList } from "@/lib/useServerLeadList";
@@ -1365,17 +1364,6 @@ export default function AdminCampaignsPage() {
                           </tr>
                         ) : (
                           categoryDrillList.rows.map((l) => (
-                            <tr
-                              key={l.id}
-                              onClick={(e) => {
-                                const target = e.target as HTMLElement;
-                                if (!e.currentTarget.contains(target)) return;
-                                if (target.closest("button, a, input, select, textarea, label, [role='button'], [role='combobox'], [role='listbox']")) return;
-                                if (window.getSelection()?.toString()) return;
-                                setQuickViewLead(l);
-                              }}
-                              className="cursor-pointer hover:bg-slate-50/50 transition-colors"
-                            >
                             <tr key={l.id} onClick={openOnRowClick(() => openLeadPanel(l))} className={LEAD_ROW_CLASS}>
                               <td className="px-4 py-2.5 font-semibold text-slate-900 [overflow-wrap:anywhere]">{l.name}</td>
                               <td className="px-4 py-2.5 font-mono [overflow-wrap:anywhere]">{isAdmin ? l.phone : maskPhone(l.phone)}</td>
@@ -1480,17 +1468,6 @@ export default function AdminCampaignsPage() {
                         </tr>
                       ) : (
                         qualifiedLeadsList.rows.map(l => (
-                          <tr
-                            key={l.id}
-                            onClick={(e) => {
-                              const target = e.target as HTMLElement;
-                              if (!e.currentTarget.contains(target)) return;
-                              if (target.closest("button, a, input, select, textarea, label, [role='button'], [role='combobox'], [role='listbox']")) return;
-                              if (window.getSelection()?.toString()) return;
-                              setQuickViewLead(l);
-                            }}
-                            className="cursor-pointer hover:bg-slate-50/50 transition-colors"
-                          >
                           <tr key={l.id} onClick={openOnRowClick(() => openLeadPanel(l))} className={LEAD_ROW_CLASS}>
                             <td className="px-4 py-3 text-slate-900 font-semibold [overflow-wrap:anywhere]">{l.name}</td>
                             <td className="px-4 py-3 [overflow-wrap:anywhere]" title={isAdmin ? l.email : undefined}>{l.email ? (isAdmin ? l.email : maskEmail(l.email)) : "—"}</td>
@@ -2441,7 +2418,6 @@ export default function AdminCampaignsPage() {
         lead={quickViewLead}
         isOpen={quickViewLead !== null}
         onClose={() => setQuickViewLead(null)}
-        onUpdateStatus={updateLeadStatus}
         onUpdateStatus={handleLeadStatusChange}
       />
     </div>

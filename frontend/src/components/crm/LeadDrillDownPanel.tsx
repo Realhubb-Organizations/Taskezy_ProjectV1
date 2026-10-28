@@ -581,14 +581,6 @@ export default function LeadDrillDownPanel({ title, baseFilters, onClose }: {
                   drillPageLeads.map((l) => (
                     <tr
                       key={l.id}
-                      onClick={(e) => {
-                        const target = e.target as HTMLElement;
-                        if (!e.currentTarget.contains(target)) return;
-                        if (target.closest("button, a, input, select, textarea, label, [role='button'], [role='combobox'], [role='listbox']")) return;
-                        if (window.getSelection()?.toString()) return;
-                        setQuickViewLead(l);
-                      }}
-                      className="cursor-pointer hover:bg-slate-50/60 transition-colors"
                       onClick={openOnRowClick(() => {
                         setQuickViewLead(l);
                         apiGetLead(l.id).then(row => setQuickViewLead(mapApiLeadToFrontendLead(row))).catch(() => {});
