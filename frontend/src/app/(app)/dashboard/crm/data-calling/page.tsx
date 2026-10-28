@@ -3,7 +3,7 @@
 import React, { useState, useRef, useMemo, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useApp, Lead, FollowupCall, mapApiFollowupToFrontend } from "@/context/AppContext";
-import { ChevronRight, Search, Sliders, Minus, X, Copy, Users, Plus, Check, Trash2, AlertTriangle } from "lucide-react";
+import { ChevronRight, Search, Sliders, Minus, X, Copy, Users, Plus, Check, Trash2, AlertTriangle, GripVertical } from "lucide-react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine } from "recharts";
 import UploadLeadsModal from "@/components/crm/UploadLeadsModal";
 import LeadDetailDrawer from "@/components/crm/LeadDetailDrawer";
@@ -94,6 +94,16 @@ const DATA_CALLING_DEFAULT_VISIBLE_COLUMNS: Record<DataCallingColumnKey, boolean
   cpl: false, assignedTo: true, usageCount: false, notes: true, qualifiedPercent: false, actions: false,
   qualificationStatus: true, uploadedBy: true
 };
+
+// This table's actual column sequence before drag-reorder shipped — NOT
+// the same as DATA_CALLING_COLUMNS's own declaration order above, which
+// differs. Used as the default columnOrder so a user who's never dragged
+// anything sees exactly today's layout, not a silently reshuffled one.
+const DATA_CALLING_DEFAULT_COLUMN_ORDER: DataCallingColumnKey[] = [
+  "email", "qualificationStatus", "assignedTo", "date", "notes", "nextCallDate",
+  "property", "dataCallSource", "uploadedBy", "usageCount", "qualifiedLeads",
+  "unqualifiedLeads", "cpl", "qualifiedPercent", "actions"
+];
 
 // The Analytics tab's Source Performance table's extra togglable columns —
 // the exact same label set (and default on/off state) as the Campaigns
@@ -695,6 +705,81 @@ export default function DataCallingPage() {
     pickableColumns.forEach(c => { next[c.key] = !allOn; });
     setVisibleColumns(next);
   };
+
+  // Column order — draggable from both the Filter panel's column list and
+  // the live table's own headers, same taskezy_-prefixed localStorage
+  // convention and array+filter+sort+map approach already shipped for the
+  // Leads page table (LeadDashboard.tsx). Lead Name and Status (and, on
+  // phone, the early Action column) stay fixed first; only the togglable
+  // DATA_CALLING_COLUMNS set below is reorderable.
+  const COLUMN_ORDER_STORAGE_KEY = "taskezy_data_calling_column_order";
+  const [columnOrder, setColumnOrderState] = useState<DataCallingColumnKey[]>(() => DATA_CALLING_DEFAULT_COLUMN_ORDER);
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(COLUMN_ORDER_STORAGE_KEY);
+      if (!stored) return;
+      const parsed: unknown = JSON.parse(stored);
+      if (!Array.isArray(parsed)) return;
+      const validKeys = new Set(DATA_CALLING_COLUMNS.map(c => c.key));
+      const kept = parsed.filter((k): k is DataCallingColumnKey => validKeys.has(k as DataCallingColumnKey));
+      // A column shipped after the user last saved an order is appended at
+      // the end, so it doesn't silently vanish from the table.
+      const missing = DATA_CALLING_DEFAULT_COLUMN_ORDER.filter(k => !kept.includes(k));
+      setColumnOrderState([...kept, ...missing]);
+    } catch {
+      // Corrupt/inaccessible storage — fall back to the default order.
+    }
+  }, []);
+  const persistColumnOrder = (next: DataCallingColumnKey[]) => {
+    setColumnOrderState(next);
+    try {
+      window.localStorage.setItem(COLUMN_ORDER_STORAGE_KEY, JSON.stringify(next));
+    } catch {
+      // Storage full/unavailable — the new order still works for this session.
+    }
+  };
+  const [draggedColumnKey, setDraggedColumnKey] = useState<DataCallingColumnKey | null>(null);
+  const handleColumnDragStart = (key: DataCallingColumnKey) => (e: React.DragEvent) => {
+    setDraggedColumnKey(key);
+    e.dataTransfer.effectAllowed = "move";
+  };
+  const handleColumnDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+  };
+  const handleColumnDrop = (targetKey: DataCallingColumnKey) => (e: React.DragEvent) => {
+    e.preventDefault();
+    if (!draggedColumnKey || draggedColumnKey === targetKey) return;
+    const order = [...columnOrder];
+    const from = order.indexOf(draggedColumnKey);
+    const to = order.indexOf(targetKey);
+    if (from === -1 || to === -1) return;
+    order.splice(from, 1);
+    order.splice(to, 0, draggedColumnKey);
+    persistColumnOrder(order);
+    setDraggedColumnKey(null);
+  };
+  const handleColumnDragEnd = () => setDraggedColumnKey(null);
+  // Only this small handle (not the whole <th>/button) is draggable — some
+  // headers hold a SearchableMultiSelect filter that must stay clickable.
+  const ColumnDragHandle = ({ columnKey }: { columnKey: DataCallingColumnKey }) => (
+    <span
+      draggable
+      onDragStart={handleColumnDragStart(columnKey)}
+      onDragEnd={handleColumnDragEnd}
+      onClick={(e) => e.stopPropagation()}
+      title="Drag to reorder"
+      className="shrink-0 cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500"
+    >
+      <GripVertical className="h-3 w-3" />
+    </span>
+  );
+  // "actions" renders in its own fixed early slot on phone (right after
+  // Status, unchanged) rather than in this reorderable block — excluded
+  // here only for that layout, matching the existing phoneLayout split.
+  const visibleColumnList = DATA_CALLING_COLUMNS
+    .filter(c => !hiddenColumnsForRole.includes(c.key) && visibleColumns[c.key] && (c.key !== "actions" || !phoneLayout))
+    .sort((a, b) => columnOrder.indexOf(a.key) - columnOrder.indexOf(b.key));
 
   const [rowsPerPage, setRowsPerPage] = useState(100);
   const [currentPage, setCurrentPage] = useState(1);
@@ -1694,23 +1779,17 @@ export default function DataCallingPage() {
                 <colgroup>
                   {showAdminCols && <col className="w-[44px]" />}
                   <col />
-                  {visibleColumns.email && <col />}
                   <col className={phoneLayout ? "w-[118px]" : undefined} />
                   {phoneLayout && visibleColumns.actions && <col className="w-[56px]" />}
-                  {visibleColumns.qualificationStatus && <col />}
-                  {visibleColumns.assignedTo && <col />}
-                  {visibleColumns.date && <col />}
-                  {visibleColumns.notes && <col className={phoneLayout ? "w-[80px]" : undefined} />}
-                  {visibleColumns.nextCallDate && <col />}
-                  {visibleColumns.property && <col />}
-                  {visibleColumns.dataCallSource && <col />}
-                  {visibleColumns.uploadedBy && <col />}
-                  {visibleColumns.usageCount && <col />}
-                  {visibleColumns.qualifiedLeads && <col />}
-                  {visibleColumns.unqualifiedLeads && <col />}
-                  {visibleColumns.cpl && <col />}
-                  {visibleColumns.qualifiedPercent && <col />}
-                  {!phoneLayout && visibleColumns.actions && <col className="w-[80px]" />}
+                  {/* Togglable, draggable to reorder (both here and in the
+                      Filter panel — same columnOrder). */}
+                  {visibleColumnList.map(c => (
+                    c.key === "actions"
+                      ? <col key={c.key} className="w-[80px]" />
+                      : c.key === "notes"
+                        ? <col key={c.key} className={phoneLayout ? "w-[80px]" : undefined} />
+                        : <col key={c.key} />
+                  ))}
                 </colgroup>
                 <thead className="sticky top-0 z-10 bg-white">
                   <tr className="border-b border-slate-200/80 text-left text-xs font-bold text-slate-800 whitespace-nowrap">
@@ -1747,7 +1826,6 @@ export default function DataCallingPage() {
                         </div>
                       )}
                     </th>
-                    {visibleColumns.email && <th className="px-4 py-3 whitespace-nowrap">Email</th>}
                     <th className="px-4 py-3 whitespace-nowrap">
                       <SearchableMultiSelect
                         variant="inline"
@@ -1760,68 +1838,146 @@ export default function DataCallingPage() {
                       />
                     </th>
                     {phoneLayout && visibleColumns.actions && <th className="px-4 py-3 whitespace-nowrap">Action</th>}
-                    {visibleColumns.qualificationStatus && (
-                      <th className="px-4 py-3 whitespace-nowrap">
-                        <SearchableMultiSelect
-                          variant="inline"
-                          label="Sub-status"
-                          selected={subStatusFilters}
-                          onChange={(next) => { setSubStatusFilters(next); setCurrentPage(1); }}
-                          options={subStatusOptions}
-                          searchPlaceholder="Search sub-status..."
-                          panelWidth={180}
-                        />
-                      </th>
-                    )}
-                    {visibleColumns.assignedTo && (
-                      <th className="px-4 py-3 whitespace-nowrap">
-                        <SearchableMultiSelect
-                          variant="inline"
-                          label="Assigned To"
-                          selected={assignedFilters}
-                          onChange={(next) => { setAssignedFilters(next); setCurrentPage(1); }}
-                          options={assignedOptions}
-                          searchPlaceholder="Search agents..."
-                          panelWidth={180}
-                        />
-                      </th>
-                    )}
-                    {visibleColumns.date && <th className="px-4 py-3 whitespace-nowrap">Date</th>}
-                    {visibleColumns.notes && <th className="px-4 py-3 whitespace-nowrap">Notes</th>}
-                    {visibleColumns.nextCallDate && <th className="px-4 py-3 whitespace-nowrap">Next Call Date</th>}
-                    {visibleColumns.property && (
-                      <th className="px-4 py-3 whitespace-nowrap">
-                        <SearchableMultiSelect
-                          variant="inline"
-                          label="Property"
-                          options={propertyFilterOptions}
-                          selected={propertyFilters}
-                          onChange={(next) => { setPropertyFilters(next); setCurrentPage(1); }}
-                          searchPlaceholder="Search properties..."
-                          panelWidth={240}
-                        />
-                      </th>
-                    )}
-                    {visibleColumns.dataCallSource && (
-                      <th className="px-4 py-3 whitespace-nowrap">
-                        {!isAdmin ? "Data Call Source" : <SearchableMultiSelect
-                          variant="inline"
-                          label="Data Call Source"
-                          selected={dataCallSourceFilters}
-                          onChange={(next) => { setDataCallSourceFilters(next); setCurrentPage(1); }}
-                          options={dataCallSourceOptions}
-                          searchPlaceholder="Search sources..."
-                          panelWidth={200}
-                        />}
-                      </th>
-                    )}
-                    {visibleColumns.uploadedBy && <th className="px-4 py-3 whitespace-nowrap">Uploaded By</th>}
-                    {visibleColumns.usageCount && <th className="px-4 py-3 whitespace-nowrap">Usage Count</th>}
-                    {visibleColumns.qualifiedLeads && <th className="px-4 py-3 whitespace-nowrap">Qualified Leads</th>}
-                    {visibleColumns.unqualifiedLeads && <th className="px-4 py-3 whitespace-nowrap">Unqualified Leads</th>}
-                    {visibleColumns.cpl && <th className="px-4 py-3 whitespace-nowrap">CPL</th>}
-                    {visibleColumns.qualifiedPercent && <th className="px-4 py-3 whitespace-nowrap">Qualified %age</th>}
-                    {!phoneLayout && visibleColumns.actions && <th className="px-4 py-3 whitespace-nowrap">Actions</th>}
+                    {/* Togglable, draggable to reorder (both here and in the
+                        Filter panel — same columnOrder). Same array + filter +
+                        sort + map approach already shipped for the Leads page
+                        table, since CSS `order` has no effect on <th>/<td>
+                        inside a real <table>. */}
+                    {([
+                      visibleColumns.email && {
+                        key: "email" as const,
+                        node: <th className="px-4 py-3 whitespace-nowrap" onDragOver={handleColumnDragOver} onDrop={handleColumnDrop("email")}><span className="inline-flex items-center gap-1"><ColumnDragHandle columnKey="email" />Email</span></th>
+                      },
+                      visibleColumns.qualificationStatus && {
+                        key: "qualificationStatus" as const,
+                        node: (
+                          <th className="px-4 py-3 whitespace-nowrap" onDragOver={handleColumnDragOver} onDrop={handleColumnDrop("qualificationStatus")}>
+                            <div className="flex items-center gap-1">
+                              <ColumnDragHandle columnKey="qualificationStatus" />
+                              <div className="min-w-0 flex-1">
+                                <SearchableMultiSelect
+                                  variant="inline"
+                                  label="Sub-status"
+                                  selected={subStatusFilters}
+                                  onChange={(next) => { setSubStatusFilters(next); setCurrentPage(1); }}
+                                  options={subStatusOptions}
+                                  searchPlaceholder="Search sub-status..."
+                                  panelWidth={180}
+                                />
+                              </div>
+                            </div>
+                          </th>
+                        )
+                      },
+                      visibleColumns.assignedTo && {
+                        key: "assignedTo" as const,
+                        node: (
+                          <th className="px-4 py-3 whitespace-nowrap" onDragOver={handleColumnDragOver} onDrop={handleColumnDrop("assignedTo")}>
+                            <div className="flex items-center gap-1">
+                              <ColumnDragHandle columnKey="assignedTo" />
+                              <div className="min-w-0 flex-1">
+                                <SearchableMultiSelect
+                                  variant="inline"
+                                  label="Assigned To"
+                                  selected={assignedFilters}
+                                  onChange={(next) => { setAssignedFilters(next); setCurrentPage(1); }}
+                                  options={assignedOptions}
+                                  searchPlaceholder="Search agents..."
+                                  panelWidth={180}
+                                />
+                              </div>
+                            </div>
+                          </th>
+                        )
+                      },
+                      visibleColumns.date && {
+                        key: "date" as const,
+                        node: <th className="px-4 py-3 whitespace-nowrap" onDragOver={handleColumnDragOver} onDrop={handleColumnDrop("date")}><span className="inline-flex items-center gap-1"><ColumnDragHandle columnKey="date" />Date</span></th>
+                      },
+                      visibleColumns.notes && {
+                        key: "notes" as const,
+                        node: <th className="px-4 py-3 whitespace-nowrap" onDragOver={handleColumnDragOver} onDrop={handleColumnDrop("notes")}><span className="inline-flex items-center gap-1"><ColumnDragHandle columnKey="notes" />Notes</span></th>
+                      },
+                      visibleColumns.nextCallDate && {
+                        key: "nextCallDate" as const,
+                        node: <th className="px-4 py-3 whitespace-nowrap" onDragOver={handleColumnDragOver} onDrop={handleColumnDrop("nextCallDate")}><span className="inline-flex items-center gap-1"><ColumnDragHandle columnKey="nextCallDate" />Next Call Date</span></th>
+                      },
+                      visibleColumns.property && {
+                        key: "property" as const,
+                        node: (
+                          <th className="px-4 py-3 whitespace-nowrap" onDragOver={handleColumnDragOver} onDrop={handleColumnDrop("property")}>
+                            <div className="flex items-center gap-1">
+                              <ColumnDragHandle columnKey="property" />
+                              <div className="min-w-0 flex-1">
+                                <SearchableMultiSelect
+                                  variant="inline"
+                                  label="Property"
+                                  options={propertyFilterOptions}
+                                  selected={propertyFilters}
+                                  onChange={(next) => { setPropertyFilters(next); setCurrentPage(1); }}
+                                  searchPlaceholder="Search properties..."
+                                  panelWidth={240}
+                                />
+                              </div>
+                            </div>
+                          </th>
+                        )
+                      },
+                      visibleColumns.dataCallSource && {
+                        key: "dataCallSource" as const,
+                        node: (
+                          <th className="px-4 py-3 whitespace-nowrap" onDragOver={handleColumnDragOver} onDrop={handleColumnDrop("dataCallSource")}>
+                            <div className="flex items-center gap-1">
+                              <ColumnDragHandle columnKey="dataCallSource" />
+                              <div className="min-w-0 flex-1">
+                                {!isAdmin ? "Data Call Source" : <SearchableMultiSelect
+                                  variant="inline"
+                                  label="Data Call Source"
+                                  selected={dataCallSourceFilters}
+                                  onChange={(next) => { setDataCallSourceFilters(next); setCurrentPage(1); }}
+                                  options={dataCallSourceOptions}
+                                  searchPlaceholder="Search sources..."
+                                  panelWidth={200}
+                                />}
+                              </div>
+                            </div>
+                          </th>
+                        )
+                      },
+                      visibleColumns.uploadedBy && {
+                        key: "uploadedBy" as const,
+                        node: <th className="px-4 py-3 whitespace-nowrap" onDragOver={handleColumnDragOver} onDrop={handleColumnDrop("uploadedBy")}><span className="inline-flex items-center gap-1"><ColumnDragHandle columnKey="uploadedBy" />Uploaded By</span></th>
+                      },
+                      visibleColumns.usageCount && {
+                        key: "usageCount" as const,
+                        node: <th className="px-4 py-3 whitespace-nowrap" onDragOver={handleColumnDragOver} onDrop={handleColumnDrop("usageCount")}><span className="inline-flex items-center gap-1"><ColumnDragHandle columnKey="usageCount" />Usage Count</span></th>
+                      },
+                      visibleColumns.qualifiedLeads && {
+                        key: "qualifiedLeads" as const,
+                        node: <th className="px-4 py-3 whitespace-nowrap" onDragOver={handleColumnDragOver} onDrop={handleColumnDrop("qualifiedLeads")}><span className="inline-flex items-center gap-1"><ColumnDragHandle columnKey="qualifiedLeads" />Qualified Leads</span></th>
+                      },
+                      visibleColumns.unqualifiedLeads && {
+                        key: "unqualifiedLeads" as const,
+                        node: <th className="px-4 py-3 whitespace-nowrap" onDragOver={handleColumnDragOver} onDrop={handleColumnDrop("unqualifiedLeads")}><span className="inline-flex items-center gap-1"><ColumnDragHandle columnKey="unqualifiedLeads" />Unqualified Leads</span></th>
+                      },
+                      visibleColumns.cpl && {
+                        key: "cpl" as const,
+                        node: <th className="px-4 py-3 whitespace-nowrap" onDragOver={handleColumnDragOver} onDrop={handleColumnDrop("cpl")}><span className="inline-flex items-center gap-1"><ColumnDragHandle columnKey="cpl" />CPL</span></th>
+                      },
+                      visibleColumns.qualifiedPercent && {
+                        key: "qualifiedPercent" as const,
+                        node: <th className="px-4 py-3 whitespace-nowrap" onDragOver={handleColumnDragOver} onDrop={handleColumnDrop("qualifiedPercent")}><span className="inline-flex items-center gap-1"><ColumnDragHandle columnKey="qualifiedPercent" />Qualified %age</span></th>
+                      },
+                      !phoneLayout && visibleColumns.actions && {
+                        key: "actions" as const,
+                        node: <th className="px-4 py-3 whitespace-nowrap" onDragOver={handleColumnDragOver} onDrop={handleColumnDrop("actions")}><span className="inline-flex items-center gap-1"><ColumnDragHandle columnKey="actions" />Actions</span></th>
+                      }
+                    ] as (false | { key: DataCallingColumnKey; node: React.ReactNode })[])
+                      .filter((x): x is { key: DataCallingColumnKey; node: React.ReactNode } => !!x)
+                      .sort((a, b) => columnOrder.indexOf(a.key) - columnOrder.indexOf(b.key))
+                      .map(({ key, node }) => (
+                        <React.Fragment key={key}>{node}</React.Fragment>
+                      ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-[12px] font-medium text-slate-700">
@@ -1876,20 +2032,6 @@ export default function DataCallingPage() {
                             </div>
                           )}
                         </td>
-                        {visibleColumns.email && (
-                        <td className="px-4 py-3.5">
-                          {l.email ? (
-                            <div className="flex items-center gap-1">
-                              <span className="min-w-0 [overflow-wrap:anywhere]" title={isAdmin ? l.email : undefined}>{isAdmin ? l.email : maskEmail(l.email)}</span>
-                              {isAdmin && (
-                                <button onClick={() => copyToClipboard(l.email)} className="text-slate-300 hover:text-slate-500 shrink-0" title="Copy email">
-                                  <Copy className="h-2.5 w-2.5" />
-                                </button>
-                              )}
-                            </div>
-                          ) : "—"}
-                        </td>
-                        )}
                         <td className="px-4 py-3.5 whitespace-nowrap">
                           {canEditLeadStatus(l) ? (
                             <SearchableSelect
@@ -1907,70 +2049,104 @@ export default function DataCallingPage() {
                           )}
                         </td>
                         {phoneLayout && visibleColumns.actions && renderActionsCell(l)}
-                        {visibleColumns.qualificationStatus && (
-                        <td className="px-4 py-3.5 whitespace-nowrap">
-                          {/* Sub-status: pickable only while Call Status is Connected
-                              (lib/callSubStatus.ts). Called / Not Reachable / Wrong
-                              Number keep it disabled. Same edit rule as Call Status. */}
-                          {l.callStatus === "Connected" && canEditLeadStatus(l) ? (
-                            <SearchableSelect
-                              variant="inline"
-                              value={l.callSubStatus || ""}
-                              onChange={(v) => openCallStatusChange(l, "Connected", v as CallSubStatus)}
-                              options={CALL_SUB_STATUS_OPTIONS}
-                              placeholder="Select"
-                              searchPlaceholder="Search sub-status..."
-                              panelWidth={160}
-                              className={l.callSubStatus === "Qualified" ? "text-emerald-600" : l.callSubStatus === "Unqualified" ? "text-red-500" : "text-slate-400"}
-                            />
-                          ) : l.callStatus === "Connected" && l.callSubStatus ? (
-                            <span className={l.callSubStatus === "Qualified" ? "text-emerald-600" : "text-red-500"}>{l.callSubStatus}</span>
-                          ) : (
-                            <span
-                              className="text-slate-300 cursor-not-allowed"
-                              title={l.callStatus === "Connected" ? STATUS_LOCKED_HINT : "Available when Call Status is Connected"}
-                            >
-                              —
-                            </span>
-                          )}
-                        </td>
-                        )}
-                        {visibleColumns.assignedTo && (
-                          <td className="px-4 py-3.5">
-                            {/* Agents see who has it; only admins/managers can move it. */}
-                            {canReassignThisLead(l, currentUser, users) ? (
-                              <SearchableSelect
-                                variant="inline"
-                                value={l.assignedAgent || ""}
-                                onChange={(v) => reassignWithNote(l, v)}
-                                options={assignedOptions}
-                                placeholder="—"
-                                searchPlaceholder="Search agents..."
-                                panelWidth={176}
-                                className="max-w-full text-slate-700"
-                              />
-                            ) : (
-                              <span className="text-slate-700 [overflow-wrap:anywhere]">{l.assignedAgent || "—"}</span>
-                            )}
-                          </td>
-                        )}
-                        {visibleColumns.date && <td className="px-4 py-3.5">{formatDateTime(l.createdAtStr)}</td>}
-                        {visibleColumns.notes && <td className="px-4 py-3.5"><LeadNoteCell lead={l} compact={phoneLayout} /></td>}
-                        {visibleColumns.nextCallDate && <td className="px-4 py-3.5"><NextCallCell next={nextCallDateFor(l.id)} /></td>}
-                        {visibleColumns.property && <td className="px-4 py-3.5 [overflow-wrap:anywhere]">{l.property || "—"}</td>}
-                        {visibleColumns.dataCallSource && (
-                          <td className="px-4 py-3.5 [overflow-wrap:anywhere]">
-                            {/* Managers see only that it's an uploaded-data lead, not the batch name. */}
-                            {isAdmin ? (l.subSource || l.source || "—") : <ExcelIcon className="h-4 w-4" />}
-                          </td>
-                        )}
-                        {visibleColumns.uploadedBy && <td className="px-4 py-3.5 [overflow-wrap:anywhere]">{l.uploadedByName || "—"}</td>}
-                        {visibleColumns.usageCount && <td className="px-4 py-3.5">{l.logs ? l.logs.length : 0}</td>}
-                        {visibleColumns.qualifiedLeads && <td className="px-4 py-3.5 text-slate-300" title="Not applicable — this is a per-lead row, not an aggregate">—</td>}
-                        {visibleColumns.unqualifiedLeads && <td className="px-4 py-3.5 text-slate-300" title="Not applicable — this is a per-lead row, not an aggregate">—</td>}
-                        {visibleColumns.cpl && <td className="px-4 py-3.5 text-slate-300" title="Not applicable — this is a per-lead row, not an aggregate">—</td>}
-                        {visibleColumns.qualifiedPercent && <td className="px-4 py-3.5 text-slate-300" title="Not applicable — this is a per-lead row, not an aggregate">—</td>}
-                        {!phoneLayout && visibleColumns.actions && renderActionsCell(l)}
+                        {/* Togglable, same order as the header above (columnOrder). */}
+                        {([
+                          visibleColumns.email && {
+                            key: "email" as const,
+                            node: (
+                              <td className="px-4 py-3.5">
+                                {l.email ? (
+                                  <div className="flex items-center gap-1">
+                                    <span className="min-w-0 [overflow-wrap:anywhere]" title={isAdmin ? l.email : undefined}>{isAdmin ? l.email : maskEmail(l.email)}</span>
+                                    {isAdmin && (
+                                      <button onClick={() => copyToClipboard(l.email)} className="text-slate-300 hover:text-slate-500 shrink-0" title="Copy email">
+                                        <Copy className="h-2.5 w-2.5" />
+                                      </button>
+                                    )}
+                                  </div>
+                                ) : "—"}
+                              </td>
+                            )
+                          },
+                          visibleColumns.qualificationStatus && {
+                            key: "qualificationStatus" as const,
+                            node: (
+                              <td className="px-4 py-3.5 whitespace-nowrap">
+                                {/* Sub-status: pickable only while Call Status is Connected
+                                    (lib/callSubStatus.ts). Called / Not Reachable / Wrong
+                                    Number keep it disabled. Same edit rule as Call Status. */}
+                                {l.callStatus === "Connected" && canEditLeadStatus(l) ? (
+                                  <SearchableSelect
+                                    variant="inline"
+                                    value={l.callSubStatus || ""}
+                                    onChange={(v) => openCallStatusChange(l, "Connected", v as CallSubStatus)}
+                                    options={CALL_SUB_STATUS_OPTIONS}
+                                    placeholder="Select"
+                                    searchPlaceholder="Search sub-status..."
+                                    panelWidth={160}
+                                    className={l.callSubStatus === "Qualified" ? "text-emerald-600" : l.callSubStatus === "Unqualified" ? "text-red-500" : "text-slate-400"}
+                                  />
+                                ) : l.callStatus === "Connected" && l.callSubStatus ? (
+                                  <span className={l.callSubStatus === "Qualified" ? "text-emerald-600" : "text-red-500"}>{l.callSubStatus}</span>
+                                ) : (
+                                  <span
+                                    className="text-slate-300 cursor-not-allowed"
+                                    title={l.callStatus === "Connected" ? STATUS_LOCKED_HINT : "Available when Call Status is Connected"}
+                                  >
+                                    —
+                                  </span>
+                                )}
+                              </td>
+                            )
+                          },
+                          visibleColumns.assignedTo && {
+                            key: "assignedTo" as const,
+                            node: (
+                              <td className="px-4 py-3.5">
+                                {/* Agents see who has it; only admins/managers can move it. */}
+                                {canReassignThisLead(l, currentUser, users) ? (
+                                  <SearchableSelect
+                                    variant="inline"
+                                    value={l.assignedAgent || ""}
+                                    onChange={(v) => reassignWithNote(l, v)}
+                                    options={assignedOptions}
+                                    placeholder="—"
+                                    searchPlaceholder="Search agents..."
+                                    panelWidth={176}
+                                    className="max-w-full text-slate-700"
+                                  />
+                                ) : (
+                                  <span className="text-slate-700 [overflow-wrap:anywhere]">{l.assignedAgent || "—"}</span>
+                                )}
+                              </td>
+                            )
+                          },
+                          visibleColumns.date && { key: "date" as const, node: <td className="px-4 py-3.5">{formatDateTime(l.createdAtStr)}</td> },
+                          visibleColumns.notes && { key: "notes" as const, node: <td className="px-4 py-3.5"><LeadNoteCell lead={l} compact={phoneLayout} /></td> },
+                          visibleColumns.nextCallDate && { key: "nextCallDate" as const, node: <td className="px-4 py-3.5"><NextCallCell next={nextCallDateFor(l.id)} /></td> },
+                          visibleColumns.property && { key: "property" as const, node: <td className="px-4 py-3.5 [overflow-wrap:anywhere]">{l.property || "—"}</td> },
+                          visibleColumns.dataCallSource && {
+                            key: "dataCallSource" as const,
+                            node: (
+                              <td className="px-4 py-3.5 [overflow-wrap:anywhere]">
+                                {/* Managers see only that it's an uploaded-data lead, not the batch name. */}
+                                {isAdmin ? (l.subSource || l.source || "—") : <ExcelIcon className="h-4 w-4" />}
+                              </td>
+                            )
+                          },
+                          visibleColumns.uploadedBy && { key: "uploadedBy" as const, node: <td className="px-4 py-3.5 [overflow-wrap:anywhere]">{l.uploadedByName || "—"}</td> },
+                          visibleColumns.usageCount && { key: "usageCount" as const, node: <td className="px-4 py-3.5">{l.logs ? l.logs.length : 0}</td> },
+                          visibleColumns.qualifiedLeads && { key: "qualifiedLeads" as const, node: <td className="px-4 py-3.5 text-slate-300" title="Not applicable — this is a per-lead row, not an aggregate">—</td> },
+                          visibleColumns.unqualifiedLeads && { key: "unqualifiedLeads" as const, node: <td className="px-4 py-3.5 text-slate-300" title="Not applicable — this is a per-lead row, not an aggregate">—</td> },
+                          visibleColumns.cpl && { key: "cpl" as const, node: <td className="px-4 py-3.5 text-slate-300" title="Not applicable — this is a per-lead row, not an aggregate">—</td> },
+                          visibleColumns.qualifiedPercent && { key: "qualifiedPercent" as const, node: <td className="px-4 py-3.5 text-slate-300" title="Not applicable — this is a per-lead row, not an aggregate">—</td> },
+                          !phoneLayout && visibleColumns.actions && { key: "actions" as const, node: renderActionsCell(l) }
+                        ] as (false | { key: DataCallingColumnKey; node: React.ReactNode })[])
+                          .filter((x): x is { key: DataCallingColumnKey; node: React.ReactNode } => !!x)
+                          .sort((a, b) => columnOrder.indexOf(a.key) - columnOrder.indexOf(b.key))
+                          .map(({ key, node }) => (
+                            <React.Fragment key={key}>{node}</React.Fragment>
+                          ))}
                       </tr>
                     ))
                   )}
@@ -2015,20 +2191,34 @@ export default function DataCallingPage() {
                 </button>
               </div>
               <div className="grid grid-cols-2 gap-3">
-                {pickableColumns.map(c => {
+                {[...pickableColumns].sort((a, b) => columnOrder.indexOf(a.key) - columnOrder.indexOf(b.key)).map(c => {
                   const isOn = visibleColumns[c.key];
                   return (
                     <button
                       key={c.key}
                       type="button"
                       onClick={() => toggleColumn(c.key)}
-                      className={`text-left pl-3 pr-2.5 py-2.5 text-xs rounded-lg border transition-colors truncate ${
+                      onDragOver={handleColumnDragOver}
+                      onDrop={handleColumnDrop(c.key)}
+                      className={`flex items-center gap-1 text-left pl-1.5 pr-2.5 py-2.5 text-xs rounded-lg border transition-colors ${
+                        draggedColumnKey === c.key ? "opacity-40" : ""
+                      } ${
                         isOn
                           ? "border-slate-200 border-l-[3px] border-l-[#0B1E6E] font-extrabold text-slate-900"
                           : "border-slate-200 font-semibold text-slate-400 hover:text-slate-600 hover:bg-slate-50"
                       }`}
                     >
-                      {c.label}
+                      <span
+                        draggable
+                        onDragStart={handleColumnDragStart(c.key)}
+                        onDragEnd={handleColumnDragEnd}
+                        onClick={(e) => e.stopPropagation()}
+                        title="Drag to reorder"
+                        className="shrink-0 cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500"
+                      >
+                        <GripVertical className="h-3.5 w-3.5" />
+                      </span>
+                      <span className="truncate">{c.label}</span>
                     </button>
                   );
                 })}
