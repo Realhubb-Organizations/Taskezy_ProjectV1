@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { X, Phone, Mail, ArrowRight, Copy, Check, User, Pencil, ChevronDown } from "lucide-react";
-import { useApp, Lead, LeadStatus } from "@/context/AppContext";
+import { useApp, Lead, LeadStatus, mapApiLeadToFrontendLead } from "@/context/AppContext";
 import { useDialog } from "@/components/ui/DialogProvider";
 import { SearchableSelect } from "@/components/ui/SearchableDropdown";
 import { apiSetLeadProperty } from "@/lib/apiClient";
@@ -37,7 +37,7 @@ export default function LeadDetailDrawer({
   onNoteSaved,
   onPropertySaved
 }: LeadDetailDrawerProps) {
-  const { users, currentUser, activeRole, reassignLead, updateLeadNote, recordCallEnded, recordWhatsAppOpened } = useApp();
+  const { users, properties, currentUser, activeRole, reassignLead, updateLeadNote, recordCallEnded, recordWhatsAppOpened } = useApp();
   const { toast, confirm, prompt: promptDialog } = useDialog();
   const callAllowed = canTriggerLeadCall(activeRole === "ADMIN", currentUser?.email);
   const [localStatus, setLocalStatus] = useState<LeadStatus>("New Lead");
@@ -268,7 +268,21 @@ export default function LeadDetailDrawer({
           {lead.property ? "Assigned" : "Unassigned"}
         </span>
       ),
-      value: <span title={lead.property || undefined}>{lead.property || "Not set"}</span>
+      value: canEditProperty ? (
+        <SearchableSelect
+          variant="inline"
+          value={lead.property || NO_PROPERTY}
+          onChange={handlePropertyChange}
+          options={[NO_PROPERTY, ...properties.map(p => p.name)]}
+          placeholder={savingProperty ? "Saving..." : undefined}
+          searchPlaceholder="Search property..."
+          panelWidth={220}
+          disabled={savingProperty}
+          className="max-w-full text-xs font-semibold text-slate-800"
+        />
+      ) : (
+        <span title={lead.property || undefined}>{lead.property || "Not set"}</span>
+      )
     },
     {
       label: "Reassigned To",
