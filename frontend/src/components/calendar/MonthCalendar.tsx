@@ -59,7 +59,7 @@ export default function MonthCalendar({ events, selectedDate, onSelectDate, colo
   return (
     <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
       <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 bg-slate-50/50">
-        <h3 className="text-xs font-extrabold text-slate-800">{monthLabel}</h3>
+        <h3 className="ui-subheading">{monthLabel}</h3>
         <div className="flex items-center gap-1">
           <button
             onClick={() => setCursor(new Date(year, month - 1, 1))}

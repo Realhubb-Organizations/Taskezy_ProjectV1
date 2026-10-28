@@ -111,7 +111,7 @@ export default function DeleteUserModal({
         onSubmit={(e) => { e.preventDefault(); submit(); }}
       >
         <div className="px-6 pt-6 pb-4 border-b border-slate-100 shrink-0">
-          <h3 className="text-lg font-extrabold text-slate-900">Delete user?</h3>
+          <h3 className="ui-title">Delete user?</h3>
         </div>
 
         <div className="px-6 py-5 space-y-4 overflow-y-auto">
@@ -205,14 +205,14 @@ export default function DeleteUserModal({
             type="button"
             onClick={close}
             disabled={submitting}
-            className="px-5 py-2 rounded-xl border border-slate-300 font-bold text-slate-700 text-sm hover:bg-slate-50 transition-colors disabled:opacity-50"
+            className="ui-btn ui-btn-secondary border disabled:opacity-50"
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={!canSubmit}
-            className="px-5 py-2 rounded-xl font-bold text-sm text-white bg-red-600 hover:bg-red-700 transition-colors disabled:bg-slate-300 disabled:cursor-not-allowed"
+            className="ui-btn ui-btn-danger disabled:bg-slate-300 disabled:cursor-not-allowed"
           >
             {submitting ? "Deleting..." : needsHandover ? "Reassign & delete" : "Delete"}
           </button>

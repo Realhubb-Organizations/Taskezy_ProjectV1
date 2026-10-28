@@ -335,7 +335,7 @@ export default function LeadDetailDrawer({
         {/* Header — name, contact row (WhatsApp, call, copy), email */}
         <div className="px-6 pt-6 pb-4 shrink-0">
           <div className="flex items-start justify-between gap-2">
-            <h3 className="text-lg font-extrabold text-slate-900 truncate">{lead.name}</h3>
+            <h3 className="ui-title truncate">{lead.name}</h3>
             <button onClick={onClose} className="text-slate-400 hover:text-slate-700 -mt-1 shrink-0" aria-label="Close">
               <X className="h-4.5 w-4.5" />
             </button>
@@ -499,7 +499,7 @@ export default function LeadDetailDrawer({
                       type="button"
                       onClick={handleSaveNote}
                       disabled={!noteDraft.trim() || noteDraft.trim() === savedNote || savingNote}
-                      className="shrink-0 bg-[#0B1E6E] hover:bg-[#081650] disabled:opacity-40 text-white font-bold px-4 py-1.5 rounded-xl text-xs transition-all"
+                      className="ui-btn ui-btn-primary shrink-0 disabled:opacity-40"
                     >
                       {savingNote ? "Saving..." : savedNote ? "Update note" : "Save note"}
                     </button>

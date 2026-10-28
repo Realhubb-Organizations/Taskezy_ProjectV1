@@ -74,11 +74,11 @@ function CRMCalendarContent() {
   return (
     <div className="space-y-6 pb-12 animate-fade-in">
       <div>
-        <h2 className="text-xl font-bold text-brand-700 flex items-center gap-2">
+        <h2 className="ui-title text-brand-700 flex items-center gap-2">
           <CalendarDays className="h-6.5 w-6.5 text-brand-600" />
           CRM Calendar
         </h2>
-        <p className="text-xs text-slate-500">Site visits, follow-up callbacks, bookings, and EOI submissions across the pipeline.</p>
+        <p className="ui-desc">Site visits, follow-up callbacks, bookings, and EOI submissions across the pipeline.</p>
       </div>
 
       <div className="flex flex-wrap gap-3">
@@ -103,7 +103,7 @@ function CRMCalendarContent() {
         </div>
 
         <div className="lg:col-span-4 glass-card p-5 rounded-2xl space-y-3">
-          <h3 className="text-xs font-bold text-slate-700 border-b border-slate-100 pb-2">
+          <h3 className="ui-section-title border-b border-slate-100 pb-2">
             {new Date(selectedDate + "T00:00:00").toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
           </h3>
           {eventsLoading && dayEvents.length === 0 ? (

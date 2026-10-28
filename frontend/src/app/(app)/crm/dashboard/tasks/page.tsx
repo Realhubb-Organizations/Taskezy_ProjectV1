@@ -8,6 +8,7 @@ import { useApp, Lead, LeadStatus, mapApiLeadToFrontendLead } from "@/context/Ap
 import { apiGetLead } from "@/lib/apiClient";
 import { useDialog } from "@/components/ui/DialogProvider";
 import SalesPendingTasksTable from "@/components/dashboard/SalesPendingTasksTable";
+import TaskSourceTabs, { TaskSource } from "@/components/dashboard/TaskSourceTabs";
 import { TAB_BUCKETS, TeamTaskTab } from "@/components/dashboard/TeamTasksTable";
 import LeadDetailDrawer from "@/components/crm/LeadDetailDrawer";
 import LeadScheduleModal from "@/components/crm/LeadScheduleModal";
@@ -29,9 +30,13 @@ function AgentTasksView() {
   // One `type` param per selected task type; none (or the legacy "All") means every type.
   const taskTypes = useMemo(() => params.getAll("type").filter(t => t && t !== "All"), [params]);
 
-  const [range, setRange] = useState<DateRangeValue | null>(null);
+  // Starts on the dashboard's Date Range when opened from it (?from=&to=).
+  const [range, setRange] = useState<DateRangeValue | null>(() => {
+    const from = params.get("from"), to = params.get("to");
+    return from && to ? { start: from, end: to } : null;
+  });
   // Leads vs Data Calling (source "Bulk Upload") — two separate task lists.
-  const [source, setSource] = useState<"leads" | "dataCalling">("leads");
+  const [source, setSource] = useState<TaskSource>("leads");
   const [drawerLead, setDrawerLead] = useState<Lead | null>(null);
 
   const taskFilter = useCallback((t: PendingTask) => {
@@ -105,22 +110,7 @@ function AgentTasksView() {
         key={source}
         title={tab === "pending" ? "Pending Task" : "All Task"}
         subtitle={subtitle}
-        headerTabs={
-          <div className="flex items-end gap-6 mt-5">
-            {([["leads", "Leads"], ["dataCalling", "Data Calling"]] as const).map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                onClick={() => setSource(value)}
-                className={`pb-2 text-base font-extrabold border-b-2 transition-colors ${
-                  source === value ? "text-[#0B1E6E] border-[#0B1E6E]" : "text-slate-400 border-slate-200 hover:text-slate-600"
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        }
+        headerTabs={<TaskSourceTabs value={source} onChange={setSource} />}
         visibleBuckets={(["missed", "pending", "upcoming"] as const).filter(b => TAB_BUCKETS[tab].includes(b))}
         pendingTasks={pendingTasks}
         taskFilter={taskFilter}

@@ -177,7 +177,7 @@ const MetaCampaignLinker = forwardRef<LinkerHandle, MetaCampaignLinkerProps>(fun
               type="button"
               onClick={handleAddSelected}
               disabled={saving || !selected}
-              className="shrink-0 bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold px-5 py-2 rounded-xl text-sm transition-all disabled:opacity-40"
+              className="ui-btn ui-btn-primary shrink-0 disabled:opacity-40"
             >
               {saving ? "…" : "Add"}
             </button>
@@ -208,7 +208,7 @@ const MetaCampaignLinker = forwardRef<LinkerHandle, MetaCampaignLinkerProps>(fun
                   type="button"
                   onClick={handleAddCustom}
                   disabled={saving}
-                  className="shrink-0 bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold px-5 py-2 rounded-xl text-sm transition-all disabled:opacity-50"
+                  className="ui-btn ui-btn-primary shrink-0 disabled:opacity-50"
                 >
                   {saving ? "…" : "Add"}
                 </button>

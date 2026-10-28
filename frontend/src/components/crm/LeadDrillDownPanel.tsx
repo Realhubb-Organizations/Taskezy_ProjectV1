@@ -3,8 +3,10 @@
 import React, { useEffect, useMemo, useState, useRef } from "react";
 import LeadRowActionsMenu from "./LeadRowActionsMenu";
 import { createPortal } from "react-dom";
-import { useApp, Lead, LeadStatus, FollowupCall, mapApiFollowupToFrontend } from "@/context/AppContext";
-import { apiListFollowupsPage, apiGetDistinctCampaigns, LeadListFilters } from "@/lib/apiClient";
+import { useApp, Lead, LeadStatus, FollowupCall, mapApiFollowupToFrontend, mapApiLeadToFrontendLead } from "@/context/AppContext";
+import { apiListFollowupsPage, apiGetDistinctCampaigns, apiGetLead, LeadListFilters } from "@/lib/apiClient";
+import LeadDetailDrawer from "./LeadDetailDrawer";
+import { openOnRowClick, LEAD_ROW_CLASS } from "@/lib/rowClick";
 import { useServerLeadList } from "@/lib/useServerLeadList";
 import { useDialog } from "@/components/ui/DialogProvider";
 import { deriveActivityTimeline, PICKABLE_STATUS_OPTIONS, statusBadgeClasses, frontendStatusToDbCode, withDeadLeadGate, nextStatusOptions } from "@/lib/leadStatusMapping";
@@ -424,6 +426,9 @@ export default function LeadDrillDownPanel({ title, baseFilters, onClose }: {
   // follow-up table.
   const [pageFollowups, setPageFollowups] = useState<FollowupCall[]>([]);
   const pageLeadIds = drillPageLeads.map(l => l.id).join(",");
+  // Re-fetch Next Call Dates when a call is scheduled anywhere (addFollowupCall
+  // updates this list), not only when the rows change.
+  const { followupCalls: liveFollowups } = useApp();
   useEffect(() => {
     if (!pageLeadIds) { setPageFollowups([]); return; }
     let cancelled = false;
@@ -431,7 +436,7 @@ export default function LeadDrillDownPanel({ title, baseFilters, onClose }: {
       .then(({ rows }) => { if (!cancelled) setPageFollowups(rows.map(mapApiFollowupToFrontend)); })
       .catch(() => { if (!cancelled) setPageFollowups([]); });
     return () => { cancelled = true; };
-  }, [pageLeadIds]);
+  }, [pageLeadIds, liveFollowups]);
   const nextCallDateFor = (leadId: string) => nextFollowupFor(leadId, pageFollowups);
 
   // Drill-down table's per-row Status cell — the shared searchable dropdown,
@@ -467,7 +472,7 @@ export default function LeadDrillDownPanel({ title, baseFilters, onClose }: {
       {title && (
         <div className="bg-white rounded-2xl shadow-md animate-fade-in">
           <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
-            <h3 className="text-sm font-extrabold text-slate-900">{title}</h3>
+            <h3 className="ui-title">{title}</h3>
             <button onClick={onClose} className="text-[11px] font-bold text-slate-400 hover:text-slate-700">
               Close ✕
             </button>
@@ -568,11 +573,19 @@ export default function LeadDrillDownPanel({ title, baseFilters, onClose }: {
                   drillPageLeads.map((l) => (
                     <tr
                       key={l.id}
-                      className="hover:bg-slate-50/60 transition-colors"
+                      onClick={openOnRowClick(() => {
+                        setQuickViewLead(l);
+                        apiGetLead(l.id).then(row => setQuickViewLead(mapApiLeadToFrontendLead(row))).catch(() => {});
+                      })}
+                      className={LEAD_ROW_CLASS}
                     >
                       <td className="px-4 py-3 align-top overflow-hidden">
                         <button
-                          onClick={() => setQuickViewLead(l)}
+                          onClick={() => {
+                            // Full record (with Activity History) for the lead panel; the row is the fallback.
+                            setQuickViewLead(l);
+                            apiGetLead(l.id).then(row => setQuickViewLead(mapApiLeadToFrontendLead(row))).catch(() => {});
+                          }}
                           className="font-bold text-[#0B1E6E] hover:underline text-left [overflow-wrap:anywhere] block max-w-full"
                           title={l.name}
                         >
@@ -610,7 +623,12 @@ export default function LeadDrillDownPanel({ title, baseFilters, onClose }: {
 
       {/* Lead quick-view — opened by clicking a lead's name in the table above */}
       {quickViewLead && (
-        <LeadQuickViewDrawer lead={quickViewLead} onClose={() => setQuickViewLead(null)} />
+        <LeadDetailDrawer
+          lead={quickViewLead}
+          isOpen={quickViewLead !== null}
+          onClose={() => setQuickViewLead(null)}
+          onUpdateStatus={handleDrillStatusChange}
+        />
       )}
       {statusScheduler.pendingSchedule && (
         <LeadScheduleModal

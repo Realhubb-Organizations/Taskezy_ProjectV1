@@ -36,6 +36,7 @@ export default function TablePagination({
   onRowsPerPageChange,
   rowsPerPageOptions = DEFAULT_ROWS_PER_PAGE_OPTIONS,
   rowLabel = "Row",
+  countSuffix,
   className = ""
 }: {
   totalRows: number;
@@ -47,6 +48,8 @@ export default function TablePagination({
   rowsPerPageOptions?: number[];
   /** Singular noun for the total, e.g. "Lead" → "12 Leads". */
   rowLabel?: string;
+  /** Shown in brackets after the count, e.g. the page's date range: "12 Leads (Yesterday)". */
+  countSuffix?: string;
   className?: string;
 }) {
   const totalPages = Math.max(1, Math.ceil(totalRows / rowsPerPage));
@@ -64,6 +67,7 @@ export default function TablePagination({
     <div data-table-footer className={`px-5 py-3 flex flex-wrap justify-between items-center gap-3 border-t border-slate-100 bg-white md:sticky md:-bottom-8 md:z-20 text-[11px] text-slate-500 font-semibold ${className}`}>
       <span className="text-slate-800 font-bold">
         {totalRows} {totalRows === 1 ? rowLabel : pluralize(rowLabel)}
+        {countSuffix && <span className="font-medium text-slate-500"> ({countSuffix})</span>}
       </span>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         {onRowsPerPageChange && (

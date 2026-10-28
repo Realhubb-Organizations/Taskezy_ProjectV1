@@ -49,6 +49,10 @@ import {
   apiGetAdLevelLeadStats, type AdLevelLeadStat,
   apiListLeadsPage, apiListFollowupsPage
 } from "@/lib/apiClient";
+import { apiGetLead } from "@/lib/apiClient";
+import LeadDetailDrawer from "@/components/crm/LeadDetailDrawer";
+import { useLeadStatusChange } from "@/components/crm/LeadDrillDownPanel";
+import { openOnRowClick, LEAD_ROW_CLASS } from "@/lib/rowClick";
 import { useServerLeadList } from "@/lib/useServerLeadList";
 import type { LeadSummaryStats } from "@/lib/leadSummaryStats";
 
@@ -238,6 +242,13 @@ export default function AdminCampaignsPage() {
   const [searchQuery, setSearchQuery] = useState("");
 
   const [quickViewLead, setQuickViewLead] = useState<Lead | null>(null);
+  // Open a lead in the full lead panel: show the row straight away, then
+  // swap in the full record (with Activity History).
+  const openLeadPanel = (l: Lead) => {
+    setQuickViewLead(l);
+    apiGetLead(l.id).then(row => setQuickViewLead(mapApiLeadToFrontendLead(row))).catch(() => {});
+  };
+  const handleLeadStatusChange = useLeadStatusChange();
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
   // Filter button → Settings panel for which table columns are shown — a
@@ -940,6 +951,9 @@ export default function AdminCampaignsPage() {
   // company's follow-up table) — same pattern LeadDrillDownPanel uses.
   const [qualifiedLeadsPageFollowups, setQualifiedLeadsPageFollowups] = useState<FollowupCall[]>([]);
   const qualifiedLeadsPageIds = qualifiedLeadsList.rows.map(l => l.id).join(",");
+  // Re-fetch Next Call Dates when a call is scheduled anywhere (addFollowupCall
+  // updates this list), not only when the rows change.
+  const { followupCalls: liveFollowups } = useApp();
   useEffect(() => {
     if (!qualifiedLeadsPageIds) { setQualifiedLeadsPageFollowups([]); return; }
     let cancelled = false;
@@ -947,7 +961,7 @@ export default function AdminCampaignsPage() {
       .then(({ rows }) => { if (!cancelled) setQualifiedLeadsPageFollowups(rows.map(mapApiFollowupToFrontend)); })
       .catch(() => { if (!cancelled) setQualifiedLeadsPageFollowups([]); });
     return () => { cancelled = true; };
-  }, [qualifiedLeadsPageIds]);
+  }, [qualifiedLeadsPageIds, liveFollowups]);
 
   // CSV export needs every matching row, not just the current page — loop-
   // fetch every page (bounded by this one campaign's qualified leads,
@@ -1162,20 +1176,16 @@ export default function AdminCampaignsPage() {
     <div className="space-y-4 pb-8 animate-fade-in text-slate-800">
       {/* Top Toggle Switcher: Campaigns vs Campaigns Analytics */}
       <div className="flex items-center gap-1.5">
-        <div className="bg-slate-200/70 p-1 rounded-xl flex items-center gap-1">
+        <div className="ui-toggle">
           <button
             onClick={() => setActiveTab("Campaigns")}
-            className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-              activeTab === "Campaigns" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-800"
-            }`}
+            className={`ui-toggle-item ${activeTab === "Campaigns" ? "ui-toggle-item-active" : ""}`}
           >
             Campaigns
           </button>
           <button
             onClick={() => setActiveTab("Analytics")}
-            className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-              activeTab === "Analytics" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-800"
-            }`}
+            className={`ui-toggle-item ${activeTab === "Analytics" ? "ui-toggle-item-active" : ""}`}
           >
             Campaigns Analytics
           </button>
@@ -1268,7 +1278,7 @@ export default function AdminCampaignsPage() {
             return (
               <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden animate-fade-in">
                 <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-200/80 gap-3">
-                  <h3 className="text-sm font-bold text-slate-900 whitespace-nowrap">
+                  <h3 className="ui-section-title whitespace-nowrap">
                     {selectedCategory}
                     <span className="text-slate-400 font-medium ml-1.5">({shownCount})</span>
                   </h3>
@@ -1354,7 +1364,7 @@ export default function AdminCampaignsPage() {
                           </tr>
                         ) : (
                           categoryDrillList.rows.map((l) => (
-                            <tr key={l.id} className="hover:bg-slate-50/50 transition-colors">
+                            <tr key={l.id} onClick={openOnRowClick(() => openLeadPanel(l))} className={LEAD_ROW_CLASS}>
                               <td className="px-4 py-2.5 font-semibold text-slate-900 [overflow-wrap:anywhere]">{l.name}</td>
                               <td className="px-4 py-2.5 font-mono [overflow-wrap:anywhere]">{isAdmin ? l.phone : maskPhone(l.phone)}</td>
                               <td className="px-4 py-2.5">{l.status}</td>
@@ -1400,7 +1410,7 @@ export default function AdminCampaignsPage() {
             {(
               <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden">
                 <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5 border-b border-slate-200/80">
-                  <h3 className="text-sm font-bold text-slate-900">
+                  <h3 className="ui-section-title">
                     Qualified Leads
                     <span className="text-slate-400 font-medium ml-1.5">({qualifiedLeadsList.totalCount}) — {analyticsDrillView.campaign.name}</span>
                   </h3>
@@ -1458,7 +1468,7 @@ export default function AdminCampaignsPage() {
                         </tr>
                       ) : (
                         qualifiedLeadsList.rows.map(l => (
-                          <tr key={l.id} className="hover:bg-slate-50/50 transition-colors">
+                          <tr key={l.id} onClick={openOnRowClick(() => openLeadPanel(l))} className={LEAD_ROW_CLASS}>
                             <td className="px-4 py-3 text-slate-900 font-semibold [overflow-wrap:anywhere]">{l.name}</td>
                             <td className="px-4 py-3 [overflow-wrap:anywhere]" title={isAdmin ? l.email : undefined}>{l.email ? (isAdmin ? l.email : maskEmail(l.email)) : "—"}</td>
                             <td className="px-4 py-3 whitespace-nowrap">{l.status}</td>
@@ -1661,7 +1671,7 @@ export default function AdminCampaignsPage() {
                   onChange={handleDateRangeChange}
                   emptyLabel={todayStr}
                 />
-                <SearchableMultiSelect
+                <SearchableMultiSelect variant="toolbar"
                   options={breakdownCampaignOptions}
                   selected={breakdownCampaignFilters}
                   onChange={setBreakdownCampaignFilters}
@@ -1673,7 +1683,7 @@ export default function AdminCampaignsPage() {
                 <button
                   type="button"
                   onClick={() => setIsBreakdownFilterOpen(true)}
-                  className="inline-flex items-center justify-center gap-2 h-9 border border-slate-300/80 bg-white rounded-xl px-3.5 text-xs text-slate-700 font-bold hover:bg-slate-50 shadow-2xs transition-colors"
+                  className="ui-btn ui-btn-secondary border"
                 >
                   <Sliders className="h-4 w-4 text-blue-600" />
                   Filter
@@ -1910,7 +1920,7 @@ export default function AdminCampaignsPage() {
               <div className="fixed inset-0" onClick={() => setIsBreakdownFilterOpen(false)} />
               <div className="fixed inset-y-0 right-0 w-full max-w-sm bg-white border-l border-slate-200 shadow-2xl flex flex-col animate-slide-in">
                 <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-slate-100 shrink-0">
-                  <h3 className="text-base font-extrabold text-slate-900">Filter</h3>
+                  <h3 className="ui-title">Filter</h3>
                   <button onClick={() => setIsBreakdownFilterOpen(false)} className="text-slate-400 hover:text-slate-700">
                     <X className="h-4.5 w-4.5" />
                   </button>
@@ -1981,13 +1991,13 @@ export default function AdminCampaignsPage() {
               Sync button below), never as an invented value. */}
           <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden">
             <div className="px-5 py-3.5 border-b border-slate-200/80 flex flex-wrap items-center justify-between gap-3">
-              <h3 className="text-sm font-bold text-slate-900">Campaign Deep Dive</h3>
+              <h3 className="ui-section-title">Campaign Deep Dive</h3>
               <div className="flex items-center gap-2">
                 {adSyncNote && <span className="text-[11px] text-slate-500 max-w-[320px] text-right">{adSyncNote}</span>}
                 <button
                   onClick={handleAdSpendSync}
                   disabled={adSyncStatus === "syncing"}
-                  className="inline-flex items-center justify-center gap-2 h-9 px-3.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed whitespace-nowrap"
+                  className="ui-btn ui-btn-secondary border disabled:opacity-60 disabled:cursor-not-allowed"
                   title="Fetch the latest Ad Set Name/Ad creative Name/spend from Meta and Google now, instead of waiting for the automatic sync"
                 >
                   <RefreshCw size={16} className={adSyncStatus === "syncing" ? "animate-spin" : ""} />
@@ -2182,7 +2192,7 @@ export default function AdminCampaignsPage() {
               />
 
               {/* Campaigns multi-select — filters the table and the summary cards */}
-              <SearchableMultiSelect
+              <SearchableMultiSelect variant="toolbar"
                 options={breakdownCampaignOptions}
                 selected={campaignFilters}
                 onChange={(next) => { setCampaignFilters(next); setCurrentPage(1); }}
@@ -2196,7 +2206,7 @@ export default function AdminCampaignsPage() {
               <button
                 type="button"
                 onClick={() => setIsColumnsSettingsOpen(true)}
-                className="inline-flex items-center justify-center gap-2 h-9 border border-slate-300/80 bg-white rounded-xl px-3.5 text-xs text-slate-700 font-bold hover:bg-slate-50 shadow-2xs transition-colors"
+                className="ui-btn ui-btn-secondary border"
               >
                 <Sliders className="h-4 w-4 text-blue-600" />
                 Filter
@@ -2358,7 +2368,7 @@ export default function AdminCampaignsPage() {
           <div className="fixed inset-0" onClick={() => setIsColumnsSettingsOpen(false)} />
           <div className="fixed inset-y-0 right-0 w-full max-w-sm bg-white border-l border-slate-200 shadow-2xl flex flex-col animate-slide-in">
             <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-slate-100 shrink-0">
-              <h3 className="text-base font-extrabold text-slate-900">Filter</h3>
+              <h3 className="ui-title">Filter</h3>
               <button
                 onClick={() => setIsColumnsSettingsOpen(false)}
                 className="text-slate-400 hover:text-slate-700"
@@ -2403,24 +2413,13 @@ export default function AdminCampaignsPage() {
         document.body
       )}
 
-      {/* Quick View Drawer if needed */}
-      {quickViewLead && createPortal(
-        <div className="fixed inset-0 z-50">
-          <div className="fixed inset-0 bg-slate-900/20 backdrop-blur-xs" onClick={() => setQuickViewLead(null)} />
-          <div className="fixed inset-y-0 right-0 w-full max-w-sm bg-white border-l border-slate-200 shadow-2xl flex flex-col animate-slide-in z-10">
-            <div className="px-5 pt-5 pb-4 border-b border-slate-100 flex items-start justify-between">
-              <div>
-                <p className="text-base font-bold text-slate-900">{quickViewLead.name}</p>
-                <p className="text-xs text-slate-500 font-mono mt-0.5">{isAdmin ? quickViewLead.phone : maskPhone(quickViewLead.phone)}</p>
-              </div>
-              <button onClick={() => setQuickViewLead(null)} className="text-slate-400 hover:text-slate-700">
-                <X className="h-4.5 w-4.5" />
-              </button>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
+      {/* Lead panel — opened by clicking a lead row in the lists above. */}
+      <LeadDetailDrawer
+        lead={quickViewLead}
+        isOpen={quickViewLead !== null}
+        onClose={() => setQuickViewLead(null)}
+        onUpdateStatus={handleLeadStatusChange}
+      />
     </div>
   );
 }

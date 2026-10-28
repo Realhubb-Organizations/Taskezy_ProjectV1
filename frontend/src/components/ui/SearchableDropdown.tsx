@@ -31,7 +31,9 @@ type OptionsInput = (string | DropdownOption)[];
  *   pill   — compact bordered filter button (toolbars, card headers)
  *   inline — bare text + chevron (table column headers, footers)
  */
-export type DropdownVariant = "field" | "pill" | "inline";
+// "toolbar": a page-toolbar filter that sits next to action buttons — same
+// height, text and corners as .ui-btn.
+export type DropdownVariant = "field" | "pill" | "inline" | "toolbar";
 
 interface CommonProps {
   options: OptionsInput;
@@ -59,7 +61,9 @@ const TRIGGER_BASE: Record<DropdownVariant, string> = {
     "w-full flex items-center justify-between gap-2 bg-slate-50 border rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:outline-none transition-all",
   pill:
     "inline-flex items-center gap-1.5 bg-white border rounded-lg px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 transition-colors max-w-[220px]",
-  inline: "inline-flex items-center gap-1 font-bold hover:text-brand-700 whitespace-nowrap"
+  inline: "inline-flex items-center gap-1 font-bold hover:text-brand-700 whitespace-nowrap",
+  toolbar:
+    "inline-flex items-center gap-2 bg-white border h-9 px-3.5 rounded-xl text-[13px] font-semibold text-slate-700 hover:bg-slate-50 transition-colors max-w-[240px]"
 };
 
 // Autofocusing the search box on touch screens opens the keyboard and shuts the panel.
@@ -207,7 +211,7 @@ function Trigger({
       ? active ? "text-blue-700" : ""
       : state.open
         ? "border-[#0B1E6E] bg-white"
-        : active && variant === "pill" ? "border-blue-300 text-blue-700" : "border-slate-200";
+        : active && (variant === "pill" || variant === "toolbar") ? "border-blue-300 text-blue-700" : variant === "toolbar" ? "border-slate-300" : "border-slate-200";
   return (
     <button
       type="button"

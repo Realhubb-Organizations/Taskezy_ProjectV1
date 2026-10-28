@@ -820,8 +820,8 @@ export default function SettingsPage() {
             <Settings className="h-5.5 w-5.5 text-brand-600" />
           </div>
           <div>
-            <h2 className="text-lg font-extrabold text-slate-900">Settings &amp; Configuration</h2>
-            <p className="text-xs text-slate-500 font-medium max-w-md mt-0.5">
+            <h2 className="ui-title">Settings &amp; Configuration</h2>
+            <p className="ui-desc max-w-md mt-0.5">
               Integrate your favorite tools, manage account preferences, and configure your CRM experience — all in one place.
             </p>
           </div>
@@ -1027,7 +1027,7 @@ export default function SettingsPage() {
                 <div className="h-10 w-10 rounded-xl border border-slate-200 bg-white flex items-center justify-center shrink-0 p-1.5">
                   <img src="https://img.icons8.com/?size=100&id=wA5rN96FVDtq&format=png&color=000000" alt="Meta" className="h-full w-full object-contain" />
                 </div>
-                <h4 className="text-sm font-extrabold text-slate-900 truncate">Meta Ads</h4>
+                <h4 className="ui-subheading truncate">Meta Ads</h4>
                 {!metaConnectionsLoaded ? loadingPill() : metaCheckError ? errorPill() : statusPill(activeMetaConnections.length > 0)}
               </div>
               {cardMenu(
@@ -1076,7 +1076,7 @@ export default function SettingsPage() {
                 <button
                   onClick={handleConnectMeta}
                   disabled={metaLoading}
-                  className="px-3 py-1.5 rounded-lg text-[11px] font-bold border bg-brand-50 border-brand-200 text-brand-700 hover:bg-[#0B1E6E] hover:text-white transition-all disabled:opacity-50"
+                  className="ui-btn ui-btn-primary"
                 >
                   {metaLoading ? "Redirecting…" : activeMetaConnections.length > 0 ? "Connect Another Page" : "Connect"}
                 </button>
@@ -1094,7 +1094,7 @@ export default function SettingsPage() {
                 <div className="h-10 w-10 rounded-xl border border-slate-200 bg-white flex items-center justify-center shrink-0 p-1.5">
                   <img src="https://img.icons8.com/?size=100&id=4hR4Ih04Je2t&format=png&color=000000" alt="Google Ads" className="h-full w-full object-contain" />
                 </div>
-                <h4 className="text-sm font-extrabold text-slate-900 truncate">Google Ads</h4>
+                <h4 className="ui-subheading truncate">Google Ads</h4>
                 {!googleAccountsLoaded ? loadingPill() : googleCheckError ? errorPill() : statusPill(activeGoogleAccounts.length > 0)}
               </div>
               {cardMenu("google", "/dashboard/settings/integrations?app=google")}
@@ -1163,7 +1163,7 @@ export default function SettingsPage() {
                   <div className={`h-10 w-10 rounded-xl flex items-center justify-center shrink-0 ${badge?.bg ?? "bg-slate-400"}`}>
                     {badge?.content ?? <span className="text-xs font-black text-white">{item.name[0]}</span>}
                   </div>
-                  <h4 className="text-sm font-extrabold text-slate-900 truncate">{item.name}</h4>
+                  <h4 className="ui-subheading truncate">{item.name}</h4>
                   {statusPill(active)}
                 </div>
                 {cardMenu(item.name, `/dashboard/settings/integrations?app=${encodeURIComponent(item.name)}`)}
@@ -1214,7 +1214,7 @@ export default function SettingsPage() {
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
                 <div className="flex items-center gap-2">
-                  <h3 className="text-base font-extrabold text-slate-900">Connected Apps</h3>
+                  <h3 className="ui-section-title">Connected Apps</h3>
                   <span className="bg-emerald-50 text-emerald-700 border border-emerald-100 text-[10px] font-bold px-2 py-0.5 rounded-full">
                     {integrationSummaries.length} integrations available
                   </span>
@@ -1235,7 +1235,7 @@ export default function SettingsPage() {
                 </div>
                 <button
                   onClick={handleRequestIntegration}
-                  className="inline-flex items-center gap-1.5 bg-[#0B1E6E] hover:bg-[#081650] text-white px-3.5 py-2 rounded-lg text-xs font-bold transition-all shadow-sm"
+                  className="ui-btn ui-btn-primary"
                 >
                   <Plus className="h-3.5 w-3.5" />
                   Add Integration
@@ -1303,7 +1303,7 @@ export default function SettingsPage() {
       {activeTab === "Leads" && (
         <div className="glass-card p-6 rounded-2xl space-y-5 animate-fade-in">
           <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-            <h3 className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+            <h3 className="ui-section-title flex items-center gap-1.5">
               <TrendingUp className="h-4 w-4 text-slate-500" />
               Lead Source Breakdown
             </h3>
@@ -1507,18 +1507,18 @@ export default function SettingsPage() {
       {activeTab === "Manage Users" && (
         <div className="space-y-6 animate-fade-in">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-            <h3 className="text-sm font-bold text-slate-700">Corporate User Directory</h3>
+            <h3 className="ui-section-title">Corporate User Directory</h3>
             <div className="flex gap-2 shrink-0">
               <button
                 onClick={() => { setQuickResetUserId(""); setQuickResetResult(null); setIsQuickResetOpen(true); }}
-                className="inline-flex items-center gap-1.5 bg-slate-50 border border-slate-200 hover:bg-slate-100 text-slate-700 px-4 py-2 rounded-lg text-xs font-bold transition-all"
+                className="ui-btn ui-btn-secondary border"
               >
                 <KeyRound className="h-4 w-4" />
                 Reset Password
               </button>
               <button
                 onClick={() => { setAddErrors({}); setIsAddOpen(true); }}
-                className="inline-flex items-center gap-1.5 bg-[#0B1E6E] hover:bg-[#081650] text-white px-4 py-2 rounded-lg text-xs font-bold transition-all shadow-md"
+                className="ui-btn ui-btn-primary"
               >
                 <Plus className="h-4 w-4" />
                 Add User
@@ -1658,7 +1658,7 @@ export default function SettingsPage() {
                 <button
                   type="button"
                   onClick={() => setUsersRefreshKey(k => k + 1)}
-                  className="px-4 py-1.5 rounded-lg bg-[#0B1E6E] hover:bg-[#081650] text-white text-xs font-bold transition-colors"
+                  className="ui-btn ui-btn-primary"
                 >
                   Retry
                 </button>
@@ -1902,7 +1902,7 @@ export default function SettingsPage() {
       {activeTab === "Preference" && (
         <div className="max-w-xl space-y-4 animate-fade-in">
           <div className="glass-card p-6 rounded-2xl space-y-4">
-            <h3 className="text-sm font-extrabold text-slate-800">Notifications</h3>
+            <h3 className="ui-section-title">Notifications</h3>
             <div className="flex items-center justify-between gap-4 bg-slate-50 border border-slate-150 rounded-xl px-4 py-3">
               <div>
                 <p className="text-xs font-bold text-slate-700">Notification Sounds</p>
@@ -1932,7 +1932,7 @@ export default function SettingsPage() {
             <div className="glass-card p-6 rounded-2xl space-y-4">
               <div className="flex items-center gap-2">
                 <Megaphone className="h-4 w-4 text-brand-600" />
-                <h3 className="text-sm font-extrabold text-slate-800">Announce to Everyone</h3>
+                <h3 className="ui-section-title">Announce to Everyone</h3>
               </div>
               <p className="text-[11px] text-slate-500">
                 Sends one message to every Admin, Manager, and Member — it shows up live in their notification bell&apos;s Activity tab.
@@ -1950,7 +1950,7 @@ export default function SettingsPage() {
                   type="button"
                   onClick={handleAnnounce}
                   disabled={!announceMessage.trim() || announceSubmitting}
-                  className="inline-flex items-center gap-2 h-9 px-4 bg-[#0B1E6E] hover:bg-[#081650] text-white rounded-xl text-xs font-bold transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="ui-btn ui-btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Megaphone className="h-3.5 w-3.5" />
                   {announceSubmitting ? "Sending…" : "Announce"}
@@ -1970,8 +1970,8 @@ export default function SettingsPage() {
                 <Info className="h-5.5 w-5.5" />
               </div>
               <div>
-                <h3 className="text-sm font-bold text-slate-800">TASKEZY Enterprise Platform</h3>
-                <p className="text-[11px] text-slate-500">Version 1.0.0 (2026.07)</p>
+                <h3 className="ui-section-title">TASKEZY Enterprise Platform</h3>
+                <p className="ui-desc">Version 1.0.0 (2026.07)</p>
               </div>
             </div>
             <p className="text-[11px] text-slate-500 leading-relaxed border-t border-slate-100 pt-3">
@@ -2006,7 +2006,7 @@ export default function SettingsPage() {
 
           <button
             onClick={handleSignOut}
-            className="w-full flex items-center justify-center gap-2 px-5 py-3 rounded-2xl border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 font-bold text-xs transition-colors"
+            className="ui-btn ui-btn-secondary w-full border border-red-200 bg-red-50 text-red-700 hover:bg-red-100"
           >
             <LogOut className="h-4 w-4" />
             Sign Out
@@ -2020,7 +2020,7 @@ export default function SettingsPage() {
           <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-30" onClick={() => setIsQuickResetOpen(false)} />
           <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[calc(100%-2rem)] max-w-sm bg-white border border-slate-200 p-6 rounded-2xl shadow-2xl z-40 space-y-4">
             <div className="flex justify-between items-center border-b border-slate-200 pb-2">
-              <h3 className="text-sm font-bold text-brand-700 flex items-center gap-1.5">
+              <h3 className="ui-title text-brand-700 flex items-center gap-1.5">
                 <KeyRound className="h-4.5 w-4.5 text-brand-600" />
                 Reset Password
               </h3>
@@ -2044,7 +2044,7 @@ export default function SettingsPage() {
               type="button"
               disabled={!quickResetUserId || quickResetLoading}
               onClick={handleQuickReset}
-              className="w-full flex items-center justify-center gap-1.5 bg-[#0B1E6E] hover:bg-[#081650] disabled:opacity-60 text-white text-xs font-bold py-2.5 rounded-lg"
+              className="ui-btn ui-btn-primary w-full disabled:opacity-60"
             >
               <KeyRound className="h-3.5 w-3.5" />
               {quickResetLoading ? "Generating..." : "Force Reset Password"}
@@ -2087,7 +2087,7 @@ export default function SettingsPage() {
           <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-30" onClick={() => setIsAddOpen(false)} />
           <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[calc(100%-2rem)] max-w-md bg-white border border-slate-200 p-6 rounded-2xl shadow-2xl z-40 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b border-slate-200 pb-2">
-              <h3 className="text-sm font-bold text-brand-700 flex items-center gap-1.5">
+              <h3 className="ui-title text-brand-700 flex items-center gap-1.5">
                 <Plus className="h-4.5 w-4.5 text-brand-600" />
                 Add User
               </h3>
@@ -2245,7 +2245,7 @@ export default function SettingsPage() {
               <button
                 type="submit"
                 disabled={addSaving}
-                className="w-full bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold py-2.5 rounded-lg text-xs transition-all shadow-sm disabled:opacity-60"
+                className="ui-btn ui-btn-primary w-full disabled:opacity-60"
               >
                 {addSaving ? "Creating..." : "Create User"}
               </button>
@@ -2260,7 +2260,7 @@ export default function SettingsPage() {
           <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-30" onClick={() => setSelectedUser(null)} />
           <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[calc(100%-2rem)] max-w-md bg-white border border-slate-200 p-6 rounded-2xl shadow-2xl z-40 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b border-slate-200 pb-2">
-              <h3 className="text-sm font-bold text-brand-700 flex items-center gap-1.5">
+              <h3 className="ui-title text-brand-700 flex items-center gap-1.5">
                 <Edit className="h-4.5 w-4.5 text-brand-600" />
                 Edit User
               </h3>
@@ -2454,7 +2454,7 @@ export default function SettingsPage() {
               <button
                 type="submit"
                 disabled={editSaving}
-                className="w-full bg-[#0B1E6E] hover:bg-[#081650] text-white font-semibold py-2.5 rounded-lg text-xs transition-all shadow-md disabled:opacity-60"
+                className="ui-btn ui-btn-primary w-full disabled:opacity-60"
               >
                 {editSaving ? "Saving..." : "Save Changes"}
               </button>
