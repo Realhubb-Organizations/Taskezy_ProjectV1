@@ -580,7 +580,17 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                         const activityTime = latestLog ? new Date(latestLog.timestamp).getTime() : Date.now();
                         const overdueMinutes = missedAtTime !== undefined ? Math.round((activityTime - missedAtTime) / 60000) : undefined;
                         return (
-                          <li key={lead.id} className="p-4 space-y-3 text-xs">
+                          <li
+                            key={lead.id}
+                            onClick={(e) => {
+                              const target = e.target as HTMLElement;
+                              if (!e.currentTarget.contains(target)) return;
+                              if (target.closest("button, a, input, select, textarea, label, [role='button'], [role='combobox'], [role='listbox']")) return;
+                              if (window.getSelection()?.toString()) return;
+                              setDrawerLeadId(lead.id);
+                            }}
+                            className="p-4 space-y-3 text-xs cursor-pointer"
+                          >
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
                                 <p className="font-bold text-slate-800">{lead.name}</p>
@@ -677,7 +687,17 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                           const activityTime = latestLog ? new Date(latestLog.timestamp).getTime() : Date.now();
                           const overdueMinutes = missedAtTime !== undefined ? Math.round((activityTime - missedAtTime) / 60000) : undefined;
                           return (
-                            <tr key={lead.id} className="hover:bg-slate-50/50">
+                            <tr
+                              key={lead.id}
+                              onClick={(e) => {
+                                const target = e.target as HTMLElement;
+                                if (!e.currentTarget.contains(target)) return;
+                                if (target.closest("button, a, input, select, textarea, label, [role='button'], [role='combobox'], [role='listbox']")) return;
+                                if (window.getSelection()?.toString()) return;
+                                setDrawerLeadId(lead.id);
+                              }}
+                              className="cursor-pointer hover:bg-slate-50/50"
+                            >
                               <td className="px-4 py-3">
                                 <p className="font-bold text-slate-800">{lead.name}</p>
                                 <p className="text-[9px] text-slate-450 font-mono">{activeRole === "ADMIN" ? lead.phone : maskPhone(lead.phone)}</p>
@@ -743,7 +763,17 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                           : new Date(`${f.date}T00:00:00`).getTime();
                         const overdueMinutes = Math.round((Date.now() - missedAtTime) / 60000);
                         return (
-                          <li key={f.id} className="p-4 space-y-3 text-xs">
+                          <li
+                            key={f.id}
+                            onClick={f.leadId ? (e) => {
+                              const target = e.target as HTMLElement;
+                              if (!e.currentTarget.contains(target)) return;
+                              if (target.closest("button, a, input, select, textarea, label, [role='button'], [role='combobox'], [role='listbox']")) return;
+                              if (window.getSelection()?.toString()) return;
+                              setDrawerLeadId(f.leadId!);
+                            } : undefined}
+                            className={`p-4 space-y-3 text-xs ${f.leadId ? "cursor-pointer" : ""}`}
+                          >
                             <div>
                               <p className="font-bold text-slate-800">{f.leadName}</p>
                               <p className="text-[10px] text-slate-450 font-mono">{activeRole === "ADMIN" ? f.phone : maskPhone(f.phone)}</p>
@@ -807,7 +837,17 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
                             : new Date(`${f.date}T00:00:00`).getTime();
                           const overdueMinutes = Math.round((Date.now() - missedAtTime) / 60000);
                           return (
-                            <tr key={f.id} className="hover:bg-slate-50/50">
+                            <tr
+                              key={f.id}
+                              onClick={f.leadId ? (e) => {
+                                const target = e.target as HTMLElement;
+                                if (!e.currentTarget.contains(target)) return;
+                                if (target.closest("button, a, input, select, textarea, label, [role='button'], [role='combobox'], [role='listbox']")) return;
+                                if (window.getSelection()?.toString()) return;
+                                setDrawerLeadId(f.leadId!);
+                              } : undefined}
+                              className={`hover:bg-slate-50/50 ${f.leadId ? "cursor-pointer" : ""}`}
+                            >
                               <td className="px-4 py-3">
                                 <p className="font-bold text-slate-800">{f.leadName}</p>
                                 <p className="text-[9px] text-slate-450 font-mono">{activeRole === "ADMIN" ? f.phone : maskPhone(f.phone)}</p>
