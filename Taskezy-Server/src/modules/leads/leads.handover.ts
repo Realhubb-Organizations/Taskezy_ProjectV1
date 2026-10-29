@@ -30,10 +30,14 @@ const SYSTEM_ORIGIN_LOG_PREFIXES = [
   "Restored from an archived lead deleted on ",
   "Lead qualified and transferred to main leads",
   "Lead received via Meta Ads",
-  // Legacy format from an earlier Meta ingest implementation — no current
-  // code generates this (confirmed via repo-wide search); kept here in
-  // case a row somewhere was missed by the retroactive cleanup.
-  "Facebook Lead (webhook):"
+  // Legacy formats from earlier Meta/Sheet ingest implementations — no
+  // current code generates any of these three (confirmed via repo-wide
+  // search); kept here since real historical rows still exist under each
+  // exact wording.
+  "Facebook Lead (webhook):",
+  "Facebook Lead Sync:",
+  "Facebook PPC",
+  "Imported from GoogleSheets"
 ];
 
 const AGENT_VISIBLE_STUB = "Lead received.";
