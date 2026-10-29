@@ -2592,7 +2592,6 @@ export default function LeadDashboard() {
                               <TableRowsSkeleton rows={6} columns={8} />
                             ) : (
                               analyticsDrilldownRows.map((l) => (
-                              <tr key={l.id} onClick={(e) => handleLeadRowClick(e, l)} className="cursor-pointer hover:bg-slate-50/60 transition-colors">
                               <tr key={l.id} onClick={openOnRowClick(() => setSelectedLead(l))} className={LEAD_ROW_CLASS}>
                                 <td className="px-4 py-3 align-top overflow-hidden">
                                   <button

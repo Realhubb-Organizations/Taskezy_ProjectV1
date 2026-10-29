@@ -244,14 +244,6 @@ export default function PendingLeadsTable({
                 <tr
                   key={row.id}
                   ref={idx % rowsPerPage === 0 ? (el) => { pageRowRefs.current[Math.floor(idx / rowsPerPage)] = el; } : undefined}
-                  onClick={row.leadId && onViewLead ? (e) => {
-                    const target = e.target as HTMLElement;
-                    if (!e.currentTarget.contains(target)) return;
-                    if (target.closest("button, a, input, select, textarea, label, [role='button'], [role='combobox'], [role='listbox']")) return;
-                    if (window.getSelection()?.toString()) return;
-                    onViewLead!(row.leadId!);
-                  } : undefined}
-                  className={`hover:bg-slate-50/60 transition-colors text-xs ${row.leadId && onViewLead ? "cursor-pointer" : ""}`}
                   onClick={row.leadId && onViewLead ? openOnRowClick(() => onViewLead(row.leadId!)) : undefined}
                   className={`text-xs ${row.leadId && onViewLead ? LEAD_ROW_CLASS : "hover:bg-slate-50/60 transition-colors"}`}
                 >
