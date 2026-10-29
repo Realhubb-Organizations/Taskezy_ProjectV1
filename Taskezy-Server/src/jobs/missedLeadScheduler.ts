@@ -111,13 +111,18 @@ async function notifyMissedLeads(): Promise<void> {
         ? `${leads[0].agent_name} hasn't responded to "${leads[0].name}"`
         : `${leads[0].agent_name} hasn't responded to ${leads.length} leads (${quoteList(leads)})`
     );
+    // One agent in this escalation -> deep-link straight to their Sales
+    // Agent Report instead of the generic Reports landing page. Several
+    // agents at once has no single agent to land on, so that case keeps
+    // the plain link.
+    const [singleAgentId] = byAgent.size === 1 ? [...byAgent.keys()] : [];
     await createNotification({
       system: "CRM",
       category: "MISSED_SLA",
       title: totalLeads === 1 ? "Team Lead Missed SLA" : `${totalLeads} Team Leads Missed SLA`,
       message: `${parts.join("; ")} within ${SLA_MINUTES} minutes.`,
       recipientUserId: recipientId,
-      link: "/dashboard/reports"
+      link: singleAgentId ? `/dashboard/reports?tab=agent&agentId=${singleAgentId}` : "/dashboard/reports"
     });
   }
 
@@ -131,6 +136,7 @@ async function notifyMissedLeads(): Promise<void> {
 }
 
 interface DailyMissedRow {
+  agent_id: string;
   agent_name: string;
   manager_name: string | null;
   missed_count: string;
@@ -138,7 +144,7 @@ interface DailyMissedRow {
 
 async function notifyAdminDailyDigest(adminIds: string[]): Promise<void> {
   const { rows } = await pool.query<DailyMissedRow>(
-    `SELECT u.first_name || COALESCE(' ' || u.last_name, '') AS agent_name,
+    `SELECT u.id AS agent_id, u.first_name || COALESCE(' ' || u.last_name, '') AS agent_name,
             m.first_name || COALESCE(' ' || m.last_name, '') AS manager_name,
             count(*) AS missed_count
      FROM leads l
@@ -155,6 +161,9 @@ async function notifyAdminDailyDigest(adminIds: string[]): Promise<void> {
   const breakdown = rows
     .map(r => `${r.agent_name}: ${r.missed_count}${r.manager_name ? ` (${r.manager_name}'s team)` : ""}`)
     .join(" · ");
+  // Today's misses are all one agent -> land the admin straight on that
+  // agent's Sales Agent Report, same as the per-agent escalation above.
+  const link = rows.length === 1 ? `/dashboard/reports?tab=agent&agentId=${rows[0].agent_id}` : "/dashboard/reports";
 
   for (const adminId of adminIds) {
     await createNotification({
@@ -163,7 +172,7 @@ async function notifyAdminDailyDigest(adminIds: string[]): Promise<void> {
       title: `Missed Leads Today: ${total}`,
       message: `${total} missed lead${total === 1 ? "" : "s"} today across ${rows.length} agent${rows.length === 1 ? "" : "s"} — ${breakdown}`,
       recipientUserId: adminId,
-      link: "/dashboard/reports"
+      link
     });
   }
 }

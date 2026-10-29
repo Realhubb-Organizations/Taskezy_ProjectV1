@@ -32,7 +32,7 @@ const CONTACTED_CODES = ALL_DB_CODES.filter(c => c !== "NEW_LEAD");
 const QUALIFIED_CODES = ["CALL_BACK", "FOLLOWUP", "EOI", "SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE", "BOOKED"];
 const SITE_VISIT_CODES = ["SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE"];
 
-export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
+export default function AgentReports({ dateRange, initialAgentId }: { dateRange: DateRange; initialAgentId?: string }) {
   const { users, currentUser, activeRole, reassignLead, updateLeadStatus, isDataLoading } = useApp();
   const { toast, prompt: promptDialog } = useDialog();
 
@@ -87,6 +87,18 @@ export default function AgentReports({ dateRange }: { dateRange: DateRange }) {
   const isScopedToSelf = activeRole !== "ADMIN" && currentUser?.role_type !== "Manager";
 
   const [selectedAgent, setSelectedAgent] = useState<string>(agentNames[0] || "");
+  // Deep-linked from a notification naming one specific agent (?agentId= on
+  // /dashboard/reports) — applied once, so the viewer can still freely pick
+  // a different agent afterward without this overriding their choice again.
+  const appliedInitialAgentId = useRef(false);
+  useEffect(() => {
+    if (appliedInitialAgentId.current || !initialAgentId || isScopedToSelf) return;
+    const name = users.find(u => u.id === initialAgentId)?.name;
+    if (name && agentNames.includes(name)) {
+      setSelectedAgent(name);
+      appliedInitialAgentId.current = true;
+    }
+  }, [initialAgentId, users, agentNames, isScopedToSelf]);
   const activeAgent = isScopedToSelf ? (currentUser?.name || "") : (agentNames.includes(selectedAgent) ? selectedAgent : agentNames[0] || "");
 
   const agentSalesTeamOptions = useMemo(() => {
