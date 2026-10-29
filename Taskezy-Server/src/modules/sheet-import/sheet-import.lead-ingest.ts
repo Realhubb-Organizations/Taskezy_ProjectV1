@@ -108,20 +108,16 @@ export async function ingestSheetLead(row: SheetLeadRow): Promise<SheetLeadInges
     }
     const leadId = rows[0].id;
 
-    // The sheet often carries real prior sales activity (Status/Remarks from
-    // before this lead was in Taskezy at all) plus ad-attribution details
-    // this schema has no dedicated columns for — captured losslessly as the
-    // lead's first log entry rather than invented into new columns or
-    // silently dropped.
+    // Only genuine prior sales activity (Status/Remarks, from before this
+    // lead was in Taskezy at all) is worth an agent reading in Activity
+    // History. The sheet's own ad-attribution fields (medium/keyword/
+    // gclid/landing page URL/browser user-agent/raw sheet timestamp) are
+    // real but purely technical — they used to all get dumped into this
+    // same note, making it unreadably long; left out of the visible note
+    // entirely now rather than kept in a form nobody actually reads.
     const historicalBits = [
       row.status ? `Prior status: ${row.status}` : null,
-      row.remarks ? `Remarks: ${row.remarks}` : null,
-      row.medium ? `Medium: ${row.medium}` : null,
-      row.keyword ? `Keyword: ${row.keyword}` : null,
-      row.gclid ? `GCLID: ${row.gclid}` : null,
-      row.landingPage ? `Landing page: ${row.landingPage}` : null,
-      row.browser ? `Browser: ${row.browser}` : null,
-      row.timestamp ? `Original sheet timestamp: ${row.timestamp}` : null
+      row.remarks ? `Remarks: ${row.remarks}` : null
     ].filter((v): v is string => Boolean(v));
 
     if (historicalBits.length > 0) {
