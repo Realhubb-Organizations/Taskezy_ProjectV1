@@ -50,6 +50,8 @@ export async function listLeads(caller: AccessTokenPayload, filter: {
   missedOnly?: boolean;
   sortDir?: "asc" | "desc";
   sortField?: "created" | "assigned";
+  sourceBucket?: string[];
+  campaignIgnoreCase?: boolean;
 }) {
   const scopedToAgentIds = await scopeForCaller(caller);
   const { rows, totalCount } = await repo.findMany({
@@ -68,6 +70,8 @@ export async function listLeads(caller: AccessTokenPayload, filter: {
     slaMinutes: filter.missedOnly ? REPORT_SLA_MINUTES : undefined,
     sortDir: filter.sortDir,
     sortField: filter.sortField,
+    sourceBucket: filter.sourceBucket,
+    campaignIgnoreCase: filter.campaignIgnoreCase,
     scopedToAgentIds
   });
   return {

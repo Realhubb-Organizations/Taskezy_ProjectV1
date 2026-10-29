@@ -4,7 +4,7 @@ import React, { Suspense, useState } from "react";
 import { useApp } from "@/context/AppContext";
 import { useDialog } from "@/components/ui/DialogProvider";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Download, Megaphone, Users, UserCog, AlertTriangle, Clock } from "lucide-react";
+import { Download, AlertTriangle, Clock } from "lucide-react";
 import DateRangeFilter, { DateRange } from "@/components/reports/DateRangeFilter";
 import MarketingReports from "@/components/reports/MarketingReports";
 import ManagerReports from "@/components/reports/ManagerReports";
@@ -14,9 +14,9 @@ import { maskPhone, maskEmail } from "@/lib/maskPII";
 import { apiListAllLeads, apiUpdateMyEodReportTime } from "@/lib/apiClient";
 
 const MAIN_TABS = [
-  { key: "marketing", label: "Marketing Reports", icon: Megaphone },
-  { key: "manager", label: "Manager Reports", icon: Users },
-  { key: "agent", label: "Sales Agent Reports", icon: UserCog }
+  { key: "agent", label: "Team Reports" },
+  { key: "manager", label: "Manager Reports" },
+  { key: "marketing", label: "Marketing Reports" }
 ] as const;
 
 function todayStr(): string {
@@ -122,28 +122,33 @@ function ReportsPageContent() {
 
   return (
     <div className="space-y-4 pb-12 animate-fade-in">
-      {/* Main section tabs — same segmented pill switcher as the Leads and
-          Campaigns tab toggles (bg-slate-200/70 track, bg-white active pill),
-          not a standalone page title: the top bar already shows "Reports". */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div className="ui-toggle overflow-x-auto max-w-full">
+      {/* Main section tabs — plain text tabs, the active one underlined
+          (the top bar already shows "Reports"). */}
+      {/* On Marketing the tabs stay pinned at the top (with the filters and
+          cards below them) while the lists scroll underneath — desktop only. */}
+      <div className={`flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 ${
+        activeTab === "marketing" ? "md:sticky md:-top-6 lg:-top-8 md:z-30 md:h-12 md:-mx-6 md:px-6 lg:-mx-8 lg:px-8 md:-mt-6 lg:-mt-8 md:pt-4 md:bg-[#FCFDFE]" : ""
+      }`}>
+        <div className="flex items-center gap-6 sm:gap-8 overflow-x-auto max-w-full">
           {visibleTabs.map(t => (
             <button
               key={t.key}
               onClick={() => handleTabChange(t.key)}
-              className={`ui-toggle-item shrink-0 ${activeTab === t.key ? "ui-toggle-item-active" : ""}`}
+              className={`shrink-0 pb-1.5 text-[13px] font-semibold border-b-2 transition-colors ${
+                activeTab === t.key ? "border-[#1E3A8A] text-[#1E3A8A]" : "border-transparent text-slate-500 hover:text-slate-800"
+              }`}
             >
-              <t.icon className="h-3.5 w-3.5" />
               {t.label}
             </button>
           ))}
         </div>
         <div className="flex flex-wrap items-center gap-3">
         {/* Shared date-range filter — every report is generated for this selected window */}
-        <DateRangeFilter value={dateRange} onChange={setDateRange} />
+        {/* Marketing has its own Date Range in its filter row */}
+        {activeTab !== "marketing" && <DateRangeFilter value={dateRange} onChange={setDateRange} />}
         {/* Bulk lead export (incl. phone/email) is an Admin-only capability —
             Manager/Member never get a raw CSV of leads beyond their own scope. */}
-        {isAdmin && (
+        {isAdmin && activeTab !== "marketing" && (
           <button
             onClick={handleExportCSV}
             disabled={exportingCSV}
@@ -219,7 +224,7 @@ function ReportsPageContent() {
         </div>
       ) : (
         <>
-          {activeTab === "marketing" && <MarketingReports dateRange={dateRange} />}
+          {activeTab === "marketing" && <MarketingReports dateRange={dateRange} onDateRangeChange={setDateRange} />}
           {activeTab === "manager" && <ManagerReports dateRange={dateRange} />}
           {activeTab === "agent" && <AgentReports dateRange={dateRange} initialAgentId={initialAgentId} />}
         </>
