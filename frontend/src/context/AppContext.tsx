@@ -713,6 +713,8 @@ interface AppActions {
   // Calendar actions
   addCalendarEvent: (event: Omit<CalendarEvent, "id">) => void;
   addFollowupCall: (input: { scheduledAt: string; leadId?: string; leadName: string; phone?: string; callType: "CALLBACK" | "MEETING" | "SITE_VISIT"; assignedToName: string }) => void;
+  /** Record a follow-up that was already created through the API (e.g. by the call-feedback popup), so tables showing Next Call Date refresh. */
+  recordFollowupCreated: (row: ApiFollowupRow) => void;
   deleteCalendarEvent: (id: string) => void;
 }
 
@@ -1626,6 +1628,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     })
       .then((created) => setFollowupCalls(prev => [...prev, mapApiFollowupToFrontend(created)]))
       .catch((err) => console.warn("Could not persist new follow-up to the database:", err));
+  };
+
+  const recordFollowupCreated = (row: ApiFollowupRow) => {
+    setFollowupCalls(prev => [...prev, mapApiFollowupToFrontend(row)]);
   };
 
   const deleteCalendarEvent = (id: string) => {
@@ -2739,6 +2745,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         clearNotifications,
         addCalendarEvent,
         addFollowupCall,
+        recordFollowupCreated,
         deleteCalendarEvent
       }}
     >

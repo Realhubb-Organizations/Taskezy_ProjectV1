@@ -46,7 +46,9 @@ export default function TeamTasksTable({
   teamMembers,
   tab,
   onTabChange,
-  isLoading = false
+  isLoading = false,
+  rangeLabel,
+  dateBounds
 }: {
   pendingTasks: ApiPendingTaskRow[];
   teamMembers: string[]; // active sales agents, so "Show team members with no tasks" can list them
@@ -54,6 +56,10 @@ export default function TeamTasksTable({
   tab: Tab;
   onTabChange: (tab: Tab) => void;
   isLoading?: boolean;
+  /** The dashboard's Date Range, shown in brackets next to the tabs. */
+  rangeLabel?: string;
+  /** Same range as YYYY-MM-DD bounds, passed on to the member task page. */
+  dateBounds?: { dateFrom?: string; dateTo?: string };
 }) {
   const router = useRouter();
   // Buckets are time-based, so re-evaluate periodically.
@@ -90,6 +96,7 @@ export default function TeamTasksTable({
   const tasksHref = (agent: string) => {
     const params = new URLSearchParams({ agent, tab });
     for (const t of taskTypes) params.append("type", t);
+    if (dateBounds?.dateFrom && dateBounds?.dateTo) { params.set("from", dateBounds.dateFrom); params.set("to", dateBounds.dateTo); }
     return `/crm/dashboard/tasks?${params.toString()}`;
   };
 
@@ -137,12 +144,13 @@ export default function TeamTasksTable({
               {t.label}
             </button>
           ))}
+          {rangeLabel && <span className="pb-2 ui-desc whitespace-nowrap">({rangeLabel})</span>}
         </div>
         {/* Filter button → column-visibility drawer, same as the Campaigns page */}
         <button
           type="button"
           onClick={() => setIsFilterOpen(true)}
-          className="mb-1 inline-flex items-center justify-center gap-2 h-9 px-3.5 border border-slate-300/80 bg-white rounded-xl text-xs text-slate-700 font-bold hover:bg-slate-50 shadow-2xs transition-colors"
+          className="ui-btn ui-btn-secondary mb-1 border"
         >
           <Sliders className="h-4 w-4 text-blue-600" />
           Filter
@@ -154,7 +162,7 @@ export default function TeamTasksTable({
             <div className="fixed inset-0" onClick={() => setIsFilterOpen(false)} />
             <div className="fixed inset-y-0 right-0 w-full max-w-sm bg-white border-l border-slate-200 shadow-2xl flex flex-col animate-slide-in">
               <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-slate-100 shrink-0">
-                <h3 className="text-base font-extrabold text-slate-900">Filter</h3>
+                <h3 className="ui-title">Filter</h3>
                 <button onClick={() => setIsFilterOpen(false)} className="text-slate-400 hover:text-slate-700">
                   <X className="h-4.5 w-4.5" />
                 </button>

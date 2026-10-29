@@ -399,7 +399,7 @@ export default function AddLeadModal({
         <div className="w-full sm:max-w-3xl h-[95vh] h-[95dvh] sm:h-auto sm:max-h-[90vh] my-0 sm:my-8 bg-white border-0 sm:border border-slate-200 rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-fade-in">
           {/* Header */}
           <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 bg-slate-50/50 shrink-0">
-            <h3 className="text-sm font-extrabold text-slate-805">
+            <h3 className="ui-title">
               {activeTab === "manual" ? "Upload Single Lead" : "Upload Bulk Leads"}
             </h3>
             <button
@@ -572,13 +572,13 @@ export default function AddLeadModal({
                 <button
                   type="button"
                   onClick={onClose}
-                  className="flex-1 sm:flex-none bg-slate-100 border border-slate-200 text-slate-750 font-bold px-5 py-2 rounded-xl text-sm hover:bg-slate-200 transition-colors"
+                  className="ui-btn ui-btn-secondary flex-1 sm:flex-none border"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 sm:flex-none sm:ml-auto bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold px-5 py-2 rounded-xl text-sm transition-all shadow-md shadow-[#0B1E6E]/10"
+                  className="ui-btn ui-btn-primary flex-1 sm:flex-none sm:ml-auto shadow-[#0B1E6E]/10"
                 >
                   Save Lead Profile
                 </button>
@@ -615,7 +615,7 @@ export default function AddLeadModal({
                 <button
                   type="button"
                   onClick={onClose}
-                  className="flex-1 sm:flex-none sm:ml-auto bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold px-5 py-2 rounded-xl text-sm transition-all shadow-md shadow-[#0B1E6E]/10"
+                  className="ui-btn ui-btn-primary flex-1 sm:flex-none sm:ml-auto shadow-[#0B1E6E]/10"
                 >
                   Close
                 </button>
@@ -807,14 +807,14 @@ export default function AddLeadModal({
                 <button
                   type="button"
                   onClick={onClose}
-                  className="flex-1 sm:flex-none bg-slate-100 border border-slate-200 text-slate-750 font-bold px-5 py-2 rounded-xl text-sm hover:bg-slate-200 transition-colors"
+                  className="ui-btn ui-btn-secondary flex-1 sm:flex-none border"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={bulkSubmitting}
-                  className="flex-1 sm:flex-none sm:ml-auto bg-[#0B1E6E] hover:bg-[#081650] disabled:opacity-60 text-white font-bold px-5 py-2 rounded-xl text-sm transition-all shadow-md shadow-[#0B1E6E]/10"
+                  className="ui-btn ui-btn-primary flex-1 sm:flex-none sm:ml-auto disabled:opacity-60 shadow-[#0B1E6E]/10"
                 >
                   {bulkSubmitting ? "Importing…" : "Import Leads Database"}
                 </button>

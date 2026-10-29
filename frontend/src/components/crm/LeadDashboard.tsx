@@ -14,6 +14,8 @@ import { useServerLeadList } from "@/lib/useServerLeadList";
 import { PlatformLabel, platformFromText } from "@/components/icons/ContactIcons";
 import ExpandChevron, { CollapsibleCell } from "@/components/ui/ExpandChevron";
 import { isPhoneLayout } from "@/lib/viewport";
+import { dateRangeLabel } from "@/lib/dateRangeLabel";
+import { openOnRowClick, LEAD_ROW_CLASS } from "@/lib/rowClick";
 import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/callTrigger";
 import { LineSkeleton, TableRowsSkeleton } from "@/components/ui/Skeletons";
 import Tooltip from "@/components/ui/Tooltip";
@@ -744,6 +746,9 @@ export default function LeadDashboard() {
   // table (same pattern as data-calling/page.tsx and LeadDrillDownPanel.tsx).
   const [analyticsDrillPageFollowups, setAnalyticsDrillPageFollowups] = useState<FollowupCall[]>([]);
   const analyticsDrillPageLeadIds = analyticsDrilldownRows.map(l => l.id).join(",");
+  // Re-fetch Next Call Dates when a call is scheduled anywhere (addFollowupCall
+  // updates this list), not only when the rows change.
+  const { followupCalls: liveFollowups } = useApp();
   useEffect(() => {
     if (!analyticsDrillPageLeadIds) { setAnalyticsDrillPageFollowups([]); return; }
     let cancelled = false;
@@ -751,7 +756,7 @@ export default function LeadDashboard() {
       .then(({ rows }) => { if (!cancelled) setAnalyticsDrillPageFollowups(rows.map(mapApiFollowupToFrontend)); })
       .catch(() => { if (!cancelled) setAnalyticsDrillPageFollowups([]); });
     return () => { cancelled = true; };
-  }, [analyticsDrillPageLeadIds]);
+  }, [analyticsDrillPageLeadIds, liveFollowups]);
 
   const QUALIFIED_STATUS_OPTIONS = STATUS_OPTIONS.filter(s => !UNQUALIFIED_STATUSES.includes(s));
 
@@ -980,7 +985,7 @@ export default function LeadDashboard() {
       .then(({ rows }) => { if (!cancelled) setAdminPageFollowups(rows.map(mapApiFollowupToFrontend)); })
       .catch(() => { if (!cancelled) setAdminPageFollowups([]); });
     return () => { cancelled = true; };
-  }, [adminPageLeadIds]);
+  }, [adminPageLeadIds, liveFollowups]);
   const adminNextCallDateFor = (leadId: string) => nextFollowupFor(leadId, adminPageFollowups);
 
   // ---- Bulk Assign / Reshuffle (Admin + Manager) ----
@@ -1416,20 +1421,16 @@ export default function LeadDashboard() {
     <div className="space-y-4 pb-12 animate-fade-in">
       <div className="flex flex-wrap justify-between items-center gap-3">
           {canViewLeadsAnalytics && (
-          <div className="bg-slate-200/60 p-1 rounded-xl flex items-center gap-1">
+          <div className="ui-toggle">
             <button
               onClick={() => setAdminTab("leads")}
-              className={`rounded-lg px-4 py-1.5 text-xs font-bold cursor-pointer transition-all ${
-                adminTab === "leads" ? "bg-white shadow-sm text-slate-800" : "text-slate-500 hover:text-slate-700"
-              }`}
+              className={`ui-toggle-item ${adminTab === "leads" ? "ui-toggle-item-active" : ""}`}
             >
               Leads
             </button>
             <button
               onClick={() => setAdminTab("analytics")}
-              className={`rounded-lg px-4 py-1.5 text-xs font-bold cursor-pointer transition-all ${
-                adminTab === "analytics" ? "bg-white shadow-sm text-slate-800" : "text-slate-500 hover:text-slate-700"
-              }`}
+              className={`ui-toggle-item ${adminTab === "analytics" ? "ui-toggle-item-active" : ""}`}
             >
               Leads Analytics
             </button>
@@ -1439,7 +1440,7 @@ export default function LeadDashboard() {
           {adminTab === "leads" && (
             <div className="flex flex-wrap items-center gap-3 ml-auto">
               {isAdmin && (
-                <SearchableMultiSelect
+                <SearchableMultiSelect variant="toolbar"
                   options={adminCampaignOptions}
                   selected={adminCampaignFilter}
                   onChange={(next) => { setAdminPage(1); setAdminCampaignFilter(next); }}
@@ -1453,7 +1454,7 @@ export default function LeadDashboard() {
               {canUploadLeads(currentUser) && (
                 <button
                   onClick={() => setIsAddOpen(true)}
-                  className="inline-flex items-center justify-center gap-2 h-9 px-3.5 bg-[#0B1E6E] hover:bg-[#081650] text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer"
+                  className="ui-btn ui-btn-primary cursor-pointer"
                 >
                   <Plus className="h-4 w-4" />
                   Upload Leads
@@ -1583,7 +1584,7 @@ export default function LeadDashboard() {
                   <button
                     type="button"
                     onClick={() => openAssignFlow("assign")}
-                    className="inline-flex items-center justify-center gap-2 h-9 px-3.5 border border-slate-200 bg-white rounded-xl text-xs text-slate-700 font-bold shadow-sm hover:bg-slate-50 transition-all"
+                    className="ui-btn ui-btn-secondary border"
                   >
                     <Users className="h-4 w-4 text-blue-600" />
                     Assign ({selectedUnassignedLeads.length})
@@ -1593,7 +1594,7 @@ export default function LeadDashboard() {
                   <button
                     type="button"
                     onClick={() => openAssignFlow("reshuffle")}
-                    className="inline-flex items-center justify-center gap-2 h-9 px-3.5 border border-slate-200 bg-white rounded-xl text-xs text-slate-700 font-bold shadow-sm hover:bg-slate-50 transition-all"
+                    className="ui-btn ui-btn-secondary border"
                   >
                     <Users className="h-4 w-4 text-blue-600" />
                     Reshuffle ({selectedAssignedLeads.length})
@@ -1603,7 +1604,7 @@ export default function LeadDashboard() {
                   <button
                     type="button"
                     onClick={openBulkDelete}
-                    className="inline-flex items-center justify-center gap-2 h-9 px-3.5 border border-slate-200 bg-white rounded-xl text-xs text-red-600 font-bold shadow-sm hover:bg-red-50 transition-all"
+                    className="ui-btn ui-btn-secondary border text-red-600 hover:bg-red-50"
                   >
                     <Trash2 className="h-4 w-4 text-red-600" />
                     Delete ({selectedLeads.size})
@@ -1613,7 +1614,7 @@ export default function LeadDashboard() {
                   <button
                     type="button"
                     onClick={openPropertyFlow}
-                    className="inline-flex items-center justify-center gap-2 h-9 px-3.5 border border-slate-200 bg-white rounded-xl text-xs text-slate-700 font-bold shadow-sm hover:bg-slate-50 transition-all"
+                    className="ui-btn ui-btn-secondary border"
                   >
                     <Building2 className="h-4 w-4 text-blue-600" />
                     Change Property ({selectedLeads.size})
@@ -1626,12 +1627,12 @@ export default function LeadDashboard() {
                     setAdminDateRange(range ? "custom" : "today");
                     setAdminPage(1);
                   }}
-                  emptyLabel={todayStr}
+                  emptyLabel={DATE_RANGE_OPTIONS.find(o => o.value === adminDateRange)?.label ?? todayStr}
                 />
                 <button
                   type="button"
                   onClick={() => setIsColumnsSettingsOpen(true)}
-                  className="inline-flex items-center justify-center gap-2 h-9 px-3.5 border border-slate-200 bg-white rounded-xl text-xs text-slate-700 font-bold shadow-sm hover:bg-slate-50 transition-all"
+                  className="ui-btn ui-btn-secondary border"
                 >
                   <Sliders className="h-4 w-4 text-blue-600" />
                   Filter
@@ -1648,7 +1649,7 @@ export default function LeadDashboard() {
                 unchanged) and New Leads looked like they "did nothing". */}
             {!isAdmin && adminMetric && (
               <div className="flex items-center justify-between px-1">
-                <h3 className="text-sm font-extrabold text-slate-900">
+                <h3 className="ui-section-title">
                   Showing: {adminStatCards.find(s => s.key === adminMetric)?.label}
                 </h3>
                 <button
@@ -2081,6 +2082,7 @@ export default function LeadDashboard() {
 
               <TablePagination
                 totalRows={serverTotalCount}
+                countSuffix={dateRangeLabel(DATE_RANGE_OPTIONS.find(o => o.value === adminDateRange)?.label ?? "Custom", adminDateRange === "custom" ? adminCustomRange : null)}
                 page={adminCurrentPage}
                 rowsPerPage={adminRowsPerPage}
                 onPageChange={goToAdminPage}
@@ -2136,7 +2138,7 @@ export default function LeadDashboard() {
                   emptyLabel={DATE_RANGE_OPTIONS.find(o => o.value === analyticsDateRange)?.label ?? "Custom Range"}
                 />
 
-                <SearchableMultiSelect
+                <SearchableMultiSelect variant="toolbar"
                   options={agentsList}
                   selected={analyticsMemberFilter}
                   onChange={(next) => { setAnalyticsPage(1); setAnalyticsMemberFilter(next); }}
@@ -2145,7 +2147,7 @@ export default function LeadDashboard() {
                   panelWidth={200}
                 />
 
-                <SearchableMultiSelect
+                <SearchableMultiSelect variant="toolbar"
                   options={analyticsPropertiesList}
                   selected={analyticsPropertyFilter}
                   onChange={(next) => { setAnalyticsPage(1); setAnalyticsPropertyFilter(next); }}
@@ -2159,7 +2161,7 @@ export default function LeadDashboard() {
                     Source/Ad Set Name columns. See
                     project_crm_role_based_lead_scoping memory (2026-10-09). */}
                 {isAdmin && (
-                  <SearchableMultiSelect
+                  <SearchableMultiSelect variant="toolbar"
                     options={analyticsCampaignOptions}
                     selected={analyticsCampaignFilter}
                     onChange={(next) => { setAnalyticsPage(1); setAnalyticsCampaignFilter(next); }}
@@ -2519,7 +2521,7 @@ export default function LeadDashboard() {
             {analyticsDrilldown && (
                 <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden animate-fade-in">
                   <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
-                    <h3 className="text-sm font-extrabold text-slate-900">{analyticsDrilldown.title}</h3>
+                    <h3 className="ui-section-title">{analyticsDrilldown.title}</h3>
                     <button
                       type="button"
                       onClick={() => setAnalyticsDrilldown(null)}
@@ -2591,6 +2593,7 @@ export default function LeadDashboard() {
                             ) : (
                               analyticsDrilldownRows.map((l) => (
                               <tr key={l.id} onClick={(e) => handleLeadRowClick(e, l)} className="cursor-pointer hover:bg-slate-50/60 transition-colors">
+                              <tr key={l.id} onClick={openOnRowClick(() => setSelectedLead(l))} className={LEAD_ROW_CLASS}>
                                 <td className="px-4 py-3 align-top overflow-hidden">
                                   <button
                                     onClick={() => setSelectedLead(l)}
@@ -2634,7 +2637,7 @@ export default function LeadDashboard() {
                 yet (see comment on rnrLeads above), so they honestly show "—". */}
             <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden p-6">
               <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-                <h3 className="text-sm font-extrabold text-slate-900">RNR Analysis</h3>
+                <h3 className="ui-section-title">RNR Analysis</h3>
                 <div className="relative">
                   <Search className="h-3.5 w-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
                   <input
@@ -2700,7 +2703,7 @@ export default function LeadDashboard() {
             <div className="fixed inset-0 bg-slate-900/40" onClick={closeAssignFlow} />
             <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md">
               <div className="px-6 pt-6 pb-4 border-b border-slate-100">
-                <h3 className="text-xl font-extrabold text-slate-900">
+                <h3 className="ui-title">
                   {assignFlowMode === "reshuffle" ? "Reshuffle Leads" : "Assign Leads"}
                 </h3>
               </div>
@@ -2773,7 +2776,7 @@ export default function LeadDashboard() {
                   type="button"
                   disabled={assignSubmitting}
                   onClick={closeAssignFlow}
-                  className="px-5 py-2 rounded-xl border border-slate-300 font-bold text-slate-700 text-sm hover:bg-slate-50 transition-colors disabled:opacity-50"
+                  className="ui-btn ui-btn-secondary border disabled:opacity-50"
                 >
                   Cancel
                 </button>
@@ -2781,9 +2784,9 @@ export default function LeadDashboard() {
                   type="button"
                   disabled={!canConfirmAssign || assignSubmitting}
                   onClick={confirmBulkAssign}
-                  className={`px-5 py-2 rounded-xl font-bold text-sm text-white transition-colors ${
-                    canConfirmAssign && !assignSubmitting ? "bg-[#0B1E6E] hover:bg-[#081650]" : "bg-slate-300 cursor-not-allowed"
-                  }`}
+                  className={`ui-btn ui-btn-primary ${
+ canConfirmAssign && !assignSubmitting ? " " : "bg-slate-300 cursor-not-allowed"
+ }`}
                 >
                   {assignSubmitting ? "Saving..." : assignFlowMode === "reshuffle" ? "Reshuffle" : "Assign"}
                 </button>
@@ -2800,7 +2803,7 @@ export default function LeadDashboard() {
             <div className="fixed inset-0 bg-slate-900/40" onClick={closePropertyFlow} />
             <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md">
               <div className="px-6 pt-6 pb-4 border-b border-slate-100">
-                <h3 className="text-xl font-extrabold text-slate-900">Change Property</h3>
+                <h3 className="ui-title">Change Property</h3>
               </div>
               <div className="px-6 py-5 space-y-5">
                 <p className="text-xs text-slate-500">
@@ -2846,7 +2849,7 @@ export default function LeadDashboard() {
                   type="button"
                   disabled={bulkPropertySubmitting}
                   onClick={closePropertyFlow}
-                  className="px-5 py-2 rounded-xl border border-slate-300 font-bold text-slate-700 text-sm hover:bg-slate-50 transition-colors disabled:opacity-50"
+                  className="ui-btn ui-btn-secondary border disabled:opacity-50"
                 >
                   Cancel
                 </button>
@@ -2854,9 +2857,9 @@ export default function LeadDashboard() {
                   type="button"
                   disabled={!bulkPropertyId || !bulkPropertyNote.trim() || bulkPropertySubmitting}
                   onClick={confirmBulkSetProperty}
-                  className={`px-5 py-2 rounded-xl font-bold text-sm text-white transition-colors ${
-                    bulkPropertyId && bulkPropertyNote.trim() && !bulkPropertySubmitting ? "bg-[#0B1E6E] hover:bg-[#081650]" : "bg-slate-300 cursor-not-allowed"
-                  }`}
+                  className={`ui-btn ui-btn-primary ${
+ bulkPropertyId && bulkPropertyNote.trim() && !bulkPropertySubmitting ? " " : "bg-slate-300 cursor-not-allowed"
+ }`}
                 >
                   {bulkPropertySubmitting ? "Saving..." : "Change Property"}
                 </button>
@@ -2873,8 +2876,8 @@ export default function LeadDashboard() {
             <div className="fixed inset-0 bg-slate-900/40" onClick={closePhoneSearch} />
             <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col">
               <div className="px-6 pt-6 pb-4 border-b border-slate-100 shrink-0">
-                <h3 className="text-xl font-extrabold text-slate-900">Search Multiple Phone Numbers</h3>
-                <p className="text-xs text-slate-500 mt-1">Paste a list (one per line, or comma-separated) or upload a .csv/.txt file. Up to 2,000 at once.</p>
+                <h3 className="ui-title">Search Multiple Phone Numbers</h3>
+                <p className="ui-desc mt-1">Paste a list (one per line, or comma-separated) or upload a .csv/.txt file. Up to 2,000 at once.</p>
               </div>
 
               <div className="px-6 py-5 space-y-4 overflow-y-auto">
@@ -2916,14 +2919,14 @@ export default function LeadDashboard() {
                 <button
                   type="button"
                   onClick={closePhoneSearch}
-                  className="px-5 py-2 rounded-xl border border-slate-300 font-bold text-slate-700 text-sm hover:bg-slate-50 transition-colors"
+                  className="ui-btn ui-btn-secondary border"
                 >
                   Cancel
                 </button>
                 <button
                   type="button"
                   onClick={runPhoneSearch}
-                  className="px-5 py-2 rounded-xl font-bold text-sm text-white bg-[#0B1E6E] hover:bg-[#081650] transition-colors"
+                  className="ui-btn ui-btn-primary"
                 >
                   Search
                 </button>
@@ -2939,7 +2942,7 @@ export default function LeadDashboard() {
             <div className="fixed inset-0 bg-slate-900/40" onClick={closeDeleteDialog} />
             <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md">
               <div className="px-6 pt-6 pb-4 border-b border-slate-100">
-                <h3 className="text-xl font-extrabold text-slate-900">
+                <h3 className="ui-title">
                   {deleteTarget.ids.length === 1 ? "Delete Lead" : "Delete Leads"}
                 </h3>
               </div>
@@ -2964,7 +2967,7 @@ export default function LeadDashboard() {
                   type="button"
                   disabled={deleteSubmitting}
                   onClick={closeDeleteDialog}
-                  className="px-5 py-2 rounded-xl border border-slate-300 font-bold text-slate-700 text-sm hover:bg-slate-50 transition-colors disabled:opacity-50"
+                  className="ui-btn ui-btn-secondary border disabled:opacity-50"
                 >
                   Cancel
                 </button>
@@ -2972,7 +2975,7 @@ export default function LeadDashboard() {
                   type="button"
                   disabled={deleteSubmitting}
                   onClick={confirmDelete}
-                  className="px-5 py-2 rounded-xl font-bold text-sm text-white bg-red-600 hover:bg-red-700 transition-colors disabled:bg-slate-300 disabled:cursor-not-allowed"
+                  className="ui-btn ui-btn-danger disabled:bg-slate-300 disabled:cursor-not-allowed"
                 >
                   {deleteSubmitting ? "Deleting..." : "Delete"}
                 </button>
@@ -3021,7 +3024,7 @@ export default function LeadDashboard() {
             <div className="fixed inset-0" onClick={() => setIsColumnsSettingsOpen(false)} />
             <div className="fixed inset-y-0 right-0 w-full max-w-sm bg-white border-l border-slate-200 shadow-2xl flex flex-col animate-slide-in">
               <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-slate-100 shrink-0">
-                <h3 className="text-base font-extrabold text-slate-900">Filter</h3>
+                <h3 className="ui-title">Filter</h3>
                 <button
                   onClick={() => setIsColumnsSettingsOpen(false)}
                   className="text-slate-400 hover:text-slate-700"
@@ -3102,7 +3105,7 @@ export default function LeadDashboard() {
               <div className="fixed inset-0" onClick={() => setIsColumnsSettingsOpen(false)} />
               <div className="fixed inset-y-0 right-0 w-full max-w-sm bg-white border-l border-slate-200 shadow-2xl flex flex-col animate-slide-in">
                 <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-slate-100 shrink-0">
-                  <h3 className="text-base font-extrabold text-slate-900">Filter</h3>
+                  <h3 className="ui-title">Filter</h3>
                   <button
                     onClick={() => setIsColumnsSettingsOpen(false)}
                     className="text-slate-400 hover:text-slate-700"

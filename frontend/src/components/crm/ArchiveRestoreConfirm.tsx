@@ -51,7 +51,7 @@ export default function ArchiveRestoreConfirm({ precheck, onRestore, onSkip, onB
           type="button"
           onClick={onBack}
           disabled={submitting}
-          className="sm:order-1 bg-slate-100 border border-slate-200 text-slate-750 font-bold px-4 py-2 rounded-xl text-sm hover:bg-slate-200 disabled:opacity-60 transition-colors"
+          className="ui-btn ui-btn-secondary sm:order-1 border disabled:opacity-60"
         >
           Back
         </button>
@@ -59,7 +59,7 @@ export default function ArchiveRestoreConfirm({ precheck, onRestore, onSkip, onB
           type="button"
           onClick={onSkip}
           disabled={submitting}
-          className="sm:order-2 flex-1 bg-white border border-slate-300 text-slate-700 font-bold px-4 py-2 rounded-xl text-sm hover:bg-slate-50 disabled:opacity-60 transition-colors"
+          className="ui-btn ui-btn-secondary sm:order-2 flex-1 border disabled:opacity-60"
         >
           Skip — import as new leads
         </button>
@@ -67,7 +67,7 @@ export default function ArchiveRestoreConfirm({ precheck, onRestore, onSkip, onB
           type="button"
           onClick={onRestore}
           disabled={submitting}
-          className="sm:order-3 flex-1 bg-[#0B1E6E] hover:bg-[#081650] disabled:opacity-60 text-white font-bold px-4 py-2 rounded-xl text-sm transition-all shadow-md shadow-[#0B1E6E]/10"
+          className="ui-btn ui-btn-primary sm:order-3 flex-1 disabled:opacity-60 shadow-[#0B1E6E]/10"
         >
           {submitting ? "Importing…" : "Restore their history"}
         </button>

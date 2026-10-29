@@ -503,7 +503,7 @@ export default function AgentReports({ dateRange, initialAgentId }: { dateRange:
                 {/* Sales Funnel */}
                 <div className="lg:col-span-7 bg-white border border-slate-100 rounded-2xl shadow-sm p-5 space-y-4 min-w-0">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h3 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                    <h3 className="ui-section-title flex items-center gap-1.5">
                       Sales Funnel
                       <span
                         className="text-slate-400 cursor-help"
@@ -512,7 +512,7 @@ export default function AgentReports({ dateRange, initialAgentId }: { dateRange:
                         <Info className="h-3.5 w-3.5" />
                       </span>
                     </h3>
-                    <p className="text-[11px] text-slate-500">
+                    <p className="ui-desc">
                       Conversion Rate (Assigned → Site Visit) <span className="ml-1 text-sm font-black text-slate-800">{pct(funnel.siteVisits)}%</span>
                     </p>
                   </div>
@@ -532,7 +532,7 @@ export default function AgentReports({ dateRange, initialAgentId }: { dateRange:
 
                 {/* Action Required */}
                 <div className="lg:col-span-5 bg-white border border-slate-100 rounded-2xl shadow-sm p-5 space-y-3 min-w-0">
-                  <h3 className="text-sm font-bold text-slate-800">Action Required</h3>
+                  <h3 className="ui-section-title">Action Required</h3>
                   {[
                     { key: "missedLeads", label: "Missed Leads", value: reportStats.missedLeads, sub: `Leads not contacted within ${SLA_MINUTES} min SLA`, icon: AlertTriangle, tone: "bg-red-50 border-red-100", iconTone: "bg-red-100 text-red-600", btn: "bg-red-100/70 text-red-700 hover:bg-red-100", cta: "View Leads", tab: "leads" as "leads" | "followups" | null },
                     { key: "missedFollowups", label: "Missed Follow-ups", value: reportStats.missedFollowups, sub: "Follow-ups past reminder due time", icon: Clock, tone: "bg-amber-50 border-amber-100", iconTone: "bg-amber-100 text-amber-600", btn: "bg-amber-100/70 text-amber-800 hover:bg-amber-100", cta: "View Follow-ups", tab: "followups" as "leads" | "followups" | null },

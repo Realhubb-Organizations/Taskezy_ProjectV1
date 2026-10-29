@@ -22,7 +22,8 @@ body {
     ),
     rgb(var(--background-start-rgb));
   min-height: 100vh;
-  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  /* Standard Inter letter shapes (two-storey "a", regular 4/6/9) — no
+     stylistic alternates, matching the PubScale dashboard's Inter. */
 }
 
 /* Custom Scrollbars */
@@ -56,6 +57,31 @@ td [data-table-footer] {
   position: static !important;
 }
 
+
+/* One type scale for headings and their descriptions across the CRM, so the
+   same kind of heading looks the same on every page:
+     ui-title          — popup / drawer titles and in-page page headings
+     ui-section-title  — card and table section titles
+     ui-subheading     — small titles inside cards and popups
+     ui-desc           — the grey line under a heading */
+@layer components {
+  .ui-title { @apply text-lg font-semibold text-slate-900 tracking-tight; }
+  .ui-section-title { @apply text-base font-semibold text-slate-900; }
+  .ui-subheading { @apply text-sm font-semibold text-slate-800; }
+  .ui-desc { @apply text-[13px] font-normal text-slate-500 leading-snug; }
+
+  /* One size for every action button; colour by role. */
+  .ui-btn { @apply inline-flex items-center justify-center gap-2 h-9 px-4 rounded-xl text-[13px] font-semibold whitespace-nowrap transition-colors disabled:opacity-60 disabled:cursor-not-allowed; }
+  .ui-btn-primary { @apply bg-[#0B1E6E] text-white hover:bg-[#081650]; }
+  .ui-btn-secondary { @apply bg-white border border-slate-300 text-slate-700 hover:bg-slate-50; }
+  .ui-btn-danger { @apply bg-red-600 text-white hover:bg-red-700; }
+
+  /* Segmented toggle (e.g. Leads | Leads Analytics): grey track, white pill
+     for the selected option. 36px tall, same as .ui-btn. */
+  .ui-toggle { @apply inline-flex items-center gap-1 h-9 p-1 rounded-xl bg-slate-200/70; }
+  .ui-toggle-item { @apply inline-flex items-center justify-center gap-1.5 h-7 px-4 rounded-lg text-[13px] font-semibold whitespace-nowrap transition-colors text-slate-500 hover:text-slate-800; }
+  .ui-toggle-item-active { @apply bg-white text-slate-900 shadow-sm hover:text-slate-900; }
+}
 
 @layer utilities {
   .glass-card {

@@ -216,7 +216,7 @@ export default function MarketingReports({ dateRange }: { dateRange: DateRange }
 
       {subTab === "By Ad Account" && (
         <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 space-y-4">
-          <h3 className="text-xs font-bold text-slate-700">Individual Ad Account Performance</h3>
+          <h3 className="ui-section-title">Individual Ad Account Performance</h3>
           <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm">
             {/* Phones: one card per ad account */}
             <ul className="sm:hidden divide-y divide-slate-100">
@@ -330,7 +330,7 @@ export default function MarketingReports({ dateRange }: { dateRange: DateRange }
       {subTab === "Overall" && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 space-y-4">
-            <h3 className="text-xs font-bold text-slate-700">Spend by Platform</h3>
+            <h3 className="ui-section-title">Spend by Platform</h3>
             {(["Meta", "Google"] as const).map(platform => {
               const platformSpend = rangeSpend.filter(r => r.platform === platform);
               const spend = platformSpend.reduce((sum, r) => sum + r.spend, 0);
@@ -354,7 +354,7 @@ export default function MarketingReports({ dateRange }: { dateRange: DateRange }
           </div>
 
           <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 space-y-4">
-            <h3 className="text-xs font-bold text-slate-700">Lead Quality Breakdown</h3>
+            <h3 className="ui-section-title">Lead Quality Breakdown</h3>
             <div className="flex items-end gap-6">
               <div>
                 {isDataLoading ? <LineSkeleton width={36} height={30} /> : <p className="text-3xl font-black text-emerald-600">{quality.buyerCount}</p>}
@@ -378,7 +378,7 @@ export default function MarketingReports({ dateRange }: { dateRange: DateRange }
 
       {subTab === "Property-wise" && (
         <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 space-y-4">
-          <h3 className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+          <h3 className="ui-section-title flex items-center gap-1.5">
             <Building2 className="h-4 w-4 text-slate-500" />
             Property-wise Marketing Performance
           </h3>
