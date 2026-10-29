@@ -6,7 +6,6 @@ import { createPortal } from "react-dom";
 import { useApp, Lead, LeadStatus, FollowupCall, mapApiFollowupToFrontend, mapApiLeadToFrontendLead } from "@/context/AppContext";
 import { apiListFollowupsPage, apiGetDistinctCampaigns, apiGetLead, LeadListFilters } from "@/lib/apiClient";
 import LeadDetailDrawer from "./LeadDetailDrawer";
-import { openOnRowClick, LEAD_ROW_CLASS } from "@/lib/rowClick";
 import { useServerLeadList } from "@/lib/useServerLeadList";
 import { useDialog } from "@/components/ui/DialogProvider";
 import { deriveActivityTimeline, PICKABLE_STATUS_OPTIONS, statusBadgeClasses, frontendStatusToDbCode, withDeadLeadGate, nextStatusOptions } from "@/lib/leadStatusMapping";
@@ -589,11 +588,6 @@ export default function LeadDrillDownPanel({ title, baseFilters, onClose }: {
                         setQuickViewLead(l);
                       }}
                       className="cursor-pointer hover:bg-slate-50/60 transition-colors"
-                      onClick={openOnRowClick(() => {
-                        setQuickViewLead(l);
-                        apiGetLead(l.id).then(row => setQuickViewLead(mapApiLeadToFrontendLead(row))).catch(() => {});
-                      })}
-                      className={LEAD_ROW_CLASS}
                     >
                       <td className="px-4 py-3 align-top overflow-hidden">
                         <button

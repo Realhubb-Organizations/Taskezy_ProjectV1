@@ -50,10 +50,6 @@ import {
   apiGetAdLevelLeadStats, type AdLevelLeadStat,
   apiListLeadsPage, apiListFollowupsPage
 } from "@/lib/apiClient";
-import { apiGetLead } from "@/lib/apiClient";
-import LeadDetailDrawer from "@/components/crm/LeadDetailDrawer";
-import { useLeadStatusChange } from "@/components/crm/LeadDrillDownPanel";
-import { openOnRowClick, LEAD_ROW_CLASS } from "@/lib/rowClick";
 import { useServerLeadList } from "@/lib/useServerLeadList";
 import type { LeadSummaryStats } from "@/lib/leadSummaryStats";
 
@@ -243,13 +239,6 @@ export default function AdminCampaignsPage() {
   const [searchQuery, setSearchQuery] = useState("");
 
   const [quickViewLead, setQuickViewLead] = useState<Lead | null>(null);
-  // Open a lead in the full lead panel: show the row straight away, then
-  // swap in the full record (with Activity History).
-  const openLeadPanel = (l: Lead) => {
-    setQuickViewLead(l);
-    apiGetLead(l.id).then(row => setQuickViewLead(mapApiLeadToFrontendLead(row))).catch(() => {});
-  };
-  const handleLeadStatusChange = useLeadStatusChange();
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
   // Filter button → Settings panel for which table columns are shown — a
@@ -1376,7 +1365,6 @@ export default function AdminCampaignsPage() {
                               }}
                               className="cursor-pointer hover:bg-slate-50/50 transition-colors"
                             >
-                            <tr key={l.id} onClick={openOnRowClick(() => openLeadPanel(l))} className={LEAD_ROW_CLASS}>
                               <td className="px-4 py-2.5 font-semibold text-slate-900 [overflow-wrap:anywhere]">{l.name}</td>
                               <td className="px-4 py-2.5 font-mono [overflow-wrap:anywhere]">{isAdmin ? l.phone : maskPhone(l.phone)}</td>
                               <td className="px-4 py-2.5">{l.status}</td>
@@ -1491,7 +1479,6 @@ export default function AdminCampaignsPage() {
                             }}
                             className="cursor-pointer hover:bg-slate-50/50 transition-colors"
                           >
-                          <tr key={l.id} onClick={openOnRowClick(() => openLeadPanel(l))} className={LEAD_ROW_CLASS}>
                             <td className="px-4 py-3 text-slate-900 font-semibold [overflow-wrap:anywhere]">{l.name}</td>
                             <td className="px-4 py-3 [overflow-wrap:anywhere]" title={isAdmin ? l.email : undefined}>{l.email ? (isAdmin ? l.email : maskEmail(l.email)) : "—"}</td>
                             <td className="px-4 py-3 whitespace-nowrap">{l.status}</td>
@@ -2442,7 +2429,6 @@ export default function AdminCampaignsPage() {
         isOpen={quickViewLead !== null}
         onClose={() => setQuickViewLead(null)}
         onUpdateStatus={updateLeadStatus}
-        onUpdateStatus={handleLeadStatusChange}
       />
     </div>
   );
