@@ -116,12 +116,18 @@ async function notifyMissedLeads(): Promise<void> {
     // agents at once has no single agent to land on, so that case keeps
     // the plain link.
     const [singleAgentId] = byAgent.size === 1 ? [...byAgent.keys()] : [];
+    // Exactly one lead named in the message ("Sahith Gatla hasn't responded
+    // to 'Nandini Ali'") -> leadId wins over link in the notification click
+    // handler (NotificationBell/NotificationPopup), opening that lead's
+    // detail drawer directly instead of the agent's report.
+    const singleLeadId = totalLeads === 1 ? agentGroups[0][0].id : undefined;
     await createNotification({
       system: "CRM",
       category: "MISSED_SLA",
       title: totalLeads === 1 ? "Team Lead Missed SLA" : `${totalLeads} Team Leads Missed SLA`,
       message: `${parts.join("; ")} within ${SLA_MINUTES} minutes.`,
       recipientUserId: recipientId,
+      leadId: singleLeadId,
       link: singleAgentId ? `/dashboard/reports?tab=agent&agentId=${singleAgentId}` : "/dashboard/reports"
     });
   }
