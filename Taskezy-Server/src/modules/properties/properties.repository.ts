@@ -338,13 +338,30 @@ export async function listSheetSourceNamesForProperty(propertyId: string): Promi
   return rows.map(r => r.sheet_source_name);
 }
 
-/** Sheet source names seen on at least one incoming lead that aren't linked to any property yet. */
+/**
+ * Suggestion list for the "Connected Lead-Form Sheets" picker: sheet-source
+ * names already seen on an incoming lead, PLUS every property's own name —
+ * both filtered to ones not already linked to any property. The seen-names
+ * half only ever grows reactively, after a property's campaign has already
+ * sent a lead through the sync; including every property's own name lets an
+ * admin proactively link a property's expected sheet tab name ahead of
+ * time, whether or not its campaign has sent (or is currently sending) any
+ * leads yet — a property name is still only a starting suggestion, not a
+ * forced value: the sheet tab's real name may differ, and the existing
+ * custom-name input next to this list still covers that case either way.
+ */
 export async function listUnlinkedSheetSourceNames(): Promise<string[]> {
   const { rows } = await query<{ name: string }>(
-    `SELECT s.name FROM sheet_source_names_seen s
-     LEFT JOIN property_sheet_sources pss ON pss.sheet_source_name = s.name
-     WHERE pss.id IS NULL
-     ORDER BY s.name`
+    `SELECT DISTINCT name FROM (
+       SELECT s.name FROM sheet_source_names_seen s
+       LEFT JOIN property_sheet_sources pss ON pss.sheet_source_name = s.name
+       WHERE pss.id IS NULL
+       UNION
+       SELECT p.name FROM properties p
+       LEFT JOIN property_sheet_sources pss ON pss.sheet_source_name = p.name
+       WHERE pss.id IS NULL
+     ) combined
+     ORDER BY name`
   );
   return rows.map(r => r.name);
 }

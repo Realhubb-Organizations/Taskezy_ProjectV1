@@ -3,7 +3,7 @@
 import React, { useState, useRef, useMemo, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useApp, Lead, FollowupCall, mapApiFollowupToFrontend } from "@/context/AppContext";
-import { ChevronDown, ChevronRight, Search, Sliders, Minus, X, Copy, Users, Plus, Check, Trash2, AlertTriangle, GripVertical } from "lucide-react";
+import { ChevronRight, ChevronDown, Search, Sliders, Minus, X, Copy, Users, Plus, Check, Trash2, AlertTriangle, GripVertical } from "lucide-react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine } from "recharts";
 import UploadLeadsModal from "@/components/crm/UploadLeadsModal";
 import LeadDetailDrawer from "@/components/crm/LeadDetailDrawer";

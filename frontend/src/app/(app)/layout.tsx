@@ -405,8 +405,16 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   // first 4 items become fixed tabs (mirrors a native app's tab bar);
   // anything beyond that — plus the other groups/Organization/Help/Logout —
   // lives behind the "More" tab (the same drawer used on desktop-hidden screens).
+  // CRM's right slot: Campaigns is Admin-only (checkUserAccess strips it
+  // from a Manager/Member's own items entirely), which left their bar
+  // lopsided — 3 tabs left (Properties/Leads/Data Calling, none restricted)
+  // against 2 right (Reports/Calendar). Call Log fills that slot for them
+  // instead, restoring 3-and-3; Admin keeps Campaigns there unchanged.
   const mobileNavLayout: Record<string, { left: string[]; right: string[] }> = {
-    CRM: { left: ["Properties", "Leads", "Data Calling"], right: ["Campaigns", "Reports", "Calendar"] },
+    CRM: {
+      left: ["Properties", "Leads", "Data Calling"],
+      right: currentUser?.role === "ADMIN" ? ["Campaigns", "Reports", "Calendar"] : ["Call Log", "Reports", "Calendar"]
+    },
     HRMS: { left: ["Teams", "Attendance"], right: ["Calendar", "Reports"] },
     FINANCE: { left: ["Billing", "Reimbursements"], right: ["Calendar", "Reports"] }
   };

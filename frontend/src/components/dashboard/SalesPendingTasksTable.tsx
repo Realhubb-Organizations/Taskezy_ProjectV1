@@ -243,14 +243,18 @@ export default function SalesPendingTasksTable({
                 return (
                   <tr
                     key={t.id}
+                    // Clicking anywhere on the task opens its lead (same as the
+                    // lead name) — except the row's own controls (status
+                    // dropdown, copy buttons), their portaled panels, or while
+                    // selecting text. Tasks with no linked lead stay plain.
                     onClick={t.leadId ? (e) => {
                       const target = e.target as HTMLElement;
                       if (!e.currentTarget.contains(target)) return;
-                      if (target.closest("button, a, input, select, textarea, label, [role='button'], [role='combobox'], [role='listbox']")) return;
+                      if (target.closest("button, a, input, select, textarea, label, [role='menu'], [role='listbox']")) return;
                       if (window.getSelection()?.toString()) return;
                       onViewLead(t.leadId!);
                     } : undefined}
-                    className={t.leadId ? "cursor-pointer" : undefined}
+                    className={t.leadId ? "cursor-pointer [&>td]:transition-[filter] hover:[&>td]:brightness-[0.98]" : undefined}
                   >
                     <td className={`${cell} px-4 border-l rounded-l-lg text-slate-700`}>
                       {t.dueAt ? (

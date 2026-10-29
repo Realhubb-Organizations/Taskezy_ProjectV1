@@ -46,6 +46,11 @@ function ReportsPageContent() {
 
   const requestedTab = (searchParams.get("tab") as (typeof MAIN_TABS)[number]["key"]) || "marketing";
   const activeTab = visibleTabs.some(t => t.key === requestedTab) ? requestedTab : visibleTabs[0].key;
+  // Deep-linked from a MISSED_SLA escalation/digest notification naming one
+  // specific agent (see Taskezy-Server/src/jobs/missedLeadScheduler.ts) —
+  // read once; AgentReports seeds its own selectedAgent from it on mount
+  // and the user can still pick a different agent afterward.
+  const initialAgentId = searchParams.get("agentId") || undefined;
 
   const [dateRange, setDateRange] = useState<DateRange>({ from: daysAgo(30), to: todayStr() });
 
@@ -216,7 +221,7 @@ function ReportsPageContent() {
         <>
           {activeTab === "marketing" && <MarketingReports dateRange={dateRange} />}
           {activeTab === "manager" && <ManagerReports dateRange={dateRange} />}
-          {activeTab === "agent" && <AgentReports dateRange={dateRange} />}
+          {activeTab === "agent" && <AgentReports dateRange={dateRange} initialAgentId={initialAgentId} />}
         </>
       )}
     </div>

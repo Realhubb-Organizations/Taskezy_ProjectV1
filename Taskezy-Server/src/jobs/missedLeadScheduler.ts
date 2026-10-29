@@ -111,13 +111,24 @@ async function notifyMissedLeads(): Promise<void> {
         ? `${leads[0].agent_name} hasn't responded to "${leads[0].name}"`
         : `${leads[0].agent_name} hasn't responded to ${leads.length} leads (${quoteList(leads)})`
     );
+    // One agent in this escalation -> deep-link straight to their Sales
+    // Agent Report instead of the generic Reports landing page. Several
+    // agents at once has no single agent to land on, so that case keeps
+    // the plain link.
+    const [singleAgentId] = byAgent.size === 1 ? [...byAgent.keys()] : [];
+    // Exactly one lead named in the message ("Sahith Gatla hasn't responded
+    // to 'Nandini Ali'") -> leadId wins over link in the notification click
+    // handler (NotificationBell/NotificationPopup), opening that lead's
+    // detail drawer directly instead of the agent's report.
+    const singleLeadId = totalLeads === 1 ? agentGroups[0][0].id : undefined;
     await createNotification({
       system: "CRM",
       category: "MISSED_SLA",
       title: totalLeads === 1 ? "Team Lead Missed SLA" : `${totalLeads} Team Leads Missed SLA`,
       message: `${parts.join("; ")} within ${SLA_MINUTES} minutes.`,
       recipientUserId: recipientId,
-      link: "/dashboard/reports"
+      leadId: singleLeadId,
+      link: singleAgentId ? `/dashboard/reports?tab=agent&agentId=${singleAgentId}` : "/dashboard/reports"
     });
   }
 
@@ -155,6 +166,13 @@ async function notifyAdminDailyDigest(adminIds: string[]): Promise<void> {
   const breakdown = rows
     .map(r => `${r.agent_name}: ${r.missed_count}${r.manager_name ? ` (${r.manager_name}'s team)` : ""}`)
     .join(" · ");
+  // This digest is a company-wide, cross-team rollup (today's misses broken
+  // down by agent AND their manager's team) — Manager Reports is the right
+  // landing page for that, not one agent's own Sales Agent Report (unlike
+  // the single-agent escalation above, which really is about just one
+  // person). Plain /dashboard/reports defaults to the Marketing tab, which
+  // has nothing to do with this notification.
+  const link = "/dashboard/reports?tab=manager";
 
   for (const adminId of adminIds) {
     await createNotification({
@@ -163,7 +181,7 @@ async function notifyAdminDailyDigest(adminIds: string[]): Promise<void> {
       title: `Missed Leads Today: ${total}`,
       message: `${total} missed lead${total === 1 ? "" : "s"} today across ${rows.length} agent${rows.length === 1 ? "" : "s"} — ${breakdown}`,
       recipientUserId: adminId,
-      link: "/dashboard/reports"
+      link
     });
   }
 }

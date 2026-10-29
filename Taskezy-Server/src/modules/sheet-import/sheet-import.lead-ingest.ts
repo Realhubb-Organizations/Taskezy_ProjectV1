@@ -1,6 +1,7 @@
 import { pool, withTransaction } from "../../db/pool";
 import { logger } from "../../utils/logger";
-import { insertLeadLog, normalizeLeadPhone } from "../leads/leads.repository";
+import { insertLeadLog, normalizeIndianMobile } from "../leads/leads.repository";
+import { findLeadForRevival, markLeadRevived } from "../leads/leadRevival";
 import { isUniqueViolation, listActiveAdminIds } from "../users/users.repository";
 import { createNotification } from "../notifications/notifications.service";
 import { findPropertyIdBySheetSource, recordSheetSourceSeen } from "../properties/properties.repository";
@@ -51,6 +52,18 @@ export async function ingestSheetLead(row: SheetLeadRow): Promise<SheetLeadInges
   const name = row.name?.trim();
   if (!name) {
     return { outcome: "skipped", reason: "name is required" };
+  }
+
+  // Same prospect submitting another lead form — matched by phone, or by
+  // email when given (name is never matched on, too many false-positive
+  // risks). Marks the EXISTING lead revived and notifies instead of
+  // creating a duplicate; skips the property/agent-assignment work below
+  // entirely since nothing new is being inserted.
+  const revival = await findLeadForRevival(phone, row.email ?? null);
+  if (revival) {
+    await markLeadRevived(revival, "Google Ads Sheet Import");
+    logger.info({ leadKey: row.leadKey, existingLeadId: revival.id, matchedBy: revival.matched_by }, "Sheet lead matched an existing lead — marked revived instead of creating a duplicate");
+    return { outcome: "duplicate" };
   }
 
   if (row.sourceSheet) {
