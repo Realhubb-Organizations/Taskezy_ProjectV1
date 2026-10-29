@@ -41,21 +41,15 @@ const SYSTEM_ORIGIN_LOG_PREFIXES = [
 ];
 
 const AGENT_VISIBLE_STUB = "Lead received.";
-// Fallback for a message that mentions a source keyword but isn't one of
-// the known SYSTEM_ORIGIN_LOG_PREFIXES — e.g. a reassignment note someone
-// typed as "Meta lead for MSR", or any future note mentioning one of these
-// words. Deliberately generic (not "Lead received.", which would be wrong
-// for e.g. a reassignment) since the real content is being redacted, not
-// just reworded from a known shape.
-const AGENT_VISIBLE_GENERIC_STUB = "Activity recorded.";
 
-// Case-insensitive — catches any message (a system note OR a human-typed
-// one, e.g. a reassignment note reading "Meta lead for MSR") mentioning
-// where a lead came from, so a future note doesn't need a new prefix
-// added here to also be caught. SYSTEM_ORIGIN_LOG_PREFIXES above still
-// exists so KNOWN message shapes get an accurate, specific stub
-// (AGENT_VISIBLE_STUB) instead of falling through to the generic one.
+// Case-insensitive — for any message that ISN'T one of the known
+// SYSTEM_ORIGIN_LOG_PREFIXES shapes (e.g. a reassignment note someone
+// typed as "Meta lead for MSR", or any future note mentioning one of
+// these words), only the matched word itself is redacted in place —
+// the rest of the note (who it was reassigned to, the rest of a call
+// note, etc.) stays intact and readable.
 const SOURCE_KEYWORDS = ["meta", "google", "facebook"];
+const REDACTED = "[hidden]";
 
 const seesHandoverNotes = (caller: AccessTokenPayload) => caller.role === "ADMIN" || caller.roleType === "MANAGER";
 
@@ -63,23 +57,25 @@ function isSystemOriginLog(message: string): boolean {
   return SYSTEM_ORIGIN_LOG_PREFIXES.some(prefix => message.startsWith(prefix));
 }
 
-function mentionsSourceKeyword(message: string): boolean {
-  const lower = message.toLowerCase();
-  return SOURCE_KEYWORDS.some(keyword => lower.includes(keyword));
+function redactSourceKeywords(message: string): string {
+  let result = message;
+  for (const keyword of SOURCE_KEYWORDS) {
+    result = result.replace(new RegExp(keyword, "gi"), REDACTED);
+  }
+  return result;
 }
 
 /**
  * For an agent (not Admin/Manager): drops admin-only handover notes
  * entirely; rewords a known system-origin note (Google Sheet import,
  * Meta/Google revival, archive-restore, Bulk Upload promotion) to a
- * specific "Lead received." stub, and any OTHER message mentioning a
- * source keyword (meta/google/facebook — including a human-typed note,
- * e.g. a reassignment note reading "Meta lead for MSR") to a generic
- * "Activity recorded." stub — instead of removing either, so the agent's
- * Activity History still shows *that* and *when* something happened, just
- * not the source/campaign detail. Also drops missed_task_count (migration
- * 047). None of this detail is something a Member should see, including
- * about their own leads.
+ * generic "Lead received." stub; and for any OTHER message, redacts just
+ * the specific source keyword(s) found (meta/google/facebook — including
+ * in a human-typed note, e.g. a reassignment note reading "Meta lead for
+ * MSR" becomes "[hidden] lead for MSR") while leaving the rest of that
+ * note intact. Also drops missed_task_count (migration 047). None of this
+ * detail is something a Member should see, including about their own
+ * leads.
  */
 export function leadForCaller<T>(caller: AccessTokenPayload, lead: T): T {
   if (!lead) return lead;
@@ -91,8 +87,8 @@ export function leadForCaller<T>(caller: AccessTokenPayload, lead: T): T {
       .filter(l => !l.message.startsWith(HANDOVER_NOTE_PREFIX))
       .map(l => {
         if (isSystemOriginLog(l.message)) return { ...l, message: AGENT_VISIBLE_STUB };
-        if (mentionsSourceKeyword(l.message)) return { ...l, message: AGENT_VISIBLE_GENERIC_STUB };
-        return l;
+        const redacted = redactSourceKeywords(l.message);
+        return redacted === l.message ? l : { ...l, message: redacted };
       });
   }
   if (withExtras.missed_task_count !== undefined) {
