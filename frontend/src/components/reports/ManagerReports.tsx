@@ -319,7 +319,7 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
                           {row.memberBreakdown.length === 0 ? (
                             <p className="text-[11px] text-slate-400 italic">No direct reports mapped to this manager.</p>
                           ) : (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                            <div className="flex flex-col gap-2">
                               {row.memberBreakdown.map(m => (
                                 <div key={m.name} className="bg-white border border-slate-200 rounded-lg p-3 space-y-1.5">
                                   <div className="flex items-center justify-between gap-1.5 flex-wrap">
