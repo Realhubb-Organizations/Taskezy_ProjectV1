@@ -8,39 +8,50 @@ import { AccessTokenPayload } from "../../utils/tokens";
 export const HANDOVER_NOTE_PREFIX = "Handover note (admins & managers only): ";
 
 // "How/where this lead came from" system notes — real for audit purposes,
-// but not something a Member-level agent needs cluttering their Activity
-// History (an agent doesn't act differently because a lead was a Google
-// Sheet import vs. a Meta lead vs. restored from the archive). Same
-// Admin-or-Manager boundary as handover notes, listed by their fixed
-// opening text (see leadRevival.ts, sheet-import.lead-ingest.ts,
-// leads.service.ts's archive-restore and Data Calling promotion notes).
+// but the source/campaign detail in them isn't something a Member-level
+// agent should see (an agent doesn't act differently because a lead was a
+// Google Sheet import vs. a Meta lead vs. restored from the archive, and
+// shouldn't be able to read off which ad campaign/source it came from).
+// Unlike handover notes below, these stay in the timeline for an agent —
+// just reworded to a generic stub (see AGENT_VISIBLE_STUB) — rather than
+// disappearing outright, so their Activity History still shows *that* and
+// *when* the lead arrived. Same Admin-or-Manager boundary as handover
+// notes, matched by fixed opening text (see leadRevival.ts,
+// sheet-import.lead-ingest.ts, leads.service.ts's archive-restore and
+// Data Calling promotion notes). Includes both the current and the
+// now-retired legacy Meta wording — a message's exact text can get
+// rewritten by a one-off data cleanup (see 2026-10-29's TablePlus
+// updates) without this list being updated in lockstep, so both the old
+// and new prefix stay listed rather than relying on the cleanup having
+// been exhaustive.
 const SYSTEM_ORIGIN_LOG_PREFIXES = [
   "Imported from Google Ads lead-form sheet",
   "Revived — a new ",
   "Restored from an archived lead deleted on ",
   "Lead qualified and transferred to main leads",
+  "Lead received via Meta Ads",
   // Legacy format from an earlier Meta ingest implementation — no current
-  // code generates this (confirmed via repo-wide search), but real rows
-  // still exist from when it did, each dumping the full raw webhook
-  // payload (campaign/ad-set/ad IDs, form ID, every form field) as the
-  // lead's first history entry, authored "System".
+  // code generates this (confirmed via repo-wide search); kept here in
+  // case a row somewhere was missed by the retroactive cleanup.
   "Facebook Lead (webhook):"
 ];
 
+const AGENT_VISIBLE_STUB = "Lead received.";
+
 const seesHandoverNotes = (caller: AccessTokenPayload) => caller.role === "ADMIN" || caller.roleType === "MANAGER";
 
-function isAdminOnlyLog(message: string): boolean {
-  return message.startsWith(HANDOVER_NOTE_PREFIX) || SYSTEM_ORIGIN_LOG_PREFIXES.some(prefix => message.startsWith(prefix));
+function isSystemOriginLog(message: string): boolean {
+  return SYSTEM_ORIGIN_LOG_PREFIXES.some(prefix => message.startsWith(prefix));
 }
 
 /**
- * Drops admin-only handover notes, system-origin notes (Google Sheet
- * import, Meta/Google revival, archive-restore, Bulk Upload promotion),
- * AND missed_task_count (migration 047, how many times this lead's
- * follow-up reminder was flagged MISSED) from a lead for an agent — none
- * of these are something a Member needs to see, including about their own
- * leads. Same Admin-or-Manager boundary throughout, reused rather than a
- * second role check.
+ * For an agent (not Admin/Manager): drops admin-only handover notes
+ * entirely, rewords system-origin notes (Google Sheet import, Meta/Google
+ * revival, archive-restore, Bulk Upload promotion) down to a generic
+ * "Lead received." stub instead of removing them, and drops
+ * missed_task_count (migration 047, how many times this lead's follow-up
+ * reminder was flagged MISSED) — none of the real detail in any of these
+ * is something a Member should see, including about their own leads.
  */
 export function leadForCaller<T>(caller: AccessTokenPayload, lead: T): T {
   if (!lead) return lead;
@@ -48,7 +59,9 @@ export function leadForCaller<T>(caller: AccessTokenPayload, lead: T): T {
   const withExtras = lead as T & { logs?: { message: string }[]; missed_task_count?: number };
   const result: T & { logs?: { message: string }[]; missed_task_count?: number } = { ...withExtras };
   if (Array.isArray(withExtras.logs)) {
-    result.logs = withExtras.logs.filter(l => !isAdminOnlyLog(l.message));
+    result.logs = withExtras.logs
+      .filter(l => !l.message.startsWith(HANDOVER_NOTE_PREFIX))
+      .map(l => (isSystemOriginLog(l.message) ? { ...l, message: AGENT_VISIBLE_STUB } : l));
   }
   if (withExtras.missed_task_count !== undefined) {
     delete result.missed_task_count;
