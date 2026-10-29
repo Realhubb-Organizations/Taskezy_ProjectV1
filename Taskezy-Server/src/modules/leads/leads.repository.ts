@@ -4,6 +4,18 @@ import { BUSINESS_TIMEZONE } from "../../utils/businessDate";
 import { normalizeForeignPhone } from "../../utils/validation";
 
 /** leads.phone is CHECK'd to a bare 10-digit Indian mobile or a "+<country code>" foreign number — strip formatting/country code before insert. Shared by every external lead-ingest source (Meta webhook, sheet import). */
+/**
+ * A lead's marketing source group, from leads.source — the same Meta /
+ * Google / Data buckets as the Leads page's Source filter (frontend
+ * ContactIcons.tsx platformFromText). Used by Marketing Reports.
+ */
+export const LEAD_SOURCE_BUCKET_SQL = `(CASE
+    WHEN l.source ~* '^(data|bulk upload)$' THEN 'DATA'
+    WHEN l.source ~* 'google' THEN 'GOOGLE'
+    WHEN l.source ~* '(meta|facebook|instagram)' THEN 'META'
+    ELSE 'OTHER'
+  END)`;
+
 export function normalizeIndianMobile(raw: string): string | undefined {
   const last10 = raw.replace(/\D/g, "").slice(-10);
   return /^[6-9][0-9]{9}$/.test(last10) ? last10 : undefined;
@@ -102,6 +114,10 @@ export interface LeadFilterConditions {
   search?: string;
   /** Leave out Data Calling leads (source "Bulk Upload"). */
   excludeBulkUpload?: boolean;
+  /** Marketing source groups (Meta / Google / Data) — see LEAD_SOURCE_BUCKET_SQL. */
+  sourceBucket?: string[];
+  /** Match `campaign` case-insensitively (Marketing Reports — names also come from ad accounts). */
+  campaignIgnoreCase?: boolean;
   /** Date column sort; left out = most recently assigned first. */
   sortDir?: "asc" | "desc";
   /** Which date sortDir sorts by — created_at (default) or assigned_at. */
@@ -154,8 +170,18 @@ function buildLeadWhereClause(filter: LeadFilterConditions): { whereClause: stri
   }
 
   if (filter.campaign && filter.campaign.length > 0) {
-    params.push(filter.campaign);
-    conditions.push(`COALESCE(l.campaign, l.source) = ANY($${params.length}::text[])`);
+    if (filter.campaignIgnoreCase) {
+      params.push(filter.campaign.map(c => c.toLowerCase()));
+      conditions.push(`LOWER(COALESCE(l.campaign, l.source)) = ANY($${params.length}::text[])`);
+    } else {
+      params.push(filter.campaign);
+      conditions.push(`COALESCE(l.campaign, l.source) = ANY($${params.length}::text[])`);
+    }
+  }
+
+  if (filter.sourceBucket && filter.sourceBucket.length > 0) {
+    params.push(filter.sourceBucket);
+    conditions.push(`${LEAD_SOURCE_BUCKET_SQL} = ANY($${params.length}::text[])`);
   }
 
   const hasPropertyIds = !!filter.propertyId && filter.propertyId.length > 0;

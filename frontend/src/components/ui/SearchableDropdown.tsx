@@ -51,6 +51,8 @@ interface CommonProps {
   disabled?: boolean;
   className?: string;
   title?: string;
+  /** Optional icon shown before the trigger text. */
+  icon?: React.ReactNode;
 }
 
 const normalize = (options: OptionsInput): DropdownOption[] =>
@@ -196,6 +198,7 @@ function Trigger({
   disabled,
   className,
   title,
+  icon,
   children
 }: {
   state: ReturnType<typeof useDropdownPanel>;
@@ -204,6 +207,7 @@ function Trigger({
   disabled?: boolean;
   className?: string;
   title?: string;
+  icon?: React.ReactNode;
   children: React.ReactNode;
 }) {
   const border =
@@ -221,6 +225,7 @@ function Trigger({
       title={title}
       className={`${TRIGGER_BASE[variant]} ${border} disabled:opacity-50 disabled:cursor-not-allowed ${className ?? ""}`}
     >
+      {icon}
       {children}
       <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform ${state.open ? "rotate-180" : ""}`} />
     </button>
@@ -243,7 +248,8 @@ export function SearchableMultiSelect({
   align = "left",
   disabled,
   className,
-  title
+  title,
+  icon
 }: CommonProps & { selected: string[]; onChange: (next: string[]) => void }) {
   const state = useDropdownPanel(align, panelWidth);
   const opts = useMemo(() => normalize(options), [options]);
@@ -271,7 +277,7 @@ export function SearchableMultiSelect({
 
   return (
     <>
-      <Trigger state={state} variant={variant} active={selected.length > 0} disabled={disabled} className={className} title={title}>
+      <Trigger state={state} variant={variant} active={selected.length > 0} disabled={disabled} className={className} title={title} icon={icon}>
         {triggerContent}
       </Trigger>
       {state.open && (

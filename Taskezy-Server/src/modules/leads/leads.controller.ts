@@ -6,11 +6,12 @@ import { leadForCaller } from "./leads.handover";
 import * as leadsService from "./leads.service";
 
 export async function listLeadsHandler(req: Request, res: Response): Promise<void> {
-  const { page, pageSize, status, assignedAgentId, campaign, propertyId, noProperty, dateFrom, dateTo, search, excludeBulkUpload, missedOnly, sortDir, sortField } = req.query as unknown as {
+  const { page, pageSize, status, assignedAgentId, campaign, propertyId, noProperty, dateFrom, dateTo, search, excludeBulkUpload, missedOnly, sortDir, sortField, sourceBucket, campaignIgnoreCase } = req.query as unknown as {
     page: number; pageSize: number; status?: string[]; assignedAgentId?: string[]; campaign?: string[]; propertyId?: string[]; noProperty?: boolean;
     dateFrom?: string; dateTo?: string; search?: string; excludeBulkUpload?: boolean; missedOnly?: boolean; sortDir?: "asc" | "desc"; sortField?: "created" | "assigned";
+    sourceBucket?: string[]; campaignIgnoreCase?: boolean;
   };
-  const { rows, meta } = await leadsService.listLeads(req.user!, { page, pageSize, status, assignedAgentId, campaign, propertyId, noProperty, dateFrom, dateTo, search, excludeBulkUpload, missedOnly, sortDir, sortField });
+  const { rows, meta } = await leadsService.listLeads(req.user!, { page, pageSize, status, assignedAgentId, campaign, propertyId, noProperty, dateFrom, dateTo, search, excludeBulkUpload, missedOnly, sortDir, sortField, sourceBucket, campaignIgnoreCase });
   sendPaginated(res, rows.map(r => leadForCaller(req.user!, r)), meta);
 }
 

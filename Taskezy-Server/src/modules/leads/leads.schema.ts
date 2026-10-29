@@ -47,6 +47,12 @@ export const listLeadsQuerySchema = z.object({
   sortDir: z.enum(["asc", "desc"]).optional(),
   // Which date sortDir sorts by: created (default) or assigned.
   sortField: z.enum(["created", "assigned"]).optional(),
+  // Marketing Reports drill-downs: Meta / Google / Data source groups, and
+  // case-insensitive campaign names (they also come from ad accounts).
+  sourceBucket: z.union([z.enum(["META", "GOOGLE", "DATA"]), z.array(z.enum(["META", "GOOGLE", "DATA"]))])
+    .optional()
+    .transform(v => v === undefined ? undefined : (Array.isArray(v) ? v : [v])),
+  campaignIgnoreCase: z.enum(["true", "false"]).optional().transform(v => v === "true"),
   // Already supported by buildLeadWhereClause/findMany (used by the Leads
   // Analytics tab's own aggregate) — just not previously exposed here.
   propertyId: uuidToArray,
