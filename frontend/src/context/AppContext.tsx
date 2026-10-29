@@ -97,6 +97,7 @@ import {
   apiSubmitCallFeedback,
   ApiCallAttemptRow
 } from "@/lib/apiClient";
+import { ALL_DATA_TOPICS, EMPTY_DATA_VERSION, useThrottledOnChange, type DataTopic, type DataVersion } from "@/lib/liveRefresh";
 import { dbCodeToFrontendStatus, frontendStatusToDbCode, isRealLeadId, isRealId } from "@/lib/leadStatusMapping";
 import { initNotificationSoundUnlock, playNotificationSound } from "@/lib/notificationSound";
 import { todayIso, toIsoDate } from "@/components/ui/DateRangePicker";
@@ -534,6 +535,9 @@ interface AppState {
   // reassignment, edit, delete, new lead) — list a page's own fetch effect's
   // deps on this to have it refetch live. See the "leads-changed" SSE listener.
   leadsChangedSignal: number;
+  // Per-area live version (lib/liveRefresh.ts) — bumped when the server says
+  // something in that area changed. Pages read it through useLiveRefresh.
+  dataVersion: DataVersion;
   // Bumped only by triggerManualRefresh (pull-to-refresh) — see its own
   // declaration for which pages should depend on this.
   manualRefreshSignal: number;
@@ -1444,6 +1448,78 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => { cancelled = true; };
   }, [currentUser, manualRefreshSignal]);
 
+  // ── Live refresh ─────────────────────────────────────────────────────────
+  // The server's `data-changed` event names the areas that changed; changes
+  // arriving close together are grouped and applied as one version bump per
+  // area ~1.5s later (plus the server's own 1s grouping ≈ 3s end to end), so
+  // a burst of edits costs each screen one refetch, not one per edit.
+  const LIVE_REFRESH_DELAY_MS = 1500;
+  const [dataVersion, setDataVersion] = useState<DataVersion>(EMPTY_DATA_VERSION);
+  const pendingTopicsRef = useRef<Set<DataTopic>>(new Set());
+  const topicsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bumpTopics = (topics: DataTopic[]) => {
+    topics.forEach((t) => pendingTopicsRef.current.add(t));
+    if (topicsTimerRef.current) return;
+    topicsTimerRef.current = setTimeout(() => {
+      topicsTimerRef.current = null;
+      const batch = Array.from(pendingTopicsRef.current);
+      pendingTopicsRef.current.clear();
+      setDataVersion((prev) => {
+        const next = { ...prev };
+        batch.forEach((t) => { next[t] = prev[t] + 1; });
+        return next;
+      });
+      if (batch.includes("leads")) setLeadsChangedSignal((s) => s + 1);
+    }, LIVE_REFRESH_DELAY_MS);
+  };
+  const bumpTopicsRef = useRef(bumpTopics);
+  bumpTopicsRef.current = bumpTopics;
+
+  // Shared lists held here refresh on their own areas' changes, capped so a
+  // busy team can't make every screen download them over and over: pending
+  // tasks can be multi-MB (see above) → at most every 30s.
+  useThrottledOnChange(dataVersion.tasks + dataVersion.leads + dataVersion.followups, 30_000, () => {
+    if (!currentUser) return;
+    apiGetPendingTasks().then(setPendingTasks).catch(() => { /* keep the previous tasks */ });
+  });
+  useThrottledOnChange(dataVersion.followups, 30_000, () => {
+    if (!currentUser) return;
+    apiListFollowups().then((rows) => setFollowupCalls(rows.map(mapApiFollowupToFrontend))).catch(() => { /* keep the previous list */ });
+  });
+  useThrottledOnChange(dataVersion.users, 5_000, () => {
+    if (!currentUser) return;
+    apiListUsers().then((rows) => setUsers(rows.map(mapApiUserDirectoryEntryToFrontendUser))).catch(() => { /* keep the previous list */ });
+  });
+  useThrottledOnChange(dataVersion.properties, 5_000, () => {
+    if (!currentUser) return;
+    apiListProperties().then((rows) => setProperties(rows.map(mapApiPropertyToFrontend))).catch(() => { /* keep the previous list */ });
+  });
+  // Full reload of the bulk-loaded leads (Data Calling, dashboard cards read
+  // these) — only for bulk changes, where fetching each changed lead one by
+  // one would flood the API. At most once a minute.
+  const [allLeadsReloadSignal, setAllLeadsReloadSignal] = useState(0);
+  useThrottledOnChange(allLeadsReloadSignal, 60_000, () => {
+    if (!currentUser) return;
+    apiListAllLeads().then((rows) => setAllLeads(rows.map(mapApiLeadToFrontendLead))).catch(() => { /* keep the previous list */ });
+  });
+
+  // Safety net for anything missed while the tab was in the background (or
+  // the phone app was closed): coming back after 30s+ refreshes every area.
+  useEffect(() => {
+    if (!currentUser) return;
+    let hiddenAt: number | null = null;
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") { hiddenAt = Date.now(); return; }
+      if (hiddenAt !== null && Date.now() - hiddenAt > 30_000) {
+        bumpTopicsRef.current(ALL_DATA_TOPICS);
+        setAllLeadsReloadSignal((s) => s + 1);
+      }
+      hiddenAt = null;
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, [currentUser?.id]);
+
   // Live notifications (Meta leads, etc.) over Server-Sent Events — one
   // connection per session, reopened whenever the signed-in user changes.
   // Each connection attempt mints a fresh one-time ticket first (see
@@ -1457,6 +1533,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     let cancelled = false;
     let source: EventSource | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let streamDropped = false;
 
     const connect = async () => {
       if (cancelled) return;
@@ -1472,6 +1549,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (cancelled) return;
 
       source = new EventSource(buildNotificationStreamUrl(ticket));
+      // After a dropped connection, catch up on anything sent while it was down.
+      source.onopen = () => {
+        if (streamDropped) {
+          streamDropped = false;
+          bumpTopicsRef.current(ALL_DATA_TOPICS);
+        }
+      };
+
+      source.addEventListener("data-changed", (event) => {
+        const { topics } = JSON.parse((event as MessageEvent).data) as { topics: DataTopic[] };
+        bumpTopicsRef.current(topics);
+      });
 
       // Content-free: the payload is only { leadId }, never lead data. Pages
       // refetch their own page through the normal authorized API, which is
@@ -1480,16 +1569,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // between the two becomes a real leak. Queued + debounced so a bulk
       // import touching 100 leads causes one refetch, not 100.
       source.addEventListener("leads-changed", (event) => {
-        const { leadId } = JSON.parse((event as MessageEvent).data) as { leadId: string };
+        const { leadId, bulk } = JSON.parse((event as MessageEvent).data) as { leadId?: string; bulk?: boolean };
+        if (bulk) { setAllLeadsReloadSignal((s) => s + 1); return; }
+        if (!leadId) return;
         leadsChangedQueueRef.current.add(leadId);
         if (leadsChangedTimerRef.current) clearTimeout(leadsChangedTimerRef.current);
         leadsChangedTimerRef.current = setTimeout(() => {
           const ids = Array.from(leadsChangedQueueRef.current);
           leadsChangedQueueRef.current.clear();
-          setLeadsChangedSignal((s) => s + 1);
+          // (Page refetches come from the matching `data-changed` event.)
+          // Many leads at once (bulk reassign/delete): one capped full
+          // reload instead of a request per lead, which could hit the
+          // API's rate limit.
+          if (ids.length > 20) { setAllLeadsReloadSignal((s) => s + 1); return; }
           // Keep the full bulk-loaded array (Reports, etc.) live too —
-          // refetch each changed lead; a 404 means deleted or no longer
+          // refetch each changed lead; a 404/403 means deleted or no longer
           // visible to this user, so drop it rather than leave it stale.
+          // Any other failure (rate limit, network) keeps the lead as it was.
           ids.forEach((id) => {
             apiGetLead(id)
               .then((row) => {
@@ -1498,7 +1594,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                   prev.some((l) => l.id === mapped.id) ? prev.map((l) => (l.id === mapped.id ? mapped : l)) : [mapped, ...prev]
                 );
               })
-              .catch(() => setAllLeads((prev) => prev.filter((l) => l.id !== id)));
+              .catch((err) => {
+                if (err instanceof ApiRequestError && (err.status === 404 || err.status === 403)) {
+                  setAllLeads((prev) => prev.filter((l) => l.id !== id));
+                }
+              });
           });
         }, 600);
       });
@@ -1531,6 +1631,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       });
       source.onerror = () => {
+        streamDropped = true;
         source?.close();
         source = null;
         if (!cancelled) reconnectTimer = setTimeout(connect, 3000);
@@ -2659,6 +2760,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         isDataLoading,
         dataLoadError,
         leadsChangedSignal,
+        dataVersion,
         manualRefreshSignal,
         triggerManualRefresh,
         activeRole,

@@ -30,6 +30,7 @@ import { sheetImportRouter } from "./modules/sheet-import/sheet-import.routes";
 import { callAttemptsRouter } from "./modules/call-attempts/call-attempts.routes";
 import { callLogRouter } from "./modules/call-log/call-log.routes";
 import { tasksRouter } from "./modules/tasks/tasks.routes";
+import { broadcastOnWrite } from "./utils/dataChanged";
 
 export function createApp(): Express {
   const app = express();
@@ -82,20 +83,21 @@ export function createApp(): Express {
   app.use("/health", healthRouter);
   app.use("/api/v1/auth", authRouter);
   app.use("/api/v1/leads", leadsRouter);
-  app.use("/api/v1/users", usersRouter);
-  app.use("/api/v1/properties", propertiesRouter);
+  // Writes in these areas tell every open screen to refresh (utils/dataChanged.ts).
+  app.use("/api/v1/users", broadcastOnWrite("users"), usersRouter);
+  app.use("/api/v1/properties", broadcastOnWrite("properties"), propertiesRouter);
   app.use("/api/v1/resale-units", resaleUnitsRouter);
-  app.use("/api/v1/followups", followupsRouter);
+  app.use("/api/v1/followups", broadcastOnWrite("followups", "tasks"), followupsRouter);
   app.use("/api/v1/tasks", tasksRouter);
-  app.use("/api/v1/call-attempts", callAttemptsRouter);
-  app.use("/api/v1/call-log", callLogRouter);
+  app.use("/api/v1/call-attempts", broadcastOnWrite("leads", "tasks"), callAttemptsRouter);
+  app.use("/api/v1/call-log", broadcastOnWrite("calllog"), callLogRouter);
   app.use("/api/v1/attendance", attendanceRouter);
   app.use("/api/v1/timesheets", timesheetsRouter);
   app.use("/api/v1/reimbursements", reimbursementsRouter);
   app.use("/api/v1/invoices", invoicesRouter);
   app.use("/api/v1/notifications", notificationsRouter);
   app.use("/api/v1/devices", devicesRouter);
-  app.use("/api/v1/calendar-events", calendarEventsRouter);
+  app.use("/api/v1/calendar-events", broadcastOnWrite("calendar"), calendarEventsRouter);
   app.use("/api/v1/ad-spend", adSpendRouter);
   app.use("/api/v1/meta", metaRouter);
   app.use("/api/v1/google-ads", googleAdsRouter);

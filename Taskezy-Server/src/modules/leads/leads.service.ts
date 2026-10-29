@@ -8,7 +8,7 @@ import * as usersRepo from "../users/users.repository";
 import { createNotification, deleteLeadActivityNotifications } from "../notifications/notifications.service";
 import { findPropertyIdBySheetSource, findById as findPropertyById } from "../properties/properties.repository";
 import { pickAgentForProperty, createPropertyAgentPicker } from "../properties/properties.assignment";
-import { broadcastLeadChanged } from "./leads.realtime";
+import { broadcastLeadChanged, broadcastManyLeadsChanged } from "./leads.realtime";
 import { HANDOVER_NOTE_PREFIX } from "./leads.handover";
 import { normalizeTypedLeadPhone } from "../../utils/validation";
 import { assertTransitionAllowed, LeadStatusCode } from "./leadStatusTransitions";
@@ -48,6 +48,8 @@ export async function listLeads(caller: AccessTokenPayload, filter: {
   search?: string;
   excludeBulkUpload?: boolean;
   missedOnly?: boolean;
+  sortDir?: "asc" | "desc";
+  sortField?: "created" | "assigned";
 }) {
   const scopedToAgentIds = await scopeForCaller(caller);
   const { rows, totalCount } = await repo.findMany({
@@ -64,6 +66,8 @@ export async function listLeads(caller: AccessTokenPayload, filter: {
     excludeBulkUpload: filter.excludeBulkUpload,
     missedOnly: filter.missedOnly,
     slaMinutes: filter.missedOnly ? REPORT_SLA_MINUTES : undefined,
+    sortDir: filter.sortDir,
+    sortField: filter.sortField,
     scopedToAgentIds
   });
   return {
@@ -761,6 +765,7 @@ export async function bulkImportLeads(input: BulkImportLeadsInput): Promise<Bulk
     link: destinationLink
   });
 
+  if (created > 0 || restored > 0) broadcastManyLeadsChanged();
   return { created, duplicates, skipped, restored };
 }
 
@@ -989,6 +994,7 @@ export async function updateLeadNote(caller: AccessTokenPayload, leadId: string,
     await repo.setNote(client, leadId, note, caller.sub);
     await repo.insertLeadLog(client, leadId, caller.sub, caller.name, `Note: ${note}`);
   });
+  broadcastLeadChanged(leadId);
   return repo.findById(leadId, scopedToAgentIds);
 }
 
@@ -1308,6 +1314,7 @@ export async function fixSheetLeadTimestamps(): Promise<{ fixed: number; already
     fixed++;
   }
 
+  if (fixed > 0) broadcastManyLeadsChanged();
   return { fixed, alreadyCorrect, total: leads.length };
 }
 

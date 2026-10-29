@@ -8,6 +8,7 @@ import MonthCalendar from "@/components/calendar/MonthCalendar";
 import { CalendarDays } from "lucide-react";
 import { CardListSkeleton } from "@/components/ui/Skeletons";
 import { todayIso } from "@/components/ui/DateRangePicker";
+import { useLiveRefresh } from "@/lib/useLiveRefresh";
 
 const SYSTEM_COLOR: Record<string, string> = {
   CRM: "bg-blue-500",
@@ -42,10 +43,13 @@ function AdminCalendarContent() {
   const [cursor, setCursor] = useState(() => new Date());
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
   const [eventsLoading, setEventsLoading] = useState(true);
+  // Live: events added/removed by anyone show up without a reload (quietly).
+  const eventsLive = useLiveRefresh("calendar");
 
   useEffect(() => {
+    const background = eventsLive.isBackground();
     let cancelled = false;
-    setEventsLoading(true);
+    if (!background) setEventsLoading(true);
     const { dateFrom, dateTo } = monthBounds(cursor);
     apiListCalendarEventsPage(1, 500, { dateFrom, dateTo })
       .then((result) => {
@@ -59,7 +63,7 @@ function AdminCalendarContent() {
         if (!cancelled) setEventsLoading(false);
       });
     return () => { cancelled = true; };
-  }, [cursor, manualRefreshSignal]);
+  }, [cursor, manualRefreshSignal, eventsLive.liveVersion]);
 
   const dayEvents = calendarEvents
     .filter(e => e.date === selectedDate)

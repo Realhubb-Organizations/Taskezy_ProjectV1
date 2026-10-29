@@ -7,6 +7,7 @@ import { apiGetLeadStats, apiListFollowupsPage } from "@/lib/apiClient";
 import { Activity, Users, TrendingUp, ArrowRight } from "lucide-react";
 import { LineSkeleton } from "@/components/ui/Skeletons";
 import { toIsoDate } from "@/components/ui/DateRangePicker";
+import { useLiveRefresh } from "@/lib/useLiveRefresh";
 
 // The universal post-login landing page — a lightweight, module-summary
 // front door (CRM/HRMS/Finance), distinct from each module's own dashboard
@@ -73,12 +74,15 @@ export default function HomePage() {
   // separate estimate — these stay org-wide, since an ad campaign isn't
   // owned by one agent), and follow-ups still pending action.
   const [leadsLast7Days, setLeadsLast7Days] = useState<number | null>(null);
+  // Live: other people's changes refresh these numbers.
+  const { liveVersion: leadsLive } = useLiveRefresh("leads");
+  const { liveVersion: followupsLive } = useLiveRefresh("followups");
   useEffect(() => {
     apiGetLeadStats({ assignedAgentId: scopedAgentIds, dateFrom: toIsoDate(sevenDaysAgo), dateTo: toIsoDate(now) })
       .then(stats => setLeadsLast7Days(stats.totalLeads))
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scopedAgentIds]);
+  }, [scopedAgentIds, leadsLive]);
   const activeCampaignsCount = new Set(
     adSpendRecords.filter(r => r.campaignStatus === "ACTIVE").map(r => r.accountName)
   ).size;
@@ -90,7 +94,7 @@ export default function HomePage() {
     apiListFollowupsPage(1, 1, { status: ["UPCOMING"] })
       .then(result => setPendingFollowUps(result.totalCount))
       .catch(() => {});
-  }, []);
+  }, [followupsLive]);
 
   // HRMS — Present/Pending Info use real timesheet/regularization data.
   // "Leave applications" and "WFH" have no backing feature anywhere in this
