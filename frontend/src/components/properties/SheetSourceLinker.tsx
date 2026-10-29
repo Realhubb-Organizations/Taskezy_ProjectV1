@@ -26,9 +26,11 @@ interface SheetSourceLinkerProps {
  * per-project tab, e.g. "Neopolis") is matched against what's linked here to
  * pick the property it belongs to, replacing the fragile exact-name-match
  * against the property's own display name the importer originally used.
- * Suggestions come from every sheet source name actually seen on an incoming
- * lead (recordSheetSourceSeen) rather than a synced-campaign cache, since
- * there's no equivalent sync job for sheet sources.
+ * Suggestions are every sheet source name actually seen on an incoming lead
+ * (recordSheetSourceSeen) PLUS every property's own name, so a property can
+ * be pre-linked before its campaign has ever sent a lead through the sync —
+ * not just reactively after the fact. The custom-name input below still
+ * covers a sheet tab whose real name matches neither.
  */
 // Add / remove only change the list on screen; the property popup's Save
 // button calls save() through the ref to persist it (one call per linker).
