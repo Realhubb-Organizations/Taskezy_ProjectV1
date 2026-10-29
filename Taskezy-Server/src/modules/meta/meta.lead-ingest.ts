@@ -1,6 +1,6 @@
 import { pool, withTransaction } from "../../db/pool";
 import { logger } from "../../utils/logger";
-import { insertLeadLog, normalizeIndianMobile } from "../leads/leads.repository";
+import { insertLeadLog, normalizeLeadPhone } from "../leads/leads.repository";
 import { findLeadForRevival, markLeadRevived } from "../leads/leadRevival";
 import { isUniqueViolation } from "../users/users.repository";
 import { createNotification } from "../notifications/notifications.service";

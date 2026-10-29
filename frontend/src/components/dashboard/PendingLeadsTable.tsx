@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { openOnRowClick, LEAD_ROW_CLASS } from "@/lib/rowClick";
 import LeadRowActionsMenu from "@/components/crm/LeadRowActionsMenu";
 import { Search, Copy, Check, X } from "lucide-react";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";

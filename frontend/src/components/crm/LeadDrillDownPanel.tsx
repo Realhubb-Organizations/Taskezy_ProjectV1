@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 import { useApp, Lead, LeadStatus, FollowupCall, mapApiFollowupToFrontend, mapApiLeadToFrontendLead } from "@/context/AppContext";
 import { apiListFollowupsPage, apiGetDistinctCampaigns, apiGetLead, LeadListFilters } from "@/lib/apiClient";
 import LeadDetailDrawer from "./LeadDetailDrawer";
+import { openOnRowClick, LEAD_ROW_CLASS } from "@/lib/rowClick";
 import { useServerLeadList } from "@/lib/useServerLeadList";
 import { useDialog } from "@/components/ui/DialogProvider";
 import { deriveActivityTimeline, PICKABLE_STATUS_OPTIONS, statusBadgeClasses, frontendStatusToDbCode, withDeadLeadGate, nextStatusOptions } from "@/lib/leadStatusMapping";
