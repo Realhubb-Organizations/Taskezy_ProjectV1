@@ -109,20 +109,16 @@ export async function ingestSheetLead(row: SheetLeadRow): Promise<SheetLeadInges
     }
     const leadId = rows[0].id;
 
-    // The sheet often carries real prior sales activity (Status/Remarks from
-    // before this lead was in Taskezy at all) plus ad-attribution details
-    // this schema has no dedicated columns for — captured losslessly as the
-    // lead's first log entry rather than invented into new columns or
-    // silently dropped.
+    // Only genuine prior sales activity (Status/Remarks, from before this
+    // lead was in Taskezy at all) is worth an agent reading in Activity
+    // History. The sheet's own ad-attribution fields (medium/keyword/
+    // gclid/landing page URL/browser user-agent/raw sheet timestamp) are
+    // real but purely technical — they used to all get dumped into this
+    // same note, making it unreadably long; left out of the visible note
+    // entirely now rather than kept in a form nobody actually reads.
     const historicalBits = [
       row.status ? `Prior status: ${row.status}` : null,
-      row.remarks ? `Remarks: ${row.remarks}` : null,
-      row.medium ? `Medium: ${row.medium}` : null,
-      row.keyword ? `Keyword: ${row.keyword}` : null,
-      row.gclid ? `GCLID: ${row.gclid}` : null,
-      row.landingPage ? `Landing page: ${row.landingPage}` : null,
-      row.browser ? `Browser: ${row.browser}` : null,
-      row.timestamp ? `Original sheet timestamp: ${row.timestamp}` : null
+      row.remarks ? `Remarks: ${row.remarks}` : null
     ].filter((v): v is string => Boolean(v));
 
     if (historicalBits.length > 0) {
@@ -155,20 +151,16 @@ export async function ingestSheetLead(row: SheetLeadRow): Promise<SheetLeadInges
     // this phone number already has a lead from some other source (or an
     // earlier sheet row). Note it, don't duplicate.
     if (isUniqueViolation(err)) {
-      logger.info({ leadKey: row.leadKey }, "Sheet lead phone already exists in leads — logging a note instead of creating a duplicate");
-      await withTransaction(async (client) => {
-        const { rows: existing } = await client.query<{ id: string }>(`SELECT id FROM leads WHERE phone = $1`, [phone]);
-        if (existing[0]) {
-          await insertLeadLog(
-            client,
-            existing[0].id,
-            assignedAgentId,
-            "Google Ads Sheet Import",
-            `Sheet lead (key ${row.leadKey}) submitted for this phone number again — not duplicated.`
-          );
-          broadcastLeadChanged(existing[0].id);
-        }
-      });
+      // Same revival handling as the proactive check above (clean Activity
+      // History note + agent/manager/admin notification) — this only fires
+      // on a genuine race (another request inserted the same phone between
+      // our check and this insert), so it stays rare, but should still look
+      // and behave identically to the normal case, not a separate bare note.
+      const revival = await findLeadForRevival(phone, row.email ?? null);
+      if (revival) {
+        await markLeadRevived(revival, "Google Ads Sheet Import");
+      }
+      logger.info({ leadKey: row.leadKey, existingLeadId: revival?.id }, "Sheet lead phone already exists in leads — marked revived instead of creating a duplicate");
       return { outcome: "duplicate" };
     }
     throw err;
