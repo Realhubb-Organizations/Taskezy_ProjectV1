@@ -1840,6 +1840,9 @@ export default function SettingsPage() {
                                       <p className="text-[10px] text-slate-500 truncate">
                                         {d.source === "web" ? "Web" : d.platform} · active {new Date(d.last_seen_at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
                                       </p>
+                                      <p className="text-[10px] text-slate-400 truncate">
+                                        First login {new Date(d.created_at).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                                      </p>
                                     </div>
                                   </li>
                                 ))}
