@@ -9,6 +9,7 @@ import { computeROIMultiple, formatCurrency } from "@/lib/reportMetrics";
 import { apiGetManagerReportStats, type ManagerReportAgentStats } from "@/lib/apiClient";
 import { TableRowsSkeleton, CardListSkeleton } from "@/components/ui/Skeletons";
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
+import { useLiveRefresh } from "@/lib/useLiveRefresh";
 
 const ZERO_AGENT_STATS = { leadsCount: 0, spend: 0, bookingValue: 0, missedCount: 0, missedFollowups: 0 };
 
@@ -21,13 +22,15 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
   // the Individual/Team/Combined split and per-member breakdown below still
   // just sum these small per-agent rows client-side, same as before.
   const [agentStats, setAgentStats] = useState<ManagerReportAgentStats[]>([]);
+  // Live: refreshes when leads or follow-ups change anywhere.
+  const { liveVersion: reportsLive } = useLiveRefresh("leads", "followups");
   useEffect(() => {
     let cancelled = false;
     apiGetManagerReportStats(dateRange.from, dateRange.to)
       .then(result => { if (!cancelled) setAgentStats(result); })
       .catch(() => { /* leave the previous numbers showing on a transient failure */ });
     return () => { cancelled = true; };
-  }, [dateRange.from, dateRange.to]);
+  }, [dateRange.from, dateRange.to, reportsLive]);
   const statsByAgentId = useMemo(() => new Map(agentStats.map(s => [s.assignedAgentId, s])), [agentStats]);
   const userIdByName = useMemo(() => new Map(users.map(u => [u.name, u.id])), [users]);
   const statsForName = (name: string): ManagerReportAgentStats | typeof ZERO_AGENT_STATS => {

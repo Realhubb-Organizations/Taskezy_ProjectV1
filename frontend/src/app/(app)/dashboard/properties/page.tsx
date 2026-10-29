@@ -41,6 +41,7 @@ import { DatePicker } from "@/components/ui/DateRangePicker";
 import { DateTimeLines, dateTimeParts } from "@/components/ui/DateTimeLines";
 import { downloadPropertyBrochure, possessionLabel, priceLabel, propertyBrochureFile, propertyShareText } from "@/lib/propertyBrochurePdf";
 import { WhatsAppIcon } from "@/components/icons/ContactIcons";
+import { useLiveRefresh } from "@/lib/useLiveRefresh";
 
 const ROWS_PER_PAGE_OPTIONS = [25, 50, 100];
 
@@ -367,10 +368,13 @@ export default function PropertiesPage() {
     sortDir
   };
   const propertyFiltersKey = JSON.stringify(propertyListFilters);
+  // Live: other people's property changes show up without a reload (quietly).
+  const propertiesLive = useLiveRefresh("properties");
 
   useEffect(() => {
+    const background = propertiesLive.isBackground();
     let cancelled = false;
-    setServerPropertiesLoading(true);
+    if (!background) setServerPropertiesLoading(true);
     setPropertiesLoadError(false);
     apiListPropertiesPage(currentPage, rowsPerPage, propertyListFilters)
       .then((result) => {
@@ -379,7 +383,7 @@ export default function PropertiesPage() {
         setServerTotalCount(result.totalCount);
       })
       .catch((err) => {
-        if (cancelled) return;
+        if (cancelled || background) return;
         console.error("Could not load the properties list page:", err);
         setServerProperties([]);
         setServerTotalCount(0);
@@ -393,7 +397,7 @@ export default function PropertiesPage() {
     // this effect re-fires exactly when a real filter value changes, without
     // needing every individual filter piece listed separately.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, rowsPerPage, propertyFiltersKey, propertiesRefreshNonce, manualRefreshSignal]);
+  }, [currentPage, rowsPerPage, propertyFiltersKey, propertiesRefreshNonce, manualRefreshSignal, propertiesLive.liveVersion]);
 
   const totalRows = serverTotalCount;
   const totalPages = Math.max(1, Math.ceil(totalRows / rowsPerPage));

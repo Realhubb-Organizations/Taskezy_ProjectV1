@@ -24,6 +24,8 @@ import NextCallCell from "./NextCallCell";
 import { callSubStatusOf } from "@/lib/callSubStatus";
 import { useLeadStatusScheduler } from "@/lib/leadScheduler";
 import LeadScheduleModal from "./LeadScheduleModal";
+import { DateSortButton } from "@/components/ui/DateSortButton";
+import { useLiveRefresh } from "@/lib/useLiveRefresh";
 
 // Drill-down table + lead quick-view drawer behind the 7 lead stat cards
 // (Total Leads … Site Visit Done). Shared by the CRM Dashboard and the admin
@@ -386,6 +388,8 @@ export default function LeadDrillDownPanel({ title, baseFilters, onClose }: {
     loading: drillLoading,
     search: drillSearch,
     setSearch: setDrillSearch,
+    sortDir: drillSortDir,
+    setSortDir: setDrillSortDir,
     paginationProps
   } = useServerLeadList(filters, 10);
 
@@ -431,6 +435,8 @@ export default function LeadDrillDownPanel({ title, baseFilters, onClose }: {
   // Re-fetch Next Call Dates when a call is scheduled anywhere (addFollowupCall
   // updates this list), not only when the rows change.
   const { followupCalls: liveFollowups } = useApp();
+  // …and when anyone else schedules or completes one (lib/liveRefresh.ts).
+  const { liveVersion: followupsLive } = useLiveRefresh("followups");
   useEffect(() => {
     if (!pageLeadIds) { setPageFollowups([]); return; }
     let cancelled = false;
@@ -438,7 +444,7 @@ export default function LeadDrillDownPanel({ title, baseFilters, onClose }: {
       .then(({ rows }) => { if (!cancelled) setPageFollowups(rows.map(mapApiFollowupToFrontend)); })
       .catch(() => { if (!cancelled) setPageFollowups([]); });
     return () => { cancelled = true; };
-  }, [pageLeadIds, liveFollowups]);
+  }, [pageLeadIds, liveFollowups, followupsLive]);
   const nextCallDateFor = (leadId: string) => nextFollowupFor(leadId, pageFollowups);
 
   // Drill-down table's per-row Status cell — the shared searchable dropdown,
@@ -545,7 +551,7 @@ export default function LeadDrillDownPanel({ title, baseFilters, onClose }: {
                       panelWidth={208}
                     />
                   </th>
-                  <th className="px-4 py-3 whitespace-nowrap">Date</th>
+                  <th className="px-4 py-3 whitespace-nowrap"><DateSortButton dir={drillSortDir} onChange={setDrillSortDir} /></th>
                   <th className="px-4 py-3 whitespace-nowrap">Feedback</th>
                   <th className="px-4 py-3 whitespace-nowrap">Next Call Date</th>
                   {/* Campaign/Source attribution — Admin-only, same tier as

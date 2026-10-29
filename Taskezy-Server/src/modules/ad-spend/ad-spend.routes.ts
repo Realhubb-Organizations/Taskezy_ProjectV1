@@ -10,6 +10,7 @@ import { listAdLevelSpend as listMetaAdLevelSpend } from "../meta/meta.repositor
 import { listAdLevelSpend as listGoogleAdLevelSpend } from "../google-ads/google-ads.repository";
 import { triggerMetaAdSpendSyncNow } from "../../jobs/metaAdSpendSync";
 import { triggerGoogleAdsSpendSyncNow } from "../../jobs/googleAdsSpendSync";
+import { LEAD_SOURCE_BUCKET_SQL } from "../leads/leads.repository";
 
 export const adSpendRouter = Router();
 
@@ -378,6 +379,248 @@ adSpendRouter.get(
 const BUYER_CODES = ["CALL_BACK", "FOLLOWUP", "EOI", "SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE", "BOOKED"];
 const NON_BUYER_CODES = ["DEAD_LEAD", "RNR", "LOW_BUDGET", "CANCELLED", "NOT_INTERESTED"];
 const VISIT_CODES = ["SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE"];
+
+// ── Marketing Reports (Reports → Marketing tab) ─────────────────────────
+// KPI cards + the Project-wise Lead Report, all under the same filters:
+// date range, campaigns, properties, team (agents), source (Meta / Google /
+// Data). Leads are the CRM's own leads (created in range); spend is ad spend
+// in range for the same campaigns/properties/platforms — team doesn't apply
+// to spend (an ad has no agent).
+const toArray = z.union([z.string(), z.array(z.string())])
+  .optional()
+  .transform(v => v === undefined ? undefined : (Array.isArray(v) ? v : [v]));
+const uuidArray = z.union([z.string().uuid(), z.array(z.string().uuid())])
+  .optional()
+  .transform(v => v === undefined ? undefined : (Array.isArray(v) ? v : [v]));
+const MARKETING_SOURCES = ["META", "GOOGLE", "DATA"] as const;
+
+const marketingProjectStatsQuerySchema = z.object({
+  dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateFrom must be YYYY-MM-DD").optional(),
+  dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateTo must be YYYY-MM-DD").optional(),
+  // Campaign names, matched case-insensitively against a lead's campaign
+  // (falling back to its source) and an ad-spend row's account name.
+  campaign: toArray,
+  propertyId: uuidArray,
+  // "true" = also leads/spend with no property (the "Not set" option).
+  noProperty: z.enum(["true", "false"]).optional().transform(v => v === "true"),
+  assignedAgentId: uuidArray,
+  source: z.union([z.enum(MARKETING_SOURCES), z.array(z.enum(MARKETING_SOURCES))])
+    .optional()
+    .transform(v => v === undefined ? undefined : (Array.isArray(v) ? v : [v]))
+});
+
+
+adSpendRouter.get(
+  "/marketing-project-stats",
+  validate({ query: marketingProjectStatsQuerySchema }),
+  asyncHandler(async (req, res) => {
+    const { dateFrom, dateTo, campaign, propertyId, noProperty, assignedAgentId, source } = req.query as unknown as {
+      dateFrom?: string; dateTo?: string; campaign?: string[]; propertyId?: string[]; noProperty?: boolean;
+      assignedAgentId?: string[]; source?: (typeof MARKETING_SOURCES)[number][];
+    };
+    const campaigns = campaign?.length ? campaign.map(c => c.toLowerCase()) : null;
+    const propertyIds = propertyId?.length ? propertyId : null;
+    const propertyFilterOn = !!propertyIds || !!noProperty;
+    const agentIds = assignedAgentId?.length ? assignedAgentId : null;
+    const sources = source?.length ? source : null;
+    // Ad spend only exists for Meta and Google — picking just "Data" means no spend.
+    const spendPlatforms = sources ? sources.filter(s => s !== "DATA") : null;
+
+    // Each query numbers its own parameters ($n), so only what it uses is sent.
+    // noDate: skip the lead created-date bounds (site visits are dated by
+    // when the visit is scheduled instead).
+    const leadFilters = (from: number, opts: { noDate?: boolean } = {}) => {
+      const n = (i: number) => `$${from + i}`;
+      return {
+        params: [opts.noDate ? null : dateFrom ?? null, opts.noDate ? null : dateTo ?? null, BUSINESS_TIMEZONE, campaigns, propertyFilterOn, propertyIds, !!noProperty, agentIds, sources],
+        where: `(${n(0)}::date IS NULL OR (l.created_at AT TIME ZONE ${n(2)})::date >= ${n(0)}::date)
+          AND (${n(1)}::date IS NULL OR (l.created_at AT TIME ZONE ${n(2)})::date <= ${n(1)}::date)
+          AND (${n(3)}::text[] IS NULL OR LOWER(COALESCE(l.campaign, l.source)) = ANY(${n(3)}::text[]))
+          AND (NOT ${n(4)}::boolean OR l.property_id = ANY(COALESCE(${n(5)}::uuid[], '{}')) OR (${n(6)}::boolean AND l.property_id IS NULL))
+          AND (${n(7)}::uuid[] IS NULL OR l.assigned_agent_id = ANY(${n(7)}::uuid[]))
+          AND (CASE WHEN ${n(8)}::text[] IS NULL
+                    THEN l.source IS DISTINCT FROM 'Bulk Upload' -- the Data Calling pool isn't marketing unless "Data" is picked
+                    ELSE ${LEAD_SOURCE_BUCKET_SQL} = ANY(${n(8)}::text[]) END)`
+      };
+    };
+    const spendFilters = (from: number) => {
+      const n = (i: number) => `$${from + i}`;
+      return {
+        params: [dateFrom ?? null, dateTo ?? null, campaigns, propertyFilterOn, propertyIds, !!noProperty, spendPlatforms],
+        where: `(${n(0)}::date IS NULL OR a.spend_date >= ${n(0)}::date)
+          AND (${n(1)}::date IS NULL OR a.spend_date <= ${n(1)}::date)
+          AND (${n(2)}::text[] IS NULL OR LOWER(a.account_name) = ANY(${n(2)}::text[]))
+          AND (NOT ${n(3)}::boolean OR a.property_id = ANY(COALESCE(${n(4)}::uuid[], '{}')) OR (${n(5)}::boolean AND a.property_id IS NULL))
+          AND (${n(6)}::text[] IS NULL OR a.platform = ANY(${n(6)}::text[]))`
+      };
+    };
+
+    const kpiLeads = leadFilters(2); // $1 = qualified codes
+    const activeSpend = spendFilters(1);
+    const projectLeads = leadFilters(2); // $1 = qualified codes
+    const projectSpend = spendFilters(2 + projectLeads.params.length);
+    // Site visits: $1/$2 = visit date range, then the lead filters (minus
+    // created date) for the visits, then the full lead filters for statuses.
+    const svLeads = leadFilters(3, { noDate: true });
+    const statusLeads = leadFilters(3 + svLeads.params.length);
+
+    const [kpiResult, campaignResult, projectResult, siteVisitResult] = await Promise.all([
+      query<{ total: string; qualified: string; rnr: string; follow_ups: string; call_backs: string; site_visits: string }>(
+        `SELECT count(*) AS total,
+                count(*) FILTER (WHERE l.status_code = ANY($1::text[])) AS qualified,
+                count(*) FILTER (WHERE l.status_code = 'RNR') AS rnr,
+                count(*) FILTER (WHERE l.status_code = 'FOLLOWUP') AS follow_ups,
+                count(*) FILTER (WHERE l.status_code = 'CALL_BACK') AS call_backs,
+                count(*) FILTER (WHERE l.status_code IN ('SITE_VISIT_SCHEDULED', 'SITE_VISIT_DONE')) AS site_visits
+         FROM leads l
+         WHERE ${kpiLeads.where}`,
+        [BUYER_CODES, ...kpiLeads.params]
+      ),
+      // Active = has spend in range and isn't marked INACTIVE on Meta/Google
+      // (same rule as the Campaigns page's campaign list).
+      query<{ account_name: string; platform: string; spend: string }>(
+        `SELECT account_name, platform, spend
+         FROM (
+           SELECT a.account_name, MAX(a.platform) AS platform, SUM(a.spend) AS spend,
+                  MAX(COALESCE(mc.status, gc.status)) AS status
+           FROM ad_spend_records a
+           LEFT JOIN meta_campaigns mc ON mc.id = a.meta_campaign_id
+           LEFT JOIN google_ads_campaigns gc ON gc.id = a.google_campaign_id
+           WHERE ${activeSpend.where}
+           GROUP BY a.account_name
+         ) c
+         WHERE status IS DISTINCT FROM 'INACTIVE'
+         ORDER BY spend DESC`,
+        activeSpend.params
+      ),
+      // One row per project: CRM leads + ad spend, joined on property id
+      // (property_id NULL = "Not set").
+      query<{
+        property_id: string | null; property_name: string | null; spend: string; total: string; qualified: string; follow_ups: string;
+        unqualified: string; rnr: string; low_budget: string; other_req: string;
+      }>(
+        `WITH lead_rows AS (
+           SELECT l.property_id, COALESCE(l.property_id::text, 'none') AS project_key,
+                  count(*) AS total,
+                  count(*) FILTER (WHERE l.status_code = ANY($1::text[])) AS qualified,
+                  count(*) FILTER (WHERE l.status_code = 'FOLLOWUP') AS follow_ups,
+                  count(*) FILTER (WHERE l.status_code IN (${UNQUALIFIED_CODES.map(c => `'${c}'`).join(", ")})) AS unqualified,
+                  count(*) FILTER (WHERE l.status_code = 'RNR') AS rnr,
+                  count(*) FILTER (WHERE l.status_code = 'LOW_BUDGET') AS low_budget,
+                  count(*) FILTER (WHERE l.status_code = 'OTHER_REQUIREMENT') AS other_req
+           FROM leads l
+           WHERE ${projectLeads.where}
+           GROUP BY l.property_id
+         ),
+         spend_rows AS (
+           SELECT a.property_id, COALESCE(a.property_id::text, 'none') AS project_key, SUM(a.spend) AS spend
+           FROM ad_spend_records a
+           WHERE ${projectSpend.where}
+           GROUP BY a.property_id
+         )
+         SELECT COALESCE(lr.property_id, sr.property_id) AS property_id,
+                p.name AS property_name,
+                COALESCE(sr.spend, 0) AS spend,
+                COALESCE(lr.total, 0) AS total,
+                COALESCE(lr.qualified, 0) AS qualified,
+                COALESCE(lr.follow_ups, 0) AS follow_ups,
+                COALESCE(lr.unqualified, 0) AS unqualified,
+                COALESCE(lr.rnr, 0) AS rnr,
+                COALESCE(lr.low_budget, 0) AS low_budget,
+                COALESCE(lr.other_req, 0) AS other_req
+         FROM lead_rows lr
+         FULL OUTER JOIN spend_rows sr ON sr.project_key = lr.project_key
+         LEFT JOIN properties p ON p.id = COALESCE(lr.property_id, sr.property_id)
+         ORDER BY COALESCE(sr.spend, 0) DESC, COALESCE(lr.total, 0) DESC`,
+        [BUYER_CODES, ...projectLeads.params, ...projectSpend.params]
+      ),
+      // Project-wise Site Visits. "Lead …" = distinct leads, "SV …" =
+      // site-visit appointments (followup_calls of type SITE_VISIT, dated by
+      // scheduled_at). SV Completed / Booked = lead status, leads created in range.
+      query<{
+        property_id: string | null; property_name: string | null; total: string; lead_scheduled: string;
+        sv_scheduled: string; lead_missed: string; sv_missed: string; completed: string; booked: string;
+      }>(
+        `WITH sv AS (
+           SELECT l.property_id, COALESCE(l.property_id::text, 'none') AS project_key,
+                  count(*) AS total,
+                  count(DISTINCT fc.lead_id) AS lead_scheduled,
+                  count(*) FILTER (WHERE fc.status = 'UPCOMING') AS sv_scheduled,
+                  count(DISTINCT fc.lead_id) FILTER (WHERE fc.status = 'MISSED') AS lead_missed,
+                  count(*) FILTER (WHERE fc.status = 'MISSED') AS sv_missed
+           FROM followup_calls fc
+           JOIN leads l ON l.id = fc.lead_id
+           WHERE fc.call_type = 'SITE_VISIT'
+             AND ($1::date IS NULL OR (fc.scheduled_at AT TIME ZONE $5)::date >= $1::date)
+             AND ($2::date IS NULL OR (fc.scheduled_at AT TIME ZONE $5)::date <= $2::date)
+             AND ${svLeads.where}
+           GROUP BY l.property_id
+         ),
+         st AS (
+           SELECT l.property_id, COALESCE(l.property_id::text, 'none') AS project_key,
+                  count(*) FILTER (WHERE l.status_code = 'SITE_VISIT_DONE') AS completed,
+                  count(*) FILTER (WHERE l.status_code = 'BOOKED') AS booked
+           FROM leads l
+           WHERE ${statusLeads.where}
+           GROUP BY l.property_id
+         )
+         SELECT COALESCE(sv.property_id, st.property_id) AS property_id,
+                p.name AS property_name,
+                COALESCE(sv.total, 0) AS total,
+                COALESCE(sv.lead_scheduled, 0) AS lead_scheduled,
+                COALESCE(sv.sv_scheduled, 0) AS sv_scheduled,
+                COALESCE(sv.lead_missed, 0) AS lead_missed,
+                COALESCE(sv.sv_missed, 0) AS sv_missed,
+                COALESCE(st.completed, 0) AS completed,
+                COALESCE(st.booked, 0) AS booked
+         FROM sv
+         FULL OUTER JOIN st ON st.project_key = sv.project_key
+         LEFT JOIN properties p ON p.id = COALESCE(sv.property_id, st.property_id)
+         WHERE COALESCE(sv.total, 0) + COALESCE(st.completed, 0) + COALESCE(st.booked, 0) > 0
+         ORDER BY COALESCE(sv.total, 0) DESC, COALESCE(st.completed, 0) DESC`,
+        [dateFrom ?? null, dateTo ?? null, ...svLeads.params, ...statusLeads.params]
+      )
+    ]);
+
+    const k = kpiResult.rows[0];
+    sendOk(res, {
+      kpis: {
+        activeCampaigns: campaignResult.rows.length,
+        totalLeads: Number(k?.total ?? 0),
+        qualified: Number(k?.qualified ?? 0),
+        rnr: Number(k?.rnr ?? 0),
+        followUps: Number(k?.follow_ups ?? 0),
+        callBacks: Number(k?.call_backs ?? 0),
+        siteVisits: Number(k?.site_visits ?? 0)
+      },
+      activeCampaignList: campaignResult.rows.map(r => ({ name: r.account_name, platform: r.platform, spend: Number(r.spend) })),
+      siteVisitsByProject: siteVisitResult.rows.map(r => ({
+        propertyId: r.property_id,
+        propertyName: r.property_name,
+        totalSiteVisits: Number(r.total),
+        leadsScheduled: Number(r.lead_scheduled),
+        svScheduled: Number(r.sv_scheduled),
+        leadsCompleted: Number(r.completed),
+        leadsMissed: Number(r.lead_missed),
+        svMissed: Number(r.sv_missed),
+        booked: Number(r.booked)
+      })),
+      byProject: projectResult.rows.map(r => ({
+        propertyId: r.property_id,
+        propertyName: r.property_name,
+        spend: Number(r.spend),
+        totalLeads: Number(r.total),
+        qualified: Number(r.qualified),
+        followUps: Number(r.follow_ups),
+        // Same "unqualified" as the Campaigns page (UNQUALIFIED_CODES).
+        unqualified: Number(r.unqualified),
+        rnr: Number(r.rnr),
+        lowBudget: Number(r.low_budget),
+        otherRequirement: Number(r.other_req)
+      }))
+    });
+  })
+);
 
 const marketingReportStatsQuerySchema = z.object({
   dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateFrom must be YYYY-MM-DD").optional(),

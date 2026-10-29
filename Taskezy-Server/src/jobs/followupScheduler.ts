@@ -2,6 +2,7 @@ import { pool } from "../db/pool";
 import { logger } from "../utils/logger";
 import { createNotification } from "../modules/notifications/notifications.service";
 import { listActiveAdminIds } from "../modules/users/users.repository";
+import { broadcastDataChanged } from "../utils/dataChanged";
 
 const POLL_INTERVAL_MS = 60_000;
 const VIOLATION_WINDOW_MS = 10 * 60_000; // 10 minutes, per product decision
@@ -30,6 +31,7 @@ async function notifyDueFollowups(): Promise<void> {
      WHERE status = 'UPCOMING' AND scheduled_at <= now() AND due_notified_at IS NULL
      RETURNING id, lead_id, lead_name, call_type, assigned_to_id`
   );
+  if (rows.length > 0) broadcastDataChanged("followups", "tasks");
 
   for (const row of rows) {
     await createNotification({
@@ -79,6 +81,7 @@ async function notifySlaViolations(): Promise<void> {
      RETURNING fc.id, fc.lead_id, fc.lead_name, u.first_name || COALESCE(' ' || u.last_name, '') AS agent_name`
   );
   if (rows.length === 0) return;
+  broadcastDataChanged("followups", "tasks", "leads");
 
   // Permanent per-lead counter (migration 047) — survives this follow-up
   // row later being superseded/completed, unlike reading status='MISSED'

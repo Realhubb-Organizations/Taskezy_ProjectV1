@@ -1,10 +1,29 @@
 import rateLimit from "express-rate-limit";
 import { env } from "../config/env";
+import { verifyAccessToken } from "../utils/tokens";
 
 // General API-wide limiter — generous, just a backstop against abuse/runaway clients.
+//
+// Keyed per signed-in user (verified access token), falling back to IP for
+// anything unauthenticated: the whole office reaches the API from one public
+// IP, so an IP key made every agent share a single budget — and live screen
+// refreshes (utils/dataChanged.ts) multiply normal traffic across the team.
+// Only a token this server signed counts, so it can't be spoofed to dodge
+// the limit.
 export const apiRateLimiter = rateLimit({
   windowMs: env.RATE_LIMIT_WINDOW_MS,
   max: env.RATE_LIMIT_MAX,
+  keyGenerator: (req) => {
+    const header = req.headers.authorization;
+    if (header?.startsWith("Bearer ")) {
+      try {
+        return `user:${verifyAccessToken(header.slice(7)).sub}`;
+      } catch {
+        // expired / invalid token — counted against the IP below
+      }
+    }
+    return req.ip ?? "unknown";
+  },
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, error: { code: "RATE_LIMITED", message: "Too many requests, please try again later" } }

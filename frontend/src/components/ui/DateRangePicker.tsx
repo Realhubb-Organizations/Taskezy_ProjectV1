@@ -224,7 +224,9 @@ export default function DateRangePicker({
   maxDate = todayIso(),
   minDate,
   clearable = true,
-  className
+  className,
+  label,
+  triggerClassName
 }: {
   value: DateRangeValue | null;
   onChange: (v: DateRangeValue | null) => void;
@@ -234,6 +236,10 @@ export default function DateRangePicker({
   minDate?: string;
   /** Shows an × on the trigger to remove an applied range. */
   clearable?: boolean;
+  /** Fixed trigger text (e.g. "Date Range") instead of the dates; the dates then show on hover. */
+  label?: string;
+  /** Extra classes for the trigger button itself. */
+  triggerClassName?: string;
   /** @deprecated kept for existing callers; the calendar has no heading. */
   heading?: string;
   className?: string;
@@ -244,10 +250,16 @@ export default function DateRangePicker({
   return (
     <>
       <span className={`inline-flex items-center ${className ?? ""}`}>
-        <button ref={anchorRef} type="button" onClick={() => setOpen(o => !o)} className={triggerClass}>
+        <button
+          ref={anchorRef}
+          type="button"
+          onClick={() => setOpen(o => !o)}
+          className={`${triggerClass} ${triggerClassName ?? ""}`}
+          title={label && value ? `${formatDisplayDate(value.start)} To ${formatDisplayDate(value.end)}` : undefined}
+        >
           <Calendar className="h-4 w-4 text-blue-600" />
           <span className="tabular-nums">
-            {value ? `${formatDisplayDate(value.start)} To ${formatDisplayDate(value.end)}` : emptyLabel}
+            {label ?? (value ? `${formatDisplayDate(value.start)} To ${formatDisplayDate(value.end)}` : emptyLabel)}
           </span>
           {clearable && value && (
             <span

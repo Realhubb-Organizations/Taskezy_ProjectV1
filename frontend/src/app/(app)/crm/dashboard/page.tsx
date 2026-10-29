@@ -21,6 +21,7 @@ import DateRangeSelect from "@/components/ui/DateRangeSelect";
 import { dateRangeLabel } from "@/lib/dateRangeLabel";
 import TaskSourceTabs, { TaskSource } from "@/components/dashboard/TaskSourceTabs";
 import { DateRangeValue, toIsoDate } from "@/components/ui/DateRangePicker";
+import { useLiveRefresh } from "@/lib/useLiveRefresh";
 
 // CRM's own overview — moved out of the old bare /dashboard route (which
 // branched its content by department/activeSystem, so the same URL showed a
@@ -149,9 +150,12 @@ export default function CrmDashboardPage() {
     totalLeads: 0, newLeads: 0, rnr: 0, callBacks: 0, followUps: 0, siteVisitScheduled: 0, siteVisitDone: 0
   });
   const [statsLoading, setStatsLoading] = useState(true);
+  // Refreshes live (quietly) when leads change anywhere.
+  const statsLive = useLiveRefresh("leads");
   useEffect(() => {
+    const background = statsLive.isBackground();
     let cancelled = false;
-    setStatsLoading(true);
+    if (!background) setStatsLoading(true);
     const filters: LeadListFilters = serverDateBounds();
     apiGetLeadStats(filters)
       .then(result => { if (!cancelled) setStats(result); })
@@ -159,7 +163,7 @@ export default function CrmDashboardPage() {
       .finally(() => { if (!cancelled) setStatsLoading(false); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dateRange, customRange]);
+  }, [dateRange, customRange, statsLive.liveVersion]);
 
   // Each card's own filters for the drill-down panel — same per-status DB
   // codes the server-side stats above group by, so a clicked card's

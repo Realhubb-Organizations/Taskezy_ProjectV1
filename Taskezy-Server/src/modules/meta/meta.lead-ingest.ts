@@ -6,6 +6,7 @@ import { isUniqueViolation } from "../users/users.repository";
 import { createNotification } from "../notifications/notifications.service";
 import { findPropertyIdByCampaignName } from "../properties/properties.repository";
 import { pickAgentForProperty } from "../properties/properties.assignment";
+import { broadcastLeadChanged } from "../leads/leads.realtime";
 import { MetaLeadData } from "./meta-client";
 
 function firstFieldValue(fieldData: MetaLeadData["field_data"], keys: string[]): string | undefined {
@@ -89,6 +90,7 @@ export async function ingestMetaLead(leadData: MetaLeadData, connectingAdminId: 
         leadId: rows[0].id,
         link: "/dashboard/crm"
       });
+      broadcastLeadChanged(rows[0].id);
     }
   } catch (err) {
     // The only remaining unique constraint this insert can hit is leads.phone

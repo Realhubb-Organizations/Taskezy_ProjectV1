@@ -10,6 +10,8 @@ import { TableRowsSkeleton } from "@/components/ui/Skeletons";
 import TablePagination from "@/components/ui/TablePagination";
 import DateRangePicker, { DateRangeValue } from "@/components/ui/DateRangePicker";
 import { DateTimeLines, dateTimeParts } from "@/components/ui/DateTimeLines";
+import { DateSortButton, type SortDir } from "@/components/ui/DateSortButton";
+import { useLiveRefresh } from "@/lib/useLiveRefresh";
 
 const ROWS_PER_PAGE = 25;
 
@@ -46,6 +48,8 @@ export default function CallLogPage() {
 
   const [rows, setRows] = useState<ApiCallLogRow[]>([]);
   const [page, setPage] = useState(1);
+  // Date column sort (DateSortButton); undefined = newest first.
+  const [sortDir, setSortDir] = useState<SortDir | undefined>(undefined);
   const [totalCount, setTotalCount] = useState(0);
   const [dateRange, setDateRange] = useState<DateRangeValue | null>(null);
   const [loading, setLoading] = useState(true);
@@ -59,8 +63,11 @@ export default function CallLogPage() {
   // behind. No-ops instantly on web. Later fetches (pagination, date filter)
   // skip the sync and just re-fetch.
   const didSyncRef = useRef(false);
+  // Live: new synced calls from anyone show up without a reload (quietly).
+  const callLogLive = useLiveRefresh("calllog");
 
   useEffect(() => {
+    const background = callLogLive.isBackground();
     let active = true;
     (async () => {
       if (!didSyncRef.current) {
@@ -68,16 +75,16 @@ export default function CallLogPage() {
         await syncDeviceCallLog();
       }
       if (!active) return;
-      setLoading(true);
+      if (!background) setLoading(true);
       setCallLogLoadError(false);
       try {
-        const res = await apiListCallLogPage(page, ROWS_PER_PAGE, { dateFrom: dateRange?.start, dateTo: dateRange?.end });
+        const res = await apiListCallLogPage(page, ROWS_PER_PAGE, { dateFrom: dateRange?.start, dateTo: dateRange?.end, sortDir });
         if (!active) return;
         setRows(res.rows);
         setTotalCount(res.totalCount);
       } catch (err) {
         console.warn("Could not load call log:", err);
-        if (active) {
+        if (active && !background) {
           setRows([]);
           setTotalCount(0);
           setCallLogLoadError(true);
@@ -87,7 +94,7 @@ export default function CallLogPage() {
       }
     })();
     return () => { active = false; };
-  }, [page, dateRange, manualRefreshSignal, callLogRefreshNonce]);
+  }, [page, dateRange, sortDir, manualRefreshSignal, callLogRefreshNonce, callLogLive.liveVersion]);
 
   const colCount = 5 + (showAgentColumn ? 1 : 0);
 
@@ -106,7 +113,7 @@ export default function CallLogPage() {
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b border-slate-100 text-left text-[11px] uppercase tracking-wide text-slate-400">
-                <th className="px-5 py-3 font-bold">Date</th>
+                <th className="px-5 py-3 font-bold"><DateSortButton dir={sortDir} onChange={(d) => { setSortDir(d); setPage(1); }} /></th>
                 {showAgentColumn && <th className="px-5 py-3 font-bold">Agent</th>}
                 <th className="px-5 py-3 font-bold">Phone Number</th>
                 <th className="px-5 py-3 font-bold">Lead</th>

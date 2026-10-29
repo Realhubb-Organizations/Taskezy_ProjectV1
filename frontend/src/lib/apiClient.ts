@@ -318,6 +318,14 @@ export interface LeadListFilters {
   excludeBulkUpload?: boolean;
   /** Live-clock SLA check — see leads.repository.ts's buildLeadWhereClause. */
   missedOnly?: boolean;
+  /** Date column sort (by created date); left out = the default order. */
+  sortDir?: "asc" | "desc";
+  /** Which date sortDir sorts by — created (default) or assigned. */
+  sortField?: "created" | "assigned";
+  /** Marketing source groups (Marketing Reports drill-downs). */
+  sourceBucket?: ("META" | "GOOGLE" | "DATA")[];
+  /** Match `campaign` case-insensitively (Marketing Reports drill-downs). */
+  campaignIgnoreCase?: boolean;
 }
 
 function buildLeadFilterParams(filters: LeadListFilters): URLSearchParams {
@@ -332,6 +340,10 @@ function buildLeadFilterParams(filters: LeadListFilters): URLSearchParams {
   if (filters.search) params.set("search", filters.search);
   if (filters.excludeBulkUpload) params.set("excludeBulkUpload", "true");
   if (filters.missedOnly) params.set("missedOnly", "true");
+  if (filters.sortDir) params.set("sortDir", filters.sortDir);
+  if (filters.sortDir && filters.sortField) params.set("sortField", filters.sortField);
+  filters.sourceBucket?.forEach(s => params.append("sourceBucket", s));
+  if (filters.campaignIgnoreCase) params.set("campaignIgnoreCase", "true");
   return params;
 }
 
@@ -1849,6 +1861,71 @@ export interface MarketingReportStats {
 // Conversion, Booking ROI) and the lead-derived half of its By Ad Account/
 // Property-wise tables — spend/CPL/platform stay client-side from the
 // already-fetched adSpendRecords, same split campaign-lead-stats uses.
+// Reports → Marketing tab: KPI cards + Project-wise Lead Report under one
+// set of filters (see ad-spend.routes.ts /marketing-project-stats).
+export type MarketingSource = "META" | "GOOGLE" | "DATA";
+export interface MarketingProjectFilters {
+  dateFrom?: string;
+  dateTo?: string;
+  campaign?: string[];
+  propertyId?: string[];
+  /** Also include leads/spend with no property ("Not set"). */
+  noProperty?: boolean;
+  assignedAgentId?: string[];
+  source?: MarketingSource[];
+}
+export interface MarketingProjectRow {
+  propertyId: string | null;
+  propertyName: string | null;
+  spend: number;
+  totalLeads: number;
+  qualified: number;
+  followUps: number;
+  /** Dead Lead + RNR + Not Interested (same as the Campaigns page). */
+  unqualified: number;
+  rnr: number;
+  lowBudget: number;
+  otherRequirement: number;
+}
+export interface MarketingSiteVisitRow {
+  propertyId: string | null;
+  propertyName: string | null;
+  /** Site-visit appointments in range (upcoming + completed + missed). */
+  totalSiteVisits: number;
+  /** Leads with at least one site visit booked. */
+  leadsScheduled: number;
+  /** Appointments still upcoming. */
+  svScheduled: number;
+  /** Leads in status Site Visit Done. */
+  leadsCompleted: number;
+  /** Leads with at least one missed site visit. */
+  leadsMissed: number;
+  /** Missed appointments. */
+  svMissed: number;
+  /** Leads in status Booked. */
+  booked: number;
+}
+export interface MarketingProjectStats {
+  kpis: { activeCampaigns: number; totalLeads: number; qualified: number; rnr: number; followUps: number; callBacks: number; siteVisits: number };
+  /** The campaigns behind the Active Campaigns card, highest spend first. */
+  activeCampaignList: { name: string; platform: string; spend: number }[];
+  byProject: MarketingProjectRow[];
+  siteVisitsByProject: MarketingSiteVisitRow[];
+}
+
+export function apiGetMarketingProjectStats(filters: MarketingProjectFilters): Promise<MarketingProjectStats> {
+  const params = new URLSearchParams();
+  if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
+  if (filters.dateTo) params.set("dateTo", filters.dateTo);
+  filters.campaign?.forEach(c => params.append("campaign", c));
+  filters.propertyId?.forEach(id => params.append("propertyId", id));
+  if (filters.noProperty) params.set("noProperty", "true");
+  filters.assignedAgentId?.forEach(id => params.append("assignedAgentId", id));
+  filters.source?.forEach(s => params.append("source", s));
+  const qs = params.toString();
+  return request<MarketingProjectStats>(`/api/v1/ad-spend/marketing-project-stats${qs ? `?${qs}` : ""}`);
+}
+
 export function apiGetMarketingReportStats(dateFrom?: string, dateTo?: string): Promise<MarketingReportStats> {
   const params = new URLSearchParams();
   if (dateFrom) params.set("dateFrom", dateFrom);
@@ -2124,13 +2201,14 @@ export interface CallLogPageResult {
 export async function apiListCallLogPage(
   page: number,
   pageSize: number,
-  filters: { dateFrom?: string; dateTo?: string } = {}
+  filters: { dateFrom?: string; dateTo?: string; sortDir?: "asc" | "desc" } = {}
 ): Promise<CallLogPageResult> {
   const params = new URLSearchParams();
   params.set("page", String(page));
   params.set("pageSize", String(pageSize));
   if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
   if (filters.dateTo) params.set("dateTo", filters.dateTo);
+  if (filters.sortDir) params.set("sortDir", filters.sortDir);
   const { data, meta } = await requestWithMeta<ApiCallLogRow>(`/api/v1/call-log?${params.toString()}`);
   return {
     rows: data,

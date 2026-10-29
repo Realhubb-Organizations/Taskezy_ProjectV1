@@ -10,6 +10,7 @@ import { TableRowsSkeleton } from "@/components/ui/Skeletons";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
 import { maskPhone, maskEmail } from "@/lib/maskPII";
+import { DateSortButton, sortByDate, type SortDir } from "@/components/ui/DateSortButton";
 
 // Row colors per the sales-dashboard design: missed (no action taken),
 // pending (due now — becomes missed if not acted on within 10 min),
@@ -79,13 +80,15 @@ export default function SalesPendingTasksTable({
   }, [pendingTasks, now, taskFilter]);
   const statusOptions = useMemo(() => Array.from(new Set(tasks.map(t => t.status))), [tasks]);
 
-  const visibleTasks = useMemo(() => tasks.filter(t => {
+  // Task Time column sort (DateSortButton); undefined = the normal order.
+  const [timeSortDir, setTimeSortDir] = useState<SortDir | undefined>(undefined);
+  const visibleTasks = useMemo(() => sortByDate(tasks.filter(t => {
     const q = search.trim().toLowerCase();
     const matchesSearch = !q || t.name.toLowerCase().includes(q) || t.phone.includes(q);
     const matchesStatus = statusFilter.length === 0 || statusFilter.includes(t.status);
     const matchesBucket = !bucketFilter || t.bucket === bucketFilter;
     return matchesSearch && matchesStatus && matchesBucket;
-  }), [tasks, search, statusFilter, bucketFilter]);
+  }), timeSortDir, t => t.dueAt), [tasks, search, statusFilter, bucketFilter, timeSortDir]);
 
   // Paged here (not by the pages using it) so the sales dashboard and the
   // admin/manager per-agent task page both get it. Search, status and legend
@@ -93,7 +96,7 @@ export default function SalesPendingTasksTable({
   const { pageRows, paginationProps } = usePagination(
     visibleTasks,
     10,
-    JSON.stringify([search, statusFilter, bucketFilter])
+    JSON.stringify([search, statusFilter, bucketFilter, timeSortDir])
   );
 
   const bucketCounts = tasks.reduce<Record<TaskBucket, number>>(
@@ -179,7 +182,7 @@ export default function SalesPendingTasksTable({
               the task rows scroll underneath them. */}
           <thead>
             <tr className="text-left text-xs font-bold text-slate-800">
-              <th className="px-4 py-3 whitespace-nowrap border-b border-slate-200 sticky top-0 z-10 bg-white">Task Time</th>
+              <th className="px-4 py-3 whitespace-nowrap border-b border-slate-200 sticky top-0 z-10 bg-white"><DateSortButton label="Task Time" dir={timeSortDir} onChange={setTimeSortDir} /></th>
               <th className="px-4 py-3 whitespace-nowrap border-b border-slate-200 sticky top-0 z-10 bg-white">
                 {searchOpen ? (
                   <div className="flex items-center gap-1">
