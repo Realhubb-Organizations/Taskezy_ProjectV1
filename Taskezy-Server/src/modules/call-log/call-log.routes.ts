@@ -5,7 +5,7 @@ import { validate } from "../../middleware/validate";
 import { asyncHandler } from "../../utils/asyncHandler";
 import { sendOk, sendPaginated } from "../../utils/apiResponse";
 import { pool, query } from "../../db/pool";
-import { normalizeIndianMobile } from "../leads/leads.repository";
+import { normalizeLeadPhone } from "../leads/leads.repository";
 import * as usersRepo from "../users/users.repository";
 import { AccessTokenPayload } from "../../utils/tokens";
 
@@ -69,7 +69,7 @@ callLogRouter.post(
     // every other external phone-number ingest point in this codebase —
     // but a landline or malformed number can never match a lead anyway, so
     // it's filtered out below along with every other non-lead number.
-    const normalized = entries.map(e => normalizeIndianMobile(e.phoneNumber) ?? e.phoneNumber.trim());
+    const normalized = entries.map(e => normalizeLeadPhone(e.phoneNumber) ?? e.phoneNumber.trim());
 
     // Privacy: a device's call history is personal data for every number
     // that isn't an actual CRM lead — this app has no business persisting
@@ -120,8 +120,8 @@ const listCallLogQuerySchema = z.object({
   dateTo: z.string().optional()
 });
 
-// leads.phone is already stored normalized to a bare 10-digit mobile (see
-// normalizeIndianMobile's own comment in leads.repository.ts), and
+// leads.phone is already stored normalized to a bare 10-digit mobile or a
+// "+<country code>" foreign number (see normalizeLeadPhone in leads.repository.ts), and
 // device_call_log.phone_number is normalized the same way at insert time —
 // so a plain equality join is enough to link a call to a lead by phone
 // number, no live re-normalization needed on every query.

@@ -399,7 +399,7 @@ export default function ResalePage() {
                   <div key={l.id} className="p-3 border border-slate-200 rounded-xl bg-slate-50 flex justify-between items-center text-xs">
                     <div>
                       <p className="font-bold text-slate-800">{l.name}</p>
-                      <p className="text-[10px] text-slate-500 font-mono">+91-{activeRole === "ADMIN" ? l.phone : maskPhone(l.phone)} • {activeRole === "ADMIN" ? l.email : maskEmail(l.email)}</p>
+                      <p className="text-[10px] text-slate-500 font-mono">{l.phone.startsWith("+") ? "" : "+91-"}{activeRole === "ADMIN" ? l.phone : maskPhone(l.phone)} • {activeRole === "ADMIN" ? l.email : maskEmail(l.email)}</p>
                       <span className="inline-block mt-1 bg-brand-50 border border-brand-100 text-[9px] font-bold text-brand-700 px-1.5 py-0.5 rounded">
                         Prefers: {l.property}
                       </span>

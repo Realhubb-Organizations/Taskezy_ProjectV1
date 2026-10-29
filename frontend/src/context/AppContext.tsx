@@ -1881,14 +1881,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // CRM State Rules
   const addLead = (leadData: Omit<Lead, "id" | "status" | "kycVerified" | "logs">) => {
-    const phoneRegex = /^[6-9]\d{9}$/;
+    const phoneRegex = /^([6-9]\d{9}|\+[1-9]\d{7,14})$/;
     if (!phoneRegex.test(leadData.phone)) {
-      return { success: false, error: "Validation Error: Lead must contain a valid 10-digit Indian mobile number." };
+      return { success: false, error: "Validation Error: Lead must contain a valid 10-digit Indian mobile number or a +country-code foreign number." };
     }
 
     const isDuplicate = allLeads.some(l => l.phone === leadData.phone);
     if (isDuplicate) {
-      return { success: false, error: `Compliance Violation: Lead with phone number +91-${leadData.phone} already exists in database partition.` };
+      return { success: false, error: `Compliance Violation: Lead with phone number ${leadData.phone.startsWith("+") ? leadData.phone : `+91-${leadData.phone}`} already exists in database partition.` };
     }
 
     const newLead: Lead = {

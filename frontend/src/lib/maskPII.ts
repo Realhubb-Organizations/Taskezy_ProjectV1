@@ -7,13 +7,15 @@
 // a user reads on screen. See project_crm_role_based_lead_scoping memory
 // (2026-10-10 round — PII masking).
 //
-// Every number in this app is a normalized 10-digit Indian mobile (see
-// leads.repository.ts's normalizeIndianMobile), so a fixed first-2/last-2
-// mask reads consistently; non-standard lengths still degrade safely.
+// Numbers are a normalized 10-digit Indian mobile or a "+<country code>"
+// foreign number (see leads.repository.ts's normalizeLeadPhone), so a fixed
+// first-2/last-2 mask reads consistently (keeping a foreign number's +);
+// non-standard lengths still degrade safely.
 export function maskPhone(phone: string): string {
   const digits = phone.replace(/\D/g, "");
+  const plus = phone.trim().startsWith("+") ? "+" : "";
   if (digits.length <= 4) return "•".repeat(digits.length || 4);
-  return `${digits.slice(0, 2)}${"•".repeat(digits.length - 4)}${digits.slice(-2)}`;
+  return `${plus}${digits.slice(0, 2)}${"•".repeat(digits.length - 4)}${digits.slice(-2)}`;
 }
 
 export function maskEmail(email: string): string {

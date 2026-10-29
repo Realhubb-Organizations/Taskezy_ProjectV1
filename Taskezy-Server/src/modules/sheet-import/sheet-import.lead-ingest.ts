@@ -1,6 +1,6 @@
 import { pool, withTransaction } from "../../db/pool";
 import { logger } from "../../utils/logger";
-import { insertLeadLog, normalizeIndianMobile } from "../leads/leads.repository";
+import { insertLeadLog, normalizeLeadPhone } from "../leads/leads.repository";
 import { isUniqueViolation, listActiveAdminIds } from "../users/users.repository";
 import { createNotification } from "../notifications/notifications.service";
 import { findPropertyIdBySheetSource, recordSheetSourceSeen } from "../properties/properties.repository";
@@ -44,9 +44,9 @@ export type SheetLeadIngestResult =
  * route manually, same fallback the Meta webhook uses.
  */
 export async function ingestSheetLead(row: SheetLeadRow): Promise<SheetLeadIngestResult> {
-  const phone = normalizeIndianMobile(row.phone);
+  const phone = normalizeLeadPhone(row.phone);
   if (!phone) {
-    return { outcome: "skipped", reason: "phone did not normalize to a valid 10-digit Indian mobile" };
+    return { outcome: "skipped", reason: "phone is not a valid 10-digit Indian mobile or +country-code number" };
   }
   const name = row.name?.trim();
   if (!name) {
