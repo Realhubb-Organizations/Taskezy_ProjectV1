@@ -153,19 +153,16 @@ export async function ingestSheetLead(row: SheetLeadRow): Promise<SheetLeadInges
     // this phone number already has a lead from some other source (or an
     // earlier sheet row). Note it, don't duplicate.
     if (isUniqueViolation(err)) {
-      logger.info({ leadKey: row.leadKey }, "Sheet lead phone already exists in leads — logging a note instead of creating a duplicate");
-      await withTransaction(async (client) => {
-        const { rows: existing } = await client.query<{ id: string }>(`SELECT id FROM leads WHERE phone = $1`, [phone]);
-        if (existing[0]) {
-          await insertLeadLog(
-            client,
-            existing[0].id,
-            assignedAgentId,
-            "Google Ads Sheet Import",
-            `Sheet lead (key ${row.leadKey}) submitted for this phone number again — not duplicated.`
-          );
-        }
-      });
+      // Same revival handling as the proactive check above (clean Activity
+      // History note + agent/manager/admin notification) — this only fires
+      // on a genuine race (another request inserted the same phone between
+      // our check and this insert), so it stays rare, but should still look
+      // and behave identically to the normal case, not a separate bare note.
+      const revival = await findLeadForRevival(phone, row.email ?? null);
+      if (revival) {
+        await markLeadRevived(revival, "Google Ads Sheet Import");
+      }
+      logger.info({ leadKey: row.leadKey, existingLeadId: revival?.id }, "Sheet lead phone already exists in leads — marked revived instead of creating a duplicate");
       return { outcome: "duplicate" };
     }
     throw err;

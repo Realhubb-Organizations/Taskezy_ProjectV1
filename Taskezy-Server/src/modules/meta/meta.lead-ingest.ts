@@ -1,6 +1,6 @@
-import { pool, withTransaction } from "../../db/pool";
+import { pool } from "../../db/pool";
 import { logger } from "../../utils/logger";
-import { insertLeadLog, normalizeLeadPhone } from "../leads/leads.repository";
+import { normalizeLeadPhone } from "../leads/leads.repository";
 import { findLeadForRevival, markLeadRevived } from "../leads/leadRevival";
 import { isUniqueViolation } from "../users/users.repository";
 import { createNotification } from "../notifications/notifications.service";
@@ -95,19 +95,16 @@ export async function ingestMetaLead(leadData: MetaLeadData, connectingAdminId: 
     // (meta_leadgen_id conflicts are already absorbed by ON CONFLICT above) —
     // an existing customer submitted the form again. Note it, don't duplicate.
     if (isUniqueViolation(err)) {
-      logger.info({ leadgenId: leadData.id }, "Meta lead phone already exists in leads — logging a note instead of creating a duplicate");
-      await withTransaction(async (client) => {
-        const { rows } = await client.query<{ id: string }>(`SELECT id FROM leads WHERE phone = $1`, [phone]);
-        if (rows[0]) {
-          await insertLeadLog(
-            client,
-            rows[0].id,
-            connectingAdminId,
-            "Meta Ads Webhook",
-            `New Meta lead (leadgen ID ${leadData.id}) submitted for this phone number again — not duplicated.`
-          );
-        }
-      });
+      // Same revival handling as the proactive check above (clean Activity
+      // History note + agent/manager/admin notification) — this only fires
+      // on a genuine race (another request inserted the same phone between
+      // our check and this insert), so it stays rare, but should still look
+      // and behave identically to the normal case, not a separate bare note.
+      const revival = await findLeadForRevival(phone, email ?? null);
+      if (revival) {
+        await markLeadRevived(revival, "Meta Ads Webhook");
+      }
+      logger.info({ leadgenId: leadData.id, existingLeadId: revival?.id }, "Meta lead phone already exists in leads — marked revived instead of creating a duplicate");
       return;
     }
     throw err;
