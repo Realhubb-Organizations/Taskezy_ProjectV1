@@ -18,6 +18,30 @@ export function normalizeIndianMobile(raw: string): string | null {
   return /^[6-9]\d{9}$/.test(digits) ? digits : null;
 }
 
+/**
+ * A foreign number typed with its country code ("+971 55 422 3805" or
+ * "00971554223805") as "+" and 8–15 digits, or null. The + / 00 is required,
+ * and +91 is never foreign — Indian numbers stay 10 bare digits.
+ */
+export function normalizeForeignPhone(raw: string): string | null {
+  const m = raw.trim().replace(/[\s\-().]/g, "").match(/^(?:\+|00)([1-9]\d{7,14})$/);
+  return m && !m[1].startsWith("91") ? `+${m[1]}` : null;
+}
+
+/** A lead's phone: an Indian mobile (10 bare digits) or a foreign number (+country code). */
+export function normalizeLeadPhone(raw: string): string | null {
+  return normalizeIndianMobile(raw) ?? normalizeForeignPhone(raw);
+}
+
+/** validatePhone for a lead's phone, which may also be a foreign number. */
+export function validateLeadPhone(raw: string, { required = false, label = "Phone number" } = {}): string | null {
+  const value = raw.trim();
+  if (!value) return required ? `${label} is required.` : null;
+  if (/[a-z]/i.test(value)) return `${label} can only contain digits.`;
+  if (!normalizeLeadPhone(value)) return "Enter a valid 10-digit mobile number, or a foreign number starting with + and its country code.";
+  return null;
+}
+
 export function validatePhone(raw: string, { required = false, label = "Phone number" } = {}): string | null {
   const value = raw.trim();
   if (!value) return required ? `${label} is required.` : null;
@@ -31,10 +55,10 @@ export function sanitizePhoneInput(raw: string): string {
   return raw.replace(/[^\d+\s-]/g, "").slice(0, 16);
 }
 
-/** Props for a phone <input>: numeric keypad on phones, no letters, sensible length. */
+/** Props for a phone <input>: phone keypad (digits and +), no letters, sensible length. */
 export const phoneInputProps = {
   type: "tel",
-  inputMode: "numeric" as const,
+  inputMode: "tel" as const,
   autoComplete: "tel",
   maxLength: 16
 };

@@ -8,7 +8,7 @@ import { SearchableMultiSelect } from "@/components/ui/SearchableDropdown";
 import TablePagination from "@/components/ui/TablePagination";
 import { useApp } from "@/context/AppContext";
 import { maskPhone } from "@/lib/maskPII";
-import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/callTrigger";
+import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp, whatsAppNumber } from "@/lib/callTrigger";
 
 export interface PendingRow {
   id: string;
@@ -60,7 +60,7 @@ export default function PendingLeadsTable({
   // plain wa.me open, no feedback-gate watcher armed.
   const handleWhatsApp = (row: PendingRow) => {
     if (!row.leadId) {
-      window.open(`https://wa.me/${row.phone.replace(/[^0-9]/g, "")}`, "_blank");
+      window.open(`https://wa.me/${whatsAppNumber(row.phone)}`, "_blank");
       return;
     }
     triggerLeadWhatsApp({ id: row.leadId, phone: row.phone, name: row.name, property: row.property }, {

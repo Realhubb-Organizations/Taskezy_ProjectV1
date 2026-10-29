@@ -10,7 +10,7 @@ import { findPropertyIdBySheetSource, findById as findPropertyById } from "../pr
 import { pickAgentForProperty, createPropertyAgentPicker } from "../properties/properties.assignment";
 import { broadcastLeadChanged } from "./leads.realtime";
 import { HANDOVER_NOTE_PREFIX } from "./leads.handover";
-import { normalizeTypedIndianMobile } from "../../utils/validation";
+import { normalizeTypedLeadPhone } from "../../utils/validation";
 import { assertTransitionAllowed, LeadStatusCode } from "./leadStatusTransitions";
 
 /**
@@ -103,7 +103,7 @@ export async function searchLeadsByPhones(caller: AccessTokenPayload, rawPhones:
   const trimmed = Array.from(new Set(rawPhones.map(p => p.trim()).filter(Boolean)));
   const normalizedSet = new Set<string>();
   for (const raw of trimmed) {
-    const n = normalizeTypedIndianMobile(raw);
+    const n = normalizeTypedLeadPhone(raw);
     if (n) normalizedSet.add(n);
   }
 
@@ -111,7 +111,7 @@ export async function searchLeadsByPhones(caller: AccessTokenPayload, rawPhones:
   const matchedPhones = new Set(allMatched.map(m => m.phone));
 
   const notFound = trimmed.filter(raw => {
-    const n = normalizeTypedIndianMobile(raw);
+    const n = normalizeTypedLeadPhone(raw);
     return !n || !matchedPhones.has(n);
   });
 
@@ -591,7 +591,7 @@ export async function bulkImportLeads(input: BulkImportLeadsInput): Promise<Bulk
     const name = input.leads[i].name?.trim();
     // Typed/uploaded numbers use the strict rule: an 11-digit typo is reported
     // as skipped instead of being cut down to a different, valid-looking number.
-    const phone = normalizeTypedIndianMobile(input.leads[i].phone ?? "");
+    const phone = normalizeTypedLeadPhone(input.leads[i].phone ?? "");
     // Lenient on purpose (unlike createLeadSchema's strict email()) — a bad
     // email in one cell of a 100k-row sheet shouldn't skip an otherwise
     // valid name+phone row, it just leaves email blank for that lead.
@@ -603,7 +603,7 @@ export async function bulkImportLeads(input: BulkImportLeadsInput): Promise<Bulk
       continue;
     }
     if (!phone) {
-      skipped.push({ row, reason: "Phone is not a valid 10-digit mobile number" });
+      skipped.push({ row, reason: "Phone is not a valid 10-digit mobile number or +country-code number" });
       continue;
     }
     if (seenPhones.has(phone)) {
@@ -780,7 +780,7 @@ export interface BulkImportPrecheckResult {
  */
 export async function precheckBulkImportLeads(leads: { name: string; phone: string }[]): Promise<BulkImportPrecheckResult> {
   const phones = Array.from(
-    new Set(leads.map(l => normalizeTypedIndianMobile(l.phone ?? "")).filter((p): p is string => !!p))
+    new Set(leads.map(l => normalizeTypedLeadPhone(l.phone ?? "")).filter((p): p is string => !!p))
   );
 
   const [activeDuplicateCount, archiveMatches] = await Promise.all([

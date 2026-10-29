@@ -1,6 +1,6 @@
 import { pool, withTransaction } from "../../db/pool";
 import { logger } from "../../utils/logger";
-import { insertLeadLog, normalizeIndianMobile } from "../leads/leads.repository";
+import { insertLeadLog, normalizeLeadPhone } from "../leads/leads.repository";
 import { isUniqueViolation } from "../users/users.repository";
 import { createNotification } from "../notifications/notifications.service";
 import { findPropertyIdByCampaignName } from "../properties/properties.repository";
@@ -35,9 +35,9 @@ export async function ingestMetaLead(leadData: MetaLeadData, connectingAdminId: 
     logger.warn({ leadgenId: leadData.id }, "Meta lead has no phone_number field — skipped, leads.phone is required");
     return;
   }
-  const phone = normalizeIndianMobile(rawPhone);
+  const phone = normalizeLeadPhone(rawPhone);
   if (!phone) {
-    logger.warn({ leadgenId: leadData.id }, "Meta lead phone did not normalize to a valid 10-digit Indian mobile — skipped");
+    logger.warn({ leadgenId: leadData.id }, "Meta lead phone is not a valid Indian mobile or +country-code number — skipped");
     return;
   }
 

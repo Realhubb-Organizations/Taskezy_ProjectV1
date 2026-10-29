@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { indianMobile } from "../../utils/validation";
+import { leadPhone } from "../../utils/validation";
 import { LEAD_STATUS_CODES } from "./leadStatusTransitions";
 
 // Express's default `qs` query parser turns a single `?status=A` into a bare
@@ -96,7 +96,7 @@ export const bulkImportJobIdParamSchema = z.object({
 export const createLeadSchema = z.object({
   name: z.string().trim().min(2, "Name must be at least 2 characters").max(200),
   // "+91 98450 12345", "098450…" etc. are accepted and stored as 10 bare digits.
-  phone: indianMobile,
+  phone: leadPhone,
   email: z.string().trim().email("Enter a valid email address").max(254).optional(),
   source: z.string().max(200).optional(),
   campaign: z.string().max(200).optional(),
