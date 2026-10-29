@@ -18,7 +18,13 @@ const SYSTEM_ORIGIN_LOG_PREFIXES = [
   "Imported from Google Ads lead-form sheet",
   "Revived — a new ",
   "Restored from an archived lead deleted on ",
-  "Lead qualified and transferred to main leads"
+  "Lead qualified and transferred to main leads",
+  // Legacy format from an earlier Meta ingest implementation — no current
+  // code generates this (confirmed via repo-wide search), but real rows
+  // still exist from when it did, each dumping the full raw webhook
+  // payload (campaign/ad-set/ad IDs, form ID, every form field) as the
+  // lead's first history entry, authored "System".
+  "Facebook Lead (webhook):"
 ];
 
 const seesHandoverNotes = (caller: AccessTokenPayload) => caller.role === "ADMIN" || caller.roleType === "MANAGER";
