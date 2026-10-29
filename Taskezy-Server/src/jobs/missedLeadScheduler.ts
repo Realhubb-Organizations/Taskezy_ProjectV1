@@ -136,7 +136,6 @@ async function notifyMissedLeads(): Promise<void> {
 }
 
 interface DailyMissedRow {
-  agent_id: string;
   agent_name: string;
   manager_name: string | null;
   missed_count: string;
@@ -144,7 +143,7 @@ interface DailyMissedRow {
 
 async function notifyAdminDailyDigest(adminIds: string[]): Promise<void> {
   const { rows } = await pool.query<DailyMissedRow>(
-    `SELECT u.id AS agent_id, u.first_name || COALESCE(' ' || u.last_name, '') AS agent_name,
+    `SELECT u.first_name || COALESCE(' ' || u.last_name, '') AS agent_name,
             m.first_name || COALESCE(' ' || m.last_name, '') AS manager_name,
             count(*) AS missed_count
      FROM leads l
@@ -161,9 +160,13 @@ async function notifyAdminDailyDigest(adminIds: string[]): Promise<void> {
   const breakdown = rows
     .map(r => `${r.agent_name}: ${r.missed_count}${r.manager_name ? ` (${r.manager_name}'s team)` : ""}`)
     .join(" · ");
-  // Today's misses are all one agent -> land the admin straight on that
-  // agent's Sales Agent Report, same as the per-agent escalation above.
-  const link = rows.length === 1 ? `/dashboard/reports?tab=agent&agentId=${rows[0].agent_id}` : "/dashboard/reports";
+  // This digest is a company-wide, cross-team rollup (today's misses broken
+  // down by agent AND their manager's team) — Manager Reports is the right
+  // landing page for that, not one agent's own Sales Agent Report (unlike
+  // the single-agent escalation above, which really is about just one
+  // person). Plain /dashboard/reports defaults to the Marketing tab, which
+  // has nothing to do with this notification.
+  const link = "/dashboard/reports?tab=manager";
 
   for (const adminId of adminIds) {
     await createNotification({
