@@ -49,10 +49,6 @@ import {
   apiGetAdLevelLeadStats, type AdLevelLeadStat,
   apiListLeadsPage, apiListFollowupsPage
 } from "@/lib/apiClient";
-import { apiGetLead } from "@/lib/apiClient";
-import LeadDetailDrawer from "@/components/crm/LeadDetailDrawer";
-import { useLeadStatusChange } from "@/components/crm/LeadDrillDownPanel";
-import { openOnRowClick, LEAD_ROW_CLASS } from "@/lib/rowClick";
 import { useServerLeadList } from "@/lib/useServerLeadList";
 import type { LeadSummaryStats } from "@/lib/leadSummaryStats";
 
@@ -242,13 +238,6 @@ export default function AdminCampaignsPage() {
   const [searchQuery, setSearchQuery] = useState("");
 
   const [quickViewLead, setQuickViewLead] = useState<Lead | null>(null);
-  // Open a lead in the full lead panel: show the row straight away, then
-  // swap in the full record (with Activity History).
-  const openLeadPanel = (l: Lead) => {
-    setQuickViewLead(l);
-    apiGetLead(l.id).then(row => setQuickViewLead(mapApiLeadToFrontendLead(row))).catch(() => {});
-  };
-  const handleLeadStatusChange = useLeadStatusChange();
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
   // Filter button → Settings panel for which table columns are shown — a

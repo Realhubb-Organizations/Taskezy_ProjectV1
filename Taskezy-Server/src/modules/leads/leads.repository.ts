@@ -1,11 +1,22 @@
 import { PoolClient } from "pg";
 import { pool, query, withTransaction } from "../../db/pool";
 import { BUSINESS_TIMEZONE } from "../../utils/businessDate";
+import { normalizeForeignPhone } from "../../utils/validation";
 
-/** leads.phone is CHECK'd to a bare 10-digit Indian mobile — strip formatting/country code before insert. Shared by every external lead-ingest source (Meta webhook, sheet import). */
+/** leads.phone is CHECK'd to a bare 10-digit Indian mobile or a "+<country code>" foreign number — strip formatting/country code before insert. Shared by every external lead-ingest source (Meta webhook, sheet import). */
 export function normalizeIndianMobile(raw: string): string | undefined {
   const last10 = raw.replace(/\D/g, "").slice(-10);
   return /^[6-9][0-9]{9}$/.test(last10) ? last10 : undefined;
+}
+
+/**
+ * Lead phone from an external feed: a foreign number with its + / 00 country
+ * code is kept as "+<digits>" (checked first — the last 10 digits of
+ * +44 7911 123456 would otherwise pass as an Indian mobile), anything else
+ * goes through normalizeIndianMobile as before.
+ */
+export function normalizeLeadPhone(raw: string): string | undefined {
+  return normalizeForeignPhone(raw) ?? normalizeIndianMobile(raw);
 }
 
 export interface LeadListRow {

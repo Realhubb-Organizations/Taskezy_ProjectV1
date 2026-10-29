@@ -45,9 +45,9 @@ export type SheetLeadIngestResult =
  * route manually, same fallback the Meta webhook uses.
  */
 export async function ingestSheetLead(row: SheetLeadRow): Promise<SheetLeadIngestResult> {
-  const phone = normalizeIndianMobile(row.phone);
+  const phone = normalizeLeadPhone(row.phone);
   if (!phone) {
-    return { outcome: "skipped", reason: "phone did not normalize to a valid 10-digit Indian mobile" };
+    return { outcome: "skipped", reason: "phone is not a valid 10-digit Indian mobile or +country-code number" };
   }
   const name = row.name?.trim();
   if (!name) {

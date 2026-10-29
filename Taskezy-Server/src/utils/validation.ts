@@ -19,13 +19,41 @@ export function normalizeTypedIndianMobile(raw: string): string | undefined {
   return /^[6-9]\d{9}$/.test(digits) ? digits : undefined;
 }
 
+/**
+ * A foreign number typed with its country code — "+971 55 422 3805" or
+ * "00971554223805" — as "+" and 8–15 digits, or undefined. A + / 00 prefix is
+ * required: without it a long number can't be told apart from a mistyped
+ * Indian one. +91 is never foreign (Indian numbers stay 10 bare digits).
+ */
+export function normalizeForeignPhone(raw: string): string | undefined {
+  const m = raw.trim().replace(/[\s\-().]/g, "").match(/^(?:\+|00)([1-9]\d{7,14})$/);
+  return m && !m[1].startsWith("91") ? `+${m[1]}` : undefined;
+}
+
+/** A lead's phone: an Indian mobile (10 bare digits) or a foreign number (+country code). */
+export function normalizeTypedLeadPhone(raw: string): string | undefined {
+  return normalizeTypedIndianMobile(raw) ?? normalizeForeignPhone(raw);
+}
+
 const MOBILE_MESSAGE = "Enter a valid 10-digit mobile number starting with 6, 7, 8 or 9.";
+export const LEAD_PHONE_MESSAGE =
+  "Enter a valid 10-digit mobile number, or a foreign number starting with + and its country code.";
 
 /** Required mobile number, stored as 10 bare digits. */
 export const indianMobile = z.string().transform((v, ctx) => {
   const n = normalizeTypedIndianMobile(v);
   if (!n) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: MOBILE_MESSAGE });
+    return z.NEVER;
+  }
+  return n;
+});
+
+/** Required lead phone — Indian mobile or foreign number, see normalizeTypedLeadPhone. */
+export const leadPhone = z.string().transform((v, ctx) => {
+  const n = normalizeTypedLeadPhone(v);
+  if (!n) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: LEAD_PHONE_MESSAGE });
     return z.NEVER;
   }
   return n;

@@ -36,9 +36,9 @@ export async function ingestMetaLead(leadData: MetaLeadData, connectingAdminId: 
     logger.warn({ leadgenId: leadData.id }, "Meta lead has no phone_number field — skipped, leads.phone is required");
     return;
   }
-  const phone = normalizeIndianMobile(rawPhone);
+  const phone = normalizeLeadPhone(rawPhone);
   if (!phone) {
-    logger.warn({ leadgenId: leadData.id }, "Meta lead phone did not normalize to a valid 10-digit Indian mobile — skipped");
+    logger.warn({ leadgenId: leadData.id }, "Meta lead phone is not a valid Indian mobile or +country-code number — skipped");
     return;
   }
 

@@ -149,11 +149,19 @@ export function leadWhatsAppMessage(leadName: string, senderName?: string | null
   ].join("\n");
 }
 
+// wa.me needs the full international number. Indian leads are stored as 10
+// bare digits, so they get 91 in front; foreign ones (+971…) already carry
+// their country code.
+export function whatsAppNumber(phone: string): string {
+  const digits = phone.replace(/[^0-9]/g, "");
+  return /^[6-9]\d{9}$/.test(digits) ? `91${digits}` : digits;
+}
+
 export function triggerLeadWhatsApp(
   lead: { id: string; phone: string; name: string; property?: string | null },
   opts: { isAdmin: boolean; senderName?: string | null; onReturn: (leadId: string) => void }
 ): void {
-  const formattedPhone = lead.phone.replace(/[^0-9]/g, "");
+  const formattedPhone = whatsAppNumber(lead.phone);
   const msg = encodeURIComponent(leadWhatsAppMessage(lead.name, opts.senderName, lead.property));
   window.open(`https://wa.me/${formattedPhone}?text=${msg}`, "_blank");
 

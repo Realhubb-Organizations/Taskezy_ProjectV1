@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { openOnRowClick, LEAD_ROW_CLASS } from "@/lib/rowClick";
 import LeadRowActionsMenu from "@/components/crm/LeadRowActionsMenu";
 import { Search, Copy, Check, X } from "lucide-react";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
@@ -9,7 +8,7 @@ import { SearchableMultiSelect } from "@/components/ui/SearchableDropdown";
 import TablePagination from "@/components/ui/TablePagination";
 import { useApp } from "@/context/AppContext";
 import { maskPhone } from "@/lib/maskPII";
-import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/callTrigger";
+import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp, whatsAppNumber } from "@/lib/callTrigger";
 
 export interface PendingRow {
   id: string;
@@ -61,7 +60,7 @@ export default function PendingLeadsTable({
   // plain wa.me open, no feedback-gate watcher armed.
   const handleWhatsApp = (row: PendingRow) => {
     if (!row.leadId) {
-      window.open(`https://wa.me/${row.phone.replace(/[^0-9]/g, "")}`, "_blank");
+      window.open(`https://wa.me/${whatsAppNumber(row.phone)}`, "_blank");
       return;
     }
     triggerLeadWhatsApp({ id: row.leadId, phone: row.phone, name: row.name, property: row.property }, {

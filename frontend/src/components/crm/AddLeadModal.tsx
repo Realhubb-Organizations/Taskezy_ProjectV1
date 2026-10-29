@@ -5,7 +5,7 @@ import { PlatformLabel } from "@/components/icons/ContactIcons";
 import { SearchableSelect } from "@/components/ui/SearchableDropdown";
 import { useDialog } from "@/components/ui/DialogProvider";
 import FieldError, { fieldErrorClass } from "@/components/ui/FieldError";
-import { collectErrors, normalizeIndianMobile, phoneInputProps, sanitizePhoneInput, validateEmail, validatePersonName, validatePhone } from "@/lib/validation";
+import { collectErrors, normalizeLeadPhone, phoneInputProps, sanitizePhoneInput, validateEmail, validateLeadPhone, validatePersonName } from "@/lib/validation";
 import ArchiveRestoreConfirm from "./ArchiveRestoreConfirm";
 import { apiPrecheckBulkImportLeads, type BulkImportPrecheckResult } from "@/lib/apiClient";
 
@@ -262,13 +262,13 @@ export default function AddLeadModal({
     e.preventDefault();
     const errors = collectErrors({
       name: validatePersonName(name, { label: "Buyer name" }),
-      phone: validatePhone(phone, { required: true }),
+      phone: validateLeadPhone(phone, { required: true }),
       email: validateEmail(email)
     });
     setManualErrors(errors);
     if (Object.keys(errors).length > 0) return;
-    // "+91 98450 12345" → "9845012345", the format the server stores.
-    onSubmitManual({ name: name.trim(), phone: normalizeIndianMobile(phone)!, email: email.trim(), agent, source, property, note });
+    // "+91 98450 12345" → "9845012345" and "+971 55 422 3805" → "+971554223805", the formats the server stores.
+    onSubmitManual({ name: name.trim(), phone: normalizeLeadPhone(phone)!, email: email.trim(), agent, source, property, note });
     // Reset manual form fields
     setName("");
     setPhone("");
@@ -462,8 +462,8 @@ export default function AddLeadModal({
                       required
                       value={phone}
                       onChange={(e) => { setPhone(sanitizePhoneInput(e.target.value)); clearError("phone"); }}
-                      onBlur={() => phone && setManualErrors(prev => ({ ...prev, phone: validatePhone(phone) ?? undefined }))}
-                      placeholder="e.g. 9845012345"
+                      onBlur={() => phone && setManualErrors(prev => ({ ...prev, phone: validateLeadPhone(phone) ?? undefined }))}
+                      placeholder="e.g. 9845012345 or +971 55 422 3805"
                       aria-invalid={!!manualErrors.phone}
                       className={`w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 focus:outline-none focus:bg-white focus:border-[#0B1E6E] transition-all shadow-sm ${fieldErrorClass(!!manualErrors.phone)}`}
                     />

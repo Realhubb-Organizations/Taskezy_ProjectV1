@@ -32,7 +32,7 @@ import SheetSourceLinker from "@/components/properties/SheetSourceLinker";
 import type { LinkerHandle } from "@/components/properties/linkerHandle";
 import { useDialog } from "@/components/ui/DialogProvider";
 import FieldError, { fieldErrorClass } from "@/components/ui/FieldError";
-import { collectErrors, normalizeIndianMobile, phoneInputProps, sanitizePhoneInput, validateEmail, validatePersonName, validatePhone } from "@/lib/validation";
+import { collectErrors, normalizeIndianMobile, normalizeLeadPhone, phoneInputProps, sanitizePhoneInput, validateEmail, validateLeadPhone, validatePersonName } from "@/lib/validation";
 import { MetaIcon, GoogleIcon, platformFromText } from "@/components/icons/ContactIcons";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
 import TablePagination from "@/components/ui/TablePagination";
@@ -405,7 +405,7 @@ export default function PropertiesPage() {
     e.preventDefault();
     const errors = collectErrors({
       name: validatePersonName(interestName, { label: "Client name" }),
-      phone: validatePhone(interestPhone, { required: true }),
+      phone: validateLeadPhone(interestPhone, { required: true }),
       email: validateEmail(interestEmail)
     });
     setInterestErrors(errors);
@@ -418,7 +418,7 @@ export default function PropertiesPage() {
     // same as how Manual Ingestion Entry assigns a freshly-captured lead.
     const res = addLead({
       name: interestName.trim(),
-      phone: interestPhone,
+      phone: normalizeLeadPhone(interestPhone)!,
       email: interestEmail.trim(),
       assignedAgent: currentUser?.name || "",
       source: "Property Interest",
