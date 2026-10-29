@@ -9,6 +9,7 @@ import { CalendarDays, MapPin, PhoneCall, Handshake, FileSignature, LucideIcon }
 import { CardListSkeleton } from "@/components/ui/Skeletons";
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
 import { todayIso } from "@/components/ui/DateRangePicker";
+import { useLiveRefresh } from "@/lib/useLiveRefresh";
 
 // Plain YYYY-MM-DD bounds for the whole month a given cursor date falls in —
 // what the server-range fetch below asks for, matching leads' date-range
@@ -42,10 +43,13 @@ function CRMCalendarContent() {
   const [cursor, setCursor] = useState(() => new Date());
   const [crmEvents, setCrmEvents] = useState<CalendarEvent[]>([]);
   const [eventsLoading, setEventsLoading] = useState(true);
+  // Live: events added/removed by anyone show up without a reload (quietly).
+  const eventsLive = useLiveRefresh("calendar");
 
   useEffect(() => {
+    const background = eventsLive.isBackground();
     let cancelled = false;
-    setEventsLoading(true);
+    if (!background) setEventsLoading(true);
     const { dateFrom, dateTo } = monthBounds(cursor);
     apiListCalendarEventsPage(1, 500, { dateFrom, dateTo })
       .then((result) => {
@@ -59,7 +63,7 @@ function CRMCalendarContent() {
         if (!cancelled) setEventsLoading(false);
       });
     return () => { cancelled = true; };
-  }, [cursor, manualRefreshSignal]);
+  }, [cursor, manualRefreshSignal, eventsLive.liveVersion]);
 
   const dayEvents = crmEvents
     .filter(e => e.date === selectedDate)

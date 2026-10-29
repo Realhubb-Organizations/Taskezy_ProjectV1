@@ -117,7 +117,9 @@ const listCallLogQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().positive().max(100).default(25),
   dateFrom: z.string().optional(),
-  dateTo: z.string().optional()
+  dateTo: z.string().optional(),
+  // Date column sort; left out = newest first.
+  sortDir: z.enum(["asc", "desc"]).optional()
 });
 
 // leads.phone is already stored normalized to a bare 10-digit mobile or a
@@ -151,11 +153,12 @@ callLogRouter.get(
   "/",
   validate({ query: listCallLogQuerySchema }),
   asyncHandler(async (req, res) => {
-    const { page, pageSize, dateFrom, dateTo } = req.query as unknown as {
+    const { page, pageSize, dateFrom, dateTo, sortDir } = req.query as unknown as {
       page: number;
       pageSize: number;
       dateFrom?: string;
       dateTo?: string;
+      sortDir?: "asc" | "desc";
     };
 
     const scopedUserIds = await scopedUserIdsForCaller(req.user!);
@@ -195,7 +198,7 @@ callLogRouter.get(
       call_date: string;
       duration_seconds: number;
     }>(
-      `${LIST_SELECT} ${whereClause} ORDER BY dcl.call_date DESC LIMIT $${dataParams.length - 1} OFFSET $${dataParams.length}`,
+      `${LIST_SELECT} ${whereClause} ORDER BY dcl.call_date ${sortDir === "asc" ? "ASC" : "DESC"}, dcl.id LIMIT $${dataParams.length - 1} OFFSET $${dataParams.length}`,
       dataParams
     );
 

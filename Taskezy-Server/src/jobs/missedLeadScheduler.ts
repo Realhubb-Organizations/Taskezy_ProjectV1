@@ -3,6 +3,7 @@ import { logger } from "../utils/logger";
 import { createNotification } from "../modules/notifications/notifications.service";
 import { listActiveAdminIds } from "../modules/users/users.repository";
 import { BUSINESS_TIMEZONE } from "../utils/businessDate";
+import { broadcastDataChanged } from "../utils/dataChanged";
 
 const POLL_INTERVAL_MS = 60_000;
 const SLA_MINUTES = 20; // matches Reports' isMissedLead / getMissedInfo rule (reportMetrics.ts)
@@ -48,6 +49,7 @@ async function notifyMissedLeads(): Promise<void> {
                u.manager_id`
   );
   if (rows.length === 0) return;
+  broadcastDataChanged("leads");
 
   // Escalation always reaches Admin, not just the agent's direct manager —
   // an agent with no manager_id set (manager_id IS NULL) would otherwise

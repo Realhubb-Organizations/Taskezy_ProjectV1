@@ -22,6 +22,8 @@ import {
 } from "@/lib/reportMetrics";
 import { LineSkeleton, TableRowsSkeleton, CardListSkeleton } from "@/components/ui/Skeletons";
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
+import { DateSortButton, sortByDate, type SortDir } from "@/components/ui/DateSortButton";
+import { useLiveRefresh } from "@/lib/useLiveRefresh";
 
 // Status-code buckets for the funnel KPI popups — must exactly match
 // getAgentReportStats's own SQL bucket definitions (confirmed identical,
@@ -40,13 +42,15 @@ export default function AgentReports({ dateRange, initialAgentId }: { dateRange:
   // (one row per agent with >=1 lead in range) instead of scanning the
   // bulk leads array.
   const [managerReportStats, setManagerReportStats] = useState<ManagerReportAgentStats[]>([]);
+  // Live: every report number below refreshes when leads or follow-ups change.
+  const { liveVersion: reportsLive } = useLiveRefresh("leads", "followups");
   useEffect(() => {
     let cancelled = false;
     apiGetManagerReportStats(dateRange.from, dateRange.to)
       .then(result => { if (!cancelled) setManagerReportStats(result); })
       .catch(() => { /* leave the previous roster/counts showing on a transient failure */ });
     return () => { cancelled = true; };
-  }, [dateRange.from, dateRange.to]);
+  }, [dateRange.from, dateRange.to, reportsLive]);
   const managerStatsByAgentId = useMemo(() => new Map(managerReportStats.map(r => [r.assignedAgentId, r])), [managerReportStats]);
 
   // Real reporting-line lookup (see Settings → Manage Users → "Reports To"),
@@ -123,7 +127,7 @@ export default function AgentReports({ dateRange, initialAgentId }: { dateRange:
       .then(result => { if (!cancelled) setMissedFollowups(result.rows.map(mapApiFollowupToFrontend)); })
       .catch(() => { if (!cancelled) setMissedFollowups([]); });
     return () => { cancelled = true; };
-  }, [activeAgentId, dateRange.from, dateRange.to]);
+  }, [activeAgentId, dateRange.from, dateRange.to, reportsLive]);
 
   const ZERO_REPORT_STATS: AgentReportStats = {
     assigned: 0, contacted: 0, qualified: 0, siteVisits: 0, bookingValue: 0, bookingCount: 0,
@@ -138,7 +142,7 @@ export default function AgentReports({ dateRange, initialAgentId }: { dateRange:
       .catch(() => { /* leave the previous numbers showing on a transient failure */ });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeAgentId, dateRange.from, dateRange.to]);
+  }, [activeAgentId, dateRange.from, dateRange.to, reportsLive]);
   const funnel = { assigned: reportStats.assigned, contacted: reportStats.contacted, qualified: reportStats.qualified, siteVisits: reportStats.siteVisits };
   const bookingValue = reportStats.bookingValue;
   const bookingCount = reportStats.bookingCount;
@@ -176,7 +180,7 @@ export default function AgentReports({ dateRange, initialAgentId }: { dateRange:
   // getAgentReportStats's own live-clock predicate), scoped to this one
   // agent + date range. Always enabled (not just while its KPI popup is
   // open): also feeds the always-visible Missed Leads tab table below.
-  const missedLeadsFilters: LeadListFilters = { assignedAgentId: activeAgentId ? [activeAgentId] : [], dateFrom: dateRange.from, dateTo: dateRange.to, missedOnly: true };
+  const missedLeadsFilters: LeadListFilters = { assignedAgentId: activeAgentId ? [activeAgentId] : [], dateFrom: dateRange.from, dateTo: dateRange.to, missedOnly: true, sortField: "assigned" };
   const missedLeadsList = useServerLeadList(missedLeadsFilters, 10, !!activeAgentId);
 
   // The other four KPI popups (Assigned/Contacted/Qualified/Site Visits)
@@ -330,7 +334,10 @@ export default function AgentReports({ dateRange, initialAgentId }: { dateRange:
   // own, via missedLeadsList's own filters-changed effect).
   const detailResetKey = JSON.stringify([activeAgent, dateRange]);
   const agentListPagination = usePagination(agentNames, 10, JSON.stringify(dateRange));
-  const missedFollowupsPagination = usePagination(missedFollowups, 10, detailResetKey);
+  // Scheduled column sort (DateSortButton); undefined = the normal order.
+  const [followupsSortDir, setFollowupsSortDir] = useState<SortDir | undefined>(undefined);
+  const sortedMissedFollowups = useMemo(() => sortByDate(missedFollowups, followupsSortDir, f => f.scheduledAt), [missedFollowups, followupsSortDir]);
+  const missedFollowupsPagination = usePagination(sortedMissedFollowups, 10, `${detailResetKey}|${followupsSortDir}`);
 
   const handleReassign = async (leadId: string, leadName: string) => {
     const target = await promptDialog({
@@ -682,7 +689,7 @@ export default function AgentReports({ dateRange, initialAgentId }: { dateRange:
                     <thead>
                       <tr className="bg-slate-50 border-b border-slate-200">
                         <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Lead</th>
-                        <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Assigned At</th>
+                        <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap"><DateSortButton label="Assigned At" dir={missedLeadsList.sortDir} onChange={missedLeadsList.setSortDir} /></th>
                         <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Wait Time</th>
                         <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Overdue By</th>
                         <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Notes</th>
@@ -837,7 +844,7 @@ export default function AgentReports({ dateRange, initialAgentId }: { dateRange:
                       <tr className="bg-slate-50 border-b border-slate-200">
                         <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Lead</th>
                         <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Type</th>
-                        <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Scheduled</th>
+                        <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap"><DateSortButton label="Scheduled" dir={followupsSortDir} onChange={setFollowupsSortDir} /></th>
                         <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Overdue By</th>
                       </tr>
                     </thead>

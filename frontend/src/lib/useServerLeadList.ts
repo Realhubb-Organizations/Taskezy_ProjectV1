@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { apiListLeadsPage, LeadListFilters } from "./apiClient";
 import { Lead, mapApiLeadToFrontendLead } from "@/context/AppContext";
 import { DEFAULT_ROWS_PER_PAGE_OPTIONS } from "@/components/ui/TablePagination";
+import { useLiveRefresh } from "./useLiveRefresh";
 
 /**
  * Real server-side pagination + debounced search for a filtered lead list
@@ -24,6 +25,8 @@ export function useServerLeadList(
   const [rowsPerPage, setRowsPerPage] = useState(initialRowsPerPage);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  // Date column sort (DateSortButton); undefined = the server's normal order.
+  const [sortDir, setSortDir] = useState<"asc" | "desc" | undefined>(undefined);
   const [rows, setRows] = useState<Lead[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -37,13 +40,16 @@ export function useServerLeadList(
 
   const filtersKey = JSON.stringify(filters);
   // Any filter or search change starts back at page 1.
-  useEffect(() => { setPage(1); }, [filtersKey, debouncedSearch]);
+  useEffect(() => { setPage(1); }, [filtersKey, debouncedSearch, sortDir]);
 
+  // Refetch quietly (no loading state) when leads change anywhere.
+  const { liveVersion, isBackground } = useLiveRefresh("leads");
   useEffect(() => {
+    const background = isBackground();
     if (!enabled) { setRows([]); setTotalCount(0); setLoading(false); return; }
     let cancelled = false;
-    setLoading(true);
-    apiListLeadsPage(page, rowsPerPage, { ...filters, search: debouncedSearch || undefined })
+    if (!background) setLoading(true);
+    apiListLeadsPage(page, rowsPerPage, { ...filters, search: debouncedSearch || undefined, sortDir })
       .then(result => {
         if (cancelled) return;
         setRows(result.rows.map(mapApiLeadToFrontendLead));
@@ -53,7 +59,7 @@ export function useServerLeadList(
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filtersKey, debouncedSearch, page, rowsPerPage, enabled]);
+  }, [filtersKey, debouncedSearch, sortDir, page, rowsPerPage, enabled, liveVersion]);
 
   return {
     rows,
@@ -65,6 +71,8 @@ export function useServerLeadList(
     setRowsPerPage,
     search,
     setSearch,
+    sortDir,
+    setSortDir,
     /** Spread onto <TablePagination />. */
     paginationProps: {
       totalRows: totalCount,

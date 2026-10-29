@@ -55,6 +55,9 @@ import { useLeadStatusChange } from "@/components/crm/LeadDrillDownPanel";
 import { openOnRowClick, LEAD_ROW_CLASS } from "@/lib/rowClick";
 import { useServerLeadList } from "@/lib/useServerLeadList";
 import type { LeadSummaryStats } from "@/lib/leadSummaryStats";
+import { DateSortButton } from "@/components/ui/DateSortButton";
+import { useLiveRefresh } from "@/lib/useLiveRefresh";
+import { useBackgroundRefresh } from "@/lib/liveRefresh";
 
 // Same icon URLs the admin leads page uses for these platforms (LeadDashboard.tsx).
 const PLATFORM_ICON_URL: Partial<Record<CampaignItem["platform"], string>> = {
@@ -380,6 +383,10 @@ export default function AdminCampaignsPage() {
   // Two independent fetches, matching the two buildCampaignsList call sites
   // below: one scoped to the current Date Range, one always all-time.
   const [scopedLeadStats, setScopedLeadStats] = useState<CampaignLeadStats[]>([]);
+  // Live: other people's lead / follow-up changes refresh this page's numbers.
+  const { liveVersion: leadsLive } = useLiveRefresh("leads");
+  const { liveVersion: followupsLive } = useLiveRefresh("followups");
+  const breakdownLiveRefresh = useBackgroundRefresh(leadsLive);
   useEffect(() => {
     let cancelled = false;
     const { dateFrom, dateTo } = campaignServerDateBounds();
@@ -388,7 +395,7 @@ export default function AdminCampaignsPage() {
       .catch(() => { /* leave the previous numbers showing on a transient failure */ });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dateRange, appliedCustomRange]);
+  }, [dateRange, appliedCustomRange, leadsLive]);
   const scopedLeadStatsMap = useMemo(
     () => new Map(scopedLeadStats.map(s => [s.campaign.toLowerCase(), s])),
     [scopedLeadStats]
@@ -421,7 +428,7 @@ export default function AdminCampaignsPage() {
       .catch(() => { /* leave the previous numbers showing on a transient failure */ });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dateRange, appliedCustomRange]);
+  }, [dateRange, appliedCustomRange, leadsLive]);
 
   // The real, Date-Range-scoped campaigns list — each campaign's own
   // totalLeads is the sum of its real per-day leads (see
@@ -468,7 +475,7 @@ export default function AdminCampaignsPage() {
       .catch(() => { /* leave the previous numbers showing on a transient failure */ });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dateRange, appliedCustomRange, campaignFilterActive, campaignFilters]);
+  }, [dateRange, appliedCustomRange, campaignFilterActive, campaignFilters, leadsLive]);
 
   // Same real campaigns, but always all-time — a campaign's status
   // (Active/Pause/Stopped) and platform are snapshot properties of the
@@ -961,7 +968,7 @@ export default function AdminCampaignsPage() {
       .then(({ rows }) => { if (!cancelled) setQualifiedLeadsPageFollowups(rows.map(mapApiFollowupToFrontend)); })
       .catch(() => { if (!cancelled) setQualifiedLeadsPageFollowups([]); });
     return () => { cancelled = true; };
-  }, [qualifiedLeadsPageIds, liveFollowups]);
+  }, [qualifiedLeadsPageIds, liveFollowups, followupsLive]);
 
   // CSV export needs every matching row, not just the current page — loop-
   // fetch every page (bounded by this one campaign's qualified leads,
@@ -976,7 +983,7 @@ export default function AdminCampaignsPage() {
       let page = 1;
       // eslint-disable-next-line no-constant-condition
       while (true) {
-        const result = await apiListLeadsPage(page, 500, { ...qualifiedLeadsBaseFilters, search: qualifiedLeadsList.search || undefined });
+        const result = await apiListLeadsPage(page, 500, { ...qualifiedLeadsBaseFilters, search: qualifiedLeadsList.search || undefined, sortDir: qualifiedLeadsList.sortDir });
         all.push(...result.rows.map(mapApiLeadToFrontendLead));
         if (page >= result.totalPages) break;
         page += 1;
@@ -1068,13 +1075,13 @@ export default function AdminCampaignsPage() {
   useEffect(() => {
     if (breakdownTab !== "Status") return;
     let cancelled = false;
-    setStatusBreakdownLoading(true);
+    if (!breakdownLiveRefresh.isBackground()) setStatusBreakdownLoading(true);
     apiGetCampaignStatusBreakdown(statusBreakdownPage, statusBreakdownRowsPerPage, statusDateFrom, statusDateTo, breakdownCampaignFilters.length > 0 ? breakdownCampaignFilters : undefined)
       .then(result => { if (!cancelled) setStatusBreakdownResult(result); })
       .catch(() => { /* leave the previous numbers showing on a transient failure */ })
       .finally(() => { if (!cancelled) setStatusBreakdownLoading(false); });
     return () => { cancelled = true; };
-  }, [breakdownTab, statusBreakdownPage, statusBreakdownRowsPerPage, statusDateFrom, statusDateTo, breakdownCampaignFilters]);
+  }, [breakdownTab, statusBreakdownPage, statusBreakdownRowsPerPage, statusDateFrom, statusDateTo, breakdownCampaignFilters, leadsLive]);
   const statusDateBreakdown = useMemo(() => statusBreakdownResult.rows.map(row => {
     const d = new Date(row.date);
     const dateLabel = isNaN(d.getTime()) ? row.date : d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
@@ -1453,7 +1460,7 @@ export default function AdminCampaignsPage() {
                         <th className="px-4 py-3 whitespace-nowrap">Email</th>
                         <th className="px-4 py-3 whitespace-nowrap">Status</th>
                         <th className="px-4 py-3 whitespace-nowrap">Assigned To</th>
-                        <th className="px-4 py-3 whitespace-nowrap">Date</th>
+                        <th className="px-4 py-3 whitespace-nowrap"><DateSortButton dir={qualifiedLeadsList.sortDir} onChange={qualifiedLeadsList.setSortDir} /></th>
                         <th className="px-4 py-3 whitespace-nowrap">Notes</th>
                         <th className="px-4 py-3 whitespace-nowrap">Next Call Date</th>
                         <th className="px-4 py-3 whitespace-nowrap">Campaign</th>

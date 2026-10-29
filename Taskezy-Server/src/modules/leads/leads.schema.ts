@@ -42,6 +42,11 @@ export const listLeadsQuerySchema = z.object({
   // "true" leaves out Data Calling leads (source "Bulk Upload"), which only
   // show on the Data Calling page until they're qualified.
   excludeBulkUpload: z.enum(["true", "false"]).optional().transform(v => v === "true"),
+  // Date column sort on the lead tables (by created_at). Left out = the
+  // default order (most recently assigned first).
+  sortDir: z.enum(["asc", "desc"]).optional(),
+  // Which date sortDir sorts by: created (default) or assigned.
+  sortField: z.enum(["created", "assigned"]).optional(),
   // Already supported by buildLeadWhereClause/findMany (used by the Leads
   // Analytics tab's own aggregate) — just not previously exposed here.
   propertyId: uuidToArray,
@@ -58,7 +63,7 @@ export const listLeadsQuerySchema = z.object({
 // dateFrom/dateTo/search) minus page/pageSize, which are meaningless for an
 // aggregate — a caller can pass the exact same filter query params to both
 // `GET /` and `GET /stats` and get consistent, filter-matching results.
-export const leadStatsQuerySchema = listLeadsQuerySchema.omit({ page: true, pageSize: true });
+export const leadStatsQuerySchema = listLeadsQuerySchema.omit({ page: true, pageSize: true, sortDir: true, sortField: true });
 
 // Drill-down panel's Campaign filter dropdown — same filter shape as
 // leadStatsQuerySchema minus search/campaign (irrelevant to "what campaigns

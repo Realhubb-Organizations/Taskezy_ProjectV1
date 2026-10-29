@@ -35,6 +35,9 @@ import NextCallCell from "./NextCallCell";
 import LeadNoteCell from "./LeadNoteCell";
 import LeadRowActionsMenu from "./LeadRowActionsMenu";
 import { maskPhone, maskEmail } from "@/lib/maskPII";
+import { DateSortButton, type SortDir } from "@/components/ui/DateSortButton";
+import { useLiveRefresh } from "@/lib/useLiveRefresh";
+import { useBackgroundRefresh } from "@/lib/liveRefresh";
 
 // The admin leads table's togglable columns (beyond the always-shown Lead
 // Name/Email/Assigned To) — driven by the Filter panel's Settings modal.
@@ -448,6 +451,8 @@ export default function LeadDashboard() {
   // Property column-header filter (by name; sent to the server as ids).
   const [adminPropertyFilter, setAdminPropertyFilter] = useState<string[]>([]);
   const [adminPage, setAdminPage] = useState(1);
+  // Date column sort (DateSortButton); undefined = the normal order.
+  const [adminSortDir, setAdminSortDir] = useState<SortDir | undefined>(undefined);
   const [adminRowsPerPage, setAdminRowsPerPage] = useState(100);
   // Admin-only bulk phone-number search — a real filter on this same table
   // (see the fetch effect below), exclusive with the filters above while
@@ -605,11 +610,17 @@ export default function LeadDashboard() {
   };
 
   const adminServerFiltersKey = JSON.stringify(buildAdminServerFilters());
+  const mainTableLiveRefresh = useBackgroundRefresh(leadsChangedSignal);
+  // Other people's changes, live (lib/liveRefresh.ts).
+  const { liveVersion: leadsLive } = useLiveRefresh("leads");
+  const { liveVersion: followupsLive } = useLiveRefresh("followups");
 
   useEffect(() => {
+    // A live update (leadsChangedSignal) refreshes quietly — no loading state.
+    const background = mainTableLiveRefresh.isBackground();
     if (adminTab !== "leads") return;
     let cancelled = false;
-    setServerLeadsLoading(true);
+    if (!background) setServerLeadsLoading(true);
 
     // Phone-number search is a real filter on this same table, exclusive
     // with every other filter below (the search-by-phones endpoint doesn't
@@ -639,7 +650,7 @@ export default function LeadDashboard() {
     // burst (which on phones could trip the rate limit / drop the connection).
     const timer = setTimeout(() => {
       Promise.all([
-        apiListLeadsPage(adminPage, adminRowsPerPage, filters),
+        apiListLeadsPage(adminPage, adminRowsPerPage, { ...filters, sortDir: adminSortDir }),
         apiGetLeadStats(filters)
       ])
         .then(([pageResult, stats]) => {
@@ -663,7 +674,7 @@ export default function LeadDashboard() {
     // so this effect re-fires exactly when a real filter value changes,
     // without needing every individual filter piece listed separately.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adminTab, adminPage, adminRowsPerPage, adminServerFiltersKey, leadsRefreshKey, leadsChangedSignal, adminPhoneFilter]);
+  }, [adminTab, adminPage, adminRowsPerPage, adminServerFiltersKey, adminSortDir, leadsRefreshKey, leadsChangedSignal, adminPhoneFilter]);
 
   // Filter button → Settings panel for which table columns are shown — both
   // roles get the full-height right-docked drawer (same pattern as the lead
@@ -738,6 +749,8 @@ export default function LeadDashboard() {
     loading: analyticsDrilldownLoading,
     search: drilldownSearch,
     setSearch: setDrilldownSearch,
+    sortDir: drilldownSortDir,
+    setSortDir: setDrilldownSortDir,
     paginationProps: analyticsDrilldownPaginationProps
   } = useServerLeadList(analyticsDrilldown?.baseFilters ?? {}, 8);
 
@@ -756,7 +769,7 @@ export default function LeadDashboard() {
       .then(({ rows }) => { if (!cancelled) setAnalyticsDrillPageFollowups(rows.map(mapApiFollowupToFrontend)); })
       .catch(() => { if (!cancelled) setAnalyticsDrillPageFollowups([]); });
     return () => { cancelled = true; };
-  }, [analyticsDrillPageLeadIds, liveFollowups]);
+  }, [analyticsDrillPageLeadIds, liveFollowups, followupsLive]);
 
   const QUALIFIED_STATUS_OPTIONS = STATUS_OPTIONS.filter(s => !UNQUALIFIED_STATUSES.includes(s));
 
@@ -985,7 +998,7 @@ export default function LeadDashboard() {
       .then(({ rows }) => { if (!cancelled) setAdminPageFollowups(rows.map(mapApiFollowupToFrontend)); })
       .catch(() => { if (!cancelled) setAdminPageFollowups([]); });
     return () => { cancelled = true; };
-  }, [adminPageLeadIds, liveFollowups]);
+  }, [adminPageLeadIds, liveFollowups, followupsLive]);
   const adminNextCallDateFor = (leadId: string) => nextFollowupFor(leadId, adminPageFollowups);
 
   // ---- Bulk Assign / Reshuffle (Admin + Manager) ----
@@ -1278,7 +1291,7 @@ export default function LeadDashboard() {
       .catch(() => { /* leave the previous numbers showing on a transient failure */ });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [analyticsPropertyFilter, analyticsCampaignFilter, analyticsDateRange, analyticsCustomRange, properties]);
+  }, [analyticsPropertyFilter, analyticsCampaignFilter, analyticsDateRange, analyticsCustomRange, properties, leadsLive]);
 
   const statsByAgentId = new Map(analyticsStats.map(r => [r.assignedAgentId, r]));
   const userIdByName = new Map(users.map(u => [u.name, u.id]));
@@ -1792,7 +1805,7 @@ export default function LeadDashboard() {
                           key: "date" as const,
                           node: (
                             <th className="px-4 py-3 whitespace-nowrap" onDragOver={handleColumnDragOver} onDrop={handleColumnDrop("date")}>
-                              <span className="inline-flex items-center gap-1"><ColumnDragHandle columnKey="date" />Date</span>
+                              <span className="inline-flex items-center gap-1"><ColumnDragHandle columnKey="date" /><DateSortButton dir={adminSortDir} onChange={(d) => { setAdminSortDir(d); setAdminPage(1); }} /></span>
                             </th>
                           )
                         },
@@ -2581,7 +2594,7 @@ export default function LeadDashboard() {
                               <th className="px-4 py-3 whitespace-nowrap">Email</th>
                               <th className="px-4 py-3 whitespace-nowrap">Status</th>
                               <th className="px-4 py-3 whitespace-nowrap">Assigned To</th>
-                              <th className="px-4 py-3 whitespace-nowrap">Date</th>
+                              <th className="px-4 py-3 whitespace-nowrap"><DateSortButton dir={drilldownSortDir} onChange={setDrilldownSortDir} /></th>
                               <th className="px-4 py-3 whitespace-nowrap">Notes</th>
                               <th className="px-4 py-3 whitespace-nowrap">Next Call Date</th>
                               <th className="px-4 py-3 whitespace-nowrap">Campaign</th>

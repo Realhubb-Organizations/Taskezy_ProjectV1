@@ -6,6 +6,7 @@ import { isUniqueViolation, listActiveAdminIds } from "../users/users.repository
 import { createNotification } from "../notifications/notifications.service";
 import { findPropertyIdBySheetSource, recordSheetSourceSeen } from "../properties/properties.repository";
 import { pickAgentForProperty } from "../properties/properties.assignment";
+import { broadcastLeadChanged } from "../leads/leads.realtime";
 
 export interface SheetLeadRow {
   leadKey: string;
@@ -145,6 +146,7 @@ export async function ingestSheetLead(row: SheetLeadRow): Promise<SheetLeadInges
       leadId,
       link: "/dashboard/crm"
     });
+    broadcastLeadChanged(leadId);
 
     return { outcome: "created", leadId };
   } catch (err) {
@@ -164,6 +166,7 @@ export async function ingestSheetLead(row: SheetLeadRow): Promise<SheetLeadInges
             "Google Ads Sheet Import",
             `Sheet lead (key ${row.leadKey}) submitted for this phone number again — not duplicated.`
           );
+          broadcastLeadChanged(existing[0].id);
         }
       });
       return { outcome: "duplicate" };

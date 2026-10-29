@@ -318,6 +318,10 @@ export interface LeadListFilters {
   excludeBulkUpload?: boolean;
   /** Live-clock SLA check — see leads.repository.ts's buildLeadWhereClause. */
   missedOnly?: boolean;
+  /** Date column sort (by created date); left out = the default order. */
+  sortDir?: "asc" | "desc";
+  /** Which date sortDir sorts by — created (default) or assigned. */
+  sortField?: "created" | "assigned";
 }
 
 function buildLeadFilterParams(filters: LeadListFilters): URLSearchParams {
@@ -332,6 +336,8 @@ function buildLeadFilterParams(filters: LeadListFilters): URLSearchParams {
   if (filters.search) params.set("search", filters.search);
   if (filters.excludeBulkUpload) params.set("excludeBulkUpload", "true");
   if (filters.missedOnly) params.set("missedOnly", "true");
+  if (filters.sortDir) params.set("sortDir", filters.sortDir);
+  if (filters.sortDir && filters.sortField) params.set("sortField", filters.sortField);
   return params;
 }
 
@@ -2124,13 +2130,14 @@ export interface CallLogPageResult {
 export async function apiListCallLogPage(
   page: number,
   pageSize: number,
-  filters: { dateFrom?: string; dateTo?: string } = {}
+  filters: { dateFrom?: string; dateTo?: string; sortDir?: "asc" | "desc" } = {}
 ): Promise<CallLogPageResult> {
   const params = new URLSearchParams();
   params.set("page", String(page));
   params.set("pageSize", String(pageSize));
   if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
   if (filters.dateTo) params.set("dateTo", filters.dateTo);
+  if (filters.sortDir) params.set("sortDir", filters.sortDir);
   const { data, meta } = await requestWithMeta<ApiCallLogRow>(`/api/v1/call-log?${params.toString()}`);
   return {
     rows: data,

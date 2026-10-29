@@ -10,6 +10,7 @@ import { applyTaskBuckets, TaskBucket } from "@/lib/salesPendingTasks";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
 import { SearchableMultiSelect } from "@/components/ui/SearchableDropdown";
 import TablePagination from "@/components/ui/TablePagination";
+import { DateSortButton, sortByDate, type SortDir } from "@/components/ui/DateSortButton";
 
 export type TeamTaskTab = "all" | "pending";
 type Tab = TeamTaskTab;
@@ -81,6 +82,8 @@ export default function TeamTasksTable({
     setVisibleColumns({ team: !allOn, count: !allOn, taskType: !allOn, date: !allOn });
   };
   const [page, setPage] = useState(1);
+  // Date column sort (DateSortButton); undefined = most tasks first.
+  const [dateSortDir, setDateSortDir] = useState<SortDir | undefined>(undefined);
   const [rowsPerPage, setRowsPerPage] = useState(10);
 
   const tasks = useMemo(() => applyTaskBuckets(pendingTasks, now), [pendingTasks, now]);
@@ -117,8 +120,9 @@ export default function TeamTasksTable({
       if (t.dueAt && (!row.earliest || t.dueAt < row.earliest)) row.earliest = t.dueAt;
       byAgent.set(keyOf(name), row);
     }
-    return Array.from(byAgent.values()).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
-  }, [tasks, tab, taskTypes, showIdleMembers, teamMembers]);
+    const byCount = Array.from(byAgent.values()).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+    return sortByDate(byCount, dateSortDir, r => r.earliest);
+  }, [tasks, tab, taskTypes, showIdleMembers, teamMembers, dateSortDir]);
 
   const totalPages = Math.max(1, Math.ceil(rows.length / rowsPerPage));
   const currentPage = Math.min(page, totalPages);
@@ -231,7 +235,7 @@ export default function TeamTasksTable({
                   panelWidth={220}
                 />
               </th>}
-              {visibleColumns.date && <th className="px-4 py-3 whitespace-nowrap border-b border-slate-200 sticky top-0 z-10 bg-white" title="Earliest task date in this agent's queue">Date</th>}
+              {visibleColumns.date && <th className="px-4 py-3 whitespace-nowrap border-b border-slate-200 sticky top-0 z-10 bg-white" title="Earliest task date in this agent's queue"><DateSortButton dir={dateSortDir} onChange={(d) => { setDateSortDir(d); setPage(1); }} /></th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 text-xs">

@@ -26,6 +26,8 @@ import { maskPhone, maskEmail } from "@/lib/maskPII";
 import { ExcelIcon } from "@/components/icons/ContactIcons";
 import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/callTrigger";
 import { CALL_SUB_STATUS_OPTIONS, CallSubStatus, callSubStatusOf, isQualifiedCall, isUnqualifiedCall } from "@/lib/callSubStatus";
+import { DateSortButton, sortByDate, type SortDir } from "@/components/ui/DateSortButton";
+import { useLiveRefresh } from "@/lib/useLiveRefresh";
 
 // Data Calling's own, independent Call Status (migration 030) — completely
 // separate from the main 14-value Lead Status. "Not Reachable" always
@@ -1037,9 +1039,11 @@ export default function DataCallingPage() {
     }
   };
 
+  // Date column sort (DateSortButton); undefined = the normal order.
+  const [dateSortDir, setDateSortDir] = useState<SortDir | undefined>(undefined);
   const filteredLeads = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    return leads.filter(l => {
+    return sortByDate(leads.filter(l => {
       const matchesSearch = !q || l.name.toLowerCase().includes(q);
       const matchesStatus = statusFilters.length === 0 || statusFilters.includes(l.callStatus || CALL_STATUS_NONE);
       const matchesAssigned = assignedFilters.length === 0 || assignedFilters.includes(l.assignedAgent);
@@ -1059,9 +1063,9 @@ export default function DataCallingPage() {
         : true;
       // Also follows the Date Range card above (same range as the stat cards).
       return matchesSearch && matchesStatus && matchesAssigned && matchesDataCallSource && matchesProperty && matchesSubStatus && matchesDate && leadInSelectedRange(l);
-    });
+    }), dateSortDir, l => l.createdAtStr);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leads, searchQuery, statusFilters, assignedFilters, dataCallSourceFilters, propertyFilters, subStatusFilters, appliedCustomRange, dateRange, summaryCustomRange]);
+  }, [leads, searchQuery, statusFilters, assignedFilters, dataCallSourceFilters, propertyFilters, subStatusFilters, appliedCustomRange, dateRange, summaryCustomRange, dateSortDir]);
 
   const totalPages = Math.max(1, Math.ceil(filteredLeads.length / rowsPerPage));
   const currentPageClamped = Math.min(currentPage, totalPages);
@@ -1080,6 +1084,8 @@ export default function DataCallingPage() {
   // Re-fetch Next Call Dates when a call is scheduled anywhere (addFollowupCall
   // updates this list), not only when the rows change.
   const { followupCalls: liveFollowups } = useApp();
+  // …and when anyone else schedules or completes one (lib/liveRefresh.ts).
+  const { liveVersion: followupsLive } = useLiveRefresh("followups");
   useEffect(() => {
     if (!pageLeadIds) { setPageFollowups([]); return; }
     let cancelled = false;
@@ -1087,7 +1093,7 @@ export default function DataCallingPage() {
       .then(({ rows }) => { if (!cancelled) setPageFollowups(rows.map(mapApiFollowupToFrontend)); })
       .catch(() => { if (!cancelled) setPageFollowups([]); });
     return () => { cancelled = true; };
-  }, [pageLeadIds, liveFollowups]);
+  }, [pageLeadIds, liveFollowups, followupsLive]);
   const nextCallDateFor = (leadId: string) => nextFollowupFor(leadId, pageFollowups);
 
   // WhatsApp / Call buttons — rendered right after Status on phones, at the
@@ -1908,7 +1914,7 @@ export default function DataCallingPage() {
                       },
                       visibleColumns.date && {
                         key: "date" as const,
-                        node: <th className="px-4 py-3 whitespace-nowrap" onDragOver={handleColumnDragOver} onDrop={handleColumnDrop("date")}><span className="inline-flex items-center gap-1"><ColumnDragHandle columnKey="date" />Date</span></th>
+                        node: <th className="px-4 py-3 whitespace-nowrap" onDragOver={handleColumnDragOver} onDrop={handleColumnDrop("date")}><span className="inline-flex items-center gap-1"><ColumnDragHandle columnKey="date" /><DateSortButton dir={dateSortDir} onChange={(d) => { setDateSortDir(d); setCurrentPage(1); }} /></span></th>
                       },
                       visibleColumns.notes && {
                         key: "notes" as const,
