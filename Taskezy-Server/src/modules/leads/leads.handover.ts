@@ -41,6 +41,21 @@ const SYSTEM_ORIGIN_LOG_PREFIXES = [
 ];
 
 const AGENT_VISIBLE_STUB = "Lead received.";
+// Fallback for a message that mentions a source keyword but isn't one of
+// the known SYSTEM_ORIGIN_LOG_PREFIXES — e.g. a reassignment note someone
+// typed as "Meta lead for MSR", or any future note mentioning one of these
+// words. Deliberately generic (not "Lead received.", which would be wrong
+// for e.g. a reassignment) since the real content is being redacted, not
+// just reworded from a known shape.
+const AGENT_VISIBLE_GENERIC_STUB = "Activity recorded.";
+
+// Case-insensitive — catches any message (a system note OR a human-typed
+// one, e.g. a reassignment note reading "Meta lead for MSR") mentioning
+// where a lead came from, so a future note doesn't need a new prefix
+// added here to also be caught. SYSTEM_ORIGIN_LOG_PREFIXES above still
+// exists so KNOWN message shapes get an accurate, specific stub
+// (AGENT_VISIBLE_STUB) instead of falling through to the generic one.
+const SOURCE_KEYWORDS = ["meta", "google", "facebook"];
 
 const seesHandoverNotes = (caller: AccessTokenPayload) => caller.role === "ADMIN" || caller.roleType === "MANAGER";
 
@@ -48,14 +63,23 @@ function isSystemOriginLog(message: string): boolean {
   return SYSTEM_ORIGIN_LOG_PREFIXES.some(prefix => message.startsWith(prefix));
 }
 
+function mentionsSourceKeyword(message: string): boolean {
+  const lower = message.toLowerCase();
+  return SOURCE_KEYWORDS.some(keyword => lower.includes(keyword));
+}
+
 /**
  * For an agent (not Admin/Manager): drops admin-only handover notes
- * entirely, rewords system-origin notes (Google Sheet import, Meta/Google
- * revival, archive-restore, Bulk Upload promotion) down to a generic
- * "Lead received." stub instead of removing them, and drops
- * missed_task_count (migration 047, how many times this lead's follow-up
- * reminder was flagged MISSED) — none of the real detail in any of these
- * is something a Member should see, including about their own leads.
+ * entirely; rewords a known system-origin note (Google Sheet import,
+ * Meta/Google revival, archive-restore, Bulk Upload promotion) to a
+ * specific "Lead received." stub, and any OTHER message mentioning a
+ * source keyword (meta/google/facebook — including a human-typed note,
+ * e.g. a reassignment note reading "Meta lead for MSR") to a generic
+ * "Activity recorded." stub — instead of removing either, so the agent's
+ * Activity History still shows *that* and *when* something happened, just
+ * not the source/campaign detail. Also drops missed_task_count (migration
+ * 047). None of this detail is something a Member should see, including
+ * about their own leads.
  */
 export function leadForCaller<T>(caller: AccessTokenPayload, lead: T): T {
   if (!lead) return lead;
@@ -65,7 +89,11 @@ export function leadForCaller<T>(caller: AccessTokenPayload, lead: T): T {
   if (Array.isArray(withExtras.logs)) {
     result.logs = withExtras.logs
       .filter(l => !l.message.startsWith(HANDOVER_NOTE_PREFIX))
-      .map(l => (isSystemOriginLog(l.message) ? { ...l, message: AGENT_VISIBLE_STUB } : l));
+      .map(l => {
+        if (isSystemOriginLog(l.message)) return { ...l, message: AGENT_VISIBLE_STUB };
+        if (mentionsSourceKeyword(l.message)) return { ...l, message: AGENT_VISIBLE_GENERIC_STUB };
+        return l;
+      });
   }
   if (withExtras.missed_task_count !== undefined) {
     delete result.missed_task_count;
