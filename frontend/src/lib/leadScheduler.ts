@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useApp, LeadStatus } from "@/context/AppContext";
+import { apiUpdateLeadNote } from "@/lib/apiClient";
 
 // Shared by every status-change entry point (LeadDetailDrawer, the inline
 // table-row dropdowns, Pending Tasks tables) and CallFeedbackGate's
@@ -67,6 +68,17 @@ export function useLeadStatusScheduler(commit: (leadId: string, status: LeadStat
     setError("");
     try {
       await commit(pendingSchedule.leadId, pendingSchedule.status);
+      // Same Notes field the Notes column's pencil-edit and CallFeedbackGate's
+      // own note field both write to (PATCH /leads/:id/notes, a straight
+      // replace) — saved whenever something was typed, independent of
+      // whether a reminder was also scheduled below. Previously this note
+      // was only ever used as decoration inside the reminder notification's
+      // message and the calendar event's description, never actually
+      // persisted onto the lead itself — so the status changed but the
+      // agent's comment never showed up anywhere a user would look for it.
+      if (note.trim()) {
+        await apiUpdateLeadNote(pendingSchedule.leadId, note.trim());
+      }
       // Optional statuses can be submitted with no date/time at all — just
       // a status change with maybe a note, no reminder to schedule.
       if (date && time) {
