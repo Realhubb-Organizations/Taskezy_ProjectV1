@@ -15,6 +15,7 @@ import DateRangeSelect from "@/components/ui/DateRangeSelect";
 import { canChangeLeadStatus, canReassignThisLead, canUploadLeads, splitEvenly, uploadAssignableUsers, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
 import { nextFollowupFor } from "@/lib/followups";
 import { apiListFollowupsPage } from "@/lib/apiClient";
+import { findTodaysOpenFollowup, formatFollowupTime } from "@/lib/duplicateFollowupCheck";
 import NextCallCell from "@/components/crm/NextCallCell";
 import { useDialog } from "@/components/ui/DialogProvider";
 import LeadNoteCell from "@/components/crm/LeadNoteCell";
@@ -199,7 +200,7 @@ export default function DataCallingPage() {
     dataCallingLeads: leads, properties, users, currentUser, activeRole, updateLeadStatus, updateCallStatus, reassignLead,
     bulkImportLeads, addFollowupCall, removeLeadsLocally, isDataLoading, recordCallEnded, recordWhatsAppOpened
   } = useApp();
-  const { toast, prompt: promptDialog } = useDialog();
+  const { toast, confirm, prompt: promptDialog } = useDialog();
   // Bulk select + Assign/Reshuffle are an admin-only workflow — a sales
   // agent has no one to hand leads off to in that sense, so the checkbox
   // column and both toolbar buttons stay admin-only.
@@ -996,14 +997,30 @@ export default function DataCallingPage() {
         note
       );
       if (needsNextCall) {
-        addFollowupCall({
-          scheduledAt: new Date(`${rnrDate}T${rnrTime}`).toISOString(),
-          leadId: callUpdate.leadId,
-          leadName: callUpdate.leadName,
-          phone: lead?.phone,
-          callType: "CALLBACK",
-          assignedToName: lead?.assignedAgent || ""
-        });
+        // Same duplicate-schedule guard as CallFeedbackGate/the status
+        // scheduler popup — don't silently stack a second reminder for
+        // today on top of one that's already open. "Keep Existing" skips
+        // creating a new follow-up; the call status/note above are
+        // already saved either way.
+        const existing = await findTodaysOpenFollowup(callUpdate.leadId);
+        const scheduleAgain = existing
+          ? await confirm({
+              title: "Already scheduled for today",
+              message: `${callUpdate.leadName} already has a follow-up scheduled for today at ${formatFollowupTime(existing.scheduled_at)}. Schedule again, or keep the existing one?`,
+              confirmLabel: "Schedule Again",
+              cancelLabel: "Keep Existing"
+            })
+          : true;
+        if (scheduleAgain) {
+          addFollowupCall({
+            scheduledAt: new Date(`${rnrDate}T${rnrTime}`).toISOString(),
+            leadId: callUpdate.leadId,
+            leadName: callUpdate.leadName,
+            phone: lead?.phone,
+            callType: "CALLBACK",
+            assignedToName: lead?.assignedAgent || ""
+          });
+        }
       }
       toast(`${callUpdate.leadName}: call status saved.`, "success");
       setCallUpdate(null);
