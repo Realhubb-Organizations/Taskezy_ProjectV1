@@ -3,7 +3,7 @@
 // SUPER_ADMIN_EMAIL (Taskezy-Server/src/config/superAdmin.ts) — single
 // source of truth on this side, every file that needs this check imports
 // from here instead of hardcoding the email.
-export const SUPER_ADMIN_EMAIL = "admin@realhubb.in";
+export const SUPER_ADMIN_EMAIL = "tech@realhubb.in";
 
 export function isSuperAdminUser(email: string | undefined | null): boolean {
   return email === SUPER_ADMIN_EMAIL;
