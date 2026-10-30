@@ -55,6 +55,11 @@ export async function ingestSheetLead(row: SheetLeadRow): Promise<SheetLeadInges
     return { outcome: "skipped", reason: "name is required" };
   }
 
+  // Resolved up front (not just in the fresh-lead path below) so a revival
+  // can name the property this specific submission is actually about, even
+  // though revival never changes the lead's own stored property.
+  const propertyId = row.sourceSheet ? await findPropertyIdBySheetSource(row.sourceSheet) : undefined;
+
   // Same prospect submitting another lead form — matched by phone, or by
   // email when given (name is never matched on, too many false-positive
   // risks). Marks the EXISTING lead revived and notifies instead of
@@ -62,7 +67,7 @@ export async function ingestSheetLead(row: SheetLeadRow): Promise<SheetLeadInges
   // entirely since nothing new is being inserted.
   const revival = await findLeadForRevival(phone, row.email ?? null);
   if (revival) {
-    await markLeadRevived(revival, "Google Ads Sheet Import");
+    await markLeadRevived(revival, "Google Ads Sheet Import", propertyId);
     logger.info({ leadKey: row.leadKey, existingLeadId: revival.id, matchedBy: revival.matched_by }, "Sheet lead matched an existing lead — marked revived instead of creating a duplicate");
     return { outcome: "duplicate" };
   }
@@ -73,7 +78,6 @@ export async function ingestSheetLead(row: SheetLeadRow): Promise<SheetLeadInges
     // the moment its first lead arrives, with no code change needed.
     await recordSheetSourceSeen(row.sourceSheet);
   }
-  const propertyId = row.sourceSheet ? await findPropertyIdBySheetSource(row.sourceSheet) : undefined;
   const autoAssignedAgentId = propertyId ? await pickAgentForProperty(propertyId) : undefined;
 
   const assignedAgentId = autoAssignedAgentId ?? (await listActiveAdminIds())[0];
@@ -158,7 +162,7 @@ export async function ingestSheetLead(row: SheetLeadRow): Promise<SheetLeadInges
       // and behave identically to the normal case, not a separate bare note.
       const revival = await findLeadForRevival(phone, row.email ?? null);
       if (revival) {
-        await markLeadRevived(revival, "Google Ads Sheet Import");
+        await markLeadRevived(revival, "Google Ads Sheet Import", propertyId);
       }
       logger.info({ leadKey: row.leadKey, existingLeadId: revival?.id }, "Sheet lead phone already exists in leads — marked revived instead of creating a duplicate");
       return { outcome: "duplicate" };
