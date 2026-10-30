@@ -11,7 +11,7 @@ import { nextStatusOptions, frontendStatusToDbCode } from "@/lib/leadStatusMappi
 import { CALL_SUB_STATUS_OPTIONS, CallSubStatus, callSubStatusOf } from "@/lib/callSubStatus";
 import { SCHEDULER_REQUIRED_STATUSES } from "@/lib/leadScheduler";
 import { useDialog } from "@/components/ui/DialogProvider";
-import { findTodaysOpenFollowup, formatFollowupTime } from "@/lib/duplicateFollowupCheck";
+import { findOpenFollowup, formatFollowupWhen } from "@/lib/duplicateFollowupCheck";
 
 // Full-screen, unclosable overlay — the app stays mounted behind it but
 // nothing in it can be reached (no backdrop-click, no Escape, and the
@@ -201,16 +201,17 @@ export default function CallFeedbackGate() {
       }
       // 2. Next call — after the status change, which closes older pending follow-ups.
       // An agent or their manager calling/WhatsApp-ing the same lead again
-      // today shouldn't silently stack up a second reminder on top of one
-      // that's already open for today — ask first. "Keep Existing" skips
-      // creating a new follow-up and leaves the original untouched; the
-      // status change and note above are already saved either way.
+      // shouldn't silently stack up a second reminder on top of one that's
+      // already open — today, tomorrow, next week, any date — ask first.
+      // "Keep Existing" skips creating a new follow-up and leaves the
+      // original untouched; the status change and note above are already
+      // saved either way.
       if (lead && scheduledAt) {
-        const existing = await findTodaysOpenFollowup(lead.id);
+        const existing = await findOpenFollowup(lead.id);
         const scheduleAgain = existing
           ? await confirm({
-              title: "Already scheduled for today",
-              message: `${lead.name} already has a follow-up scheduled for today at ${formatFollowupTime(existing.scheduled_at)}. Schedule again, or keep the existing one?`,
+              title: "Already scheduled",
+              message: `${lead.name} already has a follow-up scheduled ${formatFollowupWhen(existing.scheduled_at)}. Schedule again, or keep the existing one?`,
               confirmLabel: "Schedule Again",
               cancelLabel: "Keep Existing"
             })

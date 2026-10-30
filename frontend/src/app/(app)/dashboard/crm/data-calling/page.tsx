@@ -15,7 +15,7 @@ import DateRangeSelect from "@/components/ui/DateRangeSelect";
 import { canChangeLeadStatus, canReassignThisLead, canUploadLeads, splitEvenly, uploadAssignableUsers, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
 import { nextFollowupFor } from "@/lib/followups";
 import { apiListFollowupsPage } from "@/lib/apiClient";
-import { findTodaysOpenFollowup, formatFollowupTime } from "@/lib/duplicateFollowupCheck";
+import { findOpenFollowup, formatFollowupWhen } from "@/lib/duplicateFollowupCheck";
 import NextCallCell from "@/components/crm/NextCallCell";
 import { useDialog } from "@/components/ui/DialogProvider";
 import LeadNoteCell from "@/components/crm/LeadNoteCell";
@@ -998,15 +998,15 @@ export default function DataCallingPage() {
       );
       if (needsNextCall) {
         // Same duplicate-schedule guard as CallFeedbackGate/the status
-        // scheduler popup — don't silently stack a second reminder for
-        // today on top of one that's already open. "Keep Existing" skips
-        // creating a new follow-up; the call status/note above are
-        // already saved either way.
-        const existing = await findTodaysOpenFollowup(callUpdate.leadId);
+        // scheduler popup — don't silently stack a second reminder on top
+        // of one that's already open, today or any future date. "Keep
+        // Existing" skips creating a new follow-up; the call status/note
+        // above are already saved either way.
+        const existing = await findOpenFollowup(callUpdate.leadId);
         const scheduleAgain = existing
           ? await confirm({
-              title: "Already scheduled for today",
-              message: `${callUpdate.leadName} already has a follow-up scheduled for today at ${formatFollowupTime(existing.scheduled_at)}. Schedule again, or keep the existing one?`,
+              title: "Already scheduled",
+              message: `${callUpdate.leadName} already has a follow-up scheduled ${formatFollowupWhen(existing.scheduled_at)}. Schedule again, or keep the existing one?`,
               confirmLabel: "Schedule Again",
               cancelLabel: "Keep Existing"
             })
