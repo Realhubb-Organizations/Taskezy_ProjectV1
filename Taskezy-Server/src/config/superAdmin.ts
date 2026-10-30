@@ -4,4 +4,4 @@
 // editing, the bulk phone-number search) are restricted to this one
 // account specifically, not every ADMIN. Single source of truth — every
 // other file that needs this constant imports it from here.
-export const SUPER_ADMIN_EMAIL = "admin@realhubb.in";
+export const SUPER_ADMIN_EMAIL = "tech@realhubb.in";

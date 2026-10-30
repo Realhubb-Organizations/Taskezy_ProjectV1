@@ -43,6 +43,14 @@ export async function ingestMetaLead(leadData: MetaLeadData, connectingAdminId: 
     return;
   }
 
+  // Matched by campaign NAME (see properties.repository.findPropertyIdByCampaignName)
+  // — only meaningful when Meta actually gave us the real campaign_name, not
+  // our own form_id/"Meta Lead Ads" fallback. Resolved up front (not just in
+  // the fresh-lead path below) so a revival can name the property this
+  // specific submission is actually about, even though revival never
+  // changes the lead's own stored property.
+  const propertyId = leadData.campaign_name ? await findPropertyIdByCampaignName(leadData.campaign_name) : undefined;
+
   // Same prospect submitting another lead form — matched by phone, or by
   // email when given (name is never matched on, too many false-positive
   // risks). Marks the EXISTING lead revived and notifies instead of
@@ -50,17 +58,13 @@ export async function ingestMetaLead(leadData: MetaLeadData, connectingAdminId: 
   // entirely since nothing new is being inserted.
   const revival = await findLeadForRevival(phone, email ?? null);
   if (revival) {
-    await markLeadRevived(revival, "Meta Ads Webhook");
+    await markLeadRevived(revival, "Meta Ads Webhook", propertyId);
     logger.info({ leadgenId: leadData.id, existingLeadId: revival.id, matchedBy: revival.matched_by }, "Meta lead matched an existing lead — marked revived instead of creating a duplicate");
     return;
   }
 
   const name = rawName || "Meta Lead";
   const campaign = leadData.campaign_name || leadData.form_id || "Meta Lead Ads";
-  // Matched by campaign NAME (see properties.repository.findPropertyIdByCampaignName)
-  // — only meaningful when Meta actually gave us the real campaign_name, not
-  // our own form_id/"Meta Lead Ads" fallback.
-  const propertyId = leadData.campaign_name ? await findPropertyIdByCampaignName(leadData.campaign_name) : undefined;
   const autoAssignedAgentId = propertyId ? await pickAgentForProperty(propertyId) : undefined;
   const assignedAgentId = autoAssignedAgentId ?? connectingAdminId;
   const statusCode = autoAssignedAgentId ? "NEW_LEAD" : "UNASSIGNED";
@@ -104,7 +108,7 @@ export async function ingestMetaLead(leadData: MetaLeadData, connectingAdminId: 
       // and behave identically to the normal case, not a separate bare note.
       const revival = await findLeadForRevival(phone, email ?? null);
       if (revival) {
-        await markLeadRevived(revival, "Meta Ads Webhook");
+        await markLeadRevived(revival, "Meta Ads Webhook", propertyId);
       }
       logger.info({ leadgenId: leadData.id, existingLeadId: revival?.id }, "Meta lead phone already exists in leads — marked revived instead of creating a duplicate");
       return;
