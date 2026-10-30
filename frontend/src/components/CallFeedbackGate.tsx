@@ -11,7 +11,7 @@ import { nextStatusOptions, frontendStatusToDbCode } from "@/lib/leadStatusMappi
 import { CALL_SUB_STATUS_OPTIONS, CallSubStatus, callSubStatusOf } from "@/lib/callSubStatus";
 import { SCHEDULER_REQUIRED_STATUSES } from "@/lib/leadScheduler";
 import { useDialog } from "@/components/ui/DialogProvider";
-import { findOpenFollowup, formatFollowupWhen } from "@/lib/duplicateFollowupCheck";
+import { findOpenFollowup, formatFollowupWhen, findAgentScheduleConflict } from "@/lib/duplicateFollowupCheck";
 
 // Full-screen, unclosable overlay — the app stays mounted behind it but
 // nothing in it can be reached (no backdrop-click, no Escape, and the
@@ -183,7 +183,18 @@ export default function CallFeedbackGate() {
 
     setSubmitting(true);
     setError("");
+    const ownerId = lead ? (users.find(u => u.name === lead.assignedAgent)?.id ?? currentUser?.id) : undefined;
     try {
+      // 0. An agent can't be on two calls at once — block the whole save
+      // (status included) if the picked time is within 5 minutes of
+      // another lead's already-scheduled follow-up for this same agent.
+      if (lead && scheduledAt && ownerId) {
+        const conflict = await findAgentScheduleConflict(ownerId, scheduledAt.toISOString(), lead.id);
+        if (conflict) {
+          setError(`You already have "${conflict.lead_name}" scheduled ${formatFollowupWhen(conflict.scheduled_at)} — pick a time at least 5 minutes apart.`);
+          return;
+        }
+      }
       // 1. The lead's status (or call status) — must succeed before the app unlocks.
       if (lead && isDataCallingLead && callStatusChanged) {
         await apiUpdateCallStatus(lead.id, callStatus as (typeof CALL_STATUS_OPTIONS)[number], nextCallSubStatus, note.trim());
@@ -216,12 +227,9 @@ export default function CallFeedbackGate() {
               cancelLabel: "Keep Existing"
             })
           : true;
-        if (scheduleAgain) {
-          const ownerId = users.find(u => u.name === lead.assignedAgent)?.id ?? currentUser?.id;
-          if (ownerId) {
-            const created = await apiCreateFollowup({ scheduledAt: scheduledAt.toISOString(), leadId: lead.id, leadName: lead.name, phone: lead.phone, callType: "CALLBACK", assignedToId: ownerId });
-            recordFollowupCreated(created); // tables showing Next Call Date re-fetch
-          }
+        if (scheduleAgain && ownerId) {
+          const created = await apiCreateFollowup({ scheduledAt: scheduledAt.toISOString(), leadId: lead.id, leadName: lead.name, phone: lead.phone, callType: "CALLBACK", assignedToId: ownerId });
+          recordFollowupCreated(created); // tables showing Next Call Date re-fetch
         }
       }
       // 3. Close the attempt (logged on the lead's timeline) — unlocks the app.

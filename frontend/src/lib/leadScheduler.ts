@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useApp, LeadStatus } from "@/context/AppContext";
 import { apiUpdateLeadNote } from "@/lib/apiClient";
 import { useDialog } from "@/components/ui/DialogProvider";
-import { findOpenFollowup, formatFollowupWhen } from "@/lib/duplicateFollowupCheck";
+import { findOpenFollowup, formatFollowupWhen, findAgentScheduleConflict } from "@/lib/duplicateFollowupCheck";
 
 // Shared by every status-change entry point (LeadDetailDrawer, the inline
 // table-row dropdowns, Pending Tasks tables) and CallFeedbackGate's
@@ -42,7 +42,7 @@ interface SchedulableLead {
  * that is bypassed, this only decides WHEN commit runs).
  */
 export function useLeadStatusScheduler(commit: (leadId: string, status: LeadStatus) => void | Promise<void>) {
-  const { addNotification, addCalendarEvent, addFollowupCall } = useApp();
+  const { addNotification, addCalendarEvent, addFollowupCall, users } = useApp();
   const { confirm } = useDialog();
   const [pendingSchedule, setPendingSchedule] = useState<PendingLeadSchedule | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -70,6 +70,19 @@ export function useLeadStatusScheduler(commit: (leadId: string, status: LeadStat
     setSubmitting(true);
     setError("");
     try {
+      // An agent can't be on two calls at once — block the whole save
+      // (status included) if the picked time is within 5 minutes of
+      // another lead's already-scheduled follow-up for this same agent.
+      if (date && time) {
+        const ownerId = users.find(u => u.name === pendingSchedule.assignedAgent)?.id;
+        if (ownerId) {
+          const conflict = await findAgentScheduleConflict(ownerId, new Date(`${date}T${time}`).toISOString(), pendingSchedule.leadId);
+          if (conflict) {
+            setError(`You already have "${conflict.lead_name}" scheduled ${formatFollowupWhen(conflict.scheduled_at)} — pick a time at least 5 minutes apart.`);
+            return;
+          }
+        }
+      }
       await commit(pendingSchedule.leadId, pendingSchedule.status);
       // Same Notes field the Notes column's pencil-edit and CallFeedbackGate's
       // own note field both write to (PATCH /leads/:id/notes, a straight

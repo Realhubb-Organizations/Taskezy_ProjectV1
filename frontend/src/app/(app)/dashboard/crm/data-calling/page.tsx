@@ -15,7 +15,7 @@ import DateRangeSelect from "@/components/ui/DateRangeSelect";
 import { canChangeLeadStatus, canReassignThisLead, canUploadLeads, splitEvenly, uploadAssignableUsers, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
 import { nextFollowupFor } from "@/lib/followups";
 import { apiListFollowupsPage } from "@/lib/apiClient";
-import { findOpenFollowup, formatFollowupWhen } from "@/lib/duplicateFollowupCheck";
+import { findOpenFollowup, formatFollowupWhen, findAgentScheduleConflict } from "@/lib/duplicateFollowupCheck";
 import NextCallCell from "@/components/crm/NextCallCell";
 import { useDialog } from "@/components/ui/DialogProvider";
 import LeadNoteCell from "@/components/crm/LeadNoteCell";
@@ -990,6 +990,20 @@ export default function DataCallingPage() {
     setCallUpdateSaving(true);
     setPendingActionError(null);
     try {
+      // An agent can't be on two calls at once — block the whole save
+      // (call status included) if the picked next-call time is within 5
+      // minutes of another lead's already-scheduled follow-up for this
+      // same agent.
+      if (needsNextCall) {
+        const ownerId = users.find(u => u.name === lead?.assignedAgent)?.id;
+        if (ownerId) {
+          const conflict = await findAgentScheduleConflict(ownerId, new Date(`${rnrDate}T${rnrTime}`).toISOString(), callUpdate.leadId);
+          if (conflict) {
+            setPendingActionError(`You already have "${conflict.lead_name}" scheduled ${formatFollowupWhen(conflict.scheduled_at)} — pick a time at least 5 minutes apart.`);
+            return;
+          }
+        }
+      }
       await updateCallStatus(
         callUpdate.leadId,
         callUpdate.callStatus,

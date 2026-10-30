@@ -27,3 +27,31 @@ export function formatFollowupWhen(scheduledAt: string): string {
   if (isToday) return `today at ${time}`;
   return `on ${d.toLocaleDateString([], { day: "numeric", month: "short" })} at ${time}`;
 }
+
+const AGENT_CONFLICT_WINDOW_MS = 5 * 60 * 1000;
+
+/**
+ * An agent can't physically be on two calls at once — checks whether the
+ * same agent already has another lead's UPCOMING follow-up within 5
+ * minutes of a newly-picked time, before it's saved. Bounded to the picked
+ * time's own calendar date (same-day pageSize=100 is far more than any one
+ * agent realistically has scheduled in a day).
+ * ponytail: a conflict within 5 minutes of midnight against a follow-up on
+ * the adjacent calendar date isn't caught (day-bounded query) — vanishingly
+ * rare, upgrade path is a ±1-day window if it ever actually bites someone.
+ */
+export async function findAgentScheduleConflict(
+  agentId: string,
+  newScheduledAtIso: string,
+  excludeLeadId?: string
+): Promise<ApiFollowupRow | null> {
+  const newTime = new Date(newScheduledAtIso).getTime();
+  const dayIso = newScheduledAtIso.slice(0, 10);
+  const { rows } = await apiListFollowupsPage(1, 100, {
+    assignedToId: [agentId],
+    status: ["UPCOMING"],
+    dateFrom: dayIso,
+    dateTo: dayIso
+  });
+  return rows.find(r => r.lead_id !== excludeLeadId && Math.abs(new Date(r.scheduled_at).getTime() - newTime) < AGENT_CONFLICT_WINDOW_MS) ?? null;
+}
