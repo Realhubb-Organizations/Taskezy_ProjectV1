@@ -101,8 +101,7 @@ import { ALL_DATA_TOPICS, EMPTY_DATA_VERSION, useThrottledOnChange, type DataTop
 import { dbCodeToFrontendStatus, frontendStatusToDbCode, isRealLeadId, isRealId } from "@/lib/leadStatusMapping";
 import { initNotificationSoundUnlock, playNotificationSound } from "@/lib/notificationSound";
 import { todayIso, toIsoDate } from "@/components/ui/DateRangePicker";
-import { consumePendingCallDial, isWebCallAllowed } from "@/lib/callTrigger";
-import { Capacitor } from "@capacitor/core";
+import { consumePendingCallDial } from "@/lib/callTrigger";
 
 // --- Types ---
 export type Role = "ADMIN" | "FINANCE" | "AGENT";
@@ -1323,34 +1322,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setAuthLoading(false);
         loadAllRealData(mapped.role);
         // Re-shows CallFeedbackGate after a force-quit/relaunch mid-feedback
-        // — not just within the same in-memory session. Native app only
-        // (web never creates one of these rows, except for the
-        // WEB_CALL_ALLOWED_EMAILS users in callTrigger.ts, who also get it).
+        // — not just within the same in-memory session, and not just on the
+        // same device: call_attempts.status = PENDING_FEEDBACK is scoped to
+        // the AGENT (caller_user_id), not to whichever phone/browser created
+        // it, so a call made on the mobile app and left unanswered must
+        // still gate the web platform (or any other session) for that same
+        // agent. Checked on every session restore regardless of platform —
+        // only STARTING a new call stays native/allowlisted-web-only (see
+        // canTriggerLeadCall), finishing one someone else started does not.
         //
         // Backend-authoritative check first: if there's already an
         // unresolved PENDING_FEEDBACK row, show that — never overwrite it
         // with a newer call's marker. Only once that comes back empty do we
-        // fall back to callTrigger.ts's local pending-dial marker, which
+        // fall back to callTrigger.ts's local pending-dial marker (a no-op
+        // on any device/session that never actually dialed from it), which
         // catches the case the backend could never know about on its own:
         // the app process got killed mid-call before recordCallEnded ever
         // ran, so no row was created in the first place. See callTrigger.ts
         // for the full reasoning.
-        if (Capacitor.isNativePlatform() || isWebCallAllowed(mapped.email)) {
-          apiGetPendingCallAttempt()
-            .then(async (existing) => {
-              if (existing) {
-                setPendingCallAttempt(existing);
-                consumePendingCallDial(); // superseded — don't also process it below
-                return;
-              }
-              const pendingDial = consumePendingCallDial();
-              if (pendingDial) {
-                const durationSeconds = Math.max(0, Math.round((Date.now() - new Date(pendingDial.startedAt).getTime()) / 1000));
-                await recordCallEnded(pendingDial.leadId, pendingDial.startedAt, durationSeconds);
-              }
-            })
-            .catch((err) => console.warn("Could not check for a pending call-feedback gate:", err));
-        }
+        apiGetPendingCallAttempt()
+          .then(async (existing) => {
+            if (existing) {
+              setPendingCallAttempt(existing);
+              consumePendingCallDial(); // superseded — don't also process it below
+              return;
+            }
+            const pendingDial = consumePendingCallDial();
+            if (pendingDial) {
+              const durationSeconds = Math.max(0, Math.round((Date.now() - new Date(pendingDial.startedAt).getTime()) / 1000));
+              await recordCallEnded(pendingDial.leadId, pendingDial.startedAt, durationSeconds);
+            }
+          })
+          .catch((err) => console.warn("Could not check for a pending call-feedback gate:", err));
       })
       .catch(() => {
         clearApiSession();
