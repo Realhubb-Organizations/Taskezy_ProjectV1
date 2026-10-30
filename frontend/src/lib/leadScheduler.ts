@@ -1,5 +1,8 @@
 import { useState } from "react";
 import { useApp, LeadStatus } from "@/context/AppContext";
+import { apiUpdateLeadNote } from "@/lib/apiClient";
+import { useDialog } from "@/components/ui/DialogProvider";
+import { findOpenFollowup, formatFollowupWhen, findAgentScheduleConflict } from "@/lib/duplicateFollowupCheck";
 
 // Shared by every status-change entry point (LeadDetailDrawer, the inline
 // table-row dropdowns, Pending Tasks tables) and CallFeedbackGate's
@@ -39,7 +42,8 @@ interface SchedulableLead {
  * that is bypassed, this only decides WHEN commit runs).
  */
 export function useLeadStatusScheduler(commit: (leadId: string, status: LeadStatus) => void | Promise<void>) {
-  const { addNotification, addCalendarEvent, addFollowupCall } = useApp();
+  const { addNotification, addCalendarEvent, addFollowupCall, users } = useApp();
+  const { confirm } = useDialog();
   const [pendingSchedule, setPendingSchedule] = useState<PendingLeadSchedule | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -66,10 +70,53 @@ export function useLeadStatusScheduler(commit: (leadId: string, status: LeadStat
     setSubmitting(true);
     setError("");
     try {
+      // An agent can't be on two calls at once — block the whole save
+      // (status included) if the picked time is within 5 minutes of
+      // another lead's already-scheduled follow-up for this same agent.
+      if (date && time) {
+        const ownerId = users.find(u => u.name === pendingSchedule.assignedAgent)?.id;
+        if (ownerId) {
+          const conflict = await findAgentScheduleConflict(ownerId, new Date(`${date}T${time}`).toISOString(), pendingSchedule.leadId);
+          if (conflict) {
+            setError(`You already have "${conflict.lead_name}" scheduled ${formatFollowupWhen(conflict.scheduled_at)} — pick a time at least 5 minutes apart.`);
+            return;
+          }
+        }
+      }
       await commit(pendingSchedule.leadId, pendingSchedule.status);
+      // Same Notes field the Notes column's pencil-edit and CallFeedbackGate's
+      // own note field both write to (PATCH /leads/:id/notes, a straight
+      // replace) — saved whenever something was typed, independent of
+      // whether a reminder was also scheduled below. Previously this note
+      // was only ever used as decoration inside the reminder notification's
+      // message and the calendar event's description, never actually
+      // persisted onto the lead itself — so the status changed but the
+      // agent's comment never showed up anywhere a user would look for it.
+      if (note.trim()) {
+        await apiUpdateLeadNote(pendingSchedule.leadId, note.trim());
+      }
       // Optional statuses can be submitted with no date/time at all — just
       // a status change with maybe a note, no reminder to schedule.
       if (date && time) {
+        // An agent or their manager working the same lead again shouldn't
+        // silently stack up a second reminder on top of one that's already
+        // open — today, tomorrow, next week, any date — ask first. "Keep
+        // Existing" discards this pick entirely (no notification/calendar
+        // event/follow-up created, the original stays untouched); the
+        // status change and note above have already been saved either way.
+        const existing = await findOpenFollowup(pendingSchedule.leadId);
+        if (existing) {
+          const scheduleAgain = await confirm({
+            title: "Already scheduled",
+            message: `${pendingSchedule.leadName} already has a follow-up scheduled ${formatFollowupWhen(existing.scheduled_at)}. Schedule again, or keep the existing one?`,
+            confirmLabel: "Schedule Again",
+            cancelLabel: "Keep Existing"
+          });
+          if (!scheduleAgain) {
+            setPendingSchedule(null);
+            return;
+          }
+        }
         const isSiteVisit = pendingSchedule.status === "Site Visit Scheduled";
         addNotification({
           system: "CRM",
