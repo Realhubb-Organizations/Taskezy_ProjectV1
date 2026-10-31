@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { requireAuth } from "../../middleware/auth";
+import { requireAuth, requireAdminOrManager } from "../../middleware/auth";
 import { validate } from "../../middleware/validate";
 import { asyncHandler } from "../../utils/asyncHandler";
 import { sendOk } from "../../utils/apiResponse";
@@ -123,6 +123,73 @@ callAttemptsRouter.patch(
       // sent the WhatsApp message.
       const label = found[0].channel === "WHATSAPP" ? "WhatsApp message" : "Call";
       await insertLeadLog(client, found[0].lead_id, req.user!.sub, req.user!.name, `${label} outcome: ${req.body.outcome}. Notes: ${req.body.notes}`);
+    });
+
+    const { rows: updated } = await query(`${SELECT} WHERE id = $1`, [req.params.id]);
+    sendOk(res, updated[0]);
+  })
+);
+
+// Admin/Manager-only rescue list: an agent whose device/network keeps them
+// from ever successfully submitting the blocking feedback gate has no way
+// out of it themselves (by design — see CallFeedbackGate.tsx) and a
+// restart doesn't help, since this same PENDING_FEEDBACK row is what
+// re-shows the gate. Admin sees every stuck row; a Manager only their own
+// direct reports' — mirrors every other "team" scoping in this codebase.
+callAttemptsRouter.get(
+  "/stuck",
+  requireAdminOrManager("view stuck calls"),
+  asyncHandler(async (req, res) => {
+    const scopeIds = req.user!.role === "ADMIN" ? null : await usersRepo.findDirectReportIds(req.user!.sub);
+    const { rows } = await query(
+      `SELECT ca.id, ca.lead_id, l.name AS lead_name, ca.caller_user_id,
+              u.first_name || COALESCE(' ' || u.last_name, '') AS caller_name,
+              ca.channel, ca.created_at
+       FROM call_attempts ca
+       JOIN users u ON u.id = ca.caller_user_id
+       LEFT JOIN leads l ON l.id = ca.lead_id
+       WHERE ca.status = 'PENDING_FEEDBACK'
+         ${scopeIds ? "AND ca.caller_user_id = ANY($1::uuid[])" : ""}
+       ORDER BY ca.created_at ASC`,
+      scopeIds ? [scopeIds] : []
+    );
+    sendOk(res, rows);
+  })
+);
+
+// Rescues an agent who's genuinely stuck (bad network, a dead end they
+// can't resolve from their own device) — marks the call COMPLETED with a
+// system-authored outcome instead of the agent's own, same Activity
+// History mechanism as a normal submission, so there's no gap in the
+// lead's timeline. A Manager may only force-close their own team's calls;
+// an Admin may close any.
+callAttemptsRouter.post(
+  "/:id/force-complete",
+  requireAdminOrManager("force-close a stuck call"),
+  validate({ params: idParamSchema }),
+  asyncHandler(async (req, res) => {
+    const { rows: found } = await pool.query<{ caller_user_id: string; lead_id: string; channel: string; status: string }>(
+      `SELECT caller_user_id, lead_id, channel, status FROM call_attempts WHERE id = $1`,
+      [req.params.id]
+    );
+    if (found.length === 0) throw ApiError.notFound("Call attempt not found");
+    if (found[0].status === "COMPLETED") throw ApiError.badRequest("This call was already resolved.");
+    if (req.user!.role !== "ADMIN") {
+      const teamIds = await usersRepo.findDirectReportIds(req.user!.sub);
+      if (!teamIds.includes(found[0].caller_user_id)) {
+        throw ApiError.forbidden("You can only force-close a call for your own team.");
+      }
+    }
+
+    const outcome = "Force-closed";
+    const notes = `Force-closed by ${req.user!.name} — the agent couldn't resolve this from their own device.`;
+    await withTransaction(async (client) => {
+      await client.query(
+        `UPDATE call_attempts SET status = 'COMPLETED', outcome = $1, notes = $2 WHERE id = $3`,
+        [outcome, notes, req.params.id]
+      );
+      const label = found[0].channel === "WHATSAPP" ? "WhatsApp message" : "Call";
+      await insertLeadLog(client, found[0].lead_id, req.user!.sub, req.user!.name, `${label} outcome: ${outcome}. Notes: ${notes}`);
     });
 
     const { rows: updated } = await query(`${SELECT} WHERE id = $1`, [req.params.id]);

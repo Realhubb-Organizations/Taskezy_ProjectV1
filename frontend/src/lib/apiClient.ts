@@ -1307,6 +1307,27 @@ export function apiSubmitCallFeedback(id: string, input: { outcome: string; note
   return request<ApiCallAttemptRow>(`/api/v1/call-attempts/${id}`, { method: "PATCH", body: JSON.stringify(input) });
 }
 
+// Admin/Manager rescue for an agent who can never resolve the blocking
+// feedback gate themselves (bad network, no valid time left to pick, etc.)
+// — see call-attempts.routes.ts's own comment on /stuck and /force-complete.
+export interface ApiStuckCallAttempt {
+  id: string;
+  lead_id: string | null;
+  lead_name: string | null;
+  caller_user_id: string;
+  caller_name: string;
+  channel: "CALL" | "WHATSAPP";
+  created_at: string;
+}
+
+export function apiListStuckCallAttempts(): Promise<ApiStuckCallAttempt[]> {
+  return request<ApiStuckCallAttempt[]>("/api/v1/call-attempts/stuck");
+}
+
+export function apiForceCompleteCallAttempt(id: string): Promise<ApiCallAttemptRow> {
+  return request<ApiCallAttemptRow>(`/api/v1/call-attempts/${id}/force-complete`, { method: "POST" });
+}
+
 // --- Attendance (derived view) ---
 export interface ApiAttendanceRow {
   user_id: string;

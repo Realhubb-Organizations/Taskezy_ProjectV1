@@ -12,6 +12,7 @@ import { useLeadStatusScheduler } from "@/lib/leadScheduler";
 import TeamTasksTable, { TeamTaskTab } from "@/components/dashboard/TeamTasksTable";
 import TaskInsightsCharts from "@/components/dashboard/TaskInsightsCharts";
 import SalesPendingTasksTable from "@/components/dashboard/SalesPendingTasksTable";
+import StuckCallsPanel from "@/components/dashboard/StuckCallsPanel";
 import { type LeadSummaryStats } from "@/lib/leadSummaryStats";
 import { apiGetLeadStats, apiGetLead, type LeadListFilters } from "@/lib/apiClient";
 import { canUploadLeads, uploadAssignableUsers } from "@/lib/leadAssignment";
@@ -267,6 +268,7 @@ export default function CrmDashboardPage() {
       {/* No in-page title here — the shared app header above already shows
           "Dashboard" for this route, so repeating it as a page heading was
           just duplication. */}
+      <StuckCallsPanel />
       {/* Upload Leads: admins and managers only, not agents. */}
       {canUploadLeads(currentUser) && (
       <div className="flex justify-end">
