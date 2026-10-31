@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useApp, User, Role, mapApiUserDirectoryEntryToFrontendUser } from "@/context/AppContext";
+import StuckCallsButton from "@/components/dashboard/StuckCallsButton";
 import { isSuperAdminUser } from "@/lib/superAdmin";
 import {
   apiDisconnectMeta,
@@ -1509,6 +1510,7 @@ export default function SettingsPage() {
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <h3 className="ui-section-title">Corporate User Directory</h3>
             <div className="flex gap-2 shrink-0">
+              <StuckCallsButton />
               <button
                 onClick={() => { setQuickResetUserId(""); setQuickResetResult(null); setIsQuickResetOpen(true); }}
                 className="ui-btn ui-btn-secondary border"
