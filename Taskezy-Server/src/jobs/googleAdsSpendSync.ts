@@ -5,6 +5,11 @@ import { businessDateOffset } from "../utils/businessDate";
 
 const POLL_INTERVAL_MS = 6 * 60 * 60 * 1000; // matches metaAdSpendSync.ts — spend doesn't need per-minute freshness
 const LOOKBACK_DAYS = 35; // covers the Reports page's "Last 30 Days" preset with buffer for late-arriving data
+// This account's FIRST ever ad-level insights pull uses this much wider
+// window instead of the normal 35 days — mirrors metaAdSpendSync.ts's
+// per-ad version, done at the account level here since Google's ad-level
+// call is account-wide, not per-ad.
+const FIRST_SYNC_LOOKBACK_DAYS = 365;
 
 function isoDateNDaysAgo(n: number): string {
   return businessDateOffset(-n);
@@ -123,7 +128,14 @@ async function runSync(): Promise<void> {
         await googleAdsRepo.upsertAd({ id: ad.id, campaignId: ad.campaignId, adGroupId: ad.adGroupId, name: ad.name, adType: ad.adType, status: ad.status });
       }
 
-      const adStats = await getAdDailyStats(account.id, since, until);
+      // First time this account has ever had ad-level insights: go back a
+      // full year instead of the normal 35 days, same reasoning as
+      // metaAdSpendSync.ts's per-ad version — a late-discovered inactive
+      // ad would otherwise only ever be checked against whichever narrow
+      // recent window happened to be in effect the one time this ran.
+      const everSynced = await googleAdsRepo.hasAdLevelSpendRecordsForAccount(account.id);
+      const adSince = everSynced ? since : isoDateNDaysAgo(FIRST_SYNC_LOOKBACK_DAYS);
+      const adStats = await getAdDailyStats(account.id, adSince, until);
       for (const stat of adStats) {
         if (!validAdIds.has(stat.adId)) continue;
         await googleAdsRepo.upsertAdLevelSpendRecord({ adId: stat.adId, spendDate: stat.date, spend: stat.spend, leadsGenerated: stat.conversions });

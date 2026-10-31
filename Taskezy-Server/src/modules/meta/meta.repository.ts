@@ -182,6 +182,36 @@ export async function hasAdSetsForCampaign(campaignId: string): Promise<boolean>
   return (result.rowCount ?? 0) > 0;
 }
 
+// Tells syncOnce whether this ad has ever had its insights pulled before —
+// the only ad-level rows that exist are the normal rolling lookback
+// window's worth, so an ad discovered late (its campaign already gone
+// INACTIVE and past its one backfill pass) would otherwise only ever get
+// checked against a narrow recent window that may have entirely missed
+// when it actually ran. First sync for an ad uses a much wider window;
+// every sync after that goes back to the normal one.
+export async function hasAdLevelSpendRecordsForAd(adId: string): Promise<boolean> {
+  const result = await pool.query("SELECT 1 FROM ad_level_spend_records WHERE meta_ad_id = $1 LIMIT 1", [adId]);
+  return (result.rowCount ?? 0) > 0;
+}
+
+// Used by the INACTIVE-campaign skip in syncOnce: hasAdSetsForCampaign
+// alone only proves the ad TREE was discovered, not that any real
+// insight numbers were ever captured for it — a campaign stuck at zero
+// insight rows (the exact bug this file's other new function fixes)
+// would otherwise be skipped forever, never getting a chance to run
+// the wide first-sync window at all. Only once at least one real
+// insight row exists is it safe to stop re-checking this campaign.
+export async function hasAdLevelSpendRecordsForCampaign(campaignId: string): Promise<boolean> {
+  const result = await pool.query(
+    `SELECT 1 FROM ad_level_spend_records a
+     JOIN meta_ads ma ON ma.id = a.meta_ad_id
+     JOIN meta_ad_sets mas ON mas.id = ma.adset_id
+     WHERE mas.campaign_id = $1 LIMIT 1`,
+    [campaignId]
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
 export interface UpsertAdSetInput {
   id: string;
   campaignId: string;
