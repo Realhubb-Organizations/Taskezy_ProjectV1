@@ -60,13 +60,19 @@ export default function CallFeedbackGate() {
   // Fetched directly by id instead of scanning the bulk leads/dataCallingLeads
   // arrays — this overlay only ever needs the one lead the call attempt is for.
   const [lead, setLead] = useState<Lead | null>(null);
+  // Doesn't block finishing — step 3 (closing the attempt) never actually
+  // needs `lead`, only a note — but without this the status dropdown would
+  // just silently render empty with no explanation, which looks exactly
+  // like the stuck state this whole file exists to prevent.
+  const [leadLoadFailed, setLeadLoadFailed] = useState(false);
   useEffect(() => {
     const leadId = pendingCallAttempt?.lead_id;
     if (!leadId) { setLead(null); return; }
     let cancelled = false;
+    setLeadLoadFailed(false);
     apiGetLead(leadId)
       .then(row => { if (!cancelled) setLead(mapApiLeadToFrontendLead(row)); })
-      .catch(() => { if (!cancelled) setLead(null); });
+      .catch(() => { if (!cancelled) { setLead(null); setLeadLoadFailed(true); } });
     return () => { cancelled = true; };
   }, [pendingCallAttempt?.lead_id]);
   const isDataCallingLead = lead?.source === "Bulk Upload";
@@ -348,6 +354,11 @@ export default function CallFeedbackGate() {
 
         {step === "status" && (
           <form onSubmit={finish} className="space-y-3">
+            {leadLoadFailed && (
+              <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2">
+                Could not load this lead&apos;s details. You can still add a note below and continue — status/scheduling can be updated later from the lead itself.
+              </p>
+            )}
             {isDataCallingLead ? (
               <div className="space-y-1">
                 <label className="block text-[10px] font-bold text-slate-500 uppercase">Call status</label>
