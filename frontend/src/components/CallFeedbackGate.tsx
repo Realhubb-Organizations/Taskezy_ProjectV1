@@ -11,7 +11,7 @@ import { nextStatusOptions, frontendStatusToDbCode } from "@/lib/leadStatusMappi
 import { CALL_SUB_STATUS_OPTIONS, CallSubStatus, callSubStatusOf } from "@/lib/callSubStatus";
 import { SCHEDULER_REQUIRED_STATUSES } from "@/lib/leadScheduler";
 import { useDialog } from "@/components/ui/DialogProvider";
-import { findOpenFollowup, formatFollowupWhen, findAgentScheduleConflict } from "@/lib/duplicateFollowupCheck";
+import { findOpenFollowup, formatFollowupWhen, findAgentScheduleConflict, agentConflictMessage } from "@/lib/duplicateFollowupCheck";
 
 // Full-screen, unclosable overlay — the app stays mounted behind it but
 // nothing in it can be reached (no backdrop-click, no Escape, and the
@@ -191,7 +191,7 @@ export default function CallFeedbackGate() {
       if (lead && scheduledAt && ownerId) {
         const conflict = await findAgentScheduleConflict(ownerId, scheduledAt.toISOString(), lead.id);
         if (conflict) {
-          setError(`You already have "${conflict.lead_name}" scheduled ${formatFollowupWhen(conflict.scheduled_at)} — pick a time at least 5 minutes apart.`);
+          setError(agentConflictMessage(conflict));
           return;
         }
       }

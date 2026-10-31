@@ -15,7 +15,7 @@ import DateRangeSelect from "@/components/ui/DateRangeSelect";
 import { canChangeLeadStatus, canReassignThisLead, canUploadLeads, splitEvenly, uploadAssignableUsers, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
 import { nextFollowupFor } from "@/lib/followups";
 import { apiListFollowupsPage } from "@/lib/apiClient";
-import { findOpenFollowup, formatFollowupWhen, findAgentScheduleConflict } from "@/lib/duplicateFollowupCheck";
+import { findOpenFollowup, formatFollowupWhen, findAgentScheduleConflict, agentConflictMessage } from "@/lib/duplicateFollowupCheck";
 import NextCallCell from "@/components/crm/NextCallCell";
 import { useDialog } from "@/components/ui/DialogProvider";
 import LeadNoteCell from "@/components/crm/LeadNoteCell";
@@ -999,7 +999,7 @@ export default function DataCallingPage() {
         if (ownerId) {
           const conflict = await findAgentScheduleConflict(ownerId, new Date(`${rnrDate}T${rnrTime}`).toISOString(), callUpdate.leadId);
           if (conflict) {
-            setPendingActionError(`You already have "${conflict.lead_name}" scheduled ${formatFollowupWhen(conflict.scheduled_at)} — pick a time at least 5 minutes apart.`);
+            setPendingActionError(agentConflictMessage(conflict));
             return;
           }
         }

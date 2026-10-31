@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useApp, LeadStatus } from "@/context/AppContext";
 import { apiUpdateLeadNote } from "@/lib/apiClient";
 import { useDialog } from "@/components/ui/DialogProvider";
-import { findOpenFollowup, formatFollowupWhen, findAgentScheduleConflict } from "@/lib/duplicateFollowupCheck";
+import { findOpenFollowup, formatFollowupWhen, findAgentScheduleConflict, agentConflictMessage } from "@/lib/duplicateFollowupCheck";
 
 // Shared by every status-change entry point (LeadDetailDrawer, the inline
 // table-row dropdowns, Pending Tasks tables) and CallFeedbackGate's
@@ -67,18 +67,30 @@ export function useLeadStatusScheduler(commit: (leadId: string, status: LeadStat
 
   const confirmSchedule = async ({ date, time, note }: { date: string; time: string; note: string }) => {
     if (!pendingSchedule || submitting) return;
+    // Validated once, reused below — LeadScheduleModal's own date/time
+    // inputs should always produce a real date, but CallFeedbackGate's
+    // equivalent check already guards this defensively and this one didn't.
+    let scheduledAtIso: string | null = null;
+    if (date && time) {
+      const parsed = new Date(`${date}T${time}`);
+      if (isNaN(parsed.getTime())) {
+        setError("That date/time isn't valid. Please pick it again.");
+        return;
+      }
+      scheduledAtIso = parsed.toISOString();
+    }
     setSubmitting(true);
     setError("");
     try {
       // An agent can't be on two calls at once — block the whole save
       // (status included) if the picked time is within 5 minutes of
       // another lead's already-scheduled follow-up for this same agent.
-      if (date && time) {
+      if (scheduledAtIso) {
         const ownerId = users.find(u => u.name === pendingSchedule.assignedAgent)?.id;
         if (ownerId) {
-          const conflict = await findAgentScheduleConflict(ownerId, new Date(`${date}T${time}`).toISOString(), pendingSchedule.leadId);
+          const conflict = await findAgentScheduleConflict(ownerId, scheduledAtIso, pendingSchedule.leadId);
           if (conflict) {
-            setError(`You already have "${conflict.lead_name}" scheduled ${formatFollowupWhen(conflict.scheduled_at)} — pick a time at least 5 minutes apart.`);
+            setError(agentConflictMessage(conflict));
             return;
           }
         }
@@ -97,7 +109,7 @@ export function useLeadStatusScheduler(commit: (leadId: string, status: LeadStat
       }
       // Optional statuses can be submitted with no date/time at all — just
       // a status change with maybe a note, no reminder to schedule.
-      if (date && time) {
+      if (scheduledAtIso) {
         // An agent or their manager working the same lead again shouldn't
         // silently stack up a second reminder on top of one that's already
         // open — today, tomorrow, next week, any date — ask first. "Keep
@@ -135,7 +147,7 @@ export function useLeadStatusScheduler(commit: (leadId: string, status: LeadStat
           leadId: pendingSchedule.leadId
         });
         addFollowupCall({
-          scheduledAt: new Date(`${date}T${time}`).toISOString(),
+          scheduledAt: scheduledAtIso,
           leadId: pendingSchedule.leadId,
           leadName: pendingSchedule.leadName,
           phone: pendingSchedule.phone,
