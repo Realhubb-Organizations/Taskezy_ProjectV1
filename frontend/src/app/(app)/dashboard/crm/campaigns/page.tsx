@@ -823,7 +823,15 @@ export default function AdminCampaignsPage() {
       );
       let pollsLeft = 9; // ~3 minutes of polling at 20s apart, then stop and let the admin re-trigger
       const poll = async () => {
-        await refetchAdLevelSpend();
+        // Qualified Leads / CPL's syncedLeads half (adLevelLeadStats below)
+        // used to only ever fetch once on page mount — Sync refreshed the
+        // spend/platform-lead numbers but left these frozen at whatever
+        // they were when the page first loaded, defeating the point of
+        // clicking Sync. Both now refresh together on every poll tick.
+        await Promise.all([
+          refetchAdLevelSpend(),
+          apiGetAdLevelLeadStats().then(setAdLevelLeadStats).catch(() => {})
+        ]);
         pollsLeft -= 1;
         if (pollsLeft > 0) {
           setTimeout(poll, 20_000);

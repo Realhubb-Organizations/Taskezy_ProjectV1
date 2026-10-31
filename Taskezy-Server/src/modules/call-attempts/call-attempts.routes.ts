@@ -90,6 +90,27 @@ callAttemptsRouter.get(
   })
 );
 
+// A WhatsApp follow-up doesn't carry the same weight as a phone call (no
+// live conversation to react to), so once an agent has already completed
+// WhatsApp feedback for a lead at least once, scheduling a next-call
+// date/time on a LATER WhatsApp contact for that same lead becomes
+// optional instead of mandatory (see CallFeedbackGate.tsx). Only
+// COMPLETED attempts count — an attempt still sitting PENDING_FEEDBACK
+// hasn't actually been "handled" yet.
+const leadIdParamSchema = z.object({ leadId: z.string().uuid() });
+callAttemptsRouter.get(
+  "/lead/:leadId/whatsapp-scheduled-before",
+  validate({ params: leadIdParamSchema }),
+  asyncHandler(async (req, res) => {
+    await assertCanLogCallFor(req.user!, req.params.leadId);
+    const { rows } = await pool.query(
+      `SELECT 1 FROM call_attempts WHERE lead_id = $1 AND channel = 'WHATSAPP' AND status = 'COMPLETED' LIMIT 1`,
+      [req.params.leadId]
+    );
+    sendOk(res, { scheduledBefore: rows.length > 0 });
+  })
+);
+
 const idParamSchema = z.object({ id: z.string().uuid() });
 const submitFeedbackSchema = z.object({
   outcome: z.string().trim().min(1).max(100),

@@ -92,3 +92,17 @@ export function agentConflictMessage(conflict: AgentScheduleConflict): string {
   if (conflict.suggestedAt) return `${base} Try ${formatFollowupWhen(conflict.suggestedAt)} instead.`;
   return `${base} Nothing's free the rest of today — try tomorrow.`;
 }
+
+const SAME_LEAD_MIN_GAP_MS = 60 * 1000;
+
+/**
+ * A sales person can reschedule the SAME lead as many times a day as they
+ * want (no 5-minute cross-lead rule applies here — that's a different
+ * check) — but picking the exact same minute as an already-open follow-up
+ * for that lead is almost certainly a mistake, not a real second
+ * reminder. Only checked after the agent has already chosen "Schedule
+ * Again" on the "already scheduled" prompt.
+ */
+export function isTooCloseToExistingSchedule(newScheduledAtIso: string, existingScheduledAt: string): boolean {
+  return Math.abs(new Date(newScheduledAtIso).getTime() - new Date(existingScheduledAt).getTime()) < SAME_LEAD_MIN_GAP_MS;
+}

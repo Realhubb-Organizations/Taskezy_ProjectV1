@@ -13,6 +13,11 @@ import { businessDateOffset } from "../utils/businessDate";
 
 const POLL_INTERVAL_MS = 6 * 60 * 60 * 1000; // spend doesn't need per-minute freshness like leads
 const LOOKBACK_DAYS = 35; // covers the Reports page's "Last 30 Days" preset with buffer for late-arriving data
+// An ad's FIRST ever insights pull uses this much wider window instead of
+// the normal 35 days — see hasAdLevelSpendRecordsForAd's comment. 365 days
+// comfortably covers this business's real campaign lifespans without
+// pushing into Meta's harder historical limits (~37 months).
+const FIRST_SYNC_LOOKBACK_DAYS = 365;
 
 function isoDateNDaysAgo(n: number): string {
   return businessDateOffset(-n);
@@ -106,14 +111,21 @@ async function runSync(): Promise<void> {
       // account missing ads_management on some ad sets) never blocks the
       // campaign-level spend sync that already worked before this existed.
       //
-      // An INACTIVE campaign's ad tree is permanent history once it's been
-      // backfilled once — re-fetching all of it (ad sets + ads + one
-      // insights call per ad) for every one of potentially 100+ ended
-      // campaigns on every 6h cycle is what exhausts Meta's per-ad-account
-      // rate limit before the still-ACTIVE campaigns (the ones that actually
-      // need fresh numbers) get a turn. So finished campaigns are synced
-      // once, then skipped; only ACTIVE campaigns are refreshed every cycle.
-      if (status === "INACTIVE" && (await metaRepo.hasAdSetsForCampaign(campaign.id))) {
+      // An INACTIVE campaign's ad tree is permanent history once it's
+      // actually been backfilled with real insight numbers — re-fetching
+      // all of it (ad sets + ads + one insights call per ad) for every one
+      // of potentially 100+ ended campaigns on every 6h cycle is what
+      // exhausts Meta's per-ad-account rate limit before the still-ACTIVE
+      // campaigns (the ones that actually need fresh numbers) get a turn.
+      // So finished campaigns are synced once, then skipped — but
+      // hasAdSetsForCampaign alone only proves the ad tree was
+      // discovered, not that it has real insight data: a campaign whose
+      // narrow first-look window missed its ads' actual activity (see
+      // FIRST_SYNC_LOOKBACK_DAYS below) would stay permanently skipped at
+      // zero insights forever if that were the only check. Requiring real
+      // insight rows too means a campaign stuck at zero keeps getting a
+      // real chance (with the wide window) until it actually succeeds.
+      if (status === "INACTIVE" && (await metaRepo.hasAdSetsForCampaign(campaign.id)) && (await metaRepo.hasAdLevelSpendRecordsForCampaign(campaign.id))) {
         continue;
       }
 
@@ -136,7 +148,17 @@ async function runSync(): Promise<void> {
           });
 
           try {
-            const adInsights = await getAdDailyInsights(ad.id, account.userToken, since, until);
+            // First time this ad has ever had insights pulled: go back a
+            // full year instead of the normal 35 days. Without this, an ad
+            // whose campaign went INACTIVE (and so gets backfilled only
+            // once, ever — see the skip above) before this ad was ever
+            // checked would have its real activity window missed entirely
+            // if it happened to fall outside that one narrow attempt,
+            // leaving it permanently blank with zero insight rows even
+            // though Meta genuinely has the data.
+            const everSynced = await metaRepo.hasAdLevelSpendRecordsForAd(ad.id);
+            const adSince = everSynced ? since : isoDateNDaysAgo(FIRST_SYNC_LOOKBACK_DAYS);
+            const adInsights = await getAdDailyInsights(ad.id, account.userToken, adSince, until);
             for (const day of adInsights) {
               await metaRepo.upsertAdLevelSpendRecord({
                 adId: ad.id,

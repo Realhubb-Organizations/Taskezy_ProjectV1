@@ -136,6 +136,24 @@ export interface UpsertGoogleAdLevelSpendInput {
   leadsGenerated: number;
 }
 
+// Google's ad-level insights call is account-wide (one call covers every
+// ad under the account, unlike Meta's per-ad calls), so the "first sync
+// gets a wider window" check (see metaAdSpendSync.ts's matching logic)
+// can only be done at the account level here, not per-ad — if this
+// account has never had ANY ad-level insight row, this sync's call uses
+// a much wider window so newly-discovered inactive ads don't miss their
+// real activity the way a narrow 35-day first look could.
+export async function hasAdLevelSpendRecordsForAccount(accountId: string): Promise<boolean> {
+  const result = await pool.query(
+    `SELECT 1 FROM google_ad_level_spend_records gls
+     JOIN google_ads ga ON ga.id = gls.google_ad_id
+     JOIN google_ads_campaigns gc ON gc.id = ga.campaign_id
+     WHERE gc.account_id = $1 LIMIT 1`,
+    [accountId]
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
 export async function upsertAdLevelSpendRecord(input: UpsertGoogleAdLevelSpendInput): Promise<void> {
   await pool.query(
     `INSERT INTO google_ad_level_spend_records (google_ad_id, spend_date, spend, leads_generated)

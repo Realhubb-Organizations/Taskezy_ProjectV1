@@ -9,6 +9,7 @@ import { startNotificationCleanupScheduler } from "./jobs/notificationCleanupSch
 import { startMetaAdSpendSync } from "./jobs/metaAdSpendSync";
 import { startGoogleAdsSpendSync } from "./jobs/googleAdsSpendSync";
 import { startDataRetentionJob } from "./jobs/dataRetentionJob";
+import { startStuckCallScheduler } from "./jobs/stuckCallScheduler";
 import { startQueue, stopQueue } from "./jobs/queue";
 
 async function main(): Promise<void> {
@@ -30,6 +31,7 @@ async function main(): Promise<void> {
   startMetaAdSpendSync();
   startGoogleAdsSpendSync();
   startDataRetentionJob();
+  startStuckCallScheduler();
   // The pgboss schema must already exist (migrations-archive/031_pgboss_grants.sql's
   // header) — until the one-time `pg-boss migrate` CLI step has been run in
   // this environment, this throws. Caught locally (not left to crash the

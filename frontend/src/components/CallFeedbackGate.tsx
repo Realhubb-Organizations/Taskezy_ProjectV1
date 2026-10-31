@@ -6,12 +6,12 @@ import { Capacitor } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
 import { PhoneCall, MessageCircle, Check, X } from "lucide-react";
 import { useApp, LeadStatus, Lead, mapApiLeadToFrontendLead } from "@/context/AppContext";
-import { apiCreateFollowup, apiUpdateLeadStatus, apiUpdateCallStatus, apiUpdateLeadNote, apiGetLead } from "@/lib/apiClient";
+import { apiCreateFollowup, apiUpdateLeadStatus, apiUpdateCallStatus, apiUpdateLeadNote, apiGetLead, apiHasWhatsAppScheduledBefore } from "@/lib/apiClient";
 import { nextStatusOptions, frontendStatusToDbCode } from "@/lib/leadStatusMapping";
 import { CALL_SUB_STATUS_OPTIONS, CallSubStatus, callSubStatusOf } from "@/lib/callSubStatus";
 import { SCHEDULER_REQUIRED_STATUSES } from "@/lib/leadScheduler";
 import { useDialog } from "@/components/ui/DialogProvider";
-import { findOpenFollowup, formatFollowupWhen, findAgentScheduleConflict, agentConflictMessage } from "@/lib/duplicateFollowupCheck";
+import { findOpenFollowup, formatFollowupWhen, findAgentScheduleConflict, agentConflictMessage, isTooCloseToExistingSchedule } from "@/lib/duplicateFollowupCheck";
 
 // Full-screen, unclosable overlay — the app stays mounted behind it but
 // nothing in it can be reached (no backdrop-click, no Escape, and the
@@ -60,16 +60,39 @@ export default function CallFeedbackGate() {
   // Fetched directly by id instead of scanning the bulk leads/dataCallingLeads
   // arrays — this overlay only ever needs the one lead the call attempt is for.
   const [lead, setLead] = useState<Lead | null>(null);
+  // Doesn't block finishing — step 3 (closing the attempt) never actually
+  // needs `lead`, only a note — but without this the status dropdown would
+  // just silently render empty with no explanation, which looks exactly
+  // like the stuck state this whole file exists to prevent.
+  const [leadLoadFailed, setLeadLoadFailed] = useState(false);
   useEffect(() => {
     const leadId = pendingCallAttempt?.lead_id;
     if (!leadId) { setLead(null); return; }
     let cancelled = false;
+    setLeadLoadFailed(false);
     apiGetLead(leadId)
       .then(row => { if (!cancelled) setLead(mapApiLeadToFrontendLead(row)); })
-      .catch(() => { if (!cancelled) setLead(null); });
+      .catch(() => { if (!cancelled) { setLead(null); setLeadLoadFailed(true); } });
     return () => { cancelled = true; };
   }, [pendingCallAttempt?.lead_id]);
   const isDataCallingLead = lead?.source === "Bulk Upload";
+
+  // A WhatsApp message doesn't carry the same weight as a live phone call,
+  // so once an agent has already completed WhatsApp feedback for this
+  // lead at least once before, scheduling a next-call date/time on a
+  // LATER WhatsApp contact for the same lead becomes optional instead of
+  // mandatory — see nextCallRequired below. Defaults to false (mandatory)
+  // until the check resolves, the safe default while unknown. Calls are
+  // never affected by this, only the WHATSAPP channel.
+  const [whatsAppScheduledBefore, setWhatsAppScheduledBefore] = useState(false);
+  useEffect(() => {
+    if (!isWhatsApp || !lead?.id || isDataCallingLead) { setWhatsAppScheduledBefore(false); return; }
+    let cancelled = false;
+    apiHasWhatsAppScheduledBefore(lead.id)
+      .then(({ scheduledBefore }) => { if (!cancelled) setWhatsAppScheduledBefore(scheduledBefore); })
+      .catch(() => { if (!cancelled) setWhatsAppScheduledBefore(false); });
+    return () => { cancelled = true; };
+  }, [isWhatsApp, lead?.id, isDataCallingLead]);
   // Regular leads: only what the transition matrix allows from the lead's
   // current status — mirrors LeadDetailDrawer, just without its separate
   // confirm-step for "Optional" picks (this form already has its own
@@ -160,9 +183,13 @@ export default function CallFeedbackGate() {
   // agent could keep calling the same lead with no follow-up ever
   // scheduled. Data Calling's own "Not Reachable" branch is unchanged
   // (narrower scope, not what was reported).
-  const needsNextCall = isDataCallingLead
+  const nextCallApplicable = isDataCallingLead
     ? callStatus === "Not Reachable" && callStatusChanged
     : NEEDS_NEXT_CALL.includes(status);
+  // Optional (fields still shown, may be left blank) only for a repeat
+  // WhatsApp contact on a regular lead that's already had one scheduled
+  // before; every other case stays exactly as required as before.
+  const nextCallRequired = nextCallApplicable && !(isWhatsApp && !isDataCallingLead && whatsAppScheduledBefore);
   const needsDealValue = !isDataCallingLead && status === "Booked" && statusChanged;
   const somethingChanged = statusChanged || callStatusChanged;
 
@@ -170,10 +197,16 @@ export default function CallFeedbackGate() {
     e.preventDefault();
     if (submitting) return;
     let scheduledAt: Date | null = null;
-    if (needsNextCall) {
-      if (!nextDate || !nextTime) return setError("Pick the date and time of the next call.");
-      scheduledAt = new Date(`${nextDate}T${nextTime}`);
-      if (isNaN(scheduledAt.getTime()) || scheduledAt.getTime() < Date.now()) return setError("The next call must be in the future.");
+    if (nextCallApplicable) {
+      if (nextCallRequired) {
+        if (!nextDate || !nextTime) return setError("Pick the date and time of the next call.");
+      } else if ((nextDate || nextTime) && !(nextDate && nextTime)) {
+        return setError("Pick both date and time, or leave both blank.");
+      }
+      if (nextDate && nextTime) {
+        scheduledAt = new Date(`${nextDate}T${nextTime}`);
+        if (isNaN(scheduledAt.getTime()) || scheduledAt.getTime() < Date.now()) return setError("The next call must be in the future.");
+      }
     }
     const deal = needsDealValue ? parseFloat(dealValue.replace(/[^0-9.]/g, "")) : undefined;
     if (needsDealValue && (!deal || deal <= 0)) return setError("Enter the booking's deal value.");
@@ -227,6 +260,12 @@ export default function CallFeedbackGate() {
               cancelLabel: "Keep Existing"
             })
           : true;
+        // Rescheduling the same lead is always allowed (no 5-minute rule
+        // here, that's cross-lead only) — but picking the exact same
+        // minute as the one just kept open is almost certainly a mistake.
+        if (existing && scheduleAgain && isTooCloseToExistingSchedule(scheduledAt.toISOString(), existing.scheduled_at)) {
+          return setError("Pick a time at least 1 minute apart from the existing schedule.");
+        }
         if (scheduleAgain && ownerId) {
           const created = await apiCreateFollowup({ scheduledAt: scheduledAt.toISOString(), leadId: lead.id, leadName: lead.name, phone: lead.phone, callType: "CALLBACK", assignedToId: ownerId });
           recordFollowupCreated(created); // tables showing Next Call Date re-fetch
@@ -315,6 +354,11 @@ export default function CallFeedbackGate() {
 
         {step === "status" && (
           <form onSubmit={finish} className="space-y-3">
+            {leadLoadFailed && (
+              <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2">
+                Could not load this lead&apos;s details. You can still add a note below and continue — status/scheduling can be updated later from the lead itself.
+              </p>
+            )}
             {isDataCallingLead ? (
               <div className="space-y-1">
                 <label className="block text-[10px] font-bold text-slate-500 uppercase">Call status</label>
@@ -356,14 +400,14 @@ export default function CallFeedbackGate() {
                 </select>
               </div>
             )}
-            {needsNextCall && (
+            {nextCallApplicable && (
               <div className="grid grid-cols-2 gap-2">
                 <div className="space-y-1">
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase">Next call date</label>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase">Next call date{nextCallRequired ? "" : " (optional)"}</label>
                   <input type="date" min={todayIso()} value={nextDate} onChange={(e) => setNextDate(e.target.value)} className={inputClass} />
                 </div>
                 <div className="space-y-1">
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase">Time</label>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase">Time{nextCallRequired ? "" : " (optional)"}</label>
                   <input type="time" value={nextTime} onChange={(e) => setNextTime(e.target.value)} className={inputClass} />
                 </div>
               </div>

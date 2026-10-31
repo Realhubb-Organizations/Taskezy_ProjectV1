@@ -1354,6 +1354,13 @@ export function apiForceCompleteCallAttempt(id: string): Promise<ApiCallAttemptR
   return request<ApiCallAttemptRow>(`/api/v1/call-attempts/${id}/force-complete`, { method: "POST" });
 }
 
+// Has this lead already had a COMPLETED WhatsApp contact before? Used to
+// make a later WhatsApp schedule optional instead of mandatory — see
+// CallFeedbackGate.tsx.
+export function apiHasWhatsAppScheduledBefore(leadId: string): Promise<{ scheduledBefore: boolean }> {
+  return request<{ scheduledBefore: boolean }>(`/api/v1/call-attempts/lead/${leadId}/whatsapp-scheduled-before`);
+}
+
 // --- Attendance (derived view) ---
 export interface ApiAttendanceRow {
   user_id: string;

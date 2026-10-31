@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useApp, LeadStatus } from "@/context/AppContext";
 import { apiUpdateLeadNote } from "@/lib/apiClient";
 import { useDialog } from "@/components/ui/DialogProvider";
-import { findOpenFollowup, formatFollowupWhen, findAgentScheduleConflict, agentConflictMessage } from "@/lib/duplicateFollowupCheck";
+import { findOpenFollowup, formatFollowupWhen, findAgentScheduleConflict, agentConflictMessage, isTooCloseToExistingSchedule } from "@/lib/duplicateFollowupCheck";
 
 // Shared by every status-change entry point (LeadDetailDrawer, the inline
 // table-row dropdowns, Pending Tasks tables) and CallFeedbackGate's
@@ -77,6 +77,10 @@ export function useLeadStatusScheduler(commit: (leadId: string, status: LeadStat
         setError("That date/time isn't valid. Please pick it again.");
         return;
       }
+      if (parsed.getTime() < Date.now()) {
+        setError("The scheduled time must be in the future.");
+        return;
+      }
       scheduledAtIso = parsed.toISOString();
     }
     setSubmitting(true);
@@ -126,6 +130,13 @@ export function useLeadStatusScheduler(commit: (leadId: string, status: LeadStat
           });
           if (!scheduleAgain) {
             setPendingSchedule(null);
+            return;
+          }
+          // Rescheduling the same lead is always allowed (no 5-minute rule
+          // here, that's cross-lead only) — but picking the exact same
+          // minute as the one just kept open is almost certainly a mistake.
+          if (isTooCloseToExistingSchedule(scheduledAtIso, existing.scheduled_at)) {
+            setError("Pick a time at least 1 minute apart from the existing schedule.");
             return;
           }
         }
