@@ -34,6 +34,32 @@ export class ApiRequestError extends Error {
   }
 }
 
+// Every fetch in this file went through plain fetch() with no timeout at
+// all — on weak mobile signal (the field-agent norm, not an edge case), a
+// hung request left the UI waiting indefinitely: a disabled "Saving..."
+// button with zero feedback and no way out, functionally identical to a
+// frozen app. This is what turned "the agent put a status and the popup
+// never closes" into a real support report. 408 (not 5xx) deliberately:
+// every existing `err.status < 500` branch across this codebase already
+// treats that bucket as "show err.message to the user" — exactly what
+// should happen for a timeout's own message below.
+const REQUEST_TIMEOUT_MS = 25_000;
+
+async function fetchWithTimeout(url: string, options: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new ApiRequestError(408, "Could not reach the server — check your connection and try again.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 interface Envelope<T> {
   success: boolean;
   data: T;
@@ -51,7 +77,7 @@ function errorMessageOf(error: Envelope<unknown>["error"] | undefined): string {
 
 async function request<T>(path: string, options: RequestInit = {}, allowRefreshRetry = true): Promise<T> {
   const token = getAccessToken();
-  const res = await fetch(`${API_BASE_URL}${path}`, {
+  const res = await fetchWithTimeout(`${API_BASE_URL}${path}`, {
     ...options,
     credentials: "include", // sends the httpOnly refresh-token cookie
     headers: {
@@ -87,7 +113,7 @@ async function request<T>(path: string, options: RequestInit = {}, allowRefreshR
 
 async function requestWithMeta<T>(path: string, allowRefreshRetry = true): Promise<{ data: T[]; meta: Envelope<T[]>["meta"] }> {
   const token = getAccessToken();
-  const res = await fetch(`${API_BASE_URL}${path}`, {
+  const res = await fetchWithTimeout(`${API_BASE_URL}${path}`, {
     credentials: "include",
     headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) }
   });
@@ -126,7 +152,7 @@ export async function refreshAccessToken(): Promise<boolean> {
   if (refreshPromise) return refreshPromise;
   refreshPromise = (async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/api/v1/auth/refresh`, { method: "POST", credentials: "include" });
+      const res = await fetchWithTimeout(`${API_BASE_URL}/api/v1/auth/refresh`, { method: "POST", credentials: "include" });
       if (!res.ok) {
         setAccessToken(null);
         return false;
@@ -1305,6 +1331,27 @@ export function apiGetPendingCallAttempt(): Promise<ApiCallAttemptRow | null> {
 
 export function apiSubmitCallFeedback(id: string, input: { outcome: string; notes: string }): Promise<ApiCallAttemptRow> {
   return request<ApiCallAttemptRow>(`/api/v1/call-attempts/${id}`, { method: "PATCH", body: JSON.stringify(input) });
+}
+
+// Admin/Manager rescue for an agent who can never resolve the blocking
+// feedback gate themselves (bad network, no valid time left to pick, etc.)
+// — see call-attempts.routes.ts's own comment on /stuck and /force-complete.
+export interface ApiStuckCallAttempt {
+  id: string;
+  lead_id: string | null;
+  lead_name: string | null;
+  caller_user_id: string;
+  caller_name: string;
+  channel: "CALL" | "WHATSAPP";
+  created_at: string;
+}
+
+export function apiListStuckCallAttempts(): Promise<ApiStuckCallAttempt[]> {
+  return request<ApiStuckCallAttempt[]>("/api/v1/call-attempts/stuck");
+}
+
+export function apiForceCompleteCallAttempt(id: string): Promise<ApiCallAttemptRow> {
+  return request<ApiCallAttemptRow>(`/api/v1/call-attempts/${id}/force-complete`, { method: "POST" });
 }
 
 // --- Attendance (derived view) ---
