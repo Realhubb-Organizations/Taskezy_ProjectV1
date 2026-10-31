@@ -15,7 +15,7 @@ import DateRangeSelect from "@/components/ui/DateRangeSelect";
 import { canChangeLeadStatus, canReassignThisLead, canUploadLeads, splitEvenly, uploadAssignableUsers, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
 import { nextFollowupFor } from "@/lib/followups";
 import { apiListFollowupsPage } from "@/lib/apiClient";
-import { findOpenFollowup, formatFollowupWhen, findAgentScheduleConflict, agentConflictMessage } from "@/lib/duplicateFollowupCheck";
+import { findOpenFollowup, formatFollowupWhen, findAgentScheduleConflict, agentConflictMessage, isTooCloseToExistingSchedule } from "@/lib/duplicateFollowupCheck";
 import NextCallCell from "@/components/crm/NextCallCell";
 import { useDialog } from "@/components/ui/DialogProvider";
 import LeadNoteCell from "@/components/crm/LeadNoteCell";
@@ -986,6 +986,13 @@ export default function DataCallingPage() {
     if (!note) return setPendingActionError("Please write a note.");
     const needsNextCall = callUpdate.callStatus === "Not Reachable";
     if (needsNextCall && !rnrDate) return setPendingActionError("Please select the next calling date.");
+    let scheduledAtIso: string | null = null;
+    if (needsNextCall) {
+      const parsed = new Date(`${rnrDate}T${rnrTime}`);
+      if (isNaN(parsed.getTime())) return setPendingActionError("That date/time isn't valid. Please pick it again.");
+      if (parsed.getTime() < Date.now()) return setPendingActionError("The next calling time must be in the future.");
+      scheduledAtIso = parsed.toISOString();
+    }
     const lead = leads.find(l => l.id === callUpdate.leadId);
     setCallUpdateSaving(true);
     setPendingActionError(null);
@@ -994,10 +1001,10 @@ export default function DataCallingPage() {
       // (call status included) if the picked next-call time is within 5
       // minutes of another lead's already-scheduled follow-up for this
       // same agent.
-      if (needsNextCall) {
+      if (scheduledAtIso) {
         const ownerId = users.find(u => u.name === lead?.assignedAgent)?.id;
         if (ownerId) {
-          const conflict = await findAgentScheduleConflict(ownerId, new Date(`${rnrDate}T${rnrTime}`).toISOString(), callUpdate.leadId);
+          const conflict = await findAgentScheduleConflict(ownerId, scheduledAtIso, callUpdate.leadId);
           if (conflict) {
             setPendingActionError(agentConflictMessage(conflict));
             return;
@@ -1025,9 +1032,12 @@ export default function DataCallingPage() {
               cancelLabel: "Keep Existing"
             })
           : true;
+        if (existing && scheduleAgain && isTooCloseToExistingSchedule(scheduledAtIso!, existing.scheduled_at)) {
+          return setPendingActionError("Pick a time at least 1 minute apart from the existing schedule.");
+        }
         if (scheduleAgain) {
           addFollowupCall({
-            scheduledAt: new Date(`${rnrDate}T${rnrTime}`).toISOString(),
+            scheduledAt: scheduledAtIso!,
             leadId: callUpdate.leadId,
             leadName: callUpdate.leadName,
             phone: lead?.phone,
