@@ -383,6 +383,7 @@ export interface FollowupCall {
   assignedTo: string;
   dueNotifiedAt?: string; // when the "reminder due" alert fired — the SLA clock's start
   violationNotifiedAt?: string; // when it was escalated to admins as overdue
+  leadMissedCount?: number; // the lead's missed_task_count — Admins/Managers only
 }
 
 export interface AttendanceRecord {
@@ -901,6 +902,7 @@ export function mapApiFollowupToFrontend(row: ApiFollowupRow): FollowupCall {
     type: FOLLOWUP_TYPE_MAP[row.call_type] || "Callback",
     assignedTo: row.assigned_to_name,
     dueNotifiedAt: row.due_notified_at || undefined,
+    leadMissedCount: row.lead_missed_count ?? undefined,
     violationNotifiedAt: row.violation_notified_at || undefined
   };
 }

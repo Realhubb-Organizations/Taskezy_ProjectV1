@@ -26,6 +26,7 @@ import { useLeadStatusScheduler } from "@/lib/leadScheduler";
 import LeadScheduleModal from "./LeadScheduleModal";
 import { DateSortButton } from "@/components/ui/DateSortButton";
 import { useLiveRefresh } from "@/lib/useLiveRefresh";
+import MissedCountBadge from "@/components/crm/MissedCountBadge";
 
 // Drill-down table + lead quick-view drawer behind the 7 lead stat cards
 // (Total Leads … Site Visit Done). Shared by the CRM Dashboard and the admin
@@ -606,6 +607,7 @@ export default function LeadDrillDownPanel({ title, baseFilters, onClose }: {
                           {l.name}
                         </button>
                         <p className="text-[11px] text-slate-500 font-mono mt-0.5 [overflow-wrap:anywhere]">{activeRole === "ADMIN" ? l.phone : maskPhone(l.phone)}</p>
+                        <MissedCountBadge count={l.missedTaskCount} />
                       </td>
                       <td className="px-4 py-3 text-slate-600 align-top [overflow-wrap:anywhere]" title={activeRole === "ADMIN" ? (l.email || "—") : "—"}>{l.email ? (activeRole === "ADMIN" ? l.email : maskEmail(l.email)) : "—"}</td>
                       <td className="px-4 py-3 align-top">

@@ -5,6 +5,7 @@ import { sendOk } from "../../utils/apiResponse";
 import { query } from "../../db/pool";
 import { findDirectReportIds } from "../users/users.repository";
 import { AccessTokenPayload } from "../../utils/tokens";
+import { canSeeMissedTaskCount } from "../leads/leads.handover";
 
 export const tasksRouter = Router();
 
@@ -47,6 +48,7 @@ interface OpenFollowupRow {
   latest_log_message: string | null;
   latest_log_at: string | null;
   is_data_calling: boolean | null;
+  missed_task_count: number | null;
 }
 
 interface ActionableLeadRow {
@@ -62,6 +64,7 @@ interface ActionableLeadRow {
   latest_log_message: string | null;
   latest_log_at: string | null;
   is_data_calling: boolean | null;
+  missed_task_count: number | null;
 }
 
 export interface PendingTaskRow {
@@ -80,6 +83,8 @@ export interface PendingTaskRow {
   feedback: string;
   taskType: string;
   assignedTo: string;
+  /** How many times this lead's scheduled calls were missed — Admins/Managers only (canSeeMissedTaskCount). */
+  missedCount?: number;
   /** The lead is a Data Calling lead (source "Bulk Upload") — lets the per-member task page split Leads / Data Calling. */
   isDataCalling: boolean;
 }
@@ -112,7 +117,7 @@ tasksRouter.get(
               u.first_name || COALESCE(' ' || u.last_name, '') AS assigned_to_name,
               l.name AS lead_full_name, l.phone AS lead_phone, l.email AS lead_email, ls.label AS lead_status_label,
               ll.message AS latest_log_message, ll.created_at AS latest_log_at,
-              l.source = 'Bulk Upload' AS is_data_calling
+              l.source = 'Bulk Upload' AS is_data_calling, l.missed_task_count
        FROM followup_calls fc
        JOIN users u ON u.id = fc.assigned_to_id
        LEFT JOIN leads l ON l.id = fc.lead_id
@@ -135,7 +140,7 @@ tasksRouter.get(
               l.assigned_at, l.created_at,
               u.first_name || COALESCE(' ' || u.last_name, '') AS assigned_to_name,
               ll.message AS latest_log_message, ll.created_at AS latest_log_at,
-              l.source = 'Bulk Upload' AS is_data_calling
+              l.source = 'Bulk Upload' AS is_data_calling, l.missed_task_count
        FROM leads l
        JOIN lead_statuses ls ON ls.code = l.status_code
        JOIN users u ON u.id = l.assigned_agent_id
@@ -160,6 +165,8 @@ tasksRouter.get(
     );
 
     const tasks: PendingTaskRow[] = [];
+    const showMissed = canSeeMissedTaskCount(req.user!);
+    const missedCountOf = (n: number | null | undefined) => (showMissed ? Number(n ?? 0) : undefined);
 
     for (const r of followupRows) {
       const dueAt = r.scheduled_at;
@@ -182,7 +189,8 @@ tasksRouter.get(
         feedback: r.latest_log_message || "No feedback yet",
         taskType: r.call_type,
         assignedTo: r.assigned_to_name || "",
-        isDataCalling: r.is_data_calling === true
+        isDataCalling: r.is_data_calling === true,
+        missedCount: missedCountOf(r.missed_task_count)
       });
     }
 
@@ -200,7 +208,8 @@ tasksRouter.get(
         feedback: r.latest_log_message || "No feedback yet",
         taskType: r.status_label,
         assignedTo: r.assigned_to_name || "",
-        isDataCalling: r.is_data_calling === true
+        isDataCalling: r.is_data_calling === true,
+        missedCount: missedCountOf(r.missed_task_count)
       });
     }
 

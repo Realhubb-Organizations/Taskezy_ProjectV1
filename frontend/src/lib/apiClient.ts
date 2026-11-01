@@ -1183,6 +1183,8 @@ export interface ApiFollowupRow {
   assigned_to_name: string;
   due_notified_at: string | null;
   violation_notified_at: string | null;
+  /** The lead's missed_task_count — Admins/Managers only (server leaves it out for agents). */
+  lead_missed_count?: number | null;
 }
 // Pages through every follow-up and concatenates the results — same bridge
 // pattern as apiListAllLeads, now that GET /followups has real LIMIT/OFFSET
@@ -1218,6 +1220,8 @@ export interface ApiPendingTaskRow {
   taskType: string;
   assignedTo: string;
   /** Data Calling lead (source "Bulk Upload"). Missing from older servers — treat as false. */
+  /** Admins/Managers only (server leaves it out for agents). */
+  missedCount?: number;
   isDataCalling?: boolean;
 }
 // Backs the sales dashboard's Pending Tasks queue (SalesPendingTasksTable/

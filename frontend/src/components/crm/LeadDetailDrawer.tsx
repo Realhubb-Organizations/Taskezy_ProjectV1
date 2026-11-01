@@ -14,6 +14,7 @@ import { WhatsAppIcon, PlatformLabel } from "@/components/icons/ContactIcons";
 import { callSubStatusOf } from "@/lib/callSubStatus";
 import { useLeadStatusScheduler } from "@/lib/leadScheduler";
 import LeadScheduleModal from "./LeadScheduleModal";
+import MissedCountBadge from "@/components/crm/MissedCountBadge";
 
 interface LeadDetailDrawerProps {
   lead: Lead | null;
@@ -335,7 +336,10 @@ export default function LeadDetailDrawer({
         {/* Header — name, contact row (WhatsApp, call, copy), email */}
         <div className="px-6 pt-6 pb-4 shrink-0">
           <div className="flex items-start justify-between gap-2">
-            <h3 className="ui-title truncate">{lead.name}</h3>
+            <div className="min-w-0">
+              <h3 className="ui-title truncate">{lead.name}</h3>
+              <MissedCountBadge count={lead.missedTaskCount} />
+            </div>
             <button onClick={onClose} className="text-slate-400 hover:text-slate-700 -mt-1 shrink-0" aria-label="Close">
               <X className="h-4.5 w-4.5" />
             </button>

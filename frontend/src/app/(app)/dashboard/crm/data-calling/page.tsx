@@ -29,6 +29,7 @@ import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/
 import { CALL_SUB_STATUS_OPTIONS, CallSubStatus, callSubStatusOf, isQualifiedCall, isUnqualifiedCall } from "@/lib/callSubStatus";
 import { DateSortButton, sortByDate, type SortDir } from "@/components/ui/DateSortButton";
 import { useLiveRefresh } from "@/lib/useLiveRefresh";
+import MissedCountBadge from "@/components/crm/MissedCountBadge";
 
 // Data Calling's own, independent Call Status (migration 030) — completely
 // separate from the main 14-value Lead Status. "Not Reachable" always
@@ -2094,6 +2095,7 @@ export default function DataCallingPage() {
                               )}
                             </div>
                           )}
+                          <MissedCountBadge count={l.missedTaskCount} />
                         </td>
                         <td className="px-4 py-3.5 whitespace-nowrap">
                           {canEditLeadStatus(l) ? (

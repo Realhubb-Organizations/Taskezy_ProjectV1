@@ -24,6 +24,7 @@ import { LineSkeleton, TableRowsSkeleton, CardListSkeleton } from "@/components/
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
 import { DateSortButton, sortByDate, type SortDir } from "@/components/ui/DateSortButton";
 import { useLiveRefresh } from "@/lib/useLiveRefresh";
+import MissedCountBadge from "@/components/crm/MissedCountBadge";
 
 // Status-code buckets for the funnel KPI popups — must exactly match
 // getAgentReportStats's own SQL bucket definitions (confirmed identical,
@@ -232,10 +233,11 @@ export default function AgentReports({ dateRange, initialAgentId }: { dateRange:
 
   const fmtDate = (iso?: string) =>
     iso ? new Date(iso).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—";
-  const leadCell = (name: string, phone: string) => (
+  const leadCell = (name: string, phone: string, missedCount?: number) => (
     <>
       <p className="font-bold text-slate-800">{name}</p>
       <p className="text-[10px] text-slate-400 font-mono">{maskPhone(phone)}</p>
+      <MissedCountBadge count={missedCount} />
     </>
   );
   const statusPill = (status: LeadStatus) => (
@@ -252,7 +254,7 @@ export default function AgentReports({ dateRange, initialAgentId }: { dateRange:
             key: lead.id,
             leadId: lead.id,
             cells: [
-              leadCell(lead.name, lead.phone),
+              leadCell(lead.name, lead.phone, lead.missedTaskCount),
               lead.property || "—",
               <span key="a" className="font-mono">{fmtDate(lead.assignedAt)}</span>,
               info.responseMinutes === undefined
@@ -275,7 +277,7 @@ export default function AgentReports({ dateRange, initialAgentId }: { dateRange:
             key: f.id,
             leadId: f.leadId,
             cells: [
-              leadCell(f.leadName, f.phone),
+              leadCell(f.leadName, f.phone, f.leadMissedCount),
               f.type,
               <span key="s" className="font-mono">{f.date} • {f.time}</span>,
               overdue > 0 ? <span key="o" className="font-bold text-amber-700">{formatMinutes(overdue)}</span> : "—"
@@ -295,7 +297,7 @@ export default function AgentReports({ dateRange, initialAgentId }: { dateRange:
           key: l.id,
           leadId: l.id,
           cells: [
-            leadCell(l.name, l.phone),
+            leadCell(l.name, l.phone, l.missedTaskCount),
             l.property || "—",
             statusPill(l.status),
             <span key="d" className="font-mono">{fmtDate(lastActivity ? latest?.timestamp : l.assignedAt)}</span>
@@ -626,6 +628,7 @@ export default function AgentReports({ dateRange, initialAgentId }: { dateRange:
                               <div className="min-w-0">
                                 <p className="font-bold text-slate-800">{lead.name}</p>
                                 <p className="text-[10px] text-slate-450 font-mono">{activeRole === "ADMIN" ? lead.phone : maskPhone(lead.phone)}</p>
+                                <MissedCountBadge count={lead.missedTaskCount} />
                               </div>
                               {activeRole === "ADMIN" && (
                                 <button
@@ -732,6 +735,7 @@ export default function AgentReports({ dateRange, initialAgentId }: { dateRange:
                               <td className="px-4 py-3">
                                 <p className="font-bold text-slate-800">{lead.name}</p>
                                 <p className="text-[9px] text-slate-450 font-mono">{activeRole === "ADMIN" ? lead.phone : maskPhone(lead.phone)}</p>
+                                <MissedCountBadge count={lead.missedTaskCount} />
                               </td>
                               <td className="px-4 py-3 font-mono text-slate-600">
                                 {lead.assignedAt ? new Date(lead.assignedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—"}
@@ -808,6 +812,7 @@ export default function AgentReports({ dateRange, initialAgentId }: { dateRange:
                             <div>
                               <p className="font-bold text-slate-800">{f.leadName}</p>
                               <p className="text-[10px] text-slate-450 font-mono">{activeRole === "ADMIN" ? f.phone : maskPhone(f.phone)}</p>
+                              <MissedCountBadge count={f.leadMissedCount} />
                             </div>
                             <div className="grid grid-cols-2 gap-x-3 gap-y-2">
                               <div>
@@ -882,6 +887,7 @@ export default function AgentReports({ dateRange, initialAgentId }: { dateRange:
                               <td className="px-4 py-3">
                                 <p className="font-bold text-slate-800">{f.leadName}</p>
                                 <p className="text-[9px] text-slate-450 font-mono">{activeRole === "ADMIN" ? f.phone : maskPhone(f.phone)}</p>
+                                <MissedCountBadge count={f.leadMissedCount} />
                               </td>
                               <td className="px-4 py-3 text-slate-600">{f.type}</td>
                               <td className="px-4 py-3 font-mono text-slate-600">{f.date} • {f.time}</td>
