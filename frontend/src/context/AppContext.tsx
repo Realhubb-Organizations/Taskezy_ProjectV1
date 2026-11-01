@@ -1289,6 +1289,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!pendingCallAttempt) return;
     await apiSubmitCallFeedback(pendingCallAttempt.id, { outcome, notes, scheduledAt });
     setPendingCallAttempt(null);
+    // The status/note are already saved; with a next call, wait for the
+    // background job to create it, otherwise refresh this user's tasks now.
+    if (scheduledAt) expectOwnFollowup();
+    else refreshOwnTasksSoon();
   };
 
   // On mount: if a token survived a page refresh, restore the session and
@@ -1473,10 +1477,45 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return next;
       });
       if (batch.includes("leads")) setLeadsChangedSignal((s) => s + 1);
+      if (batch.includes("followups") && awaitingOwnFollowupRef.current) {
+        awaitingOwnFollowupRef.current = false;
+        refreshPendingTasksNow();
+      }
     }, LIVE_REFRESH_DELAY_MS);
   };
   const bumpTopicsRef = useRef(bumpTopics);
   bumpTopicsRef.current = bumpTopics;
+
+  // Call feedback saved with a next call: the follow-up itself is created a
+  // moment later by a background job (scheduleFollowupJob.ts). Until it
+  // exists the lead counts as due *now*, so this user's Pending Tasks would
+  // show it as Pending (yellow). Reload them as soon as the job's
+  // "followups" update arrives — or after 8s if it never does — instead of
+  // waiting out the usual 30s cap below.
+  const awaitingOwnFollowupRef = useRef(false);
+  const refreshPendingTasksNow = () => {
+    apiGetPendingTasks().then(setPendingTasks).catch(() => { /* keep the previous tasks */ });
+  };
+  // The user's own status change / new follow-up: refresh their Pending Tasks
+  // shortly after the server confirms, instead of waiting out the 30s cap
+  // (which stays for everyone else's changes). Several saves close together
+  // = one refresh after the last one.
+  const ownTasksTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refreshOwnTasksSoon = () => {
+    if (ownTasksTimerRef.current) clearTimeout(ownTasksTimerRef.current);
+    ownTasksTimerRef.current = setTimeout(() => {
+      ownTasksTimerRef.current = null;
+      refreshPendingTasksNow();
+    }, 1500);
+  };
+  const expectOwnFollowup = () => {
+    awaitingOwnFollowupRef.current = true;
+    setTimeout(() => {
+      if (!awaitingOwnFollowupRef.current) return;
+      awaitingOwnFollowupRef.current = false;
+      refreshPendingTasksNow();
+    }, 8000);
+  };
 
   // Shared lists held here refresh on their own areas' changes, capped so a
   // busy team can't make every screen download them over and over: pending
@@ -1730,7 +1769,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       callType: input.callType,
       assignedToId: assignee.id
     })
-      .then((created) => setFollowupCalls(prev => [...prev, mapApiFollowupToFrontend(created)]))
+      .then((created) => {
+        setFollowupCalls(prev => [...prev, mapApiFollowupToFrontend(created)]);
+        refreshOwnTasksSoon(); // the new call shows as Upcoming right away
+      })
       .catch((err) => console.warn("Could not persist new follow-up to the database:", err));
   };
 
@@ -2131,7 +2173,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (isApiSessionActive() && isRealLeadId(leadId)) {
       const dbCode = frontendStatusToDbCode(targetStatus);
       if (dbCode) {
-        apiUpdateLeadStatus(leadId, dbCode, dealValue).catch((err) =>
+        apiUpdateLeadStatus(leadId, dbCode, dealValue).then(() => refreshOwnTasksSoon()).catch((err) =>
           console.warn("Could not persist status update to the database:", err)
         );
         // The server deletes this lead's activity alerts on a status update; drop live copies too.

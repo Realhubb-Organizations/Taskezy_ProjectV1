@@ -1,6 +1,7 @@
 import { pool } from "../db/pool";
 import { logger } from "../utils/logger";
 import { deleteLeadActivityNotifications, createNotification } from "../modules/notifications/notifications.service";
+import { broadcastDataChanged } from "../utils/dataChanged";
 
 const AGENT_CONFLICT_WINDOW_MS = 5 * 60 * 1000;
 
@@ -67,4 +68,8 @@ export async function processScheduleFollowup(data: ScheduleFollowupJobData): Pr
      VALUES ($1, $2, $3, $4, 'CALLBACK', $5)`,
     [scheduledAt, leadId, leadName, phone, assignedAgentId]
   );
+  // This runs outside any route, so broadcastOnWrite never sees it — tell
+  // open screens directly. Until now the lead counted as "due now" in
+  // Pending Tasks (it had no scheduled call yet), and Next Call Date was blank.
+  broadcastDataChanged("followups", "tasks");
 }
