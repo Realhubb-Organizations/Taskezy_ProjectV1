@@ -11,6 +11,7 @@ import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/Searcha
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
 import { maskPhone, maskEmail } from "@/lib/maskPII";
 import { DateSortButton, sortByDate, type SortDir } from "@/components/ui/DateSortButton";
+import MissedCountBadge from "@/components/crm/MissedCountBadge";
 
 // Row colors per the sales-dashboard design: missed (no action taken),
 // pending (due now — becomes missed if not acted on within 10 min),
@@ -275,6 +276,7 @@ export default function SalesPendingTasksTable({
                       ) : (
                         <p className="font-bold text-slate-900 [overflow-wrap:anywhere]" title={t.name}>{t.name}</p>
                       )}
+                      <MissedCountBadge count={t.missedCount} />
                       {t.phone && (
                         <div className="flex items-center gap-1.5 mt-0.5">
                           <span className="text-[11px] text-slate-600 [overflow-wrap:anywhere]">{isAdminView ? t.phone : maskPhone(t.phone)}</span>

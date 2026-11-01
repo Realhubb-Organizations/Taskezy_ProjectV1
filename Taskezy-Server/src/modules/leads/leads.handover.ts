@@ -53,6 +53,9 @@ const REDACTED = "[hidden]";
 
 const seesHandoverNotes = (caller: AccessTokenPayload) => caller.role === "ADMIN" || caller.roleType === "MANAGER";
 
+/** Who may see a lead's missed_task_count (migration 047) — Admins and Managers only, never the agent. */
+export const canSeeMissedTaskCount = seesHandoverNotes;
+
 function isSystemOriginLog(message: string): boolean {
   return SYSTEM_ORIGIN_LOG_PREFIXES.some(prefix => message.startsWith(prefix));
 }

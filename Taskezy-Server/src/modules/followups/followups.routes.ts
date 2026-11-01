@@ -9,6 +9,7 @@ import { pool, query } from "../../db/pool";
 import { deleteLeadActivityNotifications } from "../notifications/notifications.service";
 import { findDirectReportIds, findById as findUserById } from "../users/users.repository";
 import { getAssignedAgentId } from "../leads/leads.repository";
+import { canSeeMissedTaskCount } from "../leads/leads.handover";
 import { AccessTokenPayload } from "../../utils/tokens";
 
 export const followupsRouter = Router();
@@ -34,6 +35,17 @@ const SELECT = `
          fc.due_notified_at, fc.violation_notified_at
   FROM followup_calls fc
   JOIN users u ON u.id = fc.assigned_to_id
+`;
+
+// The list also carries the lead's missed_task_count (migration 047) — left
+// out below for anyone but Admins/Managers (canSeeMissedTaskCount).
+const LIST_SELECT = `
+  SELECT fc.id, fc.scheduled_at, fc.status, fc.lead_id, fc.lead_name, fc.phone, fc.call_type,
+         fc.assigned_to_id, u.first_name || COALESCE(' ' || u.last_name, '') AS assigned_to_name,
+         fc.due_notified_at, fc.violation_notified_at, l.missed_task_count AS lead_missed_count
+  FROM followup_calls fc
+  JOIN users u ON u.id = fc.assigned_to_id
+  LEFT JOIN leads l ON l.id = fc.lead_id
 `;
 
 // followup_calls is another zero-cap, ever-growing table (one row per
@@ -135,10 +147,11 @@ followupsRouter.get(
 
     const offset = (page - 1) * pageSize;
     const dataParams = [...params, pageSize, offset];
-    const { rows } = await query(
-      `${SELECT} ${whereClause} ORDER BY fc.scheduled_at LIMIT $${dataParams.length - 1} OFFSET $${dataParams.length}`,
+    const { rows } = await query<Record<string, unknown>>(
+      `${LIST_SELECT} ${whereClause} ORDER BY fc.scheduled_at LIMIT $${dataParams.length - 1} OFFSET $${dataParams.length}`,
       dataParams
     );
+    if (!canSeeMissedTaskCount(req.user!)) rows.forEach(r => { delete r.lead_missed_count; });
     sendPaginated(res, rows, { page, pageSize, totalCount, totalPages: Math.max(1, Math.ceil(totalCount / pageSize)) });
   })
 );

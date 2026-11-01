@@ -38,6 +38,7 @@ import { maskPhone, maskEmail } from "@/lib/maskPII";
 import { DateSortButton, type SortDir } from "@/components/ui/DateSortButton";
 import { useLiveRefresh } from "@/lib/useLiveRefresh";
 import { useBackgroundRefresh } from "@/lib/liveRefresh";
+import MissedCountBadge from "@/components/crm/MissedCountBadge";
 
 // The admin leads table's togglable columns (beyond the always-shown Lead
 // Name/Email/Assigned To) — driven by the Filter panel's Settings modal.
@@ -1976,6 +1977,7 @@ export default function LeadDashboard() {
                               {l.name}
                             </button>
                             <p className={phoneLayout ? "mt-0.5 truncate font-mono text-[11px] text-slate-500" : "text-[11px] text-slate-500 font-mono mt-0.5 [overflow-wrap:anywhere]"}>{isAdmin ? l.phone : maskPhone(l.phone)}</p>
+                            <MissedCountBadge count={l.missedTaskCount} />
                           </td>
                           {/* Same column set/order as the header above — one
                               array, filtered+sorted by the same adminColumnOrder,
@@ -2615,6 +2617,7 @@ export default function LeadDashboard() {
                                     {l.name}
                                   </button>
                                   <p className="text-[11px] text-slate-500 font-mono mt-0.5 [overflow-wrap:anywhere]">{isAdmin ? l.phone : maskPhone(l.phone)}</p>
+                                  <MissedCountBadge count={l.missedTaskCount} />
                                 </td>
                                 <td className="px-4 py-3 text-slate-600 align-top [overflow-wrap:anywhere]" title={l.email ? (isAdmin ? l.email : maskEmail(l.email)) : "—"}>{l.email ? (isAdmin ? l.email : maskEmail(l.email)) : "—"}</td>
                                 <td className="px-4 py-3 align-top">
