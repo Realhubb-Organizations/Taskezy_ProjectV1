@@ -8,6 +8,7 @@ import { ApiError } from "../../utils/ApiError";
 import { pool, query, withTransaction } from "../../db/pool";
 import { insertLeadLog } from "../leads/leads.repository";
 import * as usersRepo from "../users/users.repository";
+import { boss, SCHEDULE_FOLLOWUP_QUEUE } from "../../jobs/queue";
 
 export const callAttemptsRouter = Router();
 
@@ -114,7 +115,13 @@ callAttemptsRouter.get(
 const idParamSchema = z.object({ id: z.string().uuid() });
 const submitFeedbackSchema = z.object({
   outcome: z.string().trim().min(1).max(100),
-  notes: z.string().trim().min(1).max(2000)
+  notes: z.string().trim().min(1).max(2000),
+  // Optional next-call date/time (CallFeedbackGate's "Next call date"/
+  // "Time" fields) — closing the attempt itself stays synchronous below so
+  // the popup unlocks right away; actually scheduling the reminder (the
+  // conflict check + create) is queued (see scheduleFollowupJob.ts) so the
+  // agent isn't held waiting on it.
+  scheduledAt: z.string().datetime().optional()
 });
 
 // Only the caller who made the call may submit its feedback — this is a
@@ -145,6 +152,22 @@ callAttemptsRouter.patch(
       const label = found[0].channel === "WHATSAPP" ? "WhatsApp message" : "Call";
       await insertLeadLog(client, found[0].lead_id, req.user!.sub, req.user!.name, `${label} outcome: ${req.body.outcome}. Notes: ${req.body.notes}`);
     });
+
+    if (req.body.scheduledAt) {
+      const { rows: leadRows } = await pool.query<{ name: string; phone: string | null; assigned_agent_id: string }>(
+        `SELECT name, phone, assigned_agent_id FROM leads WHERE id = $1`,
+        [found[0].lead_id]
+      );
+      if (leadRows[0]) {
+        await boss.send(SCHEDULE_FOLLOWUP_QUEUE, {
+          leadId: found[0].lead_id,
+          leadName: leadRows[0].name,
+          phone: leadRows[0].phone,
+          assignedAgentId: leadRows[0].assigned_agent_id,
+          scheduledAt: req.body.scheduledAt
+        });
+      }
+    }
 
     const { rows: updated } = await query(`${SELECT} WHERE id = $1`, [req.params.id]);
     sendOk(res, updated[0]);

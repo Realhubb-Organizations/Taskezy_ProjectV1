@@ -6,12 +6,10 @@ import { Capacitor } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
 import { PhoneCall, MessageCircle, Check, X } from "lucide-react";
 import { useApp, LeadStatus, Lead, mapApiLeadToFrontendLead } from "@/context/AppContext";
-import { apiCreateFollowup, apiUpdateLeadStatus, apiUpdateCallStatus, apiUpdateLeadNote, apiGetLead, apiHasWhatsAppScheduledBefore } from "@/lib/apiClient";
+import { apiUpdateLeadStatus, apiUpdateCallStatus, apiUpdateLeadNote, apiGetLead, apiHasWhatsAppScheduledBefore } from "@/lib/apiClient";
 import { nextStatusOptions, frontendStatusToDbCode } from "@/lib/leadStatusMapping";
 import { CALL_SUB_STATUS_OPTIONS, CallSubStatus, callSubStatusOf } from "@/lib/callSubStatus";
 import { SCHEDULER_REQUIRED_STATUSES } from "@/lib/leadScheduler";
-import { useDialog } from "@/components/ui/DialogProvider";
-import { findOpenFollowup, formatFollowupWhen, findAgentScheduleConflict, agentConflictMessage, isTooCloseToExistingSchedule } from "@/lib/duplicateFollowupCheck";
 
 // Full-screen, unclosable overlay — the app stays mounted behind it but
 // nothing in it can be reached (no backdrop-click, no Escape, and the
@@ -37,8 +35,9 @@ import { findOpenFollowup, formatFollowupWhen, findAgentScheduleConflict, agentC
 //      leadScheduler.ts's SCHEDULER_REQUIRED_STATUSES) or Not Reachable
 //      (Data Calling leads) need the next call's date and time; Booked
 //      needs the deal value.
-// The status is saved first (and must succeed), then the next call is
-// scheduled, then the attempt is closed — only then does the app unlock.
+// The status and note are saved, then the attempt is closed — only then
+// does the app unlock. Scheduling the next call happens on the backend's
+// job queue afterward, not awaited here — see finish()'s own comment.
 
 const CALL_NOT_CONNECTED_REASONS = ["No answer", "Switched off", "Busy", "Wrong number", "Other"];
 const CALL_STATUS_OPTIONS = ["Connected", "Called", "Not Reachable", "Wrong Number"] as const;
@@ -53,8 +52,7 @@ const todayIso = () => {
 };
 
 export default function CallFeedbackGate() {
-  const { pendingCallAttempt, submitCallFeedback, users, currentUser, recordFollowupCreated } = useApp();
-  const { confirm } = useDialog();
+  const { pendingCallAttempt, submitCallFeedback } = useApp();
   const isWhatsApp = pendingCallAttempt?.channel === "WHATSAPP";
 
   // Fetched directly by id instead of scanning the bulk leads/dataCallingLeads
@@ -216,18 +214,7 @@ export default function CallFeedbackGate() {
 
     setSubmitting(true);
     setError("");
-    const ownerId = lead ? (users.find(u => u.name === lead.assignedAgent)?.id ?? currentUser?.id) : undefined;
     try {
-      // 0. An agent can't be on two calls at once — block the whole save
-      // (status included) if the picked time is within 5 minutes of
-      // another lead's already-scheduled follow-up for this same agent.
-      if (lead && scheduledAt && ownerId) {
-        const conflict = await findAgentScheduleConflict(ownerId, scheduledAt.toISOString(), lead.id);
-        if (conflict) {
-          setError(agentConflictMessage(conflict));
-          return;
-        }
-      }
       // 1. The lead's status (or call status) — must succeed before the app unlocks.
       if (lead && isDataCallingLead && callStatusChanged) {
         await apiUpdateCallStatus(lead.id, callStatus as (typeof CALL_STATUS_OPTIONS)[number], nextCallSubStatus, note.trim());
@@ -243,35 +230,17 @@ export default function CallFeedbackGate() {
       if (lead && !isDataCallingLead && note.trim()) {
         await apiUpdateLeadNote(lead.id, note.trim());
       }
-      // 2. Next call — after the status change, which closes older pending follow-ups.
-      // An agent or their manager calling/WhatsApp-ing the same lead again
-      // shouldn't silently stack up a second reminder on top of one that's
-      // already open — today, tomorrow, next week, any date — ask first.
-      // "Keep Existing" skips creating a new follow-up and leaves the
-      // original untouched; the status change and note above are already
-      // saved either way.
-      if (lead && scheduledAt) {
-        const existing = await findOpenFollowup(lead.id);
-        const scheduleAgain = existing
-          ? await confirm({
-              title: "Already scheduled",
-              message: `${lead.name} already has a follow-up scheduled ${formatFollowupWhen(existing.scheduled_at)}. Schedule again, or keep the existing one?`,
-              confirmLabel: "Schedule Again",
-              cancelLabel: "Keep Existing"
-            })
-          : true;
-        // Rescheduling the same lead is always allowed (no 5-minute rule
-        // here, that's cross-lead only) — but picking the exact same
-        // minute as the one just kept open is almost certainly a mistake.
-        if (existing && scheduleAgain && isTooCloseToExistingSchedule(scheduledAt.toISOString(), existing.scheduled_at)) {
-          return setError("Pick a time at least 1 minute apart from the existing schedule.");
-        }
-        if (scheduleAgain && ownerId) {
-          const created = await apiCreateFollowup({ scheduledAt: scheduledAt.toISOString(), leadId: lead.id, leadName: lead.name, phone: lead.phone, callType: "CALLBACK", assignedToId: ownerId });
-          recordFollowupCreated(created); // tables showing Next Call Date re-fetch
-        }
-      }
-      // 3. Close the attempt (logged on the lead's timeline) — unlocks the app.
+      // 2. Close the attempt (logged on the lead's timeline) — unlocks the
+      // app immediately. Scheduling the next call (the conflict check +
+      // actually creating the follow-up — previously awaited here, several
+      // sequential round trips plus a confirm() dialog) now happens on the
+      // backend's job queue instead, kicked off by passing scheduledAt
+      // through to this same call — see call-attempts.routes.ts's PATCH
+      // /:id and scheduleFollowupJob.ts. The agent isn't held waiting on
+      // it; if it can't be scheduled (a genuine cross-lead time conflict),
+      // they get a notification telling them to pick a new time, instead
+      // of the whole save blocking on a dialog that could render invisibly
+      // underneath this very popup (the actual cause of today's incident).
       const outcome = isWhatsApp ? (happened ? "Sent" : "Not Sent") : happened ? "Connected" : "Not connected";
       const statusLine = isDataCallingLead
         ? callStatusChanged
@@ -279,7 +248,11 @@ export default function CallFeedbackGate() {
           : `Call status kept: ${lead?.callStatus ?? "—"}`
         : statusChanged ? `Status → ${status}` : `Status kept: ${lead?.status ?? "—"}`;
       const parts = [!happened ? `Reason: ${notHappenedReason()}` : "", statusLine, note.trim()].filter(Boolean);
-      await submitCallFeedback(outcome, parts.join(". ") || (isWhatsApp ? "Message sent via WhatsApp." : "Call completed."));
+      await submitCallFeedback(
+        outcome,
+        parts.join(". ") || (isWhatsApp ? "Message sent via WhatsApp." : "Call completed."),
+        scheduledAt?.toISOString()
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save. Please try again.");
     } finally {

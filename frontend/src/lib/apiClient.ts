@@ -1329,7 +1329,7 @@ export function apiGetPendingCallAttempt(): Promise<ApiCallAttemptRow | null> {
   return request<ApiCallAttemptRow | null>("/api/v1/call-attempts/pending");
 }
 
-export function apiSubmitCallFeedback(id: string, input: { outcome: string; notes: string }): Promise<ApiCallAttemptRow> {
+export function apiSubmitCallFeedback(id: string, input: { outcome: string; notes: string; scheduledAt?: string }): Promise<ApiCallAttemptRow> {
   return request<ApiCallAttemptRow>(`/api/v1/call-attempts/${id}`, { method: "PATCH", body: JSON.stringify(input) });
 }
 

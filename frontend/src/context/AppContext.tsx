@@ -595,7 +595,7 @@ interface AppActions {
   // equivalent; same gate, no call-state plugin involved for this channel.
   recordWhatsAppOpened: (leadId: string) => Promise<void>;
   // Submits the blocking gate's form and clears pendingCallAttempt.
-  submitCallFeedback: (outcome: string, notes: string) => Promise<void>;
+  submitCallFeedback: (outcome: string, notes: string, scheduledAt?: string) => Promise<void>;
   updateTenantSettings: (input: UpdateTenantSettingsInput) => Promise<{ success: boolean; error?: string }>;
   // SaaS actions
   setSeats: (role: Role, count: number) => void;
@@ -1285,9 +1285,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setPendingCallAttempt(attempt);
   };
 
-  const submitCallFeedback = async (outcome: string, notes: string) => {
+  const submitCallFeedback = async (outcome: string, notes: string, scheduledAt?: string) => {
     if (!pendingCallAttempt) return;
-    await apiSubmitCallFeedback(pendingCallAttempt.id, { outcome, notes });
+    await apiSubmitCallFeedback(pendingCallAttempt.id, { outcome, notes, scheduledAt });
     setPendingCallAttempt(null);
   };
 

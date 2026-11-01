@@ -3,6 +3,7 @@ import { env } from "../config/env";
 import { logger } from "../utils/logger";
 import { AccessTokenPayload } from "../utils/tokens";
 import { bulkImportLeads, BulkImportLeadsInput, bulkDeleteLeads, bulkReassignLeads, bulkSetLeadProperty } from "../modules/leads/leads.service";
+import { processScheduleFollowup, ScheduleFollowupJobData } from "./scheduleFollowupJob";
 
 // Postgres-backed job queue (same RDS instance, its own `pgboss` schema —
 // see migrations-archive/031_pgboss_grants.sql for the one-time setup).
@@ -60,6 +61,14 @@ interface BulkSetPropertyJobData {
   note: string;
 }
 
+// CallFeedbackGate's Save & Continue (call-attempts.routes.ts's PATCH /:id)
+// — closing the call attempt itself (status/note/outcome) stays
+// synchronous so the popup unlocks immediately; scheduling the next-call
+// reminder (the part that used to involve a conflict check, a duplicate-
+// schedule confirm dialog, and a separate create call, all awaited in
+// sequence) is queued here instead. See scheduleFollowupJob.ts.
+export const SCHEDULE_FOLLOWUP_QUEUE = "schedule-followup";
+
 /**
  * Starts the queue and registers every job worker this process handles.
  * Same process as the API server (see server.ts) — this app is already
@@ -108,6 +117,12 @@ export async function startQueue(): Promise<void> {
   await boss.work<BulkSetPropertyJobData>(BULK_SET_PROPERTY_QUEUE, async ([job]) => {
     logger.info({ jobId: job.id }, "Processing queued bulk lead property change");
     return bulkSetLeadProperty(job.data.caller, job.data.leadIds, job.data.propertyId, job.data.note);
+  });
+
+  await boss.createQueue(SCHEDULE_FOLLOWUP_QUEUE);
+  await boss.work<ScheduleFollowupJobData>(SCHEDULE_FOLLOWUP_QUEUE, async ([job]) => {
+    logger.info({ jobId: job.id, leadId: job.data.leadId }, "Processing queued follow-up schedule");
+    return processScheduleFollowup(job.data);
   });
 }
 
