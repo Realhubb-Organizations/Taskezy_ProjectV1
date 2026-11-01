@@ -153,7 +153,14 @@ function DialogModal({ dialog, onClose }: { dialog: ActiveDialog; onClose: (resu
 
   return (
     <div
-      className="fixed inset-0 z-[300] flex items-center justify-center p-4"
+      // Must always render above every other overlay in the app, including
+      // CallFeedbackGate's own z-[9999] full-screen gate — that popup calls
+      // confirm() itself (the "Already scheduled" prompt), and at the
+      // previous z-[300] this dialog rendered invisibly UNDERNEATH it: the
+      // agent saw no dialog at all, the awaited confirm() promise could
+      // never resolve, and "Saving..." stayed stuck forever. Same stacking
+      // bug LeadScheduleModal.tsx already hit once with its own DatePicker.
+      className="fixed inset-0 z-[10000] flex items-center justify-center p-4"
       onKeyDown={(e) => { if (e.key === "Escape") cancel(); }}
     >
       <div className="fixed inset-0 bg-slate-900/40" onClick={cancel} />
