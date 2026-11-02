@@ -65,7 +65,7 @@ export function useLeadStatusScheduler(commit: (leadId: string, status: LeadStat
     setError("");
   };
 
-  const confirmSchedule = async ({ date, time, note }: { date: string; time: string; note: string }) => {
+  const confirmSchedule = async ({ date, time, note, rescheduleReason }: { date: string; time: string; note: string; rescheduleReason?: string }) => {
     if (!pendingSchedule || submitting) return;
     // Validated once, reused below — LeadScheduleModal's own date/time
     // inputs should always produce a real date, but CallFeedbackGate's
@@ -163,7 +163,8 @@ export function useLeadStatusScheduler(commit: (leadId: string, status: LeadStat
           leadName: pendingSchedule.leadName,
           phone: pendingSchedule.phone,
           callType: isSiteVisit ? "SITE_VISIT" : "CALLBACK",
-          assignedToName: pendingSchedule.assignedAgent || ""
+          assignedToName: pendingSchedule.assignedAgent || "",
+          rescheduleReason: isSiteVisit ? rescheduleReason : undefined
         });
       }
       setPendingSchedule(null);

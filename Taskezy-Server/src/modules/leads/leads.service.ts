@@ -52,6 +52,11 @@ export async function listLeads(caller: AccessTokenPayload, filter: {
   sortField?: "created" | "assigned";
   sourceBucket?: string[];
   campaignIgnoreCase?: boolean;
+  dataCallingOnly?: boolean;
+  assignedOnly?: boolean;
+  subSource?: string[];
+  callStatus?: string[];
+  callSubStatus?: string[];
 }) {
   const scopedToAgentIds = await scopeForCaller(caller);
   const { rows, totalCount } = await repo.findMany({
@@ -72,6 +77,11 @@ export async function listLeads(caller: AccessTokenPayload, filter: {
     sortField: filter.sortField,
     sourceBucket: filter.sourceBucket,
     campaignIgnoreCase: filter.campaignIgnoreCase,
+    dataCallingOnly: filter.dataCallingOnly,
+    assignedOnly: filter.assignedOnly,
+    subSource: filter.subSource,
+    callStatus: filter.callStatus,
+    callSubStatus: filter.callSubStatus,
     scopedToAgentIds
   });
   return {

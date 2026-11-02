@@ -4,14 +4,13 @@ import React, { Suspense, useState } from "react";
 import { useApp } from "@/context/AppContext";
 import { useDialog } from "@/components/ui/DialogProvider";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Download, AlertTriangle, Clock } from "lucide-react";
+import { AlertTriangle, Clock } from "lucide-react";
 import DateRangeFilter, { DateRange } from "@/components/reports/DateRangeFilter";
 import MarketingReports from "@/components/reports/MarketingReports";
 import ManagerReports from "@/components/reports/ManagerReports";
-import AgentReports from "@/components/reports/AgentReports";
+import TeamReports from "@/components/reports/TeamReports";
 import { todayIso, toIsoDate } from "@/components/ui/DateRangePicker";
-import { maskPhone, maskEmail } from "@/lib/maskPII";
-import { apiListAllLeads, apiUpdateMyEodReportTime } from "@/lib/apiClient";
+import { apiUpdateMyEodReportTime } from "@/lib/apiClient";
 
 const MAIN_TABS = [
   { key: "agent", label: "Team Reports" },
@@ -48,43 +47,14 @@ function ReportsPageContent() {
   const activeTab = visibleTabs.some(t => t.key === requestedTab) ? requestedTab : visibleTabs[0].key;
   // Deep-linked from a MISSED_SLA escalation/digest notification naming one
   // specific agent (see Taskezy-Server/src/jobs/missedLeadScheduler.ts) —
-  // read once; AgentReports seeds its own selectedAgent from it on mount
-  // and the user can still pick a different agent afterward.
+  // read once; TeamReports pre-picks that salesperson on mount and the user
+  // can still change the pick afterward.
   const initialAgentId = searchParams.get("agentId") || undefined;
 
   const [dateRange, setDateRange] = useState<DateRange>({ from: daysAgo(30), to: todayStr() });
 
   const handleTabChange = (tabKey: string) => {
     router.push(`/dashboard/reports?tab=${tabKey}`);
-  };
-
-  const [exportingCSV, setExportingCSV] = useState(false);
-  const handleExportCSV = async () => {
-    if (exportingCSV) return;
-    setExportingCSV(true);
-    try {
-      // Every matching lead, unfiltered/company-wide — same as before this
-      // button moved off the bulk array; the on-screen Date Range picker is
-      // cosmetic to this export, not a filter (a pre-existing gap, not this
-      // migration's job to fix).
-      const leads = await apiListAllLeads();
-      let csvContent = "data:text/csv;charset=utf-8,";
-      csvContent += "ID,Name,Phone,Email,Status,Assigned Agent,Property,Assigned At,First Response At\n";
-      leads.forEach(l => {
-        const phone = isAdmin ? l.phone : maskPhone(l.phone);
-        const email = isAdmin ? (l.email || "") : maskEmail(l.email || "");
-        csvContent += `"${l.id}","${l.name}","${phone}","${email}","${l.status_label}","${l.assigned_agent_name}","${l.property_name || "N/A"}","${l.assigned_at || ""}","${l.first_response_at || ""}"\n`;
-      });
-      const encodedUri = encodeURI(csvContent);
-      const link = document.createElement("a");
-      link.setAttribute("href", encodedUri);
-      link.setAttribute("download", `taskezy_leads_report_${Date.now()}.csv`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    } finally {
-      setExportingCSV(false);
-    }
   };
 
   // Admin's company-wide default EOD report time (Sales Agent Reports tab) —
@@ -120,15 +90,21 @@ function ReportsPageContent() {
     }
   };
 
+  // The whole EOD Time box opens its time picker, not just the time text.
+  const openTimePicker = (e: React.MouseEvent<HTMLDivElement>) => {
+    const input = e.currentTarget.querySelector<HTMLInputElement>('input[type="time"]');
+    if (!input) return;
+    input.focus();
+    try { input.showPicker(); } catch { /* already open, or not supported — focus is enough */ }
+  };
+
   return (
     <div className="space-y-4 pb-12 animate-fade-in">
       {/* Main section tabs — plain text tabs, the active one underlined
           (the top bar already shows "Reports"). */}
-      {/* On Marketing the tabs stay pinned at the top (with the filters and
-          cards below them) while the lists scroll underneath — desktop only. */}
-      <div className={`flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 ${
-        activeTab === "marketing" ? "md:sticky md:-top-6 lg:-top-8 md:z-30 md:h-12 md:-mx-6 md:px-6 lg:-mx-8 lg:px-8 md:-mt-6 lg:-mt-8 md:pt-4 md:bg-[#FCFDFE]" : ""
-      }`}>
+      {/* The tabs stay pinned at the top (Marketing and Team Reports pin their
+          filter row below them too) while the rest scrolls — desktop only. */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 md:sticky md:-top-6 lg:-top-8 md:z-30 md:h-12 md:-mx-6 md:px-6 lg:-mx-8 lg:px-8 md:-mt-6 lg:-mt-8 md:pt-4 md:bg-[#FCFDFE]">
         <div className="flex items-center gap-6 sm:gap-8 overflow-x-auto max-w-full">
           {visibleTabs.map(t => (
             <button
@@ -144,36 +120,24 @@ function ReportsPageContent() {
         </div>
         <div className="flex flex-wrap items-center gap-3">
         {/* Shared date-range filter — every report is generated for this selected window */}
-        {/* Marketing has its own Date Range in its filter row */}
-        {activeTab !== "marketing" && <DateRangeFilter value={dateRange} onChange={setDateRange} />}
-        {/* Bulk lead export (incl. phone/email) is an Admin-only capability —
-            Manager/Member never get a raw CSV of leads beyond their own scope. */}
-        {isAdmin && activeTab !== "marketing" && (
-          <button
-            onClick={handleExportCSV}
-            disabled={exportingCSV}
-            className="ui-btn ui-btn-primary shrink-0 disabled:opacity-60 disabled:cursor-not-allowed"
-          >
-            <Download className="h-4 w-4" />
-            {exportingCSV ? "Exporting…" : "Export Leads CSV"}
-          </button>
-        )}
+        {/* Marketing and Team Reports have their own Date Range in their filter row */}
+        {activeTab === "manager" && <DateRangeFilter value={dateRange} onChange={setDateRange} />}
         {/* End of Day report time — Admin sets the company-wide default,
             Manager sets their own team's override. Only on the Sales Agent
             Reports tab, since that's what these notifications are about. */}
         {activeTab === "agent" && isAdmin && (
-          <div className="inline-flex items-center gap-1.5 bg-white border border-slate-300/80 rounded-xl px-3 h-9 shadow-2xs" title="Company-wide default time agents get their 'calls made today' notification">
+          <div onClick={openTimePicker} className="inline-flex items-center gap-1.5 bg-white border border-slate-300/80 rounded-xl px-3 h-9 shadow-2xs cursor-pointer hover:bg-slate-50 transition-colors" title="Company-wide default time agents get their 'calls made today' notification">
             <Clock className="h-3.5 w-3.5 text-slate-500" />
-            <span className="text-[11px] font-bold text-slate-500">EOD Time</span>
+            <span className="text-[11px] font-bold text-slate-500 whitespace-nowrap">EOD Time</span>
             <input
               type="time"
               value={eodTimeInput || tenantSettings?.eodReportTime?.slice(0, 5) || ""}
               onChange={(e) => setEodTimeInput(e.target.value)}
-              className="text-xs font-semibold text-slate-700 bg-transparent focus:outline-none"
+              className="text-xs font-semibold text-slate-700 bg-transparent focus:outline-none cursor-pointer"
             />
             <button
               type="button"
-              onClick={handleSaveEodTime}
+              onClick={(e) => { e.stopPropagation(); handleSaveEodTime(); }}
               disabled={!eodTimeInput || savingEodTime}
               className="text-[11px] font-bold text-[#0B1E6E] hover:underline disabled:opacity-40 disabled:no-underline"
             >
@@ -182,18 +146,18 @@ function ReportsPageContent() {
           </div>
         )}
         {activeTab === "agent" && isManager && (
-          <div className="inline-flex items-center gap-1.5 bg-white border border-slate-300/80 rounded-xl px-3 h-9 shadow-2xs" title="Your own override for when your team's EOD report arrives — leave unset to use the company default">
+          <div onClick={openTimePicker} className="inline-flex items-center gap-1.5 bg-white border border-slate-300/80 rounded-xl px-3 h-9 shadow-2xs cursor-pointer hover:bg-slate-50 transition-colors" title="Your own override for when your team's EOD report arrives — leave unset to use the company default">
             <Clock className="h-3.5 w-3.5 text-slate-500" />
-            <span className="text-[11px] font-bold text-slate-500">Your Team&apos;s EOD Time</span>
+            <span className="text-[11px] font-bold text-slate-500 whitespace-nowrap">Your Team&apos;s EOD Time</span>
             <input
               type="time"
               value={managerEodTimeInput}
               onChange={(e) => setManagerEodTimeInput(e.target.value)}
-              className="text-xs font-semibold text-slate-700 bg-transparent focus:outline-none"
+              className="text-xs font-semibold text-slate-700 bg-transparent focus:outline-none cursor-pointer"
             />
             <button
               type="button"
-              onClick={handleSaveManagerEodTime}
+              onClick={(e) => { e.stopPropagation(); handleSaveManagerEodTime(); }}
               disabled={!managerEodTimeInput || savingManagerEodTime}
               className="text-[11px] font-bold text-[#0B1E6E] hover:underline disabled:opacity-40 disabled:no-underline"
             >
@@ -226,7 +190,7 @@ function ReportsPageContent() {
         <>
           {activeTab === "marketing" && <MarketingReports dateRange={dateRange} onDateRangeChange={setDateRange} />}
           {activeTab === "manager" && <ManagerReports dateRange={dateRange} />}
-          {activeTab === "agent" && <AgentReports dateRange={dateRange} initialAgentId={initialAgentId} />}
+          {activeTab === "agent" && <TeamReports dateRange={dateRange} onDateRangeChange={setDateRange} initialAgentId={initialAgentId} />}
         </>
       )}
     </div>

@@ -73,7 +73,11 @@ const SITE_VISIT_COLUMNS: ProjectReportColumn<MarketingSiteVisitRow>[] = [
   { key: "completed", label: "SV Completed L", menuLabel: "SV Completed Leads", render: r => r.leadsCompleted },
   { key: "leadMissed", label: "Lead SV Missed", render: r => r.leadsMissed },
   { key: "svMissed", label: "SV Missed", render: r => r.svMissed },
-  { key: "booked", label: "Booked", render: r => r.booked }
+  { key: "booked", label: "Booked", render: r => r.booked },
+  // Qualified → site visit, same formula as Leads Analytics' QL→SV %.
+  { key: "q2sv", label: "Q2SV %age", render: r => formatPercent(r.siteVisitLeads, r.qualified) },
+  { key: "qualified", label: "Qualified Leads", extra: true, render: r => r.qualified },
+  { key: "unqualified", label: "Unqualified Leads", extra: true, render: r => r.unqualified }
 ];
 
 export default function MarketingReports({ dateRange, onDateRangeChange }: { dateRange: DateRange; onDateRangeChange: (range: DateRange) => void }) {
@@ -185,9 +189,9 @@ export default function MarketingReports({ dateRange, onDateRangeChange }: { dat
 
   return (
     <div className="bg-white rounded-3xl shadow-sm px-4 sm:px-6 py-5 space-y-5">
-      {/* Filters + number cards stay pinned under the tabs (desktop) while
-          the lists below scroll underneath. */}
-      <div className="md:sticky md:top-6 lg:top-4 md:z-20 bg-white -mx-4 px-4 sm:-mx-6 sm:px-6 md:pt-4 md:-mt-4 pb-1 space-y-5">
+      {/* The filter row stays pinned under the tabs (desktop); the number
+          cards and tables scroll underneath it. */}
+      <div className="md:sticky md:top-6 lg:top-4 md:z-[25] bg-white -mx-4 px-4 sm:-mx-6 sm:px-6 md:pt-4 md:-mt-4">
       {/* Filters */}
       <div className="flex flex-wrap items-center justify-end gap-2 pb-5 border-b border-slate-200">
         <SearchableMultiSelect variant="toolbar"
@@ -239,6 +243,8 @@ export default function MarketingReports({ dateRange, onDateRangeChange }: { dat
         />
       </div>
 
+      </div>
+
       {/* KPI cards — dark band on top, one bordered row of cards */}
       <div className="rounded-2xl overflow-hidden shadow-sm">
         <div className="h-6 bg-[#0B0E4F]" />
@@ -265,8 +271,6 @@ export default function MarketingReports({ dateRange, onDateRangeChange }: { dat
             );
           })}
         </div>
-      </div>
-
       </div>
 
       {/* The selected card's list */}
@@ -330,6 +334,8 @@ export default function MarketingReports({ dateRange, onDateRangeChange }: { dat
         loading={loading}
         resetKey={filtersKey}
         emptyText="No site visits for these filters."
+        // Manage Columns per the design; the other columns are always shown.
+        menu={{ main: ["booked", "q2sv", "svScheduled", "leadMissed"], extra: ["qualified", "unqualified"] }}
       />
     </div>
   );

@@ -11,6 +11,7 @@ import { findDirectReportIds, findById as findUserById } from "../users/users.re
 import { getAssignedAgentId } from "../leads/leads.repository";
 import { canSeeMissedTaskCount } from "../leads/leads.handover";
 import { AccessTokenPayload } from "../../utils/tokens";
+import { IS_SITE_VISIT_FOLLOWUP_SQL } from "../reports/siteVisitSql";
 
 export const followupsRouter = Router();
 
@@ -162,7 +163,9 @@ const createFollowupSchema = z.object({
   leadName: z.string().min(1),
   phone: z.string().optional(),
   callType: z.enum(["CALLBACK", "MEETING", "SITE_VISIT"]),
-  assignedToId: z.string().uuid()
+  assignedToId: z.string().uuid(),
+  // Why a site visit moved (Team Reports' Reschedule Reason, migration 051).
+  rescheduleReason: z.string().trim().max(500).optional()
 });
 
 // Same three-way ownership rule as leads.service.ts's
@@ -187,6 +190,22 @@ async function assertCanScheduleFor(caller: AccessTokenPayload, leadId: string):
   if (owner?.manager_id === caller.sub) return;
   throw ApiError.forbidden("Only the lead's owner, their manager or an admin can schedule a follow-up for it.");
 }
+
+// Has this lead had a site visit before? The scheduling popups ask for a
+// Reschedule Reason when it has (Team Reports → Salesperson Site Visit Report).
+const leadIdParamSchema = z.object({ leadId: z.string().uuid() });
+followupsRouter.get(
+  "/lead/:leadId/site-visit-history",
+  validate({ params: leadIdParamSchema }),
+  asyncHandler(async (req, res) => {
+    await assertCanScheduleFor(req.user!, req.params.leadId);
+    const { rows } = await pool.query(
+      `SELECT 1 FROM followup_calls fc WHERE fc.lead_id = $1 AND ${IS_SITE_VISIT_FOLLOWUP_SQL} LIMIT 1`,
+      [req.params.leadId]
+    );
+    sendOk(res, { hadSiteVisit: rows.length > 0 });
+  })
+);
 
 // Every authenticated role may schedule a follow-up for their own or a
 // teammate's lead — matches how the reminder picker in LeadDetailDrawer
@@ -214,11 +233,13 @@ followupsRouter.post(
         );
         await deleteLeadActivityNotifications(req.body.leadId, ["REMINDER"]);
       }
+      // reschedule_reason only when given, so nothing else depends on migration 051.
+      const reason = req.body.rescheduleReason || null;
       const { rows } = await pool.query(
-        `INSERT INTO followup_calls (scheduled_at, lead_id, lead_name, phone, call_type, assigned_to_id)
-         VALUES ($1, $2, $3, $4, $5, $6)
+        `INSERT INTO followup_calls (scheduled_at, lead_id, lead_name, phone, call_type, assigned_to_id${reason ? ", reschedule_reason" : ""})
+         VALUES ($1, $2, $3, $4, $5, $6${reason ? ", $7" : ""})
          RETURNING id`,
-        [req.body.scheduledAt, req.body.leadId ?? null, req.body.leadName, req.body.phone ?? null, req.body.callType, req.body.assignedToId]
+        [req.body.scheduledAt, req.body.leadId ?? null, req.body.leadName, req.body.phone ?? null, req.body.callType, req.body.assignedToId, ...(reason ? [reason] : [])]
       );
       insertedId = rows[0].id;
     } catch (err) {

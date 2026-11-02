@@ -121,7 +121,9 @@ const submitFeedbackSchema = z.object({
   // the popup unlocks right away; actually scheduling the reminder (the
   // conflict check + create) is queued (see scheduleFollowupJob.ts) so the
   // agent isn't held waiting on it.
-  scheduledAt: z.string().datetime().optional()
+  scheduledAt: z.string().datetime().optional(),
+  // Asked when a site visit is moved to a new date (Team Reports' Reschedule Reason).
+  rescheduleReason: z.string().trim().max(500).optional()
 });
 
 // Only the caller who made the call may submit its feedback — this is a
@@ -154,17 +156,23 @@ callAttemptsRouter.patch(
     });
 
     if (req.body.scheduledAt) {
-      const { rows: leadRows } = await pool.query<{ name: string; phone: string | null; assigned_agent_id: string }>(
-        `SELECT name, phone, assigned_agent_id FROM leads WHERE id = $1`,
+      const { rows: leadRows } = await pool.query<{ name: string; phone: string | null; assigned_agent_id: string; status_code: string }>(
+        `SELECT name, phone, assigned_agent_id, status_code FROM leads WHERE id = $1`,
         [found[0].lead_id]
       );
       if (leadRows[0]) {
+        // The popup saves the status first, so this is the status the agent
+        // picked (or kept): a lead in Site Visit Scheduled gets a site visit,
+        // not a callback — otherwise the visit never shows in the reports.
+        const isSiteVisit = leadRows[0].status_code === "SITE_VISIT_SCHEDULED";
         await boss.send(SCHEDULE_FOLLOWUP_QUEUE, {
           leadId: found[0].lead_id,
           leadName: leadRows[0].name,
           phone: leadRows[0].phone,
           assignedAgentId: leadRows[0].assigned_agent_id,
-          scheduledAt: req.body.scheduledAt
+          scheduledAt: req.body.scheduledAt,
+          callType: isSiteVisit ? "SITE_VISIT" : "CALLBACK",
+          rescheduleReason: isSiteVisit ? req.body.rescheduleReason || undefined : undefined
         });
       }
     }

@@ -1,17 +1,18 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { CalendarClock } from "lucide-react";
 import { DatePicker } from "@/components/ui/DateRangePicker";
 import { PendingLeadSchedule } from "@/lib/leadScheduler";
+import { apiGetSiteVisitHistory } from "@/lib/apiClient";
 
 interface LeadScheduleModalProps {
   pending: PendingLeadSchedule;
   submitting: boolean;
   error: string;
   onCancel: () => void;
-  onConfirm: (input: { date: string; time: string; note: string }) => void;
+  onConfirm: (input: { date: string; time: string; note: string; rescheduleReason?: string }) => void;
 }
 
 // Blocking popup for every SCHEDULER_REQUIRED_STATUSES status (RNR/Call
@@ -27,6 +28,20 @@ export default function LeadScheduleModal({ pending, submitting, error, onCancel
   const [note, setNote] = useState("");
   const [localError, setLocalError] = useState("");
 
+  // A lead that already had a site visit is being rescheduled — ask why
+  // (Reports → Team Reports → Salesperson Site Visit Report). If the check
+  // fails the field just doesn't show; it never blocks the save.
+  const [isReschedule, setIsReschedule] = useState(false);
+  const [rescheduleReason, setRescheduleReason] = useState("");
+  useEffect(() => {
+    if (pending.status !== "Site Visit Scheduled") return;
+    let cancelled = false;
+    apiGetSiteVisitHistory(pending.leadId)
+      .then(({ hadSiteVisit }) => { if (!cancelled) setIsReschedule(hadSiteVisit); })
+      .catch(() => { /* field stays hidden */ });
+    return () => { cancelled = true; };
+  }, [pending.leadId, pending.status]);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (pending.required && (!date || !time)) {
@@ -39,8 +54,12 @@ export default function LeadScheduleModal({ pending, submitting, error, onCancel
       setLocalError("Please select both date and time, or leave both blank.");
       return;
     }
+    if (isReschedule && date && !rescheduleReason.trim()) {
+      setLocalError("Please add the reason for rescheduling the site visit.");
+      return;
+    }
     setLocalError("");
-    onConfirm({ date, time, note });
+    onConfirm({ date, time, note, rescheduleReason: isReschedule ? rescheduleReason.trim() || undefined : undefined });
   };
 
   const inputClass = "w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 text-xs font-semibold text-slate-800 focus:outline-none focus:border-brand-500";
@@ -79,6 +98,12 @@ export default function LeadScheduleModal({ pending, submitting, error, onCancel
               <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className={inputClass} />
             </div>
           </div>
+          {isReschedule && (
+            <div className="space-y-1">
+              <label className="block text-[10px] font-bold text-slate-500 uppercase">Reschedule reason</label>
+              <input value={rescheduleReason} onChange={(e) => setRescheduleReason(e.target.value)} maxLength={500} placeholder="e.g. Out of station" className={`${inputClass} font-normal`} />
+            </div>
+          )}
           <div className="space-y-1">
             <label className="block text-[10px] font-bold text-slate-500 uppercase">Note (optional)</label>
             <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} maxLength={1000} placeholder="What happened?" className={`${inputClass} font-normal resize-none`} />

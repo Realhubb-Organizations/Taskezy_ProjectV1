@@ -118,6 +118,16 @@ export interface LeadFilterConditions {
   sourceBucket?: string[];
   /** Match `campaign` case-insensitively (Marketing Reports — names also come from ad accounts). */
   campaignIgnoreCase?: boolean;
+  /** Only Data Calling leads (any sub_source — same split as the Data Calling page). */
+  dataCallingOnly?: boolean;
+  /** Only leads that have a salesperson. */
+  assignedOnly?: boolean;
+  /** Data Calling batch labels (leads.sub_source). */
+  subSource?: string[];
+  /** Data Calling call status (Connected / Called / Not Reachable / Wrong Number). */
+  callStatus?: string[];
+  /** Qualified / Unqualified — only set on Connected calls. */
+  callSubStatus?: string[];
   /** Date column sort; left out = most recently assigned first. */
   sortDir?: "asc" | "desc";
   /** Which date sortDir sorts by — created_at (default) or assigned_at. */
@@ -177,6 +187,25 @@ function buildLeadWhereClause(filter: LeadFilterConditions): { whereClause: stri
       params.push(filter.campaign);
       conditions.push(`COALESCE(l.campaign, l.source) = ANY($${params.length}::text[])`);
     }
+  }
+
+  if (filter.dataCallingOnly) {
+    conditions.push(`l.sub_source IS NOT NULL`);
+  }
+  if (filter.assignedOnly) {
+    conditions.push(`l.assigned_agent_id IS NOT NULL`);
+  }
+  if (filter.subSource && filter.subSource.length > 0) {
+    params.push(filter.subSource);
+    conditions.push(`l.sub_source = ANY($${params.length}::text[])`);
+  }
+  if (filter.callStatus && filter.callStatus.length > 0) {
+    params.push(filter.callStatus);
+    conditions.push(`l.call_status = ANY($${params.length}::text[])`);
+  }
+  if (filter.callSubStatus && filter.callSubStatus.length > 0) {
+    params.push(filter.callSubStatus);
+    conditions.push(`l.call_status = 'Connected' AND l.call_sub_status = ANY($${params.length}::text[])`);
   }
 
   if (filter.sourceBucket && filter.sourceBucket.length > 0) {

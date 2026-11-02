@@ -2,14 +2,14 @@
 
 import React, { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { MinusSquare, Search, SlidersHorizontal, X } from "lucide-react";
+import { Download, MinusSquare, Search, SlidersHorizontal, X } from "lucide-react";
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
 
-// One per-project report card on the Marketing tab (Project-wise Lead Report,
-// Project-wise Site Visits Report): title, Columns → Manage Columns panel,
-// a search on the project column and pagination. The project column comes
-// first and can be hidden like any other.
+// One report card (Marketing's Project-wise Lead / Site Visits Reports, Team
+// Reports' Salesperson Site Visit Report): title, Columns → Manage Columns
+// panel, a search on the first (name) column and pagination. By default the
+// rows are projects; `nameColumn` makes them anything else (e.g. leads).
 
 export interface ProjectReportColumn<R> {
   key: string;
@@ -24,14 +24,39 @@ export interface ProjectReportColumn<R> {
 const NOT_SET = "Not set";
 const PROJECT_KEY = "__project";
 
-export default function ProjectReportTable<R extends { propertyId: string | null; propertyName: string | null }>({
+export interface ReportNameColumn<R> {
+  /** Row key. */
+  key: (row: R) => string;
+  /** Text the header search matches. */
+  text: (row: R) => string;
+  render: (row: R) => React.ReactNode;
+  menuLabel: string;
+  searchPlaceholder: string;
+  noMatchLabel: string;
+}
+
+type ProjectRow = { propertyId: string | null; propertyName: string | null };
+const PROJECT_COLUMN: ReportNameColumn<ProjectRow> = {
+  key: r => r.propertyId ?? NOT_SET,
+  text: r => r.propertyName ?? NOT_SET,
+  render: r => <span className={`font-semibold ${r.propertyId ? "text-slate-800" : "text-slate-400"}`}>{r.propertyName ?? NOT_SET}</span>,
+  menuLabel: "Project",
+  searchPlaceholder: "Search project...",
+  noMatchLabel: "project"
+};
+
+export default function ProjectReportTable<R extends object>({
   title,
   projectLabel,
   columns,
   rows,
   loading,
   resetKey,
-  emptyText
+  emptyText,
+  menu,
+  nameColumn,
+  headerExtra,
+  onDownload
 }: {
   title: string;
   projectLabel: string;
@@ -41,10 +66,23 @@ export default function ProjectReportTable<R extends { propertyId: string | null
   /** Changes when the page's filters change (back to page 1). */
   resetKey: string;
   emptyText: string;
+  /**
+   * Which columns Manage Columns lists, in its own order (left = usual,
+   * right = extra). Columns not listed — the project column included — are
+   * always shown. Left out = every column is listed.
+   */
+  menu?: { main: string[]; extra: string[] };
+  /** The first column; left out = the project (rows need propertyId/propertyName). */
+  nameColumn?: ReportNameColumn<R>;
+  /** Shown between the title row and the table (e.g. number cards). */
+  headerExtra?: React.ReactNode;
+  /** Shows a download button next to Columns. */
+  onDownload?: () => void;
 }) {
+  const name = nameColumn ?? (PROJECT_COLUMN as unknown as ReportNameColumn<R>);
   const allColumns = useMemo(
-    () => [{ key: PROJECT_KEY, label: projectLabel, menuLabel: "Project", extra: false }, ...columns],
-    [projectLabel, columns]
+    () => [{ key: PROJECT_KEY, label: projectLabel, menuLabel: name.menuLabel, extra: false }, ...columns],
+    [projectLabel, columns, name.menuLabel]
   );
 
   // ---- Project search (same look as the Leads page's Lead Name search) ----
@@ -52,8 +90,8 @@ export default function ProjectReportTable<R extends { propertyId: string | null
   const [search, setSearch] = useState("");
   const visibleRows = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return q ? rows.filter(r => (r.propertyName ?? NOT_SET).toLowerCase().includes(q)) : rows;
-  }, [rows, search]);
+    return q ? rows.filter(r => name.text(r).toLowerCase().includes(q)) : rows;
+  }, [rows, search, name]);
   const closeSearch = () => { setSearch(""); setSearchOpen(false); };
   const { pageRows, paginationProps } = usePagination(visibleRows, 100, `${resetKey}|${search}`);
 
@@ -61,9 +99,14 @@ export default function ProjectReportTable<R extends { propertyId: string | null
   const [visible, setVisible] = useState<Record<string, boolean>>(() => Object.fromEntries(allColumns.map(c => [c.key, !c.extra])));
   const [columnsOpen, setColumnsOpen] = useState(false);
   const toggleColumn = (key: string) => setVisible(prev => ({ ...prev, [key]: !prev[key] }));
+  const byKey = new Map(allColumns.map(c => [c.key, c]));
+  const menuGroups = menu
+    ? [menu.main, menu.extra].map(keys => keys.map(k => byKey.get(k)).filter((c): c is (typeof allColumns)[number] => !!c))
+    : [allColumns.filter(c => !c.extra), allColumns.filter(c => c.extra)];
+  const menuColumns = menuGroups.flat();
   const toggleAll = () => {
-    const allOn = allColumns.every(c => visible[c.key]);
-    setVisible(Object.fromEntries(allColumns.map(c => [c.key, !allOn])));
+    const allOn = menuColumns.every(c => visible[c.key]);
+    setVisible(prev => ({ ...prev, ...Object.fromEntries(menuColumns.map(c => [c.key, !allOn])) }));
   };
   const showProject = visible[PROJECT_KEY];
   const shownColumns = columns.filter(c => visible[c.key]);
@@ -73,11 +116,19 @@ export default function ProjectReportTable<R extends { propertyId: string | null
     <div className="border border-slate-300 rounded-3xl shadow-sm overflow-hidden">
       <div className="flex items-center justify-between gap-3 px-5 sm:px-6 pt-5 pb-3">
         <h3 className="ui-section-title">{title}</h3>
-        <button type="button" onClick={() => setColumnsOpen(true)} className="ui-btn ui-btn-secondary border">
-          <SlidersHorizontal className="h-4 w-4 text-blue-600" />
-          Columns
-        </button>
+        <div className="flex items-center gap-2">
+          {onDownload && (
+            <button type="button" onClick={onDownload} className="ui-btn ui-btn-secondary border !px-2.5" title="Download CSV" aria-label="Download CSV">
+              <Download className="h-4 w-4 text-blue-600" />
+            </button>
+          )}
+          <button type="button" onClick={() => setColumnsOpen(true)} className="ui-btn ui-btn-secondary border">
+            <SlidersHorizontal className="h-4 w-4 text-blue-600" />
+            Columns
+          </button>
+        </div>
       </div>
+      {headerExtra}
       <div className="overflow-x-auto px-5 sm:px-6">
         {/* table-fixed: every column gets the same width, so the gaps match */}
         <table className="w-full table-fixed text-left border-collapse" style={{ minWidth: `${colCount * 140}px` }}>
@@ -93,7 +144,7 @@ export default function ProjectReportTable<R extends { propertyId: string | null
                         onChange={(e) => setSearch(e.target.value)}
                         // Stays open while it has text, so the filter keeps applying.
                         onBlur={() => { if (!search.trim()) closeSearch(); }}
-                        placeholder="Search project..."
+                        placeholder={name.searchPlaceholder}
                         className="min-w-0 flex-1 bg-white border border-brand-400 rounded-md px-1.5 py-1 text-[11px] font-normal focus:outline-none"
                       />
                       <button
@@ -125,14 +176,14 @@ export default function ProjectReportTable<R extends { propertyId: string | null
             ) : pageRows.length === 0 ? (
               <tr>
                 <td colSpan={colCount} className="py-10 text-center text-xs text-slate-400 italic">
-                  {search.trim() ? `No project matches "${search.trim()}".` : emptyText}
+                  {search.trim() ? `No ${name.noMatchLabel} matches "${search.trim()}".` : emptyText}
                 </td>
               </tr>
             ) : (
               pageRows.map(r => (
-                <tr key={r.propertyId ?? NOT_SET}>
+                <tr key={name.key(r)}>
                   {showProject && (
-                    <td className={`py-3.5 pr-4 text-xs font-semibold [overflow-wrap:anywhere] ${r.propertyId ? "text-slate-800" : "text-slate-400"}`}>{r.propertyName ?? NOT_SET}</td>
+                    <td className="py-3.5 pr-4 text-xs [overflow-wrap:anywhere]">{name.render(r)}</td>
                   )}
                   {shownColumns.map(c => <td key={c.key} className="py-3.5 pr-4 text-xs text-slate-700 tabular-nums">{c.render(r)}</td>)}
                 </tr>
@@ -163,7 +214,7 @@ export default function ProjectReportTable<R extends { propertyId: string | null
               </div>
               {/* Left: the report's usual columns. Right: extra ones (hidden at first). */}
               <div className="grid grid-cols-2 gap-x-5">
-                {[allColumns.filter(c => !c.extra), allColumns.filter(c => c.extra)].map((group, i) => (
+                {menuGroups.map((group, i) => (
                   <div key={i} className="space-y-3.5">
                     {group.map(c => (
                       <button

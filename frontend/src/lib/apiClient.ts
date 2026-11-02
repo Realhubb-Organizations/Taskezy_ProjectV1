@@ -352,6 +352,16 @@ export interface LeadListFilters {
   sourceBucket?: ("META" | "GOOGLE" | "DATA")[];
   /** Match `campaign` case-insensitively (Marketing Reports drill-downs). */
   campaignIgnoreCase?: boolean;
+  /** Only Data Calling leads (any sub-source) — Team Reports' Data Calling drill-downs. */
+  dataCallingOnly?: boolean;
+  /** Only leads that have a salesperson. */
+  assignedOnly?: boolean;
+  /** Data Calling batch labels. */
+  subSource?: string[];
+  /** Data Calling call status (Connected / Called / Not Reachable / Wrong Number). */
+  callStatus?: string[];
+  /** Qualified / Unqualified (Connected calls). */
+  callSubStatus?: string[];
 }
 
 function buildLeadFilterParams(filters: LeadListFilters): URLSearchParams {
@@ -370,6 +380,11 @@ function buildLeadFilterParams(filters: LeadListFilters): URLSearchParams {
   if (filters.sortDir && filters.sortField) params.set("sortField", filters.sortField);
   filters.sourceBucket?.forEach(s => params.append("sourceBucket", s));
   if (filters.campaignIgnoreCase) params.set("campaignIgnoreCase", "true");
+  if (filters.dataCallingOnly) params.set("dataCallingOnly", "true");
+  if (filters.assignedOnly) params.set("assignedOnly", "true");
+  filters.subSource?.forEach(s => params.append("subSource", s));
+  filters.callStatus?.forEach(s => params.append("callStatus", s));
+  filters.callSubStatus?.forEach(s => params.append("callSubStatus", s));
   return params;
 }
 
@@ -1293,6 +1308,8 @@ export interface CreateFollowupApiInput {
   phone?: string;
   callType: "CALLBACK" | "MEETING" | "SITE_VISIT";
   assignedToId: string;
+  /** Why a site visit moved to a new date (Team Reports). */
+  rescheduleReason?: string;
 }
 
 export function apiCreateFollowup(input: CreateFollowupApiInput): Promise<ApiFollowupRow> {
@@ -1333,7 +1350,12 @@ export function apiGetPendingCallAttempt(): Promise<ApiCallAttemptRow | null> {
   return request<ApiCallAttemptRow | null>("/api/v1/call-attempts/pending");
 }
 
-export function apiSubmitCallFeedback(id: string, input: { outcome: string; notes: string; scheduledAt?: string }): Promise<ApiCallAttemptRow> {
+/** Has this lead had a site visit before? (asks for a Reschedule Reason when it has) */
+export function apiGetSiteVisitHistory(leadId: string): Promise<{ hadSiteVisit: boolean }> {
+  return request<{ hadSiteVisit: boolean }>(`/api/v1/followups/lead/${leadId}/site-visit-history`);
+}
+
+export function apiSubmitCallFeedback(id: string, input: { outcome: string; notes: string; scheduledAt?: string; rescheduleReason?: string }): Promise<ApiCallAttemptRow> {
   return request<ApiCallAttemptRow>(`/api/v1/call-attempts/${id}`, { method: "PATCH", body: JSON.stringify(input) });
 }
 
@@ -1962,6 +1984,11 @@ export interface MarketingSiteVisitRow {
   svMissed: number;
   /** Leads in status Booked. */
   booked: number;
+  qualified: number;
+  /** Dead + RNR + Not Interested (same as the Campaigns page). */
+  unqualified: number;
+  /** Leads in Site Visit Scheduled/Done — numerator of Q2SV %. */
+  siteVisitLeads: number;
 }
 export interface MarketingProjectStats {
   kpis: { activeCampaigns: number; totalLeads: number; qualified: number; rnr: number; followUps: number; callBacks: number; siteVisits: number };
@@ -2275,4 +2302,150 @@ export async function apiListCallLogPage(
     totalCount: meta?.totalCount ?? data.length,
     totalPages: meta?.totalPages ?? 1
   };
+}
+
+// --- Reports → Team Reports (Taskezy-Server reports/teamReport.routes.ts) ---
+export type TeamReportMode = "LEADS" | "DATA_CALLING";
+
+export interface TeamReportFilters {
+  mode: TeamReportMode;
+  dateFrom?: string;
+  dateTo?: string;
+  campaign?: string[];
+  propertyId?: string[];
+  noProperty?: boolean;
+  assignedAgentId?: string[];
+  /** Leads mode. */
+  source?: MarketingSource[];
+  /** Data Calling mode. */
+  subSource?: string[];
+}
+
+export interface TeamReportCounts {
+  totalLeads: number;
+  /** Leads with a salesperson. */
+  assigned: number;
+  qualified: number;
+  /** Data Calling: Connected calls marked Unqualified. */
+  notQualified: number;
+  /** Data Calling: leads with a call outcome. */
+  callsMade: number;
+  connected: number;
+  siteVisits: number;
+  rnr: number;
+  followUps: number;
+  callBacks: number;
+  missedTasks: number;
+}
+
+export interface TeamReportSalespersonRow extends TeamReportCounts {
+  agentId: string;
+  name: string;
+}
+
+export interface TeamSiteVisitLead {
+  leadId: string;
+  name: string;
+  phone: string;
+  status: string;
+  salespersonId: string | null;
+  salesperson: string | null;
+  propertyName: string | null;
+  /** Admins and Managers only. */
+  missedTaskCount?: number;
+  scheduledAt: string;
+  rescheduledAt: string | null;
+  rescheduleReason: string | null;
+  rescheduleCount: number;
+  siteVisitCount: number;
+  missedCount: number;
+  /** Every missed task for the lead (calls included). */
+  allMissedCount: number;
+  nextCallAt: string | null;
+  doneAt: string | null;
+  done: boolean;
+}
+
+export interface TeamReport {
+  kpis: TeamReportCounts;
+  salespeople: TeamReportSalespersonRow[];
+  siteVisits: {
+    kpis: { qualified: number; leads: number; scheduled: number; done: number; missedLeads: number; missedTasks: number; avgReschedules: number };
+    leads: TeamSiteVisitLead[];
+  };
+  subSources: string[];
+}
+
+export interface TeamMissedTaskRow {
+  id: string;
+  lead_id: string;
+  lead_name: string;
+  phone: string | null;
+  scheduled_at: string;
+  status: string;
+  call_type: "CALLBACK" | "MEETING" | "SITE_VISIT";
+  assigned_to_name: string | null;
+  lead_status: string;
+  next_call_at: string | null;
+  missed_task_count?: number;
+  email: string | null;
+  notes: string | null;
+  assigned_agent_id: string | null;
+  lead_agent_name: string | null;
+  property_name: string | null;
+}
+
+export interface TeamDataCallingLeadRow {
+  lead_id: string;
+  lead_name: string;
+  phone: string | null;
+  sub_source: string | null;
+  call_status: string | null;
+  call_sub_status: string | null;
+  status_code: string;
+  assigned_to_name: string | null;
+  missed_task_count?: number;
+  last_called_at: string | null;
+  next_call_at: string | null;
+}
+
+function teamReportParams(filters: TeamReportFilters): URLSearchParams {
+  const params = new URLSearchParams();
+  params.set("mode", filters.mode);
+  if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
+  if (filters.dateTo) params.set("dateTo", filters.dateTo);
+  filters.campaign?.forEach(c => params.append("campaign", c));
+  filters.propertyId?.forEach(id => params.append("propertyId", id));
+  if (filters.noProperty) params.set("noProperty", "true");
+  filters.assignedAgentId?.forEach(id => params.append("assignedAgentId", id));
+  filters.source?.forEach(s => params.append("source", s));
+  filters.subSource?.forEach(s => params.append("subSource", s));
+  return params;
+}
+
+export function apiGetTeamReport(filters: TeamReportFilters): Promise<TeamReport> {
+  return request<TeamReport>(`/api/v1/reports/team?${teamReportParams(filters)}`);
+}
+
+export async function apiListTeamMissedTasks(
+  filters: TeamReportFilters,
+  page: number,
+  pageSize: number,
+  extra: { search?: string; leadStatus?: string[] } = {}
+): Promise<{ rows: TeamMissedTaskRow[]; totalCount: number }> {
+  const params = teamReportParams(filters);
+  if (extra.search) params.set("search", extra.search);
+  extra.leadStatus?.forEach(s => params.append("leadStatus", s));
+  params.set("page", String(page));
+  params.set("pageSize", String(pageSize));
+  const { data, meta } = await requestWithMeta<TeamMissedTaskRow>(`/api/v1/reports/team/missed-tasks?${params}`);
+  return { rows: data, totalCount: meta?.totalCount ?? data.length };
+}
+
+export async function apiListTeamDataCallingLeads(filters: TeamReportFilters, page: number, pageSize: number): Promise<{ rows: TeamDataCallingLeadRow[]; totalCount: number }> {
+  const params = teamReportParams(filters);
+  params.set("page", String(page));
+  params.set("pageSize", String(pageSize));
+  const { data, meta } = await requestWithMeta<TeamDataCallingLeadRow>(`/api/v1/reports/team/data-calling-leads?${params}`);
+  return { rows: data, totalCount: meta?.totalCount ?? data.length };
 }

@@ -53,6 +53,15 @@ export const listLeadsQuerySchema = z.object({
     .optional()
     .transform(v => v === undefined ? undefined : (Array.isArray(v) ? v : [v])),
   campaignIgnoreCase: z.enum(["true", "false"]).optional().transform(v => v === "true"),
+  // Team Reports' Data Calling drill-downs: only Data Calling leads (any
+  // sub-source — same split as the Data Calling page), narrowed to some
+  // sub-sources / call statuses / Qualified-Unqualified.
+  dataCallingOnly: z.enum(["true", "false"]).optional().transform(v => v === "true"),
+  // Only leads that have a salesperson ("Total Leads Assigned").
+  assignedOnly: z.enum(["true", "false"]).optional().transform(v => v === "true"),
+  subSource: stringToArray,
+  callStatus: stringToArray,
+  callSubStatus: stringToArray,
   // Already supported by buildLeadWhereClause/findMany (used by the Leads
   // Analytics tab's own aggregate) — just not previously exposed here.
   propertyId: uuidToArray,
