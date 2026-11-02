@@ -54,3 +54,9 @@ yarn-error.log*
 
 # generated deliverables (Data Dictionary / DFD Word docs) — kept locally only
 /docs/
+
+# load/stress testing scripts + reports/tokens — local-only, never pushed.
+# Being ignored (not just locally git-removed) also means git itself never
+# touches this folder on pull/checkout/merge, so it can't be wiped by
+# anyone else's pull either — only an explicit `git clean -x` would.
+/load-testing/
