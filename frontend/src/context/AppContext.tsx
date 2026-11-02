@@ -599,7 +599,7 @@ interface AppActions {
   // equivalent; same gate, no call-state plugin involved for this channel.
   recordWhatsAppOpened: (leadId: string) => Promise<void>;
   // Submits the blocking gate's form and clears pendingCallAttempt.
-  submitCallFeedback: (outcome: string, notes: string, scheduledAt?: string) => Promise<void>;
+  submitCallFeedback: (outcome: string, notes: string, scheduledAt?: string, rescheduleReason?: string) => Promise<void>;
   updateTenantSettings: (input: UpdateTenantSettingsInput) => Promise<{ success: boolean; error?: string }>;
   // SaaS actions
   setSeats: (role: Role, count: number) => void;
@@ -719,7 +719,7 @@ interface AppActions {
 
   // Calendar actions
   addCalendarEvent: (event: Omit<CalendarEvent, "id">) => void;
-  addFollowupCall: (input: { scheduledAt: string; leadId?: string; leadName: string; phone?: string; callType: "CALLBACK" | "MEETING" | "SITE_VISIT"; assignedToName: string }) => void;
+  addFollowupCall: (input: { scheduledAt: string; leadId?: string; leadName: string; phone?: string; callType: "CALLBACK" | "MEETING" | "SITE_VISIT"; assignedToName: string; rescheduleReason?: string }) => void;
   /** Record a follow-up that was already created through the API (e.g. by the call-feedback popup), so tables showing Next Call Date refresh. */
   recordFollowupCreated: (row: ApiFollowupRow) => void;
   deleteCalendarEvent: (id: string) => void;
@@ -1290,9 +1290,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setPendingCallAttempt(attempt);
   };
 
-  const submitCallFeedback = async (outcome: string, notes: string, scheduledAt?: string) => {
+  const submitCallFeedback = async (outcome: string, notes: string, scheduledAt?: string, rescheduleReason?: string) => {
     if (!pendingCallAttempt) return;
-    await apiSubmitCallFeedback(pendingCallAttempt.id, { outcome, notes, scheduledAt });
+    await apiSubmitCallFeedback(pendingCallAttempt.id, { outcome, notes, scheduledAt, rescheduleReason });
     setPendingCallAttempt(null);
     // The status/note are already saved; with a next call, wait for the
     // background job to create it, otherwise refresh this user's tasks now.
@@ -1781,7 +1781,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Writes to followup_calls alongside calendar_events (see addCalendarEvent
   // call sites for SITE_VISIT/FOLLOWUP reminders) — the followup_calls table
   // used to only ever contain whatever was seeded, since nothing wrote to it.
-  const addFollowupCall = (input: { scheduledAt: string; leadId?: string; leadName: string; phone?: string; callType: "CALLBACK" | "MEETING" | "SITE_VISIT"; assignedToName: string }) => {
+  const addFollowupCall = (input: { scheduledAt: string; leadId?: string; leadName: string; phone?: string; callType: "CALLBACK" | "MEETING" | "SITE_VISIT"; assignedToName: string; rescheduleReason?: string }) => {
     const assignee = users.find(u => u.name === input.assignedToName);
     if (!isApiSessionActive() || !assignee) return;
     apiCreateFollowup({
@@ -1790,7 +1790,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       leadName: input.leadName,
       phone: input.phone,
       callType: input.callType,
-      assignedToId: assignee.id
+      assignedToId: assignee.id,
+      rescheduleReason: input.rescheduleReason
     })
       .then((created) => {
         setFollowupCalls(prev => [...prev, mapApiFollowupToFrontend(created)]);

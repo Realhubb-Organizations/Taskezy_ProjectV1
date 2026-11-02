@@ -31,6 +31,7 @@ import { sheetImportRouter } from "./modules/sheet-import/sheet-import.routes";
 import { callAttemptsRouter } from "./modules/call-attempts/call-attempts.routes";
 import { callLogRouter } from "./modules/call-log/call-log.routes";
 import { tasksRouter } from "./modules/tasks/tasks.routes";
+import { teamReportRouter } from "./modules/reports/teamReport.routes";
 import { broadcastOnWrite } from "./utils/dataChanged";
 
 export function createApp(): Express {
@@ -101,6 +102,7 @@ export function createApp(): Express {
   app.use("/api/v1/devices", devicesRouter);
   app.use("/api/v1/calendar-events", broadcastOnWrite("calendar"), calendarEventsRouter);
   app.use("/api/v1/ad-spend", adSpendRouter);
+  app.use("/api/v1/reports", teamReportRouter);
   app.use("/api/v1/meta", metaRouter);
   app.use("/api/v1/google-ads", googleAdsRouter);
   app.use("/api/v1/tenant-settings", tenantSettingsRouter);

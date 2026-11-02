@@ -6,7 +6,7 @@ import { Capacitor } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
 import { PhoneCall, MessageCircle, Check, X } from "lucide-react";
 import { useApp, LeadStatus, Lead, mapApiLeadToFrontendLead } from "@/context/AppContext";
-import { apiUpdateLeadStatus, apiUpdateCallStatus, apiUpdateLeadNote, apiGetLead, apiHasWhatsAppScheduledBefore } from "@/lib/apiClient";
+import { apiUpdateLeadStatus, apiUpdateCallStatus, apiUpdateLeadNote, apiGetLead, apiHasWhatsAppScheduledBefore, apiGetSiteVisitHistory } from "@/lib/apiClient";
 import { nextStatusOptions, frontendStatusToDbCode } from "@/lib/leadStatusMapping";
 import { CALL_SUB_STATUS_OPTIONS, CallSubStatus, callSubStatusOf } from "@/lib/callSubStatus";
 import { SCHEDULER_REQUIRED_STATUSES } from "@/lib/leadScheduler";
@@ -102,6 +102,21 @@ export default function CallFeedbackGate() {
     return [lead.status, ...choices];
   }, [lead, isDataCallingLead]);
 
+  // Has this lead had a site visit before? Then a new Site Visit Scheduled
+  // date is a reschedule and we ask why (Reports → Team Reports). If the
+  // check fails the field just doesn't show; it never blocks the save.
+  const [hadSiteVisit, setHadSiteVisit] = useState(false);
+  useEffect(() => {
+    setHadSiteVisit(false);
+    if (!lead?.id || isDataCallingLead) return;
+    let cancelled = false;
+    apiGetSiteVisitHistory(lead.id)
+      .then(({ hadSiteVisit: had }) => { if (!cancelled) setHadSiteVisit(had); })
+      .catch(() => { /* field stays hidden */ });
+    return () => { cancelled = true; };
+  }, [lead?.id, isDataCallingLead]);
+  const [rescheduleReason, setRescheduleReason] = useState("");
+
   // Step 1: did it happen?
   const [step, setStep] = useState<"ask" | "reason" | "status">("ask");
   const [happened, setHappened] = useState(true);
@@ -129,6 +144,7 @@ export default function CallFeedbackGate() {
     setNextTime("");
     setDealValue("");
     setNote("");
+    setRescheduleReason("");
     setError("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingCallAttempt?.id]);
@@ -188,6 +204,7 @@ export default function CallFeedbackGate() {
   // WhatsApp contact on a regular lead that's already had one scheduled
   // before; every other case stays exactly as required as before.
   const nextCallRequired = nextCallApplicable && !(isWhatsApp && !isDataCallingLead && whatsAppScheduledBefore);
+  const isSiteVisitReschedule = !isDataCallingLead && status === "Site Visit Scheduled" && hadSiteVisit;
   const needsDealValue = !isDataCallingLead && status === "Booked" && statusChanged;
   const somethingChanged = statusChanged || callStatusChanged;
 
@@ -206,6 +223,7 @@ export default function CallFeedbackGate() {
         if (isNaN(scheduledAt.getTime()) || scheduledAt.getTime() < Date.now()) return setError("The next call must be in the future.");
       }
     }
+    if (isSiteVisitReschedule && scheduledAt && !rescheduleReason.trim()) return setError("Please add the reason for rescheduling the site visit.");
     const deal = needsDealValue ? parseFloat(dealValue.replace(/[^0-9.]/g, "")) : undefined;
     if (needsDealValue && (!deal || deal <= 0)) return setError("Enter the booking's deal value.");
     // Data Calling: a note is always required (it's saved as the lead's note).
@@ -251,7 +269,8 @@ export default function CallFeedbackGate() {
       await submitCallFeedback(
         outcome,
         parts.join(". ") || (isWhatsApp ? "Message sent via WhatsApp." : "Call completed."),
-        scheduledAt?.toISOString()
+        scheduledAt?.toISOString(),
+        isSiteVisitReschedule && scheduledAt ? rescheduleReason.trim() : undefined
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save. Please try again.");
@@ -383,6 +402,12 @@ export default function CallFeedbackGate() {
                   <label className="block text-[10px] font-bold text-slate-500 uppercase">Time{nextCallRequired ? "" : " (optional)"}</label>
                   <input type="time" value={nextTime} onChange={(e) => setNextTime(e.target.value)} className={inputClass} />
                 </div>
+              </div>
+            )}
+            {isSiteVisitReschedule && (
+              <div className="space-y-1">
+                <label className="block text-[10px] font-bold text-slate-500 uppercase">Reschedule reason{nextCallRequired ? "" : " (if rescheduling)"}</label>
+                <input value={rescheduleReason} onChange={(e) => setRescheduleReason(e.target.value)} maxLength={500} placeholder="e.g. Out of station" className={`${inputClass} font-normal`} />
               </div>
             )}
             {needsDealValue && (

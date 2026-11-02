@@ -11,6 +11,9 @@ export interface ScheduleFollowupJobData {
   phone: string | null;
   assignedAgentId: string;
   scheduledAt: string; // ISO
+  /** Left out by jobs queued before site visits were told apart = CALLBACK. */
+  callType?: "CALLBACK" | "SITE_VISIT";
+  rescheduleReason?: string;
 }
 
 /**
@@ -63,10 +66,12 @@ export async function processScheduleFollowup(data: ScheduleFollowupJobData): Pr
 
   await pool.query(`UPDATE followup_calls SET status = 'COMPLETED' WHERE lead_id = $1 AND status <> 'COMPLETED'`, [leadId]);
   await deleteLeadActivityNotifications(leadId, ["REMINDER"]);
+  // reschedule_reason only when given, so nothing else depends on migration 051.
+  const reason = data.rescheduleReason || null;
   await pool.query(
-    `INSERT INTO followup_calls (scheduled_at, lead_id, lead_name, phone, call_type, assigned_to_id)
-     VALUES ($1, $2, $3, $4, 'CALLBACK', $5)`,
-    [scheduledAt, leadId, leadName, phone, assignedAgentId]
+    `INSERT INTO followup_calls (scheduled_at, lead_id, lead_name, phone, call_type, assigned_to_id${reason ? ", reschedule_reason" : ""})
+     VALUES ($1, $2, $3, $4, $5, $6${reason ? ", $7" : ""})`,
+    [scheduledAt, leadId, leadName, phone, data.callType ?? "CALLBACK", assignedAgentId, ...(reason ? [reason] : [])]
   );
   // This runs outside any route, so broadcastOnWrite never sees it — tell
   // open screens directly. Until now the lead counted as "due now" in

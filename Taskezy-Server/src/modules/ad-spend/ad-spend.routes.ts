@@ -11,6 +11,7 @@ import { listAdLevelSpend as listGoogleAdLevelSpend } from "../google-ads/google
 import { triggerMetaAdSpendSyncNow } from "../../jobs/metaAdSpendSync";
 import { triggerGoogleAdsSpendSyncNow } from "../../jobs/googleAdsSpendSync";
 import { LEAD_SOURCE_BUCKET_SQL } from "../leads/leads.repository";
+import { FOLLOWUP_EVER_MISSED_SQL, IS_SITE_VISIT_FOLLOWUP_SQL } from "../reports/siteVisitSql";
 
 export const adSpendRouter = Router();
 
@@ -535,22 +536,23 @@ adSpendRouter.get(
         [BUYER_CODES, ...projectLeads.params, ...projectSpend.params]
       ),
       // Project-wise Site Visits. "Lead …" = distinct leads, "SV …" =
-      // site-visit appointments (followup_calls of type SITE_VISIT, dated by
-      // scheduled_at). SV Completed / Booked = lead status, leads created in range.
+      // site-visit appointments (see reports/siteVisitSql.ts, dated by
+      // scheduled_at; missed = ever missed, even if later rescheduled). SV Completed / Booked = lead status, leads created in range.
       query<{
         property_id: string | null; property_name: string | null; total: string; lead_scheduled: string;
         sv_scheduled: string; lead_missed: string; sv_missed: string; completed: string; booked: string;
+        qualified: string; unqualified: string; sv_status_leads: string;
       }>(
         `WITH sv AS (
            SELECT l.property_id, COALESCE(l.property_id::text, 'none') AS project_key,
                   count(*) AS total,
                   count(DISTINCT fc.lead_id) AS lead_scheduled,
                   count(*) FILTER (WHERE fc.status = 'UPCOMING') AS sv_scheduled,
-                  count(DISTINCT fc.lead_id) FILTER (WHERE fc.status = 'MISSED') AS lead_missed,
-                  count(*) FILTER (WHERE fc.status = 'MISSED') AS sv_missed
+                  count(DISTINCT fc.lead_id) FILTER (WHERE ${FOLLOWUP_EVER_MISSED_SQL}) AS lead_missed,
+                  count(*) FILTER (WHERE ${FOLLOWUP_EVER_MISSED_SQL}) AS sv_missed
            FROM followup_calls fc
            JOIN leads l ON l.id = fc.lead_id
-           WHERE fc.call_type = 'SITE_VISIT'
+           WHERE ${IS_SITE_VISIT_FOLLOWUP_SQL}
              AND ($1::date IS NULL OR (fc.scheduled_at AT TIME ZONE $5)::date >= $1::date)
              AND ($2::date IS NULL OR (fc.scheduled_at AT TIME ZONE $5)::date <= $2::date)
              AND ${svLeads.where}
@@ -559,7 +561,10 @@ adSpendRouter.get(
          st AS (
            SELECT l.property_id, COALESCE(l.property_id::text, 'none') AS project_key,
                   count(*) FILTER (WHERE l.status_code = 'SITE_VISIT_DONE') AS completed,
-                  count(*) FILTER (WHERE l.status_code = 'BOOKED') AS booked
+                  count(*) FILTER (WHERE l.status_code = 'BOOKED') AS booked,
+                  count(*) FILTER (WHERE l.status_code IN (${BUYER_CODES.map(c => `'${c}'`).join(", ")})) AS qualified,
+                  count(*) FILTER (WHERE l.status_code IN (${UNQUALIFIED_CODES.map(c => `'${c}'`).join(", ")})) AS unqualified,
+                  count(*) FILTER (WHERE l.status_code IN ('SITE_VISIT_SCHEDULED', 'SITE_VISIT_DONE')) AS sv_status_leads
            FROM leads l
            WHERE ${statusLeads.where}
            GROUP BY l.property_id
@@ -572,7 +577,10 @@ adSpendRouter.get(
                 COALESCE(sv.lead_missed, 0) AS lead_missed,
                 COALESCE(sv.sv_missed, 0) AS sv_missed,
                 COALESCE(st.completed, 0) AS completed,
-                COALESCE(st.booked, 0) AS booked
+                COALESCE(st.booked, 0) AS booked,
+                COALESCE(st.qualified, 0) AS qualified,
+                COALESCE(st.unqualified, 0) AS unqualified,
+                COALESCE(st.sv_status_leads, 0) AS sv_status_leads
          FROM sv
          FULL OUTER JOIN st ON st.project_key = sv.project_key
          LEFT JOIN properties p ON p.id = COALESCE(sv.property_id, st.property_id)
@@ -603,7 +611,11 @@ adSpendRouter.get(
         leadsCompleted: Number(r.completed),
         leadsMissed: Number(r.lead_missed),
         svMissed: Number(r.sv_missed),
-        booked: Number(r.booked)
+        booked: Number(r.booked),
+        qualified: Number(r.qualified),
+        unqualified: Number(r.unqualified),
+        // Leads in Site Visit Scheduled/Done — Q2SV % = this ÷ qualified (same as Leads Analytics' QL→SV %)
+        siteVisitLeads: Number(r.sv_status_leads)
       })),
       byProject: projectResult.rows.map(r => ({
         propertyId: r.property_id,
