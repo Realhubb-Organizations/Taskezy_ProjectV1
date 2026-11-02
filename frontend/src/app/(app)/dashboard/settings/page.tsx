@@ -614,6 +614,21 @@ export default function SettingsPage() {
     }
   };
 
+  // The expanded panel's live dots (and last-active times) would otherwise
+  // be a one-time snapshot from whenever it was first opened — refetch
+  // while it stays open, same 15s cadence as the Manage Users row dot and
+  // the Team Activity page, so it's genuinely live, not just on first expand.
+  useEffect(() => {
+    if (!expandedDevicesUserId) return;
+    const userId = expandedDevicesUserId;
+    const interval = setInterval(() => {
+      apiListUserDevices(userId)
+        .then(devices => setUserDevicesCache(prev => ({ ...prev, [userId]: devices })))
+        .catch(() => { /* keep showing the last known state */ });
+    }, 15_000);
+    return () => clearInterval(interval);
+  }, [expandedDevicesUserId]);
+
   // Access Control toggle — Super-Admin-only, scoped to Managers: by
   // default a manager can only bulk-upload via Data Calling, not the main
   // CRM Leads page's own bulk upload; this expand panel's toggle opts an
