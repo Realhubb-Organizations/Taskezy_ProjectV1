@@ -40,7 +40,8 @@ import {
   Video,
   Calendar,
   PanelLeftClose,
-  PanelLeftOpen
+  PanelLeftOpen,
+  Radio
 } from "lucide-react";
 
 // Organization + Help & Support / CRM Tutorials are hidden
@@ -126,6 +127,11 @@ function checkUserAccess(user: { role: string; department?: string; role_type?: 
 
   // Admin Cockpit: accessible only to ADMIN
   if (path.startsWith("/dashboard/admin")) {
+    return user.role === "ADMIN";
+  }
+
+  // Team Activity (live presence roster): Admin-only monitoring screen.
+  if (path.startsWith("/dashboard/team-activity")) {
     return user.role === "ADMIN";
   }
 
@@ -396,7 +402,8 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
 
   // Static links, always visible below the groups regardless of which is expanded.
   const staticBottomLinks = [
-    { name: "Organization", href: "/dashboard/organization", activeCheck: (p: string) => p === "/dashboard/organization", icon: Building }
+    { name: "Organization", href: "/dashboard/organization", activeCheck: (p: string) => p === "/dashboard/organization", icon: Building },
+    { name: "Team Activity", href: "/dashboard/team-activity", activeCheck: (p: string) => p === "/dashboard/team-activity", icon: Radio }
   ].filter(item => checkUserAccess(currentUser, item.href));
 
   const groupForCurrentPage = sidebarGroups.find(g => g.items.some(i => i.activeCheck(pathname, activeTabParam)));

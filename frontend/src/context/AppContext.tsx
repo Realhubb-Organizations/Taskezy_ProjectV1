@@ -98,6 +98,9 @@ import {
   ApiCallAttemptRow
 } from "@/lib/apiClient";
 import { ALL_DATA_TOPICS, EMPTY_DATA_VERSION, useThrottledOnChange, type DataTopic, type DataVersion } from "@/lib/liveRefresh";
+import { usePresenceHeartbeat } from "@/lib/usePresenceHeartbeat";
+import { Capacitor } from "@capacitor/core";
+import { Device } from "@capacitor/device";
 import { dbCodeToFrontendStatus, frontendStatusToDbCode, isRealLeadId, isRealId } from "@/lib/leadStatusMapping";
 import { initNotificationSoundUnlock, playNotificationSound } from "@/lib/notificationSound";
 import { todayIso, toIsoDate } from "@/components/ui/DateRangePicker";
@@ -1564,6 +1567,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => document.removeEventListener("visibilitychange", onVisibility);
   }, [currentUser?.id]);
 
+  // Reports this session's own active/idle state so Admin's Team Activity
+  // page has something to show — see usePresenceHeartbeat.ts.
+  usePresenceHeartbeat(!!currentUser);
+
   // Live notifications (Meta leads, etc.) over Server-Sent Events — one
   // connection per session, reopened whenever the signed-in user changes.
   // Each connection attempt mints a fresh one-time ticket first (see
@@ -1592,7 +1599,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       if (cancelled) return;
 
-      source = new EventSource(buildNotificationStreamUrl(ticket));
+      // Native app only — same `${manufacturer} ${model}` label the
+      // heartbeat sends (usePresenceHeartbeat.ts) and layout.tsx already
+      // captures for push registration, so this connection and that
+      // heartbeat correlate to the same per-device presence row. Web
+      // leaves this undefined; the backend derives a label from the
+      // browser's own User-Agent instead.
+      let deviceLabel: string | undefined;
+      if (Capacitor.isNativePlatform()) {
+        deviceLabel = await Device.getInfo()
+          .then((info) => `${info.manufacturer} ${info.model}`.trim())
+          .catch(() => undefined);
+      }
+      if (cancelled) return;
+
+      source = new EventSource(buildNotificationStreamUrl(ticket, deviceLabel));
       // After a dropped connection, catch up on anything sent while it was down.
       source.onopen = () => {
         if (streamDropped) {

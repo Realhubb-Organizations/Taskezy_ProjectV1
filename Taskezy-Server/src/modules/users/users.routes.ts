@@ -14,6 +14,7 @@ import * as leadsService from "../leads/leads.service";
 import { broadcastLeadChanged } from "../leads/leads.realtime";
 import { createNotification } from "../notifications/notifications.service";
 import { SUPER_ADMIN_EMAIL } from "../../config/superAdmin";
+import { getPresence, getDevicePresence } from "../../utils/presence";
 
 export const usersRouter = Router();
 
@@ -225,7 +226,19 @@ usersRouter.get(
        ORDER BY last_seen_at DESC`,
       [req.params.id]
     );
-    sendOk(res, rows);
+    // Each row's own live dot, matched by device_name — web rows match a
+    // User-Agent-derived label, native rows match the real captured device
+    // name the client sends explicitly (both computed the same way the
+    // heartbeat/SSE connection compute theirs — see presence.routes.ts and
+    // notifications.routes.ts). Falls back to the user's overall status
+    // only if this exact device has never sent a heartbeat (e.g. right
+    // after it was registered, before its first live session).
+    const overall = getPresence(req.params.id).status;
+    const withPresence = rows.map((row) => ({
+      ...row,
+      live_status: getDevicePresence(req.params.id, row.device_name ?? "") ?? overall
+    }));
+    sendOk(res, withPresence);
   })
 );
 
