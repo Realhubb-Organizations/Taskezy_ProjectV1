@@ -20,6 +20,7 @@ import { timesheetsRouter } from "./modules/timesheets/timesheets.routes";
 import { reimbursementsRouter } from "./modules/reimbursements/reimbursements.routes";
 import { invoicesRouter } from "./modules/invoices/invoices.routes";
 import { notificationsRouter } from "./modules/notifications/notifications.routes";
+import { presenceRouter } from "./modules/presence/presence.routes";
 import { devicesRouter } from "./modules/devices/devices.routes";
 import { calendarEventsRouter } from "./modules/calendar-events/calendar-events.routes";
 import { adSpendRouter } from "./modules/ad-spend/ad-spend.routes";
@@ -96,6 +97,7 @@ export function createApp(): Express {
   app.use("/api/v1/reimbursements", reimbursementsRouter);
   app.use("/api/v1/invoices", invoicesRouter);
   app.use("/api/v1/notifications", notificationsRouter);
+  app.use("/api/v1/presence", presenceRouter);
   app.use("/api/v1/devices", devicesRouter);
   app.use("/api/v1/calendar-events", broadcastOnWrite("calendar"), calendarEventsRouter);
   app.use("/api/v1/ad-spend", adSpendRouter);

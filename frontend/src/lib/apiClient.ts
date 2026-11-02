@@ -1622,6 +1622,7 @@ export interface ApiUserDevice {
   created_at: string;
   last_seen_at: string;
   source: "app" | "web";
+  live_status: "active" | "idle" | "offline";
 }
 
 export function apiListUserDevices(userId: string): Promise<ApiUserDevice[]> {
@@ -1677,6 +1678,22 @@ export function apiMarkNotificationRead(notificationId: string): Promise<{ read:
   return request<{ read: boolean }>(`/api/v1/notifications/${notificationId}/read`, { method: "PATCH" });
 }
 
+export function apiSendPresenceHeartbeat(active: boolean, deviceLabel?: string): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>("/api/v1/presence/heartbeat", { method: "POST", body: JSON.stringify({ active, deviceLabel }) });
+}
+
+export interface ApiPresenceRow {
+  userId: string;
+  name: string;
+  role: string;
+  status: "active" | "idle" | "offline";
+  lastActiveAt: number | null;
+}
+
+export function apiGetPresence(): Promise<ApiPresenceRow[]> {
+  return request<ApiPresenceRow[]>("/api/v1/presence");
+}
+
 export function apiMarkAllNotificationsRead(system?: "CRM" | "HRMS" | "FINANCE" | "ADMIN"): Promise<{ read: boolean }> {
   const query = system ? `?system=${system}` : "";
   return request<{ read: boolean }>(`/api/v1/notifications/read-all${query}`, { method: "PATCH" });
@@ -1708,8 +1725,9 @@ export function apiCreateNotificationStreamTicket(): Promise<{ ticket: string }>
   return request<{ ticket: string }>("/api/v1/notifications/stream-ticket", { method: "POST" });
 }
 
-export function buildNotificationStreamUrl(ticket: string): string {
-  return `${API_BASE_URL}/api/v1/notifications/stream?ticket=${encodeURIComponent(ticket)}`;
+export function buildNotificationStreamUrl(ticket: string, deviceLabel?: string): string {
+  const base = `${API_BASE_URL}/api/v1/notifications/stream?ticket=${encodeURIComponent(ticket)}`;
+  return deviceLabel ? `${base}&deviceLabel=${encodeURIComponent(deviceLabel)}` : base;
 }
 
 // --- Calendar events ---

@@ -17,9 +17,12 @@ import {
   apiAnnounceToEveryone,
   apiListUserDevices,
   apiEditUser,
-  type ApiUserDevice
+  type ApiUserDevice,
+  apiGetPresence,
+  type ApiPresenceRow
 } from "@/lib/apiClient";
 import { isNotificationSoundMuted, setNotificationSoundMuted } from "@/lib/notificationSound";
+import PresenceDot from "@/components/PresenceDot";
 import {
   Settings,
   Plus,
@@ -680,6 +683,23 @@ export default function SettingsPage() {
       if (retryTimer) clearTimeout(retryTimer);
     };
   }, [activeTab, usersPage, usersRowsPerPage, debouncedSearchQuery, usersRefreshKey, effectiveUserGroup, userStatus, manualRefreshSignal]);
+
+  // Live status dot per row (green/yellow/red) — same admin-only /presence
+  // endpoint the dedicated Team Activity page polls, just rendered inline
+  // here too since that's where admins actually look first.
+  const [presenceByUserId, setPresenceByUserId] = useState<Map<string, ApiPresenceRow["status"]>>(new Map());
+  useEffect(() => {
+    if (activeTab !== "Manage Users") return;
+    let cancelled = false;
+    const poll = () => {
+      apiGetPresence()
+        .then((rows) => { if (!cancelled) setPresenceByUserId(new Map(rows.map(r => [r.userId, r.status]))); })
+        .catch(() => { /* keep showing the last known state */ });
+    };
+    poll();
+    const interval = setInterval(poll, 15_000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [activeTab]);
 
   const handleEditClick = (user: User) => {
     setSelectedUser(user);
@@ -1707,6 +1727,7 @@ export default function SettingsPage() {
                             <span className={`text-[9px] font-bold border px-1.5 py-0.5 rounded-full shrink-0 ${DEPT_BADGE[deptKey] || DEPT_BADGE.SALES}`}>
                               {deptKey}
                             </span>
+                            <PresenceDot status={presenceByUserId.get(user.id) ?? "offline"} title={presenceByUserId.has(user.id) ? undefined : "No recent activity data yet"} />
                           </div>
                           <p className="text-[10px] text-slate-500 truncate">{user.designation || "—"}</p>
                           <p className="text-[10px] text-slate-500 font-mono truncate">{user.email}</p>
@@ -1838,7 +1859,10 @@ export default function SettingsPage() {
                                       {d.source === "web" ? <Monitor className="h-3.5 w-3.5" /> : <Smartphone className="h-3.5 w-3.5" />}
                                     </div>
                                     <div className="min-w-0">
-                                      <p className="text-xs font-bold text-slate-800 truncate">{d.device_name || "Unknown device"}</p>
+                                      <p className="text-xs font-bold text-slate-800 truncate flex items-center gap-1.5">
+                                        <span className="truncate">{d.device_name || "Unknown device"}</span>
+                                        <PresenceDot status={d.live_status} className="shrink-0" />
+                                      </p>
                                       <p className="text-[10px] text-slate-500 truncate">
                                         {d.source === "web" ? "Web" : d.platform} · active {new Date(d.last_seen_at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
                                       </p>

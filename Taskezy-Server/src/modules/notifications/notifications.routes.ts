@@ -9,6 +9,7 @@ import { pool, query } from "../../db/pool";
 import { createNotification } from "./notifications.service";
 import { consumeTicket, issueTicket } from "../../utils/sseTickets";
 import { subscribe } from "../../utils/sseHub";
+import { describeDevice } from "../auth/loginOtp";
 
 // Express's `qs` query parser turns a single `?category=A` into a bare string
 // but repeated `?category=A&category=B` into an array — normalize either
@@ -56,7 +57,16 @@ notificationsRouter.get("/stream", (req, res) => {
   res.write(": connected\n\n");
 
   const heartbeat = setInterval(() => res.write(": ping\n\n"), HEARTBEAT_MS);
-  const unsubscribe = subscribe(userId, res);
+  // Same label the presence heartbeat and Devices panel already use — lets
+  // per-device presence know exactly when THIS device's connection (not
+  // just the user's overall connection) actually closes. ?deviceLabel=
+  // (native app only, see presence.routes.ts) overrides the User-Agent
+  // guess, since a WebView's UA can't tell two phones apart.
+  const rawDeviceLabel = req.query.deviceLabel;
+  const deviceLabel = typeof rawDeviceLabel === "string" && rawDeviceLabel
+    ? rawDeviceLabel
+    : describeDevice(req.headers["user-agent"]);
+  const unsubscribe = subscribe(userId, res, deviceLabel);
 
   req.on("close", () => {
     clearInterval(heartbeat);
