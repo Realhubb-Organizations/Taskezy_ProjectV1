@@ -96,6 +96,8 @@ import {
   apiGetPendingCallAttempt,
   apiResumeCallAttempt,
   apiHoldCallAttempt,
+  apiListHeldCallFeedback,
+  type HeldCallFeedback,
   FEEDBACK_PENDING_EVENT,
   apiSubmitCallFeedback,
   ApiCallAttemptRow
@@ -605,6 +607,10 @@ interface AppActions {
   submitCallFeedback: (outcome: string, notes: string, scheduledAt?: string, rescheduleReason?: string) => Promise<void>;
   /** The feedback screen stopped responding: free the app and hold this feedback on its lead. */
   holdCallFeedbackOnLead: () => Promise<void>;
+  /** This user's call feedback held on leads — the "Call feedback pending" popup. */
+  heldCallFeedback: HeldCallFeedback[];
+  /** Reopen one of them in the feedback popup. */
+  openHeldCallFeedback: (id: string) => Promise<void>;
   updateTenantSettings: (input: UpdateTenantSettingsInput) => Promise<{ success: boolean; error?: string }>;
   // SaaS actions
   setSeats: (role: Role, count: number) => void;
@@ -1299,6 +1305,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!pendingCallAttempt) return;
     await apiHoldCallAttempt(pendingCallAttempt.id);
     setPendingCallAttempt(null);
+    refreshHeldCallFeedback();
+  };
+
+  // Feedback held on leads: listed in the "Call feedback pending" popup until
+  // filled. Reloaded on login, whenever a popup opens or closes, and when an
+  // admin/manager force-closes one.
+  const [heldCallFeedback, setHeldCallFeedback] = useState<HeldCallFeedback[]>([]);
+  const refreshHeldCallFeedback = () => {
+    apiListHeldCallFeedback().then(setHeldCallFeedback).catch(() => { /* keep the last list */ });
+  };
+  useEffect(() => {
+    if (!currentUser) { setHeldCallFeedback([]); return; }
+    refreshHeldCallFeedback();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id, pendingCallAttempt?.id]);
+  const openHeldCallFeedback = async (id: string) => {
+    const attempt = await apiResumeCallAttempt(id);
+    if (attempt.status === "PENDING_FEEDBACK") setPendingCallAttempt(attempt);
+    refreshHeldCallFeedback();
   };
 
   // An action on a lead was refused because this agent still owes call
@@ -1719,6 +1744,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       source.addEventListener("call-attempt-resolved", (event) => {
         const { id } = JSON.parse((event as MessageEvent).data) as { id: string };
         setPendingCallAttempt(prev => (prev && prev.id === id ? null : prev));
+        apiListHeldCallFeedback().then(setHeldCallFeedback).catch(() => {});
       });
 
       source.addEventListener("notification", (event) => {
@@ -2907,6 +2933,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         recordWhatsAppOpened,
         submitCallFeedback,
         holdCallFeedbackOnLead,
+        heldCallFeedback,
+        openHeldCallFeedback,
         adSpendRecords,
         adLevelSpendRecords,
         refetchAdLevelSpend,

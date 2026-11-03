@@ -15,6 +15,7 @@ import LoginAnimationOverlay from "@/components/LoginAnimationOverlay";
 import PullToRefresh from "@/components/PullToRefresh";
 import StickyHorizontalScrollbar from "@/components/ui/StickyHorizontalScrollbar";
 import TruncatedTextTooltips from "@/components/ui/TruncatedTextTooltips";
+import PendingFeedbackPopup from "@/components/crm/PendingFeedbackPopup";
 import {
   LayoutDashboard,
   LayoutGrid,
@@ -974,6 +975,8 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
             parent — the other half of the fix above. Without this, <main>
             still grows to fit all its content instead of capping at the
             remaining viewport space and letting overflow-y-auto do its job. */}
+        {/* Call feedback held after the popup got stuck — no lead work until it's filled */}
+        <PendingFeedbackPopup />
         <main className={`flex-1 min-h-0 p-3 sm:p-6 lg:p-8 ${keyboardOpen ? "pb-3" : "pb-24"} md:pb-8 bg-slate-50/50 overflow-y-auto overflow-x-hidden overscroll-y-none`}>
           <PullToRefresh>
             {hasPageAccess ? children : (
