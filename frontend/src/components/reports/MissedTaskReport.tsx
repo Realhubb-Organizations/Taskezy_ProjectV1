@@ -15,13 +15,15 @@ import { useLeadStatusScheduler } from "@/lib/leadScheduler";
 import { canChangeLeadStatus, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
 import { STATUS_OPTIONS, dbCodeToFrontendStatus, frontendStatusToDbCode, nextStatusOptions, withDeadLeadGate } from "@/lib/leadStatusMapping";
 import { maskEmail, maskPhone } from "@/lib/maskPII";
-import { downloadCsv } from "@/lib/csv";
+import { downloadReportCsv } from "@/lib/csv";
+import { useDialog } from "@/components/ui/DialogProvider";
 import {
   apiGetLead,
   apiListLeadsPage,
   apiListTeamMissedTasks,
   type LeadListFilters,
   type TeamMissedTaskRow,
+  type ReportExportFilters,
   type TeamReportFilters
 } from "@/lib/apiClient";
 
@@ -90,15 +92,18 @@ function CopyButton({ value, label }: { value: string; label: string }) {
   );
 }
 
-export default function MissedTaskReport({ filters, baseDrill, refreshKey }: {
+export default function MissedTaskReport({ filters, baseDrill, refreshKey, exportFilters }: {
   /** The page's filters (for Missed Followups). */
   filters: TeamReportFilters;
   /** The same filters in GET /leads form (for Missed Leads). */
   baseDrill: LeadListFilters;
   /** Changes on live updates. */
   refreshKey: unknown;
+  /** The page's filters as labels, saved with each download record. */
+  exportFilters: ReportExportFilters;
 }) {
   const { currentUser, users, activeRole } = useApp();
+  const { toast } = useDialog();
   const isAdmin = activeRole === "ADMIN";
   const [tab, setTab] = useState<Tab>("leads");
 
@@ -202,7 +207,13 @@ export default function MissedTaskReport({ filters, baseDrill, refreshKey }: {
           if (all.length >= result.totalCount || result.rows.length === 0) break;
         }
       }
-      downloadCsv(
+      await downloadReportCsv(
+        `Team Reports · Salesperson Missed Task Report · ${tab === "leads" ? "Missed Leads" : "Missed Followups"}`,
+        {
+          ...exportFilters,
+          ...(debouncedSearch ? { "Lead Name": debouncedSearch } : {}),
+          ...(statusFilter.length > 0 ? { Status: statusFilter } : {})
+        },
         `${tab === "leads" ? "missed-leads" : "missed-followups"}_${filters.dateFrom ?? ""}_to_${filters.dateTo ?? ""}.csv`,
         ["Task Time", "Lead Name", "Phone", "Email", "Status", "Salesperson", "Feedback"],
         all.map(r => [
@@ -215,6 +226,8 @@ export default function MissedTaskReport({ filters, baseDrill, refreshKey }: {
           r.feedback
         ])
       );
+    } catch {
+      toast("Couldn't start the download. Please try again.", "error");
     } finally {
       setDownloading(false);
     }

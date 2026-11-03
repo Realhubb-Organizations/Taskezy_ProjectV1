@@ -15,7 +15,15 @@ import { apiListStuckCallAttempts, apiForceCompleteCallAttempt, ApiStuckCallAtte
  * from the server on every app launch), so without this there's no way
  * out for them short of someone editing the database directly. Renders
  * nothing when nobody's stuck — zero clutter on a normal day.
+ *
+ * Only popups open for SHOW_AFTER_MINUTES or more are listed: every call
+ * opens one, and an agent filling it in right after a call isn't stuck.
+ * Refreshes every minute, so finished popups drop off and newly stuck ones
+ * appear without a reload. (Settings → StuckCallsButton still lists all.)
  */
+const SHOW_AFTER_MINUTES = 10;
+const REFRESH_MS = 60_000;
+const minutesOpen = (createdAt: string) => Math.max(0, Math.round((Date.now() - new Date(createdAt).getTime()) / 60000));
 export default function StuckCallsPanel() {
   const { currentUser } = useApp();
   const { confirm, toast } = useDialog();
@@ -25,14 +33,17 @@ export default function StuckCallsPanel() {
 
   useEffect(() => {
     if (!canRescue) return;
-    apiListStuckCallAttempts().then(setRows).catch(() => {});
+    const load = () => apiListStuckCallAttempts().then(all => setRows(all.filter(r => minutesOpen(r.created_at) >= SHOW_AFTER_MINUTES))).catch(() => {});
+    load();
+    const timer = setInterval(load, REFRESH_MS);
+    return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canRescue]);
 
   if (!canRescue || rows.length === 0) return null;
 
   const timeStuck = (createdAt: string) => {
-    const minutes = Math.max(0, Math.round((Date.now() - new Date(createdAt).getTime()) / 60000));
+    const minutes = minutesOpen(createdAt);
     if (minutes < 60) return `${minutes}m`;
     return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
   };
@@ -40,7 +51,7 @@ export default function StuckCallsPanel() {
   const forceClose = async (row: ApiStuckCallAttempt) => {
     const ok = await confirm({
       title: "Force-close this call?",
-      message: `${row.caller_name} has been stuck on "${row.lead_name ?? "a lead"}" for ${timeStuck(row.created_at)}. This marks their call feedback as resolved so they can use the app again — only do this once you've confirmed with them it's a dead end, not a call they're still on.`,
+      message: `${row.caller_name} has been stuck on "${row.lead_name ?? "a lead"}" for ${timeStuck(row.created_at)}. This frees their app. The feedback stays pending on this lead, and they'll have to fill it before working on the lead again.`,
       confirmLabel: "Force Close",
       danger: true
     });
@@ -49,7 +60,7 @@ export default function StuckCallsPanel() {
     try {
       await apiForceCompleteCallAttempt(row.id);
       setRows(prev => prev.filter(r => r.id !== row.id));
-      toast(`Unstuck ${row.caller_name}.`, "success");
+      toast(`Freed ${row.caller_name}. The feedback is now pending on "${row.lead_name ?? "the lead"}".`, "success");
     } catch (err) {
       toast(err instanceof Error ? err.message : "Could not force-close this call.", "error");
     } finally {

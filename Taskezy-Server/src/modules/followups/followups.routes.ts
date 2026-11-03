@@ -12,6 +12,7 @@ import { getAssignedAgentId } from "../leads/leads.repository";
 import { canSeeMissedTaskCount } from "../leads/leads.handover";
 import { AccessTokenPayload } from "../../utils/tokens";
 import { IS_SITE_VISIT_FOLLOWUP_SQL } from "../reports/siteVisitSql";
+import { assertNoPendingFeedback } from "../call-attempts/feedbackLock";
 
 export const followupsRouter = Router();
 
@@ -215,7 +216,10 @@ followupsRouter.post(
   "/",
   validate({ body: createFollowupSchema }),
   asyncHandler(async (req, res) => {
-    if (req.body.leadId) await assertCanScheduleFor(req.user!, req.body.leadId);
+    if (req.body.leadId) {
+      await assertCanScheduleFor(req.user!, req.body.leadId);
+      await assertNoPendingFeedback(req.user!.sub, req.body.leadId);
+    }
     let insertedId: string;
     try {
       // Rescheduling a lead (RNR -> Call Back -> Followup, etc.) creates a

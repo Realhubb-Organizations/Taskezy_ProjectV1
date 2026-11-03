@@ -819,6 +819,11 @@ export async function precheckBulkImportLeads(leads: { name: string; phone: stri
   };
 }
 
+// Statuses that still have a next call (frontend leadScheduler.ts
+// SCHEDULER_REQUIRED_STATUSES) — a WhatsApp status change to one of these
+// keeps the lead's scheduled call.
+const STATUSES_THAT_KEEP_A_SCHEDULE: LeadStatusCode[] = ["RNR", "CALL_BACK", "FOLLOWUP", "EOI", "SITE_VISIT_SCHEDULED"];
+
 /** A lead's status can be changed by the agent it's assigned to, that agent's manager, or an admin. */
 async function assertStatusChangeAllowed(caller: AccessTokenPayload, assignedAgentId: string, action = "change its status"): Promise<void> {
   if (caller.role === "ADMIN" || assignedAgentId === caller.sub) return;
@@ -831,7 +836,8 @@ export async function updateLeadStatus(
   caller: AccessTokenPayload,
   leadId: string,
   statusCode: LeadStatusCode,
-  dealValue: number | undefined
+  dealValue: number | undefined,
+  keepSchedule = false
 ) {
   const scopedToAgentIds = await scopeForCaller(caller);
   const existing = await repo.findById(leadId, scopedToAgentIds);
@@ -853,10 +859,16 @@ export async function updateLeadStatus(
       // scheduler (jobs/followupScheduler.ts) checks for before escalating
       // a missed reminder to admins, so it needs to land in the same
       // transaction as the status change itself.
-      await client.query(
-        `UPDATE followup_calls SET status = 'COMPLETED' WHERE lead_id = $1 AND status = 'UPCOMING'`,
-        [leadId]
-      );
+      // A status change normally closes the lead's scheduled call (the
+      // status popups schedule a new one). After a WhatsApp message no new
+      // time is asked, so the scheduled call is kept — unless the new
+      // status ends the follow-ups (Not Interested, Booked, …).
+      if (!(keepSchedule && STATUSES_THAT_KEEP_A_SCHEDULE.includes(statusCode))) {
+        await client.query(
+          `UPDATE followup_calls SET status = 'COMPLETED' WHERE lead_id = $1 AND status = 'UPCOMING'`,
+          [leadId]
+        );
+      }
     });
   } catch (err) {
     // status_code references lead_statuses(code) — an unrecognized code

@@ -3,6 +3,7 @@ import { sendOk, sendPaginated } from "../../utils/apiResponse";
 import { ApiError } from "../../utils/ApiError";
 import { boss, BULK_IMPORT_LEADS_QUEUE, BULK_DELETE_LEADS_QUEUE, BULK_REASSIGN_LEADS_QUEUE, BULK_SET_PROPERTY_QUEUE } from "../../jobs/queue";
 import { leadForCaller } from "./leads.handover";
+import { assertNoPendingFeedback } from "../call-attempts/feedbackLock";
 import * as leadsService from "./leads.service";
 
 export async function listLeadsHandler(req: Request, res: Response): Promise<void> {
@@ -76,13 +77,15 @@ export async function createLeadHandler(req: Request, res: Response): Promise<vo
 }
 
 export async function updateLeadStatusHandler(req: Request, res: Response): Promise<void> {
-  const { statusCode, dealValue } = req.body;
-  const lead = await leadsService.updateLeadStatus(req.user!, req.params.id, statusCode, dealValue);
+  const { statusCode, dealValue, keepSchedule } = req.body;
+  await assertNoPendingFeedback(req.user!.sub, req.params.id);
+  const lead = await leadsService.updateLeadStatus(req.user!, req.params.id, statusCode, dealValue, keepSchedule);
   sendOk(res, leadForCaller(req.user!, lead));
 }
 
 export async function updateCallStatusHandler(req: Request, res: Response): Promise<void> {
   const { callStatus, callSubStatus, note } = req.body;
+  await assertNoPendingFeedback(req.user!.sub, req.params.id);
   const lead = await leadsService.updateCallStatus(req.user!, req.params.id, callStatus, callSubStatus, note);
   sendOk(res, leadForCaller(req.user!, lead));
 }
@@ -133,6 +136,7 @@ export async function reassignLeadHandler(req: Request, res: Response): Promise<
 }
 
 export async function updateLeadNoteHandler(req: Request, res: Response): Promise<void> {
+  await assertNoPendingFeedback(req.user!.sub, req.params.id);
   const lead = await leadsService.updateLeadNote(req.user!, req.params.id, req.body.note);
   sendOk(res, leadForCaller(req.user!, lead));
 }

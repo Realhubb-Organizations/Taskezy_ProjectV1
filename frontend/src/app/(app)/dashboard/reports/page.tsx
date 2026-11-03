@@ -9,6 +9,7 @@ import DateRangeFilter, { DateRange } from "@/components/reports/DateRangeFilter
 import MarketingReports from "@/components/reports/MarketingReports";
 import ManagerReports from "@/components/reports/ManagerReports";
 import TeamReports from "@/components/reports/TeamReports";
+import ReportDownloadHistory from "@/components/reports/ReportDownloadHistory";
 import { todayIso, toIsoDate } from "@/components/ui/DateRangePicker";
 import { apiUpdateMyEodReportTime } from "@/lib/apiClient";
 
@@ -120,6 +121,8 @@ function ReportsPageContent() {
         </div>
         <div className="flex flex-wrap items-center gap-3">
         {/* Shared date-range filter — every report is generated for this selected window */}
+        {/* Who downloaded which report (Admin only) */}
+        {isAdmin && <ReportDownloadHistory />}
         {/* Marketing and Team Reports have their own Date Range in their filter row */}
         {activeTab === "manager" && <DateRangeFilter value={dateRange} onChange={setDateRange} />}
         {/* End of Day report time — Admin sets the company-wide default,
