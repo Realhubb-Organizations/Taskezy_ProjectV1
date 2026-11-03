@@ -2416,6 +2416,9 @@ export interface TeamSiteVisitLead {
   rescheduleCount: number;
   siteVisitCount: number;
   missedCount: number;
+  /** Visits inside the report's date range that were missed / are still upcoming. */
+  rangeMissedCount: number;
+  rangeUpcomingCount: number;
   /** Every missed task for the lead (calls included). */
   allMissedCount: number;
   nextCallAt: string | null;

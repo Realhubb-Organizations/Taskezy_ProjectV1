@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ChevronDown, FileText, Home, Users } from "lucide-react";
 import ProjectReportTable, { type ProjectReportColumn } from "./ProjectReportTable";
+import ReportNumberLink from "./ReportNumberLink";
 import LeadDrillDownPanel from "@/components/crm/LeadDrillDownPanel";
 import { useApp } from "@/context/AppContext";
 import { DateRange } from "./DateRangeFilter";
@@ -50,34 +51,42 @@ const formatCpl = (spend: number, leads: number) =>
   leads > 0 ? `₹${(spend / leads).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—";
 const formatPercent = (part: number, whole: number) => (whole > 0 ? `${((part / whole) * 100).toFixed(1)}%` : "—");
 
+// Each count links to the leads behind it (Reports → detail page): `leads`
+// opens the project's leads in a status (undefined = all of them), `visits`
+// the project's leads with a site visit in the range.
+type LeadLink = (row: { propertyId: string | null; propertyName: string | null }, value: number, label: string, status?: string[]) => React.ReactNode;
+type VisitLink = (row: MarketingSiteVisitRow, value: number, label: string, match?: "missed" | "upcoming") => React.ReactNode;
+const UNQUALIFIED_CODES = ["DEAD_LEAD", "RNR", "NOT_INTERESTED"];
+
 // Project-wise Lead Report — usual columns first; `extra` ones start hidden.
-const LEAD_REPORT_COLUMNS: ProjectReportColumn<MarketingProjectRow>[] = [
+const leadReportColumns = (leads: LeadLink): ProjectReportColumn<MarketingProjectRow>[] => [
   { key: "spend", label: "Amount Spend", render: r => (r.spend > 0 ? formatCurrency(r.spend) : "—") },
-  { key: "total", label: "Grand Total", render: r => r.totalLeads },
+  { key: "total", label: "Grand Total", render: r => leads(r, r.totalLeads, "Leads") },
   { key: "cpl", label: "CPL", render: r => (r.spend > 0 ? formatCpl(r.spend, r.totalLeads) : "—") },
-  { key: "qualified", label: "Qualified", menuLabel: "Qualified Leads", render: r => r.qualified },
-  { key: "followups", label: "Followup", render: r => r.followUps },
+  { key: "qualified", label: "Qualified", menuLabel: "Qualified Leads", render: r => leads(r, r.qualified, "Qualified", QUALIFIED_CODES) },
+  { key: "followups", label: "Followup", render: r => leads(r, r.followUps, "Followup", ["FOLLOWUP"]) },
   { key: "workable", label: "Workable % (Q/G)", render: r => formatPercent(r.qualified, r.totalLeads) },
-  { key: "lowBudget", label: "Low Budget", extra: true, render: r => r.lowBudget },
-  { key: "otherReq", label: "Other Req.", extra: true, render: r => r.otherRequirement },
-  { key: "unqualified", label: "Unqualified", menuLabel: "Unqualified Leads", extra: true, render: r => r.unqualified },
-  { key: "rnr", label: "RNR", extra: true, render: r => r.rnr }
+  { key: "lowBudget", label: "Low Budget", extra: true, render: r => leads(r, r.lowBudget, "Low Budget", ["LOW_BUDGET"]) },
+  { key: "otherReq", label: "Other Req.", extra: true, render: r => leads(r, r.otherRequirement, "Other Requirement", ["OTHER_REQUIREMENT"]) },
+  { key: "unqualified", label: "Unqualified", menuLabel: "Unqualified Leads", extra: true, render: r => leads(r, r.unqualified, "Unqualified", UNQUALIFIED_CODES) },
+  { key: "rnr", label: "RNR", extra: true, render: r => leads(r, r.rnr, "RNR", ["RNR"]) }
 ];
 
 // Project-wise Site Visits Report. "Lead …" = leads, "SV …" = site-visit
-// appointments (see the server's /marketing-project-stats).
-const SITE_VISIT_COLUMNS: ProjectReportColumn<MarketingSiteVisitRow>[] = [
-  { key: "total", label: "Total Site Visits", render: r => r.totalSiteVisits },
-  { key: "leadScheduled", label: "Lead SV Scheduled", render: r => r.leadsScheduled },
-  { key: "svScheduled", label: "SV Scheduled", render: r => r.svScheduled },
-  { key: "completed", label: "SV Completed L", menuLabel: "SV Completed Leads", render: r => r.leadsCompleted },
-  { key: "leadMissed", label: "Lead SV Missed", render: r => r.leadsMissed },
-  { key: "svMissed", label: "SV Missed", render: r => r.svMissed },
-  { key: "booked", label: "Booked", render: r => r.booked },
+// appointments (see the server's /marketing-project-stats); an SV count
+// opens the leads those visits belong to.
+const siteVisitColumns = (leads: LeadLink, visits: VisitLink): ProjectReportColumn<MarketingSiteVisitRow>[] => [
+  { key: "total", label: "Total Site Visits", render: r => visits(r, r.totalSiteVisits, "Site Visits") },
+  { key: "leadScheduled", label: "Lead SV Scheduled", render: r => visits(r, r.leadsScheduled, "Lead SV Scheduled") },
+  { key: "svScheduled", label: "SV Scheduled", render: r => visits(r, r.svScheduled, "SV Scheduled", "upcoming") },
+  { key: "completed", label: "SV Completed L", menuLabel: "SV Completed Leads", render: r => leads(r, r.leadsCompleted, "SV Completed", ["SITE_VISIT_DONE"]) },
+  { key: "leadMissed", label: "Lead SV Missed", render: r => visits(r, r.leadsMissed, "Lead SV Missed", "missed") },
+  { key: "svMissed", label: "SV Missed", render: r => visits(r, r.svMissed, "SV Missed", "missed") },
+  { key: "booked", label: "Booked", render: r => leads(r, r.booked, "Booked", ["BOOKED"]) },
   // Qualified → site visit, same formula as Leads Analytics' QL→SV %.
   { key: "q2sv", label: "Q2SV %age", render: r => formatPercent(r.siteVisitLeads, r.qualified) },
-  { key: "qualified", label: "Qualified Leads", extra: true, render: r => r.qualified },
-  { key: "unqualified", label: "Unqualified Leads", extra: true, render: r => r.unqualified }
+  { key: "qualified", label: "Qualified Leads", extra: true, render: r => leads(r, r.qualified, "Qualified", QUALIFIED_CODES) },
+  { key: "unqualified", label: "Unqualified Leads", extra: true, render: r => leads(r, r.unqualified, "Unqualified", UNQUALIFIED_CODES) }
 ];
 
 export default function MarketingReports({ dateRange, onDateRangeChange }: { dateRange: DateRange; onDateRangeChange: (range: DateRange) => void }) {
@@ -181,6 +190,30 @@ export default function MarketingReports({ dateRange, onDateRangeChange }: { dat
     excludeBulkUpload: filters.source ? undefined : true,
     status: selected?.status
   };
+
+  // A project row's count → its leads, under the same filters as the count.
+  const projectOf = (row: { propertyId: string | null }) =>
+    row.propertyId ? { propertyId: [row.propertyId], noProperty: undefined } : { propertyId: undefined, noProperty: true };
+  const projectName = (row: { propertyName: string | null }) => row.propertyName ?? NOT_SET;
+  const leadLink: LeadLink = (row, value, label, status) => (
+    <ReportNumberLink
+      tab="marketing"
+      value={value}
+      detail={{ view: "leads", title: `${projectName(row)} · ${label}`, filters: { ...drillFilters, ...projectOf(row), status } }}
+    />
+  );
+  const visitLink: VisitLink = (row, value, label, match) => (
+    <ReportNumberLink
+      tab="marketing"
+      value={value}
+      detail={{
+        view: "site-visits",
+        title: `${projectName(row)} · ${label}`,
+        match,
+        filters: { mode: "LEADS", dateFrom: filters.dateFrom, dateTo: filters.dateTo, campaign: filters.campaign, assignedAgentId: filters.assignedAgentId, source: filters.source, ...projectOf(row) }
+      }}
+    />
+  );
 
   const { pageRows: campaignPageRows, paginationProps: campaignPaginationProps } = usePagination(stats.activeCampaignList, 10, filtersKey);
 
@@ -319,7 +352,7 @@ export default function MarketingReports({ dateRange, onDateRangeChange }: { dat
       <ProjectReportTable
         title="Project-wise Lead Report"
         projectLabel="Project"
-        columns={LEAD_REPORT_COLUMNS}
+        columns={leadReportColumns(leadLink)}
         rows={stats.byProject}
         loading={loading}
         resetKey={filtersKey}
@@ -329,7 +362,7 @@ export default function MarketingReports({ dateRange, onDateRangeChange }: { dat
       <ProjectReportTable
         title="Project-wise Site Visits Report"
         projectLabel="Project Name"
-        columns={SITE_VISIT_COLUMNS}
+        columns={siteVisitColumns(leadLink, visitLink)}
         rows={stats.siteVisitsByProject}
         loading={loading}
         resetKey={filtersKey}

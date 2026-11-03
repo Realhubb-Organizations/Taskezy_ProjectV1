@@ -1,6 +1,6 @@
 "use client";
 
-import React, { Suspense, useState } from "react";
+import React, { Suspense, useEffect, useRef, useState } from "react";
 import { useApp } from "@/context/AppContext";
 import { useDialog } from "@/components/ui/DialogProvider";
 import { useSearchParams, useRouter } from "next/navigation";
@@ -9,6 +9,8 @@ import DateRangeFilter, { DateRange } from "@/components/reports/DateRangeFilter
 import MarketingReports from "@/components/reports/MarketingReports";
 import ManagerReports from "@/components/reports/ManagerReports";
 import TeamReports from "@/components/reports/TeamReports";
+import ReportDetailView from "@/components/reports/ReportDetailView";
+import { parseReportDetail, savedReportScrollTop } from "@/lib/reportDetail";
 import ReportDownloadHistory from "@/components/reports/ReportDownloadHistory";
 import { todayIso, toIsoDate } from "@/components/ui/DateRangePicker";
 import { apiUpdateMyEodReportTime } from "@/lib/apiClient";
@@ -58,6 +60,25 @@ function ReportsPageContent() {
     router.push(`/dashboard/reports?tab=${tabKey}`);
   };
 
+  // A number was clicked: its detail page (?detail=…) shows in place of the
+  // report. The report stays mounted (just hidden), so Back returns to it
+  // with its filters intact, at the same scroll position.
+  const detail = parseReportDetail(searchParams.get("detail"));
+  const detailOpen = !!detail;
+  const wasDetailOpen = useRef(false);
+  useEffect(() => {
+    const main = document.querySelector("main");
+    if (main) {
+      if (detailOpen && !wasDetailOpen.current) main.scrollTop = 0;
+      if (!detailOpen && wasDetailOpen.current) main.scrollTop = savedReportScrollTop();
+    }
+    wasDetailOpen.current = detailOpen;
+  }, [detailOpen]);
+  const closeDetail = () => {
+    if (window.history.length > 1) router.back();
+    else router.replace(`/dashboard/reports?tab=${activeTab}`);
+  };
+
   // Admin's company-wide default EOD report time (Sales Agent Reports tab) —
   // bound to tenantSettings, same read/save pattern as every other
   // tenant-settings field elsewhere in the app.
@@ -101,6 +122,8 @@ function ReportsPageContent() {
 
   return (
     <div className="space-y-4 pb-12 animate-fade-in">
+      {detail && <ReportDetailView key={searchParams.get("detail") ?? ""} detail={detail} onBack={closeDetail} />}
+      <div hidden={detailOpen} className="space-y-4">
       {/* Main section tabs — plain text tabs, the active one underlined
           (the top bar already shows "Reports"). */}
       {/* The tabs stay pinned at the top (Marketing and Team Reports pin their
@@ -196,6 +219,7 @@ function ReportsPageContent() {
           {activeTab === "agent" && <TeamReports dateRange={dateRange} onDateRangeChange={setDateRange} initialAgentId={initialAgentId} />}
         </>
       )}
+      </div>
     </div>
   );
 }
