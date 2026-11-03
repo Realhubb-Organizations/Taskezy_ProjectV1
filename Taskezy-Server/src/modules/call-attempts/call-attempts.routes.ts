@@ -9,6 +9,9 @@ import { pool, query, withTransaction } from "../../db/pool";
 import { insertLeadLog } from "../leads/leads.repository";
 import * as usersRepo from "../users/users.repository";
 import { boss, SCHEDULE_FOLLOWUP_QUEUE } from "../../jobs/queue";
+import { processScheduleFollowup, ScheduleFollowupJobData } from "../../jobs/scheduleFollowupJob";
+import { logger } from "../../utils/logger";
+import { assertNoScheduleConflict } from "../followups/scheduleConflict";
 import { publishToUser } from "../../utils/sseHub";
 import { FEEDBACK_PENDING_LOG_PREFIX, FEEDBACK_PENDING_OUTCOME, FEEDBACK_REOPENED_OUTCOME, findHeldAttempt, isHeldSql } from "./feedbackLock";
 
@@ -184,6 +187,14 @@ callAttemptsRouter.patch(
       return;
     }
 
+    // Each lead needs its own time slot: refuse a next-call time that clashes
+    // with another lead's call for the same salesperson BEFORE anything is
+    // saved, so the popup stays open to pick another time.
+    if (req.body.scheduledAt) {
+      const { rows: owner } = await pool.query<{ assigned_agent_id: string }>(`SELECT assigned_agent_id FROM leads WHERE id = $1`, [found[0].lead_id]);
+      if (owner[0]) await assertNoScheduleConflict(owner[0].assigned_agent_id, new Date(req.body.scheduledAt), found[0].lead_id);
+    }
+
     await withTransaction(async (client) => {
       await client.query(
         `UPDATE call_attempts SET status = 'COMPLETED', outcome = $1, notes = $2 WHERE id = $3`,
@@ -220,7 +231,7 @@ callAttemptsRouter.patch(
         // picked (or kept): a lead in Site Visit Scheduled gets a site visit,
         // not a callback — otherwise the visit never shows in the reports.
         const isSiteVisit = leadRows[0].status_code === "SITE_VISIT_SCHEDULED";
-        await boss.send(SCHEDULE_FOLLOWUP_QUEUE, {
+        const schedule: ScheduleFollowupJobData = {
           leadId: found[0].lead_id,
           leadName: leadRows[0].name,
           phone: leadRows[0].phone,
@@ -228,7 +239,19 @@ callAttemptsRouter.patch(
           scheduledAt: req.body.scheduledAt,
           callType: isSiteVisit ? "SITE_VISIT" : "CALLBACK",
           rescheduleReason: isSiteVisit ? req.body.rescheduleReason || undefined : undefined
-        });
+        };
+        // Created right away, before answering, so the lead's next task is
+        // at the picked time the moment the popup closes. It used to be
+        // queued: until the job ran the lead counted as due at its last
+        // activity (the call itself, e.g. 3:53 PM), and a screen that had
+        // already refreshed kept that task — Pending, then Missed. The queue
+        // is now only the fallback if creating it here fails.
+        try {
+          await processScheduleFollowup(schedule);
+        } catch (err) {
+          logger.warn({ err, leadId: schedule.leadId }, "Scheduling the next call failed — queued instead");
+          await boss.send(SCHEDULE_FOLLOWUP_QUEUE, schedule);
+        }
       }
     }
 

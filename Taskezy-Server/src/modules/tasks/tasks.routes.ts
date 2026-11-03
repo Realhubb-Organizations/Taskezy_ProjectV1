@@ -155,17 +155,11 @@ tasksRouter.get(
          -- (Pending/Missed). It's a task again once it has a scheduled call
          -- or any other activity.
          AND (ll.message IS NULL OR ll.message NOT LIKE 'WhatsApp message outcome:%')
-         -- A lead is only "already covered" by an open follow-up if that
-         -- follow-up would actually become a task below (same acted-since
-         -- rule as the follow-up query) — one the agent has already acted
-         -- on since it fell due is excluded from the result entirely
-         -- (per-call loop below), so it must NOT also suppress this lead's
-         -- own current-status task, or the lead would silently vanish from
-         -- the queue instead of correctly falling back to this branch.
+         -- A lead with an open follow-up is covered by that follow-up's own
+         -- task (above), whatever its time.
          AND NOT EXISTS (
            SELECT 1 FROM followup_calls fc2
            WHERE fc2.lead_id = l.id AND fc2.status != 'COMPLETED'
-             AND NOT (fc2.scheduled_at <= now() AND ll.created_at IS NOT NULL AND ll.created_at >= fc2.scheduled_at)
          )
          ${leadScopeClause}`,
       leadParams
@@ -177,12 +171,13 @@ tasksRouter.get(
 
     for (const r of followupRows) {
       const dueAt = r.scheduled_at;
-      // Any lead activity logged at/after the task fell due counts as the
-      // agent having acted on it — the latest log's own timestamp is
-      // enough to decide this (if the single most recent log is before
-      // dueAt, no log can be at/after it either).
-      const actedSince = !!(r.lead_id && r.latest_log_at && dueAt && new Date(r.latest_log_at).getTime() >= new Date(dueAt).getTime());
-      if (dueAt && new Date(dueAt).getTime() <= Date.now() && actedSince) continue;
+      // Every open follow-up is a task: Upcoming before its time, then
+      // Pending, then Missed — until it's rescheduled or closed (a new
+      // schedule, a status change or a WhatsApp message closes it). The same
+      // rule the Leads page's Next Call Date uses for "OVERDUE"
+      // (frontend lib/followups.ts nextFollowupFor). Any lead activity after
+      // the due time used to hide it here, so a lead could show OVERDUE there
+      // yet be in neither Pending nor Missed.
 
       tasks.push({
         id: `fc-${r.id}`,

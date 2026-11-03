@@ -494,13 +494,14 @@ export async function getMissedFollowupCount(
     params.push(scopedToAgentIds);
     conditions.push(`fc.assigned_to_id = ANY($${params.length}::uuid[])`);
   }
+  // Whole business (IST) days, same as the follow-ups list.
   if (dateFrom) {
-    params.push(dateFrom);
-    conditions.push(`fc.scheduled_at >= $${params.length}::date`);
+    params.push(dateFrom, BUSINESS_TIMEZONE);
+    conditions.push(`fc.scheduled_at >= ($${params.length - 1}::date::timestamp AT TIME ZONE $${params.length})`);
   }
   if (dateTo) {
-    params.push(dateTo);
-    conditions.push(`fc.scheduled_at < ($${params.length}::date + 1)`);
+    params.push(dateTo, BUSINESS_TIMEZONE);
+    conditions.push(`fc.scheduled_at < (($${params.length - 1}::date + 1)::timestamp AT TIME ZONE $${params.length})`);
   }
   const { rows } = await query<{ count: string }>(
     `SELECT count(*) FROM followup_calls fc WHERE ${conditions.join(" AND ")}`,
@@ -549,13 +550,14 @@ export async function getManagerReportStatsByAgent(
     followupScopeClause = `AND fc.assigned_to_id = ANY($${params.length}::uuid[])`;
   }
   let followupDateClause = "";
+  // Whole business (IST) days, same as the follow-ups list.
   if (filter.dateFrom) {
-    params.push(filter.dateFrom);
-    followupDateClause += ` AND fc.scheduled_at >= $${params.length}::date`;
+    params.push(filter.dateFrom, BUSINESS_TIMEZONE);
+    followupDateClause += ` AND fc.scheduled_at >= ($${params.length - 1}::date::timestamp AT TIME ZONE $${params.length})`;
   }
   if (filter.dateTo) {
-    params.push(filter.dateTo);
-    followupDateClause += ` AND fc.scheduled_at < ($${params.length}::date + 1)`;
+    params.push(filter.dateTo, BUSINESS_TIMEZONE);
+    followupDateClause += ` AND fc.scheduled_at < (($${params.length - 1}::date + 1)::timestamp AT TIME ZONE $${params.length})`;
   }
 
   const { rows } = await query<ManagerReportRow>(

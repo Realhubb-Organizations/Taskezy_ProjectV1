@@ -63,7 +63,10 @@ export async function findAgentScheduleConflict(
   excludeLeadId?: string
 ): Promise<AgentScheduleConflict | null> {
   const newTime = new Date(newScheduledAtIso).getTime();
-  const dayIso = newScheduledAtIso.slice(0, 10);
+  // The picked time's own calendar day here (IST), not the UTC date in the
+  // ISO string — a call before 05:30 IST would otherwise check the day before.
+  const picked = new Date(newScheduledAtIso);
+  const dayIso = `${picked.getFullYear()}-${String(picked.getMonth() + 1).padStart(2, "0")}-${String(picked.getDate()).padStart(2, "0")}`;
   const { rows } = await apiListFollowupsPage(1, 100, {
     assignedToId: [agentId],
     status: ["UPCOMING"],

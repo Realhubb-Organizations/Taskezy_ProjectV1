@@ -2340,7 +2340,7 @@ export interface CallLogPageResult {
 export async function apiListCallLogPage(
   page: number,
   pageSize: number,
-  filters: { dateFrom?: string; dateTo?: string; sortDir?: "asc" | "desc" } = {}
+  filters: { dateFrom?: string; dateTo?: string; sortDir?: "asc" | "desc"; userId?: string[] } = {}
 ): Promise<CallLogPageResult> {
   const params = new URLSearchParams();
   params.set("page", String(page));
@@ -2348,6 +2348,7 @@ export async function apiListCallLogPage(
   if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
   if (filters.dateTo) params.set("dateTo", filters.dateTo);
   if (filters.sortDir) params.set("sortDir", filters.sortDir);
+  filters.userId?.forEach(id => params.append("userId", id));
   const { data, meta } = await requestWithMeta<ApiCallLogRow>(`/api/v1/call-log?${params.toString()}`);
   return {
     rows: data,

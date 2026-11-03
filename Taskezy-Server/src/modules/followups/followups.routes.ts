@@ -11,6 +11,8 @@ import { findDirectReportIds, findById as findUserById } from "../users/users.re
 import { getAssignedAgentId } from "../leads/leads.repository";
 import { canSeeMissedTaskCount } from "../leads/leads.handover";
 import { AccessTokenPayload } from "../../utils/tokens";
+import { assertNoScheduleConflict } from "./scheduleConflict";
+import { BUSINESS_TIMEZONE } from "../../utils/businessDate";
 import { IS_SITE_VISIT_FOLLOWUP_SQL } from "../reports/siteVisitSql";
 import { assertNoPendingFeedback } from "../call-attempts/feedbackLock";
 
@@ -87,10 +89,9 @@ const listFollowupsQuerySchema = z.object({
   // below, same AND-only boundary as every other scoped endpoint, so this
   // can never widen what the caller is actually allowed to see.
   assignedToId: uuidToArray,
-  // Same plain-date-string bounds getMissedFollowupCount already uses on
-  // this same column (no BUSINESS_TIMEZONE conversion, unlike leads'
-  // created_at) — kept identical on purpose, so a row-level fetch here can
-  // never disagree with that count for the same date range.
+  // Whole business (IST) days, the same bounds getMissedFollowupCount uses
+  // on this column — kept identical on purpose, so a row-level fetch here
+  // can never disagree with that count for the same date range.
   dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateFrom must be YYYY-MM-DD").optional(),
   dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateTo must be YYYY-MM-DD").optional()
 });
@@ -125,13 +126,15 @@ followupsRouter.get(
       params.push(assignedToId);
       conditions.push(`fc.assigned_to_id = ANY($${params.length}::uuid[])`);
     }
+    // Whole business (IST) days — a bare ::date here is midnight UTC, which
+    // put calls between 00:00 and 05:30 IST on the previous day.
     if (dateFrom) {
-      params.push(dateFrom);
-      conditions.push(`fc.scheduled_at >= $${params.length}::date`);
+      params.push(dateFrom, BUSINESS_TIMEZONE);
+      conditions.push(`fc.scheduled_at >= ($${params.length - 1}::date::timestamp AT TIME ZONE $${params.length})`);
     }
     if (dateTo) {
-      params.push(dateTo);
-      conditions.push(`fc.scheduled_at < ($${params.length}::date + 1)`);
+      params.push(dateTo, BUSINESS_TIMEZONE);
+      conditions.push(`fc.scheduled_at < (($${params.length - 1}::date + 1)::timestamp AT TIME ZONE $${params.length})`);
     }
     if (status && status.length > 0) {
       if (status.length === 1) {
@@ -220,6 +223,9 @@ followupsRouter.post(
       await assertCanScheduleFor(req.user!, req.body.leadId);
       await assertNoPendingFeedback(req.user!.sub, req.body.leadId);
     }
+    // Each lead needs its own time slot (new and rescheduled calls alike).
+    const at = new Date(req.body.scheduledAt);
+    if (!isNaN(at.getTime())) await assertNoScheduleConflict(req.body.assignedToId, at, req.body.leadId ?? null);
     let insertedId: string;
     try {
       // Rescheduling a lead (RNR -> Call Back -> Followup, etc.) creates a

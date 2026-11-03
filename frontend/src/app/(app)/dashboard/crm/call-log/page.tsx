@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "@/context/AppContext";
 import { apiListCallLogPage, ApiCallLogRow } from "@/lib/apiClient";
 import { syncDeviceCallLog } from "@/lib/callLogSync";
@@ -12,6 +12,8 @@ import DateRangePicker, { DateRangeValue } from "@/components/ui/DateRangePicker
 import { DateTimeLines, dateTimeParts } from "@/components/ui/DateTimeLines";
 import { DateSortButton, type SortDir } from "@/components/ui/DateSortButton";
 import { useLiveRefresh } from "@/lib/useLiveRefresh";
+import { SearchableMultiSelect } from "@/components/ui/SearchableDropdown";
+import { isLeadAssignableUser } from "@/lib/leadAssignment";
 
 const ROWS_PER_PAGE = 25;
 
@@ -39,7 +41,7 @@ function formatDuration(seconds: number, callType: string): string {
 }
 
 export default function CallLogPage() {
-  const { currentUser, activeRole, manualRefreshSignal } = useApp();
+  const { currentUser, activeRole, manualRefreshSignal, users } = useApp();
   const isAdmin = activeRole === "ADMIN";
   // Member only ever sees their own rows anyway (server-scoped) — an Agent
   // column that's always just their own name is noise, so it's Admin/
@@ -52,6 +54,16 @@ export default function CallLogPage() {
   const [sortDir, setSortDir] = useState<SortDir | undefined>(undefined);
   const [totalCount, setTotalCount] = useState(0);
   const [dateRange, setDateRange] = useState<DateRangeValue | null>(null);
+  // Agent filter (Admin: every salesperson; Manager: themselves + their team).
+  // The server narrows it to the caller's own scope either way.
+  const [agentFilter, setAgentFilter] = useState<string[]>([]);
+  const agentOptions = useMemo(() => {
+    const pool = isAdmin
+      ? users.filter(isLeadAssignableUser)
+      : users.filter(u => u.id === currentUser?.id || u.managerId === currentUser?.id);
+    return pool.map(u => ({ value: u.id, label: u.name })).sort((a, b) => a.label.localeCompare(b.label));
+  }, [users, isAdmin, currentUser?.id]);
+  const agentKey = agentFilter.join(",");
   const [loading, setLoading] = useState(true);
   // Distinct from "0 rows" — a failed fetch must never look like a
   // genuinely-empty call log. Same pattern as properties page's propertiesLoadError.
@@ -78,7 +90,12 @@ export default function CallLogPage() {
       if (!background) setLoading(true);
       setCallLogLoadError(false);
       try {
-        const res = await apiListCallLogPage(page, ROWS_PER_PAGE, { dateFrom: dateRange?.start, dateTo: dateRange?.end, sortDir });
+        const res = await apiListCallLogPage(page, ROWS_PER_PAGE, {
+          dateFrom: dateRange?.start,
+          dateTo: dateRange?.end,
+          sortDir,
+          userId: agentFilter.length > 0 ? agentFilter : undefined
+        });
         if (!active) return;
         setRows(res.rows);
         setTotalCount(res.totalCount);
@@ -94,7 +111,9 @@ export default function CallLogPage() {
       }
     })();
     return () => { active = false; };
-  }, [page, dateRange, sortDir, manualRefreshSignal, callLogRefreshNonce, callLogLive.liveVersion]);
+    // agentKey stands for agentFilter
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, dateRange, sortDir, agentKey, manualRefreshSignal, callLogRefreshNonce, callLogLive.liveVersion]);
 
   const colCount = 5 + (showAgentColumn ? 1 : 0);
 
@@ -114,7 +133,21 @@ export default function CallLogPage() {
             <thead>
               <tr className="border-b border-slate-100 text-left text-[11px] uppercase tracking-wide text-slate-400">
                 <th className="px-5 py-3 font-bold"><DateSortButton dir={sortDir} onChange={(d) => { setSortDir(d); setPage(1); }} /></th>
-                {showAgentColumn && <th className="px-5 py-3 font-bold">Agent</th>}
+                {showAgentColumn && (
+                  <th className="px-5 py-3 font-bold">
+                    {/* Agent filter: pick one or more agents (Admin: every salesperson; Manager: self + team) */}
+                    <SearchableMultiSelect
+                      variant="inline"
+                      label="Agent"
+                      options={agentOptions}
+                      selected={agentFilter}
+                      onChange={(next) => { setAgentFilter(next); setPage(1); }}
+                      searchPlaceholder="Search agents..."
+                      panelWidth={208}
+                      className="uppercase tracking-wide"
+                    />
+                  </th>
+                )}
                 <th className="px-5 py-3 font-bold">Phone Number</th>
                 <th className="px-5 py-3 font-bold">Lead</th>
                 <th className="px-5 py-3 font-bold">Type</th>

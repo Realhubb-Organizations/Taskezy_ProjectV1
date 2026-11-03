@@ -1366,10 +1366,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (!(err instanceof ApiRequestError && (err.status === 404 || /already submitted/i.test(err.message)))) throw err;
     }
     setPendingCallAttempt(null);
-    // The status/note are already saved; with a next call, wait for the
-    // background job to create it, otherwise refresh this user's tasks now.
-    if (scheduledAt) expectOwnFollowup();
-    else refreshOwnTasksSoon();
+    // The status, note and next call are all saved by now (the server creates
+    // the next call before answering) — reload this user's tasks straight away.
+    refreshPendingTasksNow();
   };
 
   // On mount: if a token survived a page refresh, restore the session and
@@ -1554,22 +1553,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return next;
       });
       if (batch.includes("leads")) setLeadsChangedSignal((s) => s + 1);
-      if (batch.includes("followups") && awaitingOwnFollowupRef.current) {
-        awaitingOwnFollowupRef.current = false;
-        refreshPendingTasksNow();
-      }
     }, LIVE_REFRESH_DELAY_MS);
   };
   const bumpTopicsRef = useRef(bumpTopics);
   bumpTopicsRef.current = bumpTopics;
 
-  // Call feedback saved with a next call: the follow-up itself is created a
-  // moment later by a background job (scheduleFollowupJob.ts). Until it
-  // exists the lead counts as due *now*, so this user's Pending Tasks would
-  // show it as Pending (yellow). Reload them as soon as the job's
-  // "followups" update arrives — or after 8s if it never does — instead of
-  // waiting out the usual 30s cap below.
-  const awaitingOwnFollowupRef = useRef(false);
   const refreshPendingTasksNow = () => {
     apiGetPendingTasks().then(setPendingTasks).catch(() => { /* keep the previous tasks */ });
   };
@@ -1584,14 +1572,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ownTasksTimerRef.current = null;
       refreshPendingTasksNow();
     }, 1500);
-  };
-  const expectOwnFollowup = () => {
-    awaitingOwnFollowupRef.current = true;
-    setTimeout(() => {
-      if (!awaitingOwnFollowupRef.current) return;
-      awaitingOwnFollowupRef.current = false;
-      refreshPendingTasksNow();
-    }, 8000);
   };
 
   // Shared lists held here refresh on their own areas' changes, capped so a
