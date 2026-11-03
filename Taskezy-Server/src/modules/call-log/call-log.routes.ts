@@ -8,6 +8,7 @@ import { pool, query } from "../../db/pool";
 import { normalizeLeadPhone } from "../leads/leads.repository";
 import * as usersRepo from "../users/users.repository";
 import { AccessTokenPayload } from "../../utils/tokens";
+import { BUSINESS_TIMEZONE } from "../../utils/businessDate";
 
 export const callLogRouter = Router();
 
@@ -116,10 +117,15 @@ callLogRouter.post(
 const listCallLogQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().positive().max(100).default(25),
-  dateFrom: z.string().optional(),
-  dateTo: z.string().optional(),
+  // Calendar days (YYYY-MM-DD) in the business time zone, both inclusive.
+  dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateFrom must be YYYY-MM-DD").optional(),
+  dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateTo must be YYYY-MM-DD").optional(),
   // Date column sort; left out = newest first.
-  sortDir: z.enum(["asc", "desc"]).optional()
+  sortDir: z.enum(["asc", "desc"]).optional(),
+  // Agent filter (Admin/Manager) — always narrowed to the caller's own scope below.
+  userId: z.union([z.string().uuid(), z.array(z.string().uuid())])
+    .optional()
+    .transform(v => v === undefined ? undefined : (Array.isArray(v) ? v : [v]))
 });
 
 // leads.phone is already stored normalized to a bare 10-digit mobile or a
@@ -153,12 +159,13 @@ callLogRouter.get(
   "/",
   validate({ query: listCallLogQuerySchema }),
   asyncHandler(async (req, res) => {
-    const { page, pageSize, dateFrom, dateTo, sortDir } = req.query as unknown as {
+    const { page, pageSize, dateFrom, dateTo, sortDir, userId } = req.query as unknown as {
       page: number;
       pageSize: number;
       dateFrom?: string;
       dateTo?: string;
       sortDir?: "asc" | "desc";
+      userId?: string[];
     };
 
     const scopedUserIds = await scopedUserIdsForCaller(req.user!);
@@ -169,13 +176,20 @@ callLogRouter.get(
       params.push(scopedUserIds);
       conditions.push(`dcl.user_id = ANY($${params.length}::uuid[])`);
     }
+    if (userId && userId.length > 0) {
+      params.push(userId);
+      conditions.push(`dcl.user_id = ANY($${params.length}::uuid[])`);
+    }
+    // Whole business days: the dates were compared as midnight UTC before, so
+    // the end day was left out entirely (picking one day showed nothing) and
+    // every day was shifted by the IST offset.
     if (dateFrom) {
-      params.push(dateFrom);
-      conditions.push(`dcl.call_date >= $${params.length}::timestamptz`);
+      params.push(dateFrom, BUSINESS_TIMEZONE);
+      conditions.push(`(dcl.call_date AT TIME ZONE $${params.length})::date >= $${params.length - 1}::date`);
     }
     if (dateTo) {
-      params.push(dateTo);
-      conditions.push(`dcl.call_date <= $${params.length}::timestamptz`);
+      params.push(dateTo, BUSINESS_TIMEZONE);
+      conditions.push(`(dcl.call_date AT TIME ZONE $${params.length})::date <= $${params.length - 1}::date`);
     }
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
