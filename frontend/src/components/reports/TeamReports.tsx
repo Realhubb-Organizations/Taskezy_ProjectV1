@@ -17,7 +17,9 @@ import { useLiveRefresh } from "@/lib/useLiveRefresh";
 import { isLeadAssignableUser } from "@/lib/leadAssignment";
 import { dbCodeToFrontendStatus } from "@/lib/leadStatusMapping";
 import { maskPhone } from "@/lib/maskPII";
-import { downloadCsv } from "@/lib/csv";
+import { downloadReportCsv } from "@/lib/csv";
+import { useDialog } from "@/components/ui/DialogProvider";
+import type { ReportExportFilters } from "@/lib/apiClient";
 import {
   apiGetDistinctCampaigns,
   apiGetTeamReport,
@@ -307,6 +309,7 @@ export default function TeamReports({ dateRange, onDateRangeChange, initialAgent
   initialAgentId?: string;
 }) {
   const { properties, users, currentUser, activeRole } = useApp();
+  const { toast } = useDialog();
   const isAdmin = activeRole === "ADMIN";
   const isManager = !isAdmin && currentUser?.role_type === "Manager";
 
@@ -454,6 +457,21 @@ export default function TeamReports({ dateRange, onDateRangeChange, initialAgent
     ? <SubSourceBand options={subSourceOptions} selected={subSourceFilter} onChange={setSubSourceFilter} />
     : undefined;
   const fileTag = `${dateRange.from}_to_${dateRange.to}`;
+  // The filters a download was made with, as people read them — saved with
+  // the download record (Reports → Download History).
+  const nameOf = (id: string) => users.find(u => u.id === id)?.name ?? id;
+  const exportFilters: ReportExportFilters = {
+    View: dataCalling ? "Data Calling" : "Leads",
+    "Date Range": `${dateRange.from} to ${dateRange.to}`,
+    ...(campaignFilter.length > 0 && !dataCalling ? { Campaigns: campaignFilter } : {}),
+    ...(propertyFilter.length > 0 ? { Property: propertyFilter } : {}),
+    ...(teamFilter.length > 0 ? { Team: teamFilter.map(id => `${nameOf(id)}'s team`) } : {}),
+    ...(!dataCalling && sourceFilter.length > 0 ? { Source: sourceFilter } : {}),
+    ...(dataCalling && subSourceFilter.length > 0 ? { "Sub-Source": subSourceFilter } : {}),
+    ...(salespersonFilter.length > 0 ? { Salesperson: salespersonFilter.map(nameOf) } : {})
+  };
+  const runDownload = (job: () => Promise<void>) =>
+    job().catch(() => toast("Couldn't start the download. Please try again.", "error"));
 
   // ---- Salesperson Leads Report ----
   const salesColumns: { label: string; value: (r: TeamReportSalespersonRow) => number }[] = dataCalling
@@ -474,11 +492,13 @@ export default function TeamReports({ dateRange, onDateRangeChange, initialAgent
       { label: "Missed Tasks", value: r => r.missedTasks }
     ];
   const { pageRows: salesRows, paginationProps: salesPagination } = usePagination(report.salespeople, 100, filtersKey);
-  const downloadSalespeople = () => downloadCsv(
+  const downloadSalespeople = () => runDownload(() => downloadReportCsv(
+    "Team Reports · Salesperson Leads Report",
+    exportFilters,
     `salesperson-${dataCalling ? "data-calling" : "leads"}-report_${fileTag}.csv`,
     ["Salesperson Name", ...salesColumns.map(c => c.label)],
     report.salespeople.map(r => [r.name, ...salesColumns.map(c => c.value(r))])
-  );
+  ));
 
   // ---- Salesperson Site Visit Report ----
   const svKpis = report.siteVisits.kpis;
@@ -525,14 +545,16 @@ export default function TeamReports({ dateRange, onDateRangeChange, initialAgent
     { key: "missedTasks", label: "SV Missed Tasks", extra: true, render: r => r.allMissedCount },
     { key: "nextCall", label: "Next Call Date", extra: true, render: r => formatDateTime(r.nextCallAt) }
   ];
-  const downloadSiteVisits = () => downloadCsv(
+  const downloadSiteVisits = () => runDownload(() => downloadReportCsv(
+    "Team Reports · Salesperson Site Visit Report",
+    exportFilters,
     `salesperson-site-visit-report_${fileTag}.csv`,
     ["Lead Name", "Phone", "Salesperson", "SV Schedule Date", "SV Done Date", "SV Reschedule Date", "Reschedule Reason", "SV Missed", "Reschedule Count", "Q2SV %age", "SV Missed Tasks", "Next Call Date"],
     svRows.map(r => [
       r.name, maskPhone(r.phone), r.salesperson ?? "", formatDate(r.scheduledAt), r.doneAt ? formatDate(r.doneAt) : r.done ? "Done" : "-",
       formatDate(r.rescheduledAt), r.rescheduleReason ?? "-", r.missedCount, r.rescheduleCount, q2svOf(r), r.allMissedCount, formatDateTime(r.nextCallAt)
     ])
-  );
+  ));
 
   const siteVisitReport = (
     <ProjectReportTable
@@ -766,7 +788,7 @@ export default function TeamReports({ dateRange, onDateRangeChange, initialAgent
       ) : (
         <>
           {siteVisitReport}
-          <MissedTaskReport filters={filters} baseDrill={baseDrill} refreshKey={liveVersion} />
+          <MissedTaskReport filters={filters} baseDrill={baseDrill} refreshKey={liveVersion} exportFilters={exportFilters} />
         </>
       )}
     </div>

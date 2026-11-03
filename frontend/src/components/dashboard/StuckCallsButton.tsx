@@ -47,7 +47,7 @@ export default function StuckCallsButton() {
   const forceClose = async (row: ApiStuckCallAttempt) => {
     const ok = await confirm({
       title: "Force-close this call?",
-      message: `${row.caller_name} has been stuck on "${row.lead_name ?? "a lead"}" for ${timeStuck(row.created_at)}. This marks their call feedback as resolved so they can use the app again — only do this once you've confirmed with them it's a dead end, not a call they're still on.`,
+      message: `${row.caller_name} has been stuck on "${row.lead_name ?? "a lead"}" for ${timeStuck(row.created_at)}. This frees their app. The feedback stays pending on this lead, and they'll have to fill it before working on the lead again.`,
       confirmLabel: "Force Close",
       danger: true
     });
@@ -56,7 +56,7 @@ export default function StuckCallsButton() {
     try {
       await apiForceCompleteCallAttempt(row.id);
       setRows(prev => prev?.filter(r => r.id !== row.id) ?? null);
-      toast(`Unstuck ${row.caller_name}.`, "success");
+      toast(`Freed ${row.caller_name}. The feedback is now pending on "${row.lead_name ?? "the lead"}".`, "success");
     } catch (err) {
       toast(err instanceof Error ? err.message : "Could not force-close this call.", "error");
     } finally {

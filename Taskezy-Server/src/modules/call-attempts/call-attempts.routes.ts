@@ -9,6 +9,8 @@ import { pool, query, withTransaction } from "../../db/pool";
 import { insertLeadLog } from "../leads/leads.repository";
 import * as usersRepo from "../users/users.repository";
 import { boss, SCHEDULE_FOLLOWUP_QUEUE } from "../../jobs/queue";
+import { publishToUser } from "../../utils/sseHub";
+import { FEEDBACK_PENDING_LOG_PREFIX, FEEDBACK_PENDING_OUTCOME, FEEDBACK_REOPENED_OUTCOME, findHeldAttempt, isHeldSql } from "./feedbackLock";
 
 export const callAttemptsRouter = Router();
 
@@ -55,6 +57,15 @@ callAttemptsRouter.post(
   validate({ body: createCallAttemptSchema }),
   asyncHandler(async (req, res) => {
     await assertCanLogCallFor(req.user!, req.body.leadId);
+    // Feedback for an earlier call on this lead is still held (feedbackLock.ts):
+    // bring that form back instead of starting another — one form covers both.
+    const held = await findHeldAttempt(req.user!.sub, req.body.leadId);
+    if (held) {
+      await pool.query(`UPDATE call_attempts SET outcome = $2 WHERE id = $1`, [held.id, FEEDBACK_REOPENED_OUTCOME]);
+      const { rows: resumed } = await query(`${SELECT} WHERE id = $1`, [held.id]);
+      sendOk(res, resumed[0]);
+      return;
+    }
     let insertedId: string;
     try {
       const { rows } = await pool.query(
@@ -84,7 +95,7 @@ callAttemptsRouter.get(
   "/pending",
   asyncHandler(async (req, res) => {
     const { rows } = await query(
-      `${SELECT} WHERE caller_user_id = $1 AND status = 'PENDING_FEEDBACK' ORDER BY created_at DESC LIMIT 1`,
+      `${SELECT} WHERE caller_user_id = $1 AND status = 'PENDING_FEEDBACK' AND NOT ${isHeldSql()} ORDER BY created_at DESC LIMIT 1`,
       [req.user!.sub]
     );
     sendOk(res, rows[0] ?? null);
@@ -112,6 +123,9 @@ callAttemptsRouter.get(
   })
 );
 
+// call_attempts.outcome of a feedback popup closed by an admin/manager (POST /:id/force-complete).
+const FORCE_CLOSED_OUTCOME = "Force-closed";
+
 const idParamSchema = z.object({ id: z.string().uuid() });
 const submitFeedbackSchema = z.object({
   outcome: z.string().trim().min(1).max(100),
@@ -133,13 +147,25 @@ callAttemptsRouter.patch(
   "/:id",
   validate({ params: idParamSchema, body: submitFeedbackSchema }),
   asyncHandler(async (req, res) => {
-    const { rows: found } = await pool.query<{ caller_user_id: string; lead_id: string; channel: string; status: string }>(
-      `SELECT caller_user_id, lead_id, channel, status FROM call_attempts WHERE id = $1`,
+    const { rows: found } = await pool.query<{ caller_user_id: string; lead_id: string; channel: string; status: string; outcome: string | null }>(
+      `SELECT caller_user_id, lead_id, channel, status, outcome FROM call_attempts WHERE id = $1`,
       [req.params.id]
     );
     if (found.length === 0) throw ApiError.notFound("Call attempt not found");
     if (found[0].caller_user_id !== req.user!.sub) throw ApiError.forbidden("You can only submit feedback for your own call.");
-    if (found[0].status === "COMPLETED") throw ApiError.badRequest("Feedback was already submitted for this call.");
+    // Already closed. Never refuse here — a refusal left the agent's popup
+    // with no way out:
+    //  - closed by an admin/manager (Force Close) while the agent still had
+    //    the popup open: their real feedback is still taken, below;
+    //  - closed by this same feedback a moment ago (a retry, a double tap):
+    //    nothing to do again, just let the popup close.
+    const lateAfterForceClose = found[0].status === "COMPLETED" && found[0].outcome === FORCE_CLOSED_OUTCOME;
+    const late = lateAfterForceClose || found[0].outcome === FEEDBACK_PENDING_OUTCOME || found[0].outcome === FEEDBACK_REOPENED_OUTCOME;
+    if (found[0].status === "COMPLETED" && !lateAfterForceClose) {
+      const { rows: existing } = await query(`${SELECT} WHERE id = $1`, [req.params.id]);
+      sendOk(res, existing[0]);
+      return;
+    }
 
     await withTransaction(async (client) => {
       await client.query(
@@ -152,7 +178,19 @@ callAttemptsRouter.patch(
       // every other log entry, which is what tells a manager WHO called or
       // sent the WhatsApp message.
       const label = found[0].channel === "WHATSAPP" ? "WhatsApp message" : "Call";
-      await insertLeadLog(client, found[0].lead_id, req.user!.sub, req.user!.name, `${label} outcome: ${req.body.outcome}. Notes: ${req.body.notes}`);
+      await insertLeadLog(
+        client, found[0].lead_id, req.user!.sub, req.user!.name,
+        `${label} outcome: ${req.body.outcome}. Notes: ${req.body.notes}${late ? " (given late)" : ""}`
+      );
+      // A WhatsApp message asks for no next call, but it is an action on the
+      // lead: a call that had already come due is handled by it (so it's
+      // never flagged Missed). A call still in the future stays Upcoming.
+      if (found[0].channel === "WHATSAPP") {
+        await client.query(
+          `UPDATE followup_calls SET status = 'COMPLETED' WHERE lead_id = $1 AND status = 'UPCOMING' AND scheduled_at <= now()`,
+          [found[0].lead_id]
+        );
+      }
     });
 
     if (req.body.scheduledAt) {
@@ -200,12 +238,61 @@ callAttemptsRouter.get(
        FROM call_attempts ca
        JOIN users u ON u.id = ca.caller_user_id
        LEFT JOIN leads l ON l.id = ca.lead_id
-       WHERE ca.status = 'PENDING_FEEDBACK'
+       WHERE ca.status = 'PENDING_FEEDBACK' AND NOT ${isHeldSql("ca")}
          ${scopeIds ? "AND ca.caller_user_id = ANY($1::uuid[])" : ""}
        ORDER BY ca.created_at ASC`,
       scopeIds ? [scopeIds] : []
     );
     sendOk(res, rows);
+  })
+);
+
+// Moves a pending feedback off the agent's screen onto its lead (feedbackLock.ts).
+async function holdOnLead(attemptId: string, leadId: string, actorId: string, actorName: string, why: string): Promise<void> {
+  await withTransaction(async (client) => {
+    await client.query(`UPDATE call_attempts SET outcome = $1 WHERE id = $2 AND status = 'PENDING_FEEDBACK'`, [FEEDBACK_PENDING_OUTCOME, attemptId]);
+    await insertLeadLog(client, leadId, actorId, actorName, `${FEEDBACK_PENDING_LOG_PREFIX} — ${why}. The agent has to fill it before working on this lead again.`);
+  });
+}
+
+// The agent's own feedback screen stopped responding (CallFeedbackGate's
+// dead-click check): free their app and hold the feedback on the lead.
+callAttemptsRouter.post(
+  "/:id/hold",
+  validate({ params: idParamSchema }),
+  asyncHandler(async (req, res) => {
+    const { rows: found } = await pool.query<{ caller_user_id: string; lead_id: string; status: string; outcome: string | null }>(
+      `SELECT caller_user_id, lead_id, status, outcome FROM call_attempts WHERE id = $1`,
+      [req.params.id]
+    );
+    if (found.length === 0) throw ApiError.notFound("Call attempt not found");
+    if (found[0].caller_user_id !== req.user!.sub) throw ApiError.forbidden("You can only do this for your own call.");
+    if (found[0].status === "PENDING_FEEDBACK" && found[0].outcome !== FEEDBACK_PENDING_OUTCOME) {
+      // (an open or reopened form)
+      await holdOnLead(req.params.id, found[0].lead_id, req.user!.sub, req.user!.name, "the feedback screen stopped responding");
+    }
+    const { rows } = await query(`${SELECT} WHERE id = $1`, [req.params.id]);
+    sendOk(res, rows[0]);
+  })
+);
+
+// Reopens held feedback so the agent can fill it (the app calls this when
+// an action on the lead is refused with FEEDBACK_PENDING).
+callAttemptsRouter.post(
+  "/:id/resume",
+  validate({ params: idParamSchema }),
+  asyncHandler(async (req, res) => {
+    const { rows: found } = await pool.query<{ caller_user_id: string; status: string }>(
+      `SELECT caller_user_id, status FROM call_attempts WHERE id = $1`,
+      [req.params.id]
+    );
+    if (found.length === 0) throw ApiError.notFound("Call attempt not found");
+    if (found[0].caller_user_id !== req.user!.sub) throw ApiError.forbidden("You can only do this for your own call.");
+    if (found[0].status === "PENDING_FEEDBACK") {
+      await pool.query(`UPDATE call_attempts SET outcome = $3 WHERE id = $1 AND outcome = $2`, [req.params.id, FEEDBACK_PENDING_OUTCOME, FEEDBACK_REOPENED_OUTCOME]);
+    }
+    const { rows } = await query(`${SELECT} WHERE id = $1`, [req.params.id]);
+    sendOk(res, rows[0]);
   })
 );
 
@@ -220,12 +307,13 @@ callAttemptsRouter.post(
   requireAdminOrManager("force-close a stuck call"),
   validate({ params: idParamSchema }),
   asyncHandler(async (req, res) => {
-    const { rows: found } = await pool.query<{ caller_user_id: string; lead_id: string; channel: string; status: string }>(
-      `SELECT caller_user_id, lead_id, channel, status FROM call_attempts WHERE id = $1`,
+    const { rows: found } = await pool.query<{ caller_user_id: string; lead_id: string; channel: string; status: string; outcome: string | null }>(
+      `SELECT caller_user_id, lead_id, channel, status, outcome FROM call_attempts WHERE id = $1`,
       [req.params.id]
     );
     if (found.length === 0) throw ApiError.notFound("Call attempt not found");
     if (found[0].status === "COMPLETED") throw ApiError.badRequest("This call was already resolved.");
+    if (found[0].outcome === FEEDBACK_PENDING_OUTCOME) throw ApiError.badRequest("This call's feedback was already moved to the lead.");
     if (req.user!.role !== "ADMIN") {
       const teamIds = await usersRepo.findDirectReportIds(req.user!.sub);
       if (!teamIds.includes(found[0].caller_user_id)) {
@@ -233,16 +321,12 @@ callAttemptsRouter.post(
       }
     }
 
-    const outcome = "Force-closed";
-    const notes = `Force-closed by ${req.user!.name} — the agent couldn't resolve this from their own device.`;
-    await withTransaction(async (client) => {
-      await client.query(
-        `UPDATE call_attempts SET status = 'COMPLETED', outcome = $1, notes = $2 WHERE id = $3`,
-        [outcome, notes, req.params.id]
-      );
-      const label = found[0].channel === "WHATSAPP" ? "WhatsApp message" : "Call";
-      await insertLeadLog(client, found[0].lead_id, req.user!.sub, req.user!.name, `${label} outcome: ${outcome}. Notes: ${notes}`);
-    });
+    // Frees the agent's app, but the feedback is still owed: it's held on
+    // the lead (feedbackLock.ts) — the agent can't act on that lead until
+    // they give it.
+    await holdOnLead(req.params.id, found[0].lead_id, req.user!.sub, req.user!.name, `force-closed by ${req.user!.name}`);
+    // Close the popup on the agent's open app right away (AppContext listens).
+    publishToUser(found[0].caller_user_id, "call-attempt-resolved", { id: req.params.id });
 
     const { rows: updated } = await query(`${SELECT} WHERE id = $1`, [req.params.id]);
     sendOk(res, updated[0]);

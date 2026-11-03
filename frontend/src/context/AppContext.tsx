@@ -94,6 +94,9 @@ import {
   ApiRequestError,
   apiCreateCallAttempt,
   apiGetPendingCallAttempt,
+  apiResumeCallAttempt,
+  apiHoldCallAttempt,
+  FEEDBACK_PENDING_EVENT,
   apiSubmitCallFeedback,
   ApiCallAttemptRow
 } from "@/lib/apiClient";
@@ -600,6 +603,8 @@ interface AppActions {
   recordWhatsAppOpened: (leadId: string) => Promise<void>;
   // Submits the blocking gate's form and clears pendingCallAttempt.
   submitCallFeedback: (outcome: string, notes: string, scheduledAt?: string, rescheduleReason?: string) => Promise<void>;
+  /** The feedback screen stopped responding: free the app and hold this feedback on its lead. */
+  holdCallFeedbackOnLead: () => Promise<void>;
   updateTenantSettings: (input: UpdateTenantSettingsInput) => Promise<{ success: boolean; error?: string }>;
   // SaaS actions
   setSeats: (role: Role, count: number) => void;
@@ -1290,9 +1295,51 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setPendingCallAttempt(attempt);
   };
 
+  const holdCallFeedbackOnLead = async () => {
+    if (!pendingCallAttempt) return;
+    await apiHoldCallAttempt(pendingCallAttempt.id);
+    setPendingCallAttempt(null);
+  };
+
+  // An action on a lead was refused because this agent still owes call
+  // feedback for it (held on the lead after the screen stopped responding or
+  // a force-close) — reopen that feedback form.
+  useEffect(() => {
+    const onFeedbackPending = (event: Event) => {
+      const { attemptId } = (event as CustomEvent<{ attemptId: string }>).detail;
+      apiResumeCallAttempt(attemptId)
+        .then(attempt => { if (attempt.status === "PENDING_FEEDBACK") setPendingCallAttempt(attempt); })
+        .catch((err) => console.warn("Could not reopen the pending call feedback:", err));
+    };
+    window.addEventListener(FEEDBACK_PENDING_EVENT, onFeedbackPending);
+    return () => window.removeEventListener(FEEDBACK_PENDING_EVENT, onFeedbackPending);
+  }, []);
+
+  // While the call-feedback popup is open, ask the server once a minute
+  // whether it's still open there — it may have been force-closed or
+  // finished on another device. The live "call-attempt-resolved" event
+  // above usually gets there first; this covers a dropped connection.
+  useEffect(() => {
+    const openId = pendingCallAttempt?.id;
+    if (!openId) return;
+    const timer = setInterval(() => {
+      apiGetPendingCallAttempt()
+        .then(current => { if (!current || current.id !== openId) setPendingCallAttempt(current); })
+        .catch(() => { /* offline — keep the popup as it is */ });
+    }, 60_000);
+    return () => clearInterval(timer);
+  }, [pendingCallAttempt?.id]);
+
   const submitCallFeedback = async (outcome: string, notes: string, scheduledAt?: string, rescheduleReason?: string) => {
     if (!pendingCallAttempt) return;
-    await apiSubmitCallFeedback(pendingCallAttempt.id, { outcome, notes, scheduledAt, rescheduleReason });
+    try {
+      await apiSubmitCallFeedback(pendingCallAttempt.id, { outcome, notes, scheduledAt, rescheduleReason });
+    } catch (err) {
+      // An older server refuses feedback for a call that was already closed
+      // (e.g. force-closed by an admin). Nothing is left to save on this
+      // popup then, so let the agent out instead of trapping them.
+      if (!(err instanceof ApiRequestError && (err.status === 404 || /already submitted/i.test(err.message)))) throw err;
+    }
     setPendingCallAttempt(null);
     // The status/note are already saved; with a next call, wait for the
     // background job to create it, otherwise refresh this user's tasks now.
@@ -1666,6 +1713,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               });
           });
         }, 600);
+      });
+
+      // An admin/manager force-closed this user's call-feedback popup.
+      source.addEventListener("call-attempt-resolved", (event) => {
+        const { id } = JSON.parse((event as MessageEvent).data) as { id: string };
+        setPendingCallAttempt(prev => (prev && prev.id === id ? null : prev));
       });
 
       source.addEventListener("notification", (event) => {
@@ -2853,6 +2906,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         recordCallEnded,
         recordWhatsAppOpened,
         submitCallFeedback,
+        holdCallFeedbackOnLead,
         adSpendRecords,
         adLevelSpendRecords,
         refetchAdLevelSpend,

@@ -126,7 +126,10 @@ export const createLeadSchema = z.object({
 
 export const updateLeadStatusSchema = z.object({
   statusCode: z.enum(LEAD_STATUS_CODES),
-  dealValue: z.number().nonnegative().optional()
+  dealValue: z.number().nonnegative().optional(),
+  // After a WhatsApp message: keep the lead's already-scheduled call (see
+  // leads.service.ts updateLeadStatus).
+  keepSchedule: z.boolean().optional()
 });
 
 // Data Calling's own, independent field (see migration 030) — separate

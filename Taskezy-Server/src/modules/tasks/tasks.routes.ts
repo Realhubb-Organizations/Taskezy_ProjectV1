@@ -6,6 +6,7 @@ import { query } from "../../db/pool";
 import { findDirectReportIds } from "../users/users.repository";
 import { AccessTokenPayload } from "../../utils/tokens";
 import { canSeeMissedTaskCount } from "../leads/leads.handover";
+import { FEEDBACK_PENDING_LOG_PREFIX } from "../call-attempts/feedbackLock";
 
 export const tasksRouter = Router();
 
@@ -123,7 +124,7 @@ tasksRouter.get(
        LEFT JOIN leads l ON l.id = fc.lead_id
        LEFT JOIN lead_statuses ls ON ls.code = l.status_code
        LEFT JOIN LATERAL (
-         SELECT message, created_at FROM lead_logs WHERE lead_id = fc.lead_id ORDER BY created_at DESC LIMIT 1
+         SELECT message, created_at FROM lead_logs WHERE lead_id = fc.lead_id AND message NOT LIKE '${FEEDBACK_PENDING_LOG_PREFIX}%' ORDER BY created_at DESC LIMIT 1
        ) ll ON fc.lead_id IS NOT NULL
        WHERE fc.status != 'COMPLETED' ${followupScopeClause}`,
       followupParams
@@ -145,9 +146,15 @@ tasksRouter.get(
        JOIN lead_statuses ls ON ls.code = l.status_code
        JOIN users u ON u.id = l.assigned_agent_id
        LEFT JOIN LATERAL (
-         SELECT message, created_at FROM lead_logs WHERE lead_id = l.id ORDER BY created_at DESC LIMIT 1
+         -- "Call feedback pending" notes aren't the agent acting on the lead
+         SELECT message, created_at FROM lead_logs WHERE lead_id = l.id AND message NOT LIKE '${FEEDBACK_PENDING_LOG_PREFIX}%' ORDER BY created_at DESC LIMIT 1
        ) ll ON true
        WHERE l.status_code = ANY($1::text[])
+         -- The agent's latest action was a WhatsApp message: no next call is
+         -- asked there, so the message itself never makes the lead due
+         -- (Pending/Missed). It's a task again once it has a scheduled call
+         -- or any other activity.
+         AND (ll.message IS NULL OR ll.message NOT LIKE 'WhatsApp message outcome:%')
          -- A lead is only "already covered" by an open follow-up if that
          -- follow-up would actually become a task below (same acted-since
          -- rule as the follow-up query) — one the agent has already acted

@@ -2,6 +2,7 @@ import { pool } from "../db/pool";
 import { logger } from "../utils/logger";
 import { createNotification } from "../modules/notifications/notifications.service";
 import { listActiveAdminIds } from "../modules/users/users.repository";
+import { isHeldSql } from "../modules/call-attempts/feedbackLock";
 
 const POLL_INTERVAL_MS = 10 * 60_000; // housekeeping, not a live SLA — 10 minutes is plenty
 const STUCK_THRESHOLD_MINUTES = 20;
@@ -47,6 +48,7 @@ async function notifyStuckCalls(): Promise<void> {
      LEFT JOIN leads l ON l.id = ca.lead_id
      WHERE u.id = ca.caller_user_id
        AND ca.status = 'PENDING_FEEDBACK'
+       AND NOT ${isHeldSql("ca")} -- held on its lead: the agent isn't stuck any more
        AND ca.stuck_notified_at IS NULL
        AND ca.created_at <= now() - interval '${STUCK_THRESHOLD_MINUTES} minutes'
      RETURNING ca.id, ca.lead_id, l.name AS lead_name, ca.caller_user_id,

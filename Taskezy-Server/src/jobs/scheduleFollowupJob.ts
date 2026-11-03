@@ -29,11 +29,13 @@ export interface ScheduleFollowupJobData {
  * ones COMPLETED first (same block this mirrors from followups.routes.ts's
  * POST /) — there's no "ask the agent which one to keep" step needed here,
  * that was only ever a courtesy warning on top of behavior the DB already
- * made safe. The one thing that genuinely can't be resolved without a
- * human is a cross-lead conflict (the agent already has a DIFFERENT lead
- * booked within 5 minutes) — nobody's here to pick a new time, so this
- * skips creating the follow-up and notifies the agent to reschedule it
- * manually instead of silently double-booking them.
+ * made safe. A cross-lead clash (the agent already has a DIFFERENT lead
+ * booked within 5 minutes) is caught in the popup before saving
+ * (CallFeedbackGate, same check as the status popup). If one still gets
+ * here (two saves at the same moment), the follow-up is created anyway and
+ * the agent is told about the overlap — dropping it left the lead with no
+ * scheduled call, so it showed as Pending and then Missed right after the
+ * agent had just scheduled it.
  */
 export async function processScheduleFollowup(data: ScheduleFollowupJobData): Promise<void> {
   const { leadId, leadName, phone, assignedAgentId, scheduledAt } = data;
@@ -50,20 +52,6 @@ export async function processScheduleFollowup(data: ScheduleFollowupJobData): Pr
     [assignedAgentId, leadId, dayStart.toISOString(), dayEnd.toISOString()]
   );
   const conflict = sameDayRows.find(r => Math.abs(new Date(r.scheduled_at).getTime() - newTime) < AGENT_CONFLICT_WINDOW_MS);
-  if (conflict) {
-    await createNotification({
-      system: "CRM",
-      category: "REMINDER",
-      title: "Couldn't schedule your follow-up",
-      message: `"${leadName}"'s reminder couldn't be scheduled — it's within 5 minutes of your existing "${conflict.lead_name}" follow-up. Please pick a new time from the lead's page.`,
-      recipientUserId: assignedAgentId,
-      leadId,
-      link: "/dashboard/crm"
-    });
-    logger.info({ leadId, assignedAgentId }, "Background follow-up schedule skipped — cross-lead time conflict");
-    return;
-  }
-
   await pool.query(`UPDATE followup_calls SET status = 'COMPLETED' WHERE lead_id = $1 AND status <> 'COMPLETED'`, [leadId]);
   await deleteLeadActivityNotifications(leadId, ["REMINDER"]);
   // reschedule_reason only when given, so nothing else depends on migration 051.
@@ -73,6 +61,20 @@ export async function processScheduleFollowup(data: ScheduleFollowupJobData): Pr
      VALUES ($1, $2, $3, $4, $5, $6${reason ? ", $7" : ""})`,
     [scheduledAt, leadId, leadName, phone, data.callType ?? "CALLBACK", assignedAgentId, ...(reason ? [reason] : [])]
   );
+  // After the insert: the lead's older reminder notifications were cleared just above.
+  if (conflict) {
+    await createNotification({
+      system: "CRM",
+      category: "REMINDER",
+      title: "Two follow-ups close together",
+      message: `"${leadName}" is scheduled within 5 minutes of your "${conflict.lead_name}" follow-up. You may want to move one of them.`,
+      recipientUserId: assignedAgentId,
+      leadId,
+      link: "/dashboard/crm"
+    });
+    logger.info({ leadId, assignedAgentId }, "Background follow-up scheduled within 5 minutes of another lead's");
+  }
+
   // This runs outside any route, so broadcastOnWrite never sees it — tell
   // open screens directly. Until now the lead counted as "due now" in
   // Pending Tasks (it had no scheduled call yet), and Next Call Date was blank.

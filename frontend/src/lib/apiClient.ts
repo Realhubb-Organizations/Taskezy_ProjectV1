@@ -106,10 +106,21 @@ async function request<T>(path: string, options: RequestInit = {}, allowRefreshR
 
   const json = (await res.json().catch(() => null)) as Envelope<T> | null;
   if (!res.ok || !json?.success) {
+    // The agent still owes call feedback on this lead: tell the app to
+    // reopen that form (AppContext listens). The caller still gets the error.
+    const attemptId = (json?.error?.details as { attemptId?: string } | undefined)?.attemptId;
+    if (json?.error?.code === FEEDBACK_PENDING_CODE && attemptId && typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent(FEEDBACK_PENDING_EVENT, { detail: { attemptId } }));
+    }
     throw new ApiRequestError(res.status, errorMessageOf(json?.error), json?.error?.code);
   }
   return json.data;
 }
+
+/** Server refused an action because the agent owes call feedback on that lead (feedbackLock.ts). */
+export const FEEDBACK_PENDING_CODE = "FEEDBACK_PENDING";
+/** window event fired with { attemptId } when that happens. */
+export const FEEDBACK_PENDING_EVENT = "taskezy:feedback-pending";
 
 async function requestWithMeta<T>(path: string, allowRefreshRetry = true): Promise<{ data: T[]; meta: Envelope<T[]>["meta"] }> {
   const token = getAccessToken();
@@ -608,11 +619,13 @@ export async function pollJob<T>(getStatus: () => Promise<JobStatus<T>>): Promis
 export function apiUpdateLeadStatus(
   leadId: string,
   statusCode: string,
-  dealValue?: number
+  dealValue?: number,
+  /** After a WhatsApp message: keep the lead's scheduled call. */
+  keepSchedule?: boolean
 ): Promise<ApiLeadRow> {
   return request<ApiLeadRow>(`/api/v1/leads/${leadId}/status`, {
     method: "PATCH",
-    body: JSON.stringify({ statusCode, dealValue })
+    body: JSON.stringify({ statusCode, dealValue, ...(keepSchedule ? { keepSchedule: true } : {}) })
   });
 }
 
@@ -1348,6 +1361,16 @@ export function apiCreateCallAttempt(input: { leadId: string; channel: "CALL" | 
 // after a force-quit/relaunch, not just within the same in-memory session.
 export function apiGetPendingCallAttempt(): Promise<ApiCallAttemptRow | null> {
   return request<ApiCallAttemptRow | null>("/api/v1/call-attempts/pending");
+}
+
+/** The feedback screen stopped responding: free the app and hold the feedback on its lead. */
+export function apiHoldCallAttempt(id: string): Promise<ApiCallAttemptRow> {
+  return request<ApiCallAttemptRow>(`/api/v1/call-attempts/${id}/hold`, { method: "POST" });
+}
+
+/** Reopen feedback held on a lead so the agent can fill it. */
+export function apiResumeCallAttempt(id: string): Promise<ApiCallAttemptRow> {
+  return request<ApiCallAttemptRow>(`/api/v1/call-attempts/${id}/resume`, { method: "POST" });
 }
 
 /** Has this lead had a site visit before? (asks for a Reschedule Reason when it has) */
@@ -2466,4 +2489,41 @@ export async function apiListTeamDataCallingLeads(filters: TeamReportFilters, pa
   params.set("pageSize", String(pageSize));
   const { data, meta } = await requestWithMeta<TeamDataCallingLeadRow>(`/api/v1/reports/team/data-calling-leads?${params}`);
   return { rows: data, totalCount: meta?.totalCount ?? data.length };
+}
+
+// --- Reports page download footprint (Taskezy-Server reports/reportExports.routes.ts) ---
+export type ReportExportFilters = Record<string, string | number | boolean | string[] | null>;
+
+export function apiRecordReportExport(input: { report: string; fileName?: string; rowCount?: number; filters?: ReportExportFilters }): Promise<{ recorded: boolean }> {
+  return request<{ recorded: boolean }>("/api/v1/reports/exports", { method: "POST", body: JSON.stringify(input) });
+}
+
+export interface ReportExportRow {
+  id: string;
+  user_id: string | null;
+  user_name: string;
+  role: string | null;
+  report: string;
+  file_name: string | null;
+  row_count: number | null;
+  filters: ReportExportFilters;
+  created_at: string;
+}
+
+export async function apiListReportExports(
+  page: number,
+  pageSize: number,
+  filters: { userId?: string[]; report?: string[]; dateFrom?: string; dateTo?: string } = {}
+): Promise<{ rows: ReportExportRow[]; totalCount: number }> {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+  filters.userId?.forEach(id => params.append("userId", id));
+  filters.report?.forEach(r => params.append("report", r));
+  if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
+  if (filters.dateTo) params.set("dateTo", filters.dateTo);
+  const { data, meta } = await requestWithMeta<ReportExportRow>(`/api/v1/reports/exports?${params}`);
+  return { rows: data, totalCount: meta?.totalCount ?? data.length };
+}
+
+export function apiListReportExportNames(): Promise<string[]> {
+  return request<string[]>("/api/v1/reports/exports/reports");
 }

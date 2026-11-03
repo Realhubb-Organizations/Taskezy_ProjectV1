@@ -1,15 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Capacitor } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
 import { PhoneCall, MessageCircle, Check, X } from "lucide-react";
 import { useApp, LeadStatus, Lead, mapApiLeadToFrontendLead } from "@/context/AppContext";
-import { apiUpdateLeadStatus, apiUpdateCallStatus, apiUpdateLeadNote, apiGetLead, apiHasWhatsAppScheduledBefore, apiGetSiteVisitHistory } from "@/lib/apiClient";
+import { apiUpdateLeadStatus, apiUpdateCallStatus, apiUpdateLeadNote, apiGetLead, apiGetSiteVisitHistory } from "@/lib/apiClient";
 import { nextStatusOptions, frontendStatusToDbCode } from "@/lib/leadStatusMapping";
 import { CALL_SUB_STATUS_OPTIONS, CallSubStatus, callSubStatusOf } from "@/lib/callSubStatus";
 import { SCHEDULER_REQUIRED_STATUSES } from "@/lib/leadScheduler";
+import { findAgentScheduleConflict, agentConflictMessage } from "@/lib/duplicateFollowupCheck";
 
 // Full-screen, unclosable overlay — the app stays mounted behind it but
 // nothing in it can be reached (no backdrop-click, no Escape, and the
@@ -33,8 +34,8 @@ import { SCHEDULER_REQUIRED_STATUSES } from "@/lib/leadScheduler";
 //      current status (leadStatusMapping.ts's nextStatusOptions). RNR /
 //      Call Back / Followup / Site Visit Scheduled (regular leads, see
 //      leadScheduler.ts's SCHEDULER_REQUIRED_STATUSES) or Not Reachable
-//      (Data Calling leads) need the next call's date and time; Booked
-//      needs the deal value.
+//      (Data Calling leads) need the next call's date and time after a
+//      call (never after a WhatsApp message); Booked needs the deal value.
 // The status and note are saved, then the attempt is closed — only then
 // does the app unlock. Scheduling the next call happens on the backend's
 // job queue afterward, not awaited here — see finish()'s own comment.
@@ -52,7 +53,7 @@ const todayIso = () => {
 };
 
 export default function CallFeedbackGate() {
-  const { pendingCallAttempt, submitCallFeedback } = useApp();
+  const { pendingCallAttempt, submitCallFeedback, holdCallFeedbackOnLead, users } = useApp();
   const isWhatsApp = pendingCallAttempt?.channel === "WHATSAPP";
 
   // Fetched directly by id instead of scanning the bulk leads/dataCallingLeads
@@ -75,22 +76,6 @@ export default function CallFeedbackGate() {
   }, [pendingCallAttempt?.lead_id]);
   const isDataCallingLead = lead?.source === "Bulk Upload";
 
-  // A WhatsApp message doesn't carry the same weight as a live phone call,
-  // so once an agent has already completed WhatsApp feedback for this
-  // lead at least once before, scheduling a next-call date/time on a
-  // LATER WhatsApp contact for the same lead becomes optional instead of
-  // mandatory — see nextCallRequired below. Defaults to false (mandatory)
-  // until the check resolves, the safe default while unknown. Calls are
-  // never affected by this, only the WHATSAPP channel.
-  const [whatsAppScheduledBefore, setWhatsAppScheduledBefore] = useState(false);
-  useEffect(() => {
-    if (!isWhatsApp || !lead?.id || isDataCallingLead) { setWhatsAppScheduledBefore(false); return; }
-    let cancelled = false;
-    apiHasWhatsAppScheduledBefore(lead.id)
-      .then(({ scheduledBefore }) => { if (!cancelled) setWhatsAppScheduledBefore(scheduledBefore); })
-      .catch(() => { if (!cancelled) setWhatsAppScheduledBefore(false); });
-    return () => { cancelled = true; };
-  }, [isWhatsApp, lead?.id, isDataCallingLead]);
   // Regular leads: only what the transition matrix allows from the lead's
   // current status — mirrors LeadDetailDrawer, just without its separate
   // confirm-step for "Optional" picks (this form already has its own
@@ -172,6 +157,56 @@ export default function CallFeedbackGate() {
     };
   }, [pendingCallAttempt]);
 
+  // ---- Stuck screen ----
+  // A click that never reaches this popup (something covering it), or a tap
+  // on Save that's been "Saving…" for over 15s, is a dead click. After 3,
+  // count down a minute; if nothing in the popup responds by then, free the
+  // agent's app and hold this feedback on its lead instead (the server then
+  // blocks only that lead until it's filled — feedbackLock.ts). Any click
+  // the popup does handle cancels it.
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const handledClicksRef = useRef(0);
+  const deadClicksRef = useRef(0);
+  const savingSinceRef = useRef<number | null>(null);
+  const [holdIn, setHoldIn] = useState<number | null>(null);
+  useEffect(() => { savingSinceRef.current = submitting ? Date.now() : null; }, [submitting]);
+  useEffect(() => {
+    deadClicksRef.current = 0;
+    setHoldIn(null);
+    if (!pendingCallAttempt) return;
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target === overlayRef.current) return; // a tap on the dark background, not a stuck screen
+      if (target?.closest("input, select, textarea, label")) return;
+      const handledBefore = handledClicksRef.current;
+      timers.push(setTimeout(() => {
+        const stuckSaving = savingSinceRef.current !== null && Date.now() - savingSinceRef.current > 15_000;
+        if (handledClicksRef.current !== handledBefore && !stuckSaving) {
+          deadClicksRef.current = 0;
+          setHoldIn(null);
+          return;
+        }
+        deadClicksRef.current += 1;
+        if (deadClicksRef.current >= 3) setHoldIn(prev => prev ?? 60);
+      }, 1500));
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      timers.forEach(clearTimeout);
+    };
+  }, [pendingCallAttempt?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (holdIn === null) return;
+    if (holdIn <= 0) {
+      holdCallFeedbackOnLead().catch(() => setHoldIn(null)); // offline: keep the popup
+      return;
+    }
+    const t = setTimeout(() => setHoldIn(n => (n === null ? null : n - 1)), 1000);
+    return () => clearTimeout(t);
+  }, [holdIn]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (!pendingCallAttempt) return null;
 
   const notHappenedReason = () => (isWhatsApp ? reasonText.trim() : reason === "Other" ? reasonText.trim() : reason);
@@ -197,13 +232,12 @@ export default function CallFeedbackGate() {
   // agent could keep calling the same lead with no follow-up ever
   // scheduled. Data Calling's own "Not Reachable" branch is unchanged
   // (narrower scope, not what was reported).
-  const nextCallApplicable = isDataCallingLead
+  // WhatsApp never asks for a next call: only a call is scheduled, and the
+  // message doesn't make the lead Pending/Missed (tasks.routes.ts) or drop
+  // a call that's already booked (keepSchedule below).
+  const nextCallApplicable = !isWhatsApp && (isDataCallingLead
     ? callStatus === "Not Reachable" && callStatusChanged
-    : NEEDS_NEXT_CALL.includes(status);
-  // Optional (fields still shown, may be left blank) only for a repeat
-  // WhatsApp contact on a regular lead that's already had one scheduled
-  // before; every other case stays exactly as required as before.
-  const nextCallRequired = nextCallApplicable && !(isWhatsApp && !isDataCallingLead && whatsAppScheduledBefore);
+    : NEEDS_NEXT_CALL.includes(status));
   const isSiteVisitReschedule = !isDataCallingLead && status === "Site Visit Scheduled" && hadSiteVisit;
   const needsDealValue = !isDataCallingLead && status === "Booked" && statusChanged;
   const somethingChanged = statusChanged || callStatusChanged;
@@ -213,15 +247,9 @@ export default function CallFeedbackGate() {
     if (submitting) return;
     let scheduledAt: Date | null = null;
     if (nextCallApplicable) {
-      if (nextCallRequired) {
-        if (!nextDate || !nextTime) return setError("Pick the date and time of the next call.");
-      } else if ((nextDate || nextTime) && !(nextDate && nextTime)) {
-        return setError("Pick both date and time, or leave both blank.");
-      }
-      if (nextDate && nextTime) {
-        scheduledAt = new Date(`${nextDate}T${nextTime}`);
-        if (isNaN(scheduledAt.getTime()) || scheduledAt.getTime() < Date.now()) return setError("The next call must be in the future.");
-      }
+      if (!nextDate || !nextTime) return setError("Pick the date and time of the next call.");
+      scheduledAt = new Date(`${nextDate}T${nextTime}`);
+      if (isNaN(scheduledAt.getTime()) || scheduledAt.getTime() < Date.now()) return setError("The next call must be in the future.");
     }
     if (isSiteVisitReschedule && scheduledAt && !rescheduleReason.trim()) return setError("Please add the reason for rescheduling the site visit.");
     const deal = needsDealValue ? parseFloat(dealValue.replace(/[^0-9.]/g, "")) : undefined;
@@ -233,13 +261,26 @@ export default function CallFeedbackGate() {
     setSubmitting(true);
     setError("");
     try {
+      // 0. Same rule as the status popup: an agent can't be on two calls at
+      // once, so a time within 5 minutes of another lead's scheduled call is
+      // refused here, before anything is saved, with the nearest free time.
+      // (Shown inline — never a dialog, which could open hidden behind this
+      // popup.) If the check itself can't run, the save goes ahead.
+      if (scheduledAt && lead) {
+        const ownerId = lead.assignedAgentId ?? users.find(u => u.name === lead.assignedAgent)?.id;
+        const conflict = ownerId ? await findAgentScheduleConflict(ownerId, scheduledAt.toISOString(), lead.id).catch(() => null) : null;
+        if (conflict) {
+          setError(agentConflictMessage(conflict));
+          return;
+        }
+      }
       // 1. The lead's status (or call status) — must succeed before the app unlocks.
       if (lead && isDataCallingLead && callStatusChanged) {
         await apiUpdateCallStatus(lead.id, callStatus as (typeof CALL_STATUS_OPTIONS)[number], nextCallSubStatus, note.trim());
       } else if (lead && statusChanged) {
         const code = frontendStatusToDbCode(status);
         if (!code) throw new Error(`"${status}" can't be set here.`);
-        await apiUpdateLeadStatus(lead.id, code, deal);
+        await apiUpdateLeadStatus(lead.id, code, deal, isWhatsApp);
       }
       // 1b. Regular leads: this note also becomes the lead's actual Notes
       // field (same as the Notes column's pencil-edit), not just a line in
@@ -255,10 +296,8 @@ export default function CallFeedbackGate() {
       // backend's job queue instead, kicked off by passing scheduledAt
       // through to this same call — see call-attempts.routes.ts's PATCH
       // /:id and scheduleFollowupJob.ts. The agent isn't held waiting on
-      // it; if it can't be scheduled (a genuine cross-lead time conflict),
-      // they get a notification telling them to pick a new time, instead
-      // of the whole save blocking on a dialog that could render invisibly
-      // underneath this very popup (the actual cause of today's incident).
+      // it. A clash with another lead's call is caught in step 0 above (inline,
+      // never a dialog that could render invisibly underneath this popup).
       const outcome = isWhatsApp ? (happened ? "Sent" : "Not Sent") : happened ? "Connected" : "Not connected";
       const statusLine = isDataCallingLead
         ? callStatusChanged
@@ -285,8 +324,11 @@ export default function CallFeedbackGate() {
   const inputClass = "w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 text-xs font-semibold text-slate-800 focus:outline-none focus:border-brand-500";
 
   return createPortal(
-    <div className="fixed inset-0 z-[9999] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm max-h-[90vh] overflow-y-auto p-6 space-y-4 animate-fade-in">
+    <div ref={overlayRef} className="fixed inset-0 z-[9999] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4">
+      <div
+        onClickCapture={() => { handledClicksRef.current += 1; }}
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-sm max-h-[90vh] overflow-y-auto p-6 space-y-4 animate-fade-in"
+      >
         <div className="flex items-center gap-2.5">
           <span className="h-9 w-9 rounded-xl bg-brand-50 border border-brand-100 flex items-center justify-center text-brand-600 shrink-0">
             {isWhatsApp ? <MessageCircle className="h-4.5 w-4.5" /> : <PhoneCall className="h-4.5 w-4.5" />}
@@ -302,6 +344,11 @@ export default function CallFeedbackGate() {
           </div>
         </div>
 
+        {holdIn !== null && (
+          <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2">
+            This screen isn&apos;t responding. It will close in {Math.max(holdIn, 0)}s so you can keep working. You&apos;ll need to fill this feedback before working on {lead?.name ?? "this lead"} again.
+          </p>
+        )}
         {error && <p className="text-[11px] text-red-600 font-semibold">{error}</p>}
 
         {step === "ask" && (
@@ -395,18 +442,18 @@ export default function CallFeedbackGate() {
             {nextCallApplicable && (
               <div className="grid grid-cols-2 gap-2">
                 <div className="space-y-1">
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase">Next call date{nextCallRequired ? "" : " (optional)"}</label>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase">Next call date</label>
                   <input type="date" min={todayIso()} value={nextDate} onChange={(e) => setNextDate(e.target.value)} className={inputClass} />
                 </div>
                 <div className="space-y-1">
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase">Time{nextCallRequired ? "" : " (optional)"}</label>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase">Time</label>
                   <input type="time" value={nextTime} onChange={(e) => setNextTime(e.target.value)} className={inputClass} />
                 </div>
               </div>
             )}
             {isSiteVisitReschedule && (
               <div className="space-y-1">
-                <label className="block text-[10px] font-bold text-slate-500 uppercase">Reschedule reason{nextCallRequired ? "" : " (if rescheduling)"}</label>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase">Reschedule reason</label>
                 <input value={rescheduleReason} onChange={(e) => setRescheduleReason(e.target.value)} maxLength={500} placeholder="e.g. Out of station" className={`${inputClass} font-normal`} />
               </div>
             )}
