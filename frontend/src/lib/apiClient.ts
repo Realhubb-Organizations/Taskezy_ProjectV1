@@ -1368,6 +1368,19 @@ export function apiHoldCallAttempt(id: string): Promise<ApiCallAttemptRow> {
   return request<ApiCallAttemptRow>(`/api/v1/call-attempts/${id}/hold`, { method: "POST" });
 }
 
+export interface HeldCallFeedback {
+  id: string;
+  lead_id: string;
+  lead_name: string | null;
+  channel: "CALL" | "WHATSAPP";
+  created_at: string;
+}
+
+/** This user's call feedback held on leads (filled later from the "Call feedback pending" bar). */
+export function apiListHeldCallFeedback(): Promise<HeldCallFeedback[]> {
+  return request<HeldCallFeedback[]>("/api/v1/call-attempts/held");
+}
+
 /** Reopen feedback held on a lead so the agent can fill it. */
 export function apiResumeCallAttempt(id: string): Promise<ApiCallAttemptRow> {
   return request<ApiCallAttemptRow>(`/api/v1/call-attempts/${id}/resume`, { method: "POST" });

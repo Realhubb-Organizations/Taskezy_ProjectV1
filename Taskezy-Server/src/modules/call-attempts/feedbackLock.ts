@@ -6,10 +6,11 @@ import { ApiError } from "../../utils/ApiError";
 // A call-feedback popup (CallFeedbackGate) normally blocks the agent's app
 // until it's filled. When it can't be — the screen stopped responding, or an
 // admin/manager force-closed it — the call attempt stays PENDING_FEEDBACK
-// with outcome FEEDBACK_PENDING_OUTCOME ("held"): the app is free again, but
-// that agent can't act on that one lead until the feedback is given (any
-// action there reopens the form, see POST /call-attempts/:id/resume).
-// Admins/managers acting on the lead are never blocked.
+// with outcome FEEDBACK_PENDING_OUTCOME ("held"): the stuck popup is closed,
+// but that agent can't work on ANY lead until the feedback is given — the app
+// shows a "Call feedback pending" popup with Fill now, and any lead action is
+// refused and reopens the form (POST /call-attempts/:id/resume).
+// Admins/managers acting on the agent's leads are never blocked.
 
 export const FEEDBACK_PENDING_OUTCOME = "Feedback pending";
 /** Held feedback the agent reopened (form showing again) — still noted "(given late)" when filled. */
@@ -39,16 +40,31 @@ export async function findHeldAttempt(callerId: string, leadId: string): Promise
 }
 
 /**
- * Refuses an action on a lead while the caller still owes call feedback for
- * it. The app reopens that feedback form when it gets this error
- * (code FEEDBACK_PENDING, details.attemptId).
+ * Refuses work on ANY lead while the caller still owes held call feedback —
+ * except on a lead whose feedback form they have open right now (the form's
+ * own status/note saves). The app reopens the held feedback form when it
+ * gets this error (code FEEDBACK_PENDING, details.attemptId).
  */
 export async function assertNoPendingFeedback(callerId: string, leadId: string): Promise<void> {
-  const held = await findHeldAttempt(callerId, leadId);
+  const { rows } = await pool.query<{ id: string; lead_name: string | null }>(
+    `SELECT ca.id, l.name AS lead_name
+     FROM call_attempts ca
+     LEFT JOIN leads l ON l.id = ca.lead_id
+     WHERE ca.caller_user_id = $1 AND ${isHeldSql("ca")}
+       AND NOT EXISTS (
+         SELECT 1 FROM call_attempts open_form
+         WHERE open_form.caller_user_id = $1 AND open_form.lead_id = $2
+           AND open_form.status = 'PENDING_FEEDBACK' AND NOT ${isHeldSql("open_form")}
+       )
+     ORDER BY ca.created_at
+     LIMIT 1`,
+    [callerId, leadId]
+  );
+  const held = rows[0];
   if (!held) return;
   throw new ApiError(
     409,
-    `Fill the pending call feedback for "${held.lead_name ?? "this lead"}" first.`,
+    `Call feedback is pending for "${held.lead_name ?? "a lead"}". Fill it to continue working on your leads.`,
     "FEEDBACK_PENDING",
     { attemptId: held.id }
   );

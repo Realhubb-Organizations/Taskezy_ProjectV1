@@ -47,6 +47,10 @@ const CALL_STATUS_OPTIONS = ["Connected", "Called", "Not Reachable", "Wrong Numb
 // change entry point can't drift onto different lists.
 const NEEDS_NEXT_CALL: LeadStatus[] = SCHEDULER_REQUIRED_STATUSES;
 
+// How long a stuck feedback screen counts down before it closes and the
+// feedback is held on the lead instead (see "Stuck screen" below).
+const HOLD_AFTER_SECONDS = 5;
+
 const todayIso = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -160,7 +164,7 @@ export default function CallFeedbackGate() {
   // ---- Stuck screen ----
   // A click that never reaches this popup (something covering it), or a tap
   // on Save that's been "Saving…" for over 15s, is a dead click. After 3,
-  // count down a minute; if nothing in the popup responds by then, free the
+  // count down HOLD_AFTER_SECONDS; if nothing in the popup responds by then, free the
   // agent's app and hold this feedback on its lead instead (the server then
   // blocks only that lead until it's filled — feedbackLock.ts). Any click
   // the popup does handle cancels it.
@@ -188,7 +192,7 @@ export default function CallFeedbackGate() {
           return;
         }
         deadClicksRef.current += 1;
-        if (deadClicksRef.current >= 3) setHoldIn(prev => prev ?? 60);
+        if (deadClicksRef.current >= 3) setHoldIn(prev => prev ?? HOLD_AFTER_SECONDS);
       }, 1500));
     };
     document.addEventListener("pointerdown", onPointerDown, true);
@@ -200,6 +204,7 @@ export default function CallFeedbackGate() {
   useEffect(() => {
     if (holdIn === null) return;
     if (holdIn <= 0) {
+      // The "Call feedback pending" popup (PendingFeedbackPopup) takes over.
       holdCallFeedbackOnLead().catch(() => setHoldIn(null)); // offline: keep the popup
       return;
     }
@@ -346,7 +351,7 @@ export default function CallFeedbackGate() {
 
         {holdIn !== null && (
           <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2">
-            This screen isn&apos;t responding. It will close in {Math.max(holdIn, 0)}s so you can keep working. You&apos;ll need to fill this feedback before working on {lead?.name ?? "this lead"} again.
+            This screen isn&apos;t responding. It will close in {Math.max(holdIn, 0)}s. Then press Fill now to fill this feedback. You can&apos;t work on your leads until it&apos;s filled.
           </p>
         )}
         {error && <p className="text-[11px] text-red-600 font-semibold">{error}</p>}

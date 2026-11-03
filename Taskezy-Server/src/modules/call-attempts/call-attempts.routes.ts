@@ -102,6 +102,23 @@ callAttemptsRouter.get(
   })
 );
 
+// The caller's own feedback held on leads (feedbackLock.ts) — shown as a
+// "Call feedback pending for …  Fill now" bar until each is filled.
+callAttemptsRouter.get(
+  "/held",
+  asyncHandler(async (req, res) => {
+    const { rows } = await query(
+      `SELECT ca.id, ca.lead_id, l.name AS lead_name, ca.channel, ca.created_at
+       FROM call_attempts ca
+       LEFT JOIN leads l ON l.id = ca.lead_id
+       WHERE ca.caller_user_id = $1 AND ${isHeldSql("ca")}
+       ORDER BY ca.created_at`,
+      [req.user!.sub]
+    );
+    sendOk(res, rows);
+  })
+);
+
 // A WhatsApp follow-up doesn't carry the same weight as a phone call (no
 // live conversation to react to), so once an agent has already completed
 // WhatsApp feedback for a lead at least once, scheduling a next-call
