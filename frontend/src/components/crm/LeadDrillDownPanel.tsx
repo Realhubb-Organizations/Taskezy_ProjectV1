@@ -3,8 +3,8 @@
 import React, { useEffect, useMemo, useState, useRef } from "react";
 import LeadRowActionsMenu from "./LeadRowActionsMenu";
 import { createPortal } from "react-dom";
-import { useApp, Lead, LeadStatus, FollowupCall, mapApiFollowupToFrontend, mapApiLeadToFrontendLead } from "@/context/AppContext";
-import { apiListFollowupsPage, apiGetDistinctCampaigns, apiGetLead, LeadListFilters } from "@/lib/apiClient";
+import { useApp, Lead, LeadStatus, mapApiLeadToFrontendLead } from "@/context/AppContext";
+import { apiGetDistinctCampaigns, apiGetLead, LeadListFilters } from "@/lib/apiClient";
 import LeadDetailDrawer from "./LeadDetailDrawer";
 import { openOnRowClick, LEAD_ROW_CLASS } from "@/lib/rowClick";
 import { useServerLeadList } from "@/lib/useServerLeadList";
@@ -17,7 +17,7 @@ import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/Searcha
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
 import { DateTimeLines, dateTimeParts } from "@/components/ui/DateTimeLines";
 import { canChangeLeadStatus, STATUS_LOCKED_HINT, isLeadAssignableUser } from "@/lib/leadAssignment";
-import { nextFollowupFor } from "@/lib/followups";
+import { nextCallFor } from "@/lib/followups";
 import { maskPhone, maskEmail } from "@/lib/maskPII";
 import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/callTrigger";
 import NextCallCell from "./NextCallCell";
@@ -25,7 +25,6 @@ import { callSubStatusOf } from "@/lib/callSubStatus";
 import { useLeadStatusScheduler } from "@/lib/leadScheduler";
 import LeadScheduleModal from "./LeadScheduleModal";
 import { DateSortButton } from "@/components/ui/DateSortButton";
-import { useLiveRefresh } from "@/lib/useLiveRefresh";
 import MissedCountBadge from "@/components/crm/MissedCountBadge";
 
 // Drill-down table + lead quick-view drawer behind the 7 lead stat cards
@@ -426,27 +425,6 @@ export default function LeadDrillDownPanel({ title, baseFilters, onClose }: {
     if (offset < 0) main.scrollTo({ top: main.scrollTop + offset - 80, behavior: "smooth" });
   };
 
-  // Real next-scheduled-call date, from the actual followup_calls queue —
-  // "—" when no reminder was ever set for this lead, rather than a
-  // fabricated createdAt+1day placeholder. Fetched just for the leads on
-  // the current drill-down page (10 at a time), not the whole company's
-  // follow-up table.
-  const [pageFollowups, setPageFollowups] = useState<FollowupCall[]>([]);
-  const pageLeadIds = drillPageLeads.map(l => l.id).join(",");
-  // Re-fetch Next Call Dates when a call is scheduled anywhere (addFollowupCall
-  // updates this list), not only when the rows change.
-  const { followupCalls: liveFollowups } = useApp();
-  // …and when anyone else schedules or completes one (lib/liveRefresh.ts).
-  const { liveVersion: followupsLive } = useLiveRefresh("followups");
-  useEffect(() => {
-    if (!pageLeadIds) { setPageFollowups([]); return; }
-    let cancelled = false;
-    apiListFollowupsPage(1, 500, { leadId: pageLeadIds.split(",") })
-      .then(({ rows }) => { if (!cancelled) setPageFollowups(rows.map(mapApiFollowupToFrontend)); })
-      .catch(() => { if (!cancelled) setPageFollowups([]); });
-    return () => { cancelled = true; };
-  }, [pageLeadIds, liveFollowups, followupsLive]);
-  const nextCallDateFor = (leadId: string) => nextFollowupFor(leadId, pageFollowups);
 
   // Drill-down table's per-row Status cell — the shared searchable dropdown,
   // in place of a plain native <select> (whose OS-default popup, e.g. dark
@@ -616,7 +594,7 @@ export default function LeadDrillDownPanel({ title, baseFilters, onClose }: {
                       <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]" title={l.assignedAgent || "Unassigned"}>{l.assignedAgent || "Unassigned"}</td>
                       <td className="px-4 py-3 text-slate-500 align-top"><DateTimeLines {...dateTimeParts(l.createdAtStr)} /></td>
                       <td className="px-4 py-3 text-slate-600 align-top"><div className="line-clamp-3 [overflow-wrap:anywhere]" title={latestLogMessage(l)}>{latestLogMessage(l)}</div></td>
-                      <td className="px-4 py-3 text-slate-500 align-top"><NextCallCell next={nextCallDateFor(l.id)} /></td>
+                      <td className="px-4 py-3 text-slate-500 align-top"><NextCallCell next={nextCallFor(l)} /></td>
                       {activeRole === "ADMIN" && (
                         <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]" title={l.campaign || l.source || "—"}>{l.campaign || l.source || "—"}</td>
                       )}

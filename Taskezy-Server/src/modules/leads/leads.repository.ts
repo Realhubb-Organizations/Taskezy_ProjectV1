@@ -1,4 +1,5 @@
 import { PoolClient } from "pg";
+import { TASK_DUE_AT_SQL } from "../tasks/taskDue";
 import { pool, query, withTransaction } from "../../db/pool";
 import { BUSINESS_TIMEZONE } from "../../utils/businessDate";
 import { normalizeForeignPhone } from "../../utils/validation";
@@ -93,6 +94,8 @@ export interface LeadListRow {
   // superseded/completed, unlike reading status='MISSED' live. The
   // controller strips this for Agent/Member callers (manager/admin-only).
   missed_task_count: number;
+  /** Task time — see tasks/taskDue.ts. NULL = no task. */
+  task_due_at: string | null;
   logs: { message: string; timestamp: string; user: string }[];
 }
 
@@ -267,6 +270,8 @@ const LIST_SELECT = `
     (SELECT count(DISTINCT (ca.created_at AT TIME ZONE '${BUSINESS_TIMEZONE}')::date)
      FROM call_attempts ca WHERE ca.lead_id = l.id AND ca.channel = 'CALL') AS dead_lead_call_days,
     l.missed_task_count,
+    -- The lead's task time: Pending Tasks' date and the Next Call Date column (tasks/taskDue.ts)
+    ${TASK_DUE_AT_SQL} AS task_due_at,
     COALESCE(
       (SELECT json_agg(json_build_object('message', ll.message, 'timestamp', ll.created_at, 'user', ll.user_name_snapshot) ORDER BY ll.created_at)
        FROM lead_logs ll

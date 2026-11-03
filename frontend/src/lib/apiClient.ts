@@ -304,6 +304,8 @@ export interface ApiLeadRow {
   // this lead was flagged MISSED. Stripped server-side for agents (see
   // leads.handover.ts's leadForCaller), so missing/undefined for them.
   missed_task_count?: number;
+  /** The lead's task time (Pending Tasks' date = Next Call Date) — see Taskezy-Server tasks/taskDue.ts. Null = no task. */
+  task_due_at?: string | null;
   logs: { message: string; timestamp: string; user: string }[];
 }
 

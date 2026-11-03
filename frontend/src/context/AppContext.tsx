@@ -275,6 +275,8 @@ export interface Lead {
   // undefined there (never something to branch display logic on alone —
   // also gate by activeRole, same as handover notes elsewhere).
   missedTaskCount?: number;
+  /** Task time — the same date/time Pending Tasks uses (server tasks/taskDue.ts); shown as Next Call Date. */
+  taskDueAt?: string;
 }
 
 export interface AdSpendRecord {
@@ -802,7 +804,8 @@ export function mapApiLeadToFrontendLead(row: ApiLeadRow): Lead {
     firstResponseAt: row.first_response_at || undefined,
     createdAtStr: row.created_at,
     deadLeadCallDays: Number(row.dead_lead_call_days ?? 0),
-    missedTaskCount: row.missed_task_count
+    missedTaskCount: row.missed_task_count,
+    taskDueAt: row.task_due_at ?? undefined
   };
 }
 
