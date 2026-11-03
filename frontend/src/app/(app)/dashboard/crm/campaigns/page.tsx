@@ -3,7 +3,7 @@
 import React, { useState, useRef, useMemo, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useApp, Lead, AdSpendRecord, FollowupCall, mapApiLeadToFrontendLead, mapApiFollowupToFrontend } from "@/context/AppContext";
+import { useApp, Lead, AdSpendRecord, mapApiLeadToFrontendLead } from "@/context/AppContext";
 import { computeCPL } from "@/lib/reportMetrics";
 import { WhatsAppIcon, CallIcon, PlatformLabel, platformFromText } from "@/components/icons/ContactIcons";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
@@ -38,7 +38,7 @@ import {
   BOOKING_LEAD_STATUSES,
   buildCampaignsList
 } from "@/lib/campaignBuilder";
-import { formatNextFollowup, nextFollowupFor } from "@/lib/followups";
+import { formatNextFollowup, nextCallFor } from "@/lib/followups";
 import NextCallCell from "@/components/crm/NextCallCell";
 import { maskPhone, maskEmail } from "@/lib/maskPII";
 import {
@@ -47,7 +47,7 @@ import {
   apiGetLeadStats, type LeadListFilters,
   apiGetCampaignStatusBreakdown, type CampaignStatusBreakdownRow, type CampaignStatusBreakdownResult,
   apiGetAdLevelLeadStats, type AdLevelLeadStat,
-  apiListLeadsPage, apiListFollowupsPage
+  apiListLeadsPage
 } from "@/lib/apiClient";
 import { apiGetLead } from "@/lib/apiClient";
 import LeadDetailDrawer from "@/components/crm/LeadDetailDrawer";
@@ -385,7 +385,6 @@ export default function AdminCampaignsPage() {
   const [scopedLeadStats, setScopedLeadStats] = useState<CampaignLeadStats[]>([]);
   // Live: other people's lead / follow-up changes refresh this page's numbers.
   const { liveVersion: leadsLive } = useLiveRefresh("leads");
-  const { liveVersion: followupsLive } = useLiveRefresh("followups");
   const breakdownLiveRefresh = useBackgroundRefresh(leadsLive);
   useEffect(() => {
     let cancelled = false;
@@ -597,7 +596,6 @@ export default function AdminCampaignsPage() {
   // Generic now — the two real call sites (Qualified Leads drill-down's
   // table and CSV export) each fetch just the follow-ups they need
   // instead of closing over the bulk followupCalls array.
-  const nextCallDateFor = (leadId: string, followups: FollowupCall[]) => nextFollowupFor(leadId, followups);
 
   // ---- Campaigns Analytics tab ----------------------------------------
 
@@ -962,21 +960,6 @@ export default function AdminCampaignsPage() {
     : {};
   const qualifiedLeadsList = useServerLeadList(qualifiedLeadsBaseFilters, 25, isQualifiedLeadsDrillOpen);
 
-  // Next-call-date for just the current page's leads (not the whole
-  // company's follow-up table) — same pattern LeadDrillDownPanel uses.
-  const [qualifiedLeadsPageFollowups, setQualifiedLeadsPageFollowups] = useState<FollowupCall[]>([]);
-  const qualifiedLeadsPageIds = qualifiedLeadsList.rows.map(l => l.id).join(",");
-  // Re-fetch Next Call Dates when a call is scheduled anywhere (addFollowupCall
-  // updates this list), not only when the rows change.
-  const { followupCalls: liveFollowups } = useApp();
-  useEffect(() => {
-    if (!qualifiedLeadsPageIds) { setQualifiedLeadsPageFollowups([]); return; }
-    let cancelled = false;
-    apiListFollowupsPage(1, 500, { leadId: qualifiedLeadsPageIds.split(",") })
-      .then(({ rows }) => { if (!cancelled) setQualifiedLeadsPageFollowups(rows.map(mapApiFollowupToFrontend)); })
-      .catch(() => { if (!cancelled) setQualifiedLeadsPageFollowups([]); });
-    return () => { cancelled = true; };
-  }, [qualifiedLeadsPageIds, liveFollowups, followupsLive]);
 
   // CSV export needs every matching row, not just the current page — loop-
   // fetch every page (bounded by this one campaign's qualified leads,
@@ -996,13 +979,11 @@ export default function AdminCampaignsPage() {
         if (page >= result.totalPages) break;
         page += 1;
       }
-      const { rows: followupRows } = await apiListFollowupsPage(1, 500, { leadId: all.map(l => l.id) });
-      const exportFollowups = followupRows.map(mapApiFollowupToFrontend);
       const rows = [
         ["Lead Name", "Phone", "Email", "Status", "Assigned To", "Date", "Notes", "Next Call Date", "Campaign"],
         ...all.map(l => [
           l.name, isAdmin ? l.phone : maskPhone(l.phone), isAdmin ? l.email : maskEmail(l.email || ""), l.status, l.assignedAgent,
-          l.createdAtStr || "—", latestLogMessage(l), formatNextFollowup(nextCallDateFor(l.id, exportFollowups)), l.campaign || l.source || "—"
+          l.createdAtStr || "—", latestLogMessage(l), formatNextFollowup(nextCallFor(l)), l.campaign || l.source || "—"
         ])
       ];
       const csv = rows.map(r => r.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
@@ -1490,7 +1471,7 @@ export default function AdminCampaignsPage() {
                             <td className="px-4 py-3 [overflow-wrap:anywhere]">{l.assignedAgent || "—"}</td>
                             <td className="px-4 py-3">{l.createdAtStr || "—"}</td>
                             <td className="px-4 py-3"><div className="line-clamp-3 [overflow-wrap:anywhere]" title={latestLogMessage(l)}>{latestLogMessage(l)}</div></td>
-                            <td className="px-4 py-3"><NextCallCell next={nextCallDateFor(l.id, qualifiedLeadsPageFollowups)} /></td>
+                            <td className="px-4 py-3"><NextCallCell next={nextCallFor(l)} /></td>
                             <td className="px-4 py-3 [overflow-wrap:anywhere]">{l.campaign || l.source || "—"}</td>
                           </tr>
                         ))

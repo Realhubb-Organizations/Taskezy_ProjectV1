@@ -13,6 +13,7 @@ import { processScheduleFollowup, ScheduleFollowupJobData } from "../../jobs/sch
 import { logger } from "../../utils/logger";
 import { assertNoScheduleConflict } from "../followups/scheduleConflict";
 import { publishToUser } from "../../utils/sseHub";
+import { broadcastLeadChanged } from "../leads/leads.realtime";
 import { FEEDBACK_PENDING_LOG_PREFIX, FEEDBACK_PENDING_OUTCOME, FEEDBACK_REOPENED_OUTCOME, findHeldAttempt, isHeldSql } from "./feedbackLock";
 
 export const callAttemptsRouter = Router();
@@ -255,6 +256,8 @@ callAttemptsRouter.patch(
       }
     }
 
+    // The lead's Next Call Date (task_due_at) may have changed — new call, or a WhatsApp closing a due one.
+    broadcastLeadChanged(found[0].lead_id);
     const { rows: updated } = await query(`${SELECT} WHERE id = $1`, [req.params.id]);
     sendOk(res, updated[0]);
   })

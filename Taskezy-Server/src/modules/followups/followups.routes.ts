@@ -12,6 +12,7 @@ import { getAssignedAgentId } from "../leads/leads.repository";
 import { canSeeMissedTaskCount } from "../leads/leads.handover";
 import { AccessTokenPayload } from "../../utils/tokens";
 import { assertNoScheduleConflict } from "./scheduleConflict";
+import { broadcastLeadChanged } from "../leads/leads.realtime";
 import { BUSINESS_TIMEZONE } from "../../utils/businessDate";
 import { IS_SITE_VISIT_FOLLOWUP_SQL } from "../reports/siteVisitSql";
 import { assertNoPendingFeedback } from "../call-attempts/feedbackLock";
@@ -259,6 +260,8 @@ followupsRouter.post(
       throw err;
     }
     const { rows: created } = await query(`${SELECT} WHERE fc.id = $1`, [insertedId]);
+    // The lead's Next Call Date (task_due_at on GET /leads) changed too.
+    if (req.body.leadId) broadcastLeadChanged(req.body.leadId);
     sendOk(res, created[0], 201);
   })
 );
@@ -297,6 +300,7 @@ followupsRouter.patch(
     if (req.body.status === "COMPLETED" && rows[0].lead_id) {
       await deleteLeadActivityNotifications(rows[0].lead_id, ["REMINDER"]);
     }
+    if (rows[0].lead_id) broadcastLeadChanged(rows[0].lead_id); // its Next Call Date may have changed
     const { rows: updated } = await query(`${SELECT} WHERE fc.id = $1`, [req.params.id]);
     sendOk(res, updated[0]);
   })

@@ -3,13 +3,13 @@
 import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useApp, Lead, LeadStatus, FollowupCall, mapApiLeadToFrontendLead, mapApiFollowupToFrontend } from "@/context/AppContext";
+import { useApp, Lead, LeadStatus, mapApiLeadToFrontendLead } from "@/context/AppContext";
 import { useDialog } from "@/components/ui/DialogProvider";
 import { isSuperAdminUser } from "@/lib/superAdmin";
 import { Sliders, Sparkles, Plus, Check, ChevronDown, Search, X, Minus, Download, RotateCcw, Users, Trash2, AlertTriangle, Building2, ClipboardList, Upload, GripVertical } from "lucide-react";
 import { STATUS_OPTIONS, PICKABLE_STATUS_OPTIONS, frontendStatusToDbCode, withDeadLeadGate, nextStatusOptions } from "@/lib/leadStatusMapping";
 import { type LeadSummaryStats } from "@/lib/leadSummaryStats";
-import { apiListLeadsPage, apiGetLead, apiGetLeadStats, apiGetLeadAnalyticsStats, apiGetDistinctCampaigns, apiListFollowupsPage, apiDeleteLead, apiBulkDeleteLeads, apiBulkReassignLeads, apiBulkSetLeadProperty, apiSetLeadProperty, apiSearchLeadsByPhones, type LeadListFilters, type AgentAnalyticsStats } from "@/lib/apiClient";
+import { apiListLeadsPage, apiGetLead, apiGetLeadStats, apiGetLeadAnalyticsStats, apiGetDistinctCampaigns, apiDeleteLead, apiBulkDeleteLeads, apiBulkReassignLeads, apiBulkSetLeadProperty, apiSetLeadProperty, apiSearchLeadsByPhones, type LeadListFilters, type AgentAnalyticsStats } from "@/lib/apiClient";
 import { useServerLeadList } from "@/lib/useServerLeadList";
 import { PlatformLabel, platformFromText } from "@/components/icons/ContactIcons";
 import ExpandChevron, { CollapsibleCell } from "@/components/ui/ExpandChevron";
@@ -30,7 +30,7 @@ import LeadDrillDownPanel from "./LeadDrillDownPanel";
 import LeadScheduleModal from "./LeadScheduleModal";
 import { useLeadStatusScheduler } from "@/lib/leadScheduler";
 import { DateTimeLines, dateTimeParts } from "@/components/ui/DateTimeLines";
-import { nextFollowupFor } from "@/lib/followups";
+import { nextCallFor } from "@/lib/followups";
 import NextCallCell from "./NextCallCell";
 import LeadNoteCell from "./LeadNoteCell";
 import LeadRowActionsMenu from "./LeadRowActionsMenu";
@@ -614,7 +614,6 @@ export default function LeadDashboard() {
   const mainTableLiveRefresh = useBackgroundRefresh(leadsChangedSignal);
   // Other people's changes, live (lib/liveRefresh.ts).
   const { liveVersion: leadsLive } = useLiveRefresh("leads");
-  const { liveVersion: followupsLive } = useLiveRefresh("followups");
 
   useEffect(() => {
     // A live update (leadsChangedSignal) refreshes quietly — no loading state.
@@ -755,22 +754,6 @@ export default function LeadDashboard() {
     paginationProps: analyticsDrilldownPaginationProps
   } = useServerLeadList(analyticsDrilldown?.baseFilters ?? {}, 8);
 
-  // Real next-scheduled-call date for the Analytics drill-down's current
-  // page only, fetched by lead id — not the whole company's follow-up
-  // table (same pattern as data-calling/page.tsx and LeadDrillDownPanel.tsx).
-  const [analyticsDrillPageFollowups, setAnalyticsDrillPageFollowups] = useState<FollowupCall[]>([]);
-  const analyticsDrillPageLeadIds = analyticsDrilldownRows.map(l => l.id).join(",");
-  // Re-fetch Next Call Dates when a call is scheduled anywhere (addFollowupCall
-  // updates this list), not only when the rows change.
-  const { followupCalls: liveFollowups } = useApp();
-  useEffect(() => {
-    if (!analyticsDrillPageLeadIds) { setAnalyticsDrillPageFollowups([]); return; }
-    let cancelled = false;
-    apiListFollowupsPage(1, 500, { leadId: analyticsDrillPageLeadIds.split(",") })
-      .then(({ rows }) => { if (!cancelled) setAnalyticsDrillPageFollowups(rows.map(mapApiFollowupToFrontend)); })
-      .catch(() => { if (!cancelled) setAnalyticsDrillPageFollowups([]); });
-    return () => { cancelled = true; };
-  }, [analyticsDrillPageLeadIds, liveFollowups, followupsLive]);
 
   const QUALIFIED_STATUS_OPTIONS = STATUS_OPTIONS.filter(s => !UNQUALIFIED_STATUSES.includes(s));
 
@@ -987,20 +970,6 @@ export default function LeadDashboard() {
   const adminTotalPages = Math.max(1, Math.ceil(serverTotalCount / adminRowsPerPage));
   const adminCurrentPage = Math.min(adminPage, adminTotalPages);
 
-  // Real next-scheduled-call date for just this table's current page, by
-  // lead id — not the whole company's follow-up table (same pattern as
-  // data-calling/page.tsx and LeadDrillDownPanel.tsx).
-  const [adminPageFollowups, setAdminPageFollowups] = useState<FollowupCall[]>([]);
-  const adminPageLeadIds = adminFilteredLeads.map(l => l.id).join(",");
-  useEffect(() => {
-    if (!adminPageLeadIds) { setAdminPageFollowups([]); return; }
-    let cancelled = false;
-    apiListFollowupsPage(1, 500, { leadId: adminPageLeadIds.split(",") })
-      .then(({ rows }) => { if (!cancelled) setAdminPageFollowups(rows.map(mapApiFollowupToFrontend)); })
-      .catch(() => { if (!cancelled) setAdminPageFollowups([]); });
-    return () => { cancelled = true; };
-  }, [adminPageLeadIds, liveFollowups, followupsLive]);
-  const adminNextCallDateFor = (leadId: string) => nextFollowupFor(leadId, adminPageFollowups);
 
   // ---- Bulk Assign / Reshuffle (Admin + Manager) ----
   // "Assign" appears once the selection holds an unassigned lead, "Reshuffle"
@@ -2051,7 +2020,7 @@ export default function LeadDashboard() {
                             },
                             adminVisibleColumns.nextCallDate && {
                               key: "nextCallDate" as const,
-                              node: <td className="px-4 py-3 text-slate-500 align-top"><NextCallCell next={adminNextCallDateFor(l.id)} /></td>
+                              node: <td className="px-4 py-3 text-slate-500 align-top"><NextCallCell next={nextCallFor(l)} /></td>
                             },
                             adminVisibleColumns.actions && {
                               key: "actions" as const,
@@ -2626,7 +2595,7 @@ export default function LeadDashboard() {
                                 <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]" title={l.assignedAgent || "Unassigned"}>{l.assignedAgent || "Unassigned"}</td>
                                 <td className="px-4 py-3 text-slate-500 align-top"><DateTimeLines {...dateTimeParts(l.createdAtStr)} /></td>
                                 <td className="px-4 py-3 text-slate-600 align-top"><LeadNoteCell lead={l} onSaved={handleNoteSaved} /></td>
-                                <td className="px-4 py-3 text-slate-500 align-top"><NextCallCell next={nextFollowupFor(l.id, analyticsDrillPageFollowups)} /></td>
+                                <td className="px-4 py-3 text-slate-500 align-top"><NextCallCell next={nextCallFor(l)} /></td>
                                 <td className="px-4 py-3 text-slate-700 font-medium align-top [overflow-wrap:anywhere]" title={l.campaign || "—"}>
                               {l.campaign || "—"}
                             </td>

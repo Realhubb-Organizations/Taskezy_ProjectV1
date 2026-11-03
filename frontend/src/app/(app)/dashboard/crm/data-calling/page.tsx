@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useMemo, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { useApp, Lead, FollowupCall, mapApiFollowupToFrontend } from "@/context/AppContext";
+import { useApp, Lead } from "@/context/AppContext";
 import { ChevronRight, ChevronDown, Search, Sliders, Minus, X, Copy, Users, Plus, Check, Trash2, AlertTriangle, GripVertical } from "lucide-react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine } from "recharts";
 import UploadLeadsModal from "@/components/crm/UploadLeadsModal";
@@ -13,8 +13,7 @@ import TablePagination, { usePagination } from "@/components/ui/TablePagination"
 import DateRangePicker, { DatePicker, DateRangeValue, todayIso, toIsoDate } from "@/components/ui/DateRangePicker";
 import DateRangeSelect from "@/components/ui/DateRangeSelect";
 import { canChangeLeadStatus, canReassignThisLead, canUploadLeads, splitEvenly, uploadAssignableUsers, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
-import { nextFollowupFor } from "@/lib/followups";
-import { apiListFollowupsPage } from "@/lib/apiClient";
+import { nextCallFor } from "@/lib/followups";
 import { findOpenFollowup, formatFollowupWhen, findAgentScheduleConflict, agentConflictMessage, isTooCloseToExistingSchedule } from "@/lib/duplicateFollowupCheck";
 import NextCallCell from "@/components/crm/NextCallCell";
 import { useDialog } from "@/components/ui/DialogProvider";
@@ -28,7 +27,6 @@ import { ExcelIcon } from "@/components/icons/ContactIcons";
 import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/callTrigger";
 import { CALL_SUB_STATUS_OPTIONS, CallSubStatus, callSubStatusOf, isQualifiedCall, isUnqualifiedCall } from "@/lib/callSubStatus";
 import { DateSortButton, sortByDate, type SortDir } from "@/components/ui/DateSortButton";
-import { useLiveRefresh } from "@/lib/useLiveRefresh";
 import MissedCountBadge from "@/components/crm/MissedCountBadge";
 
 // Data Calling's own, independent Call Status (migration 030) — completely
@@ -1119,24 +1117,6 @@ export default function DataCallingPage() {
     tableScrollRef.current?.scrollTo({ top: 0 });
   }, [currentPageClamped, rowsPerPage]);
 
-  // Real next-scheduled-call date, fetched for just the leads on the
-  // current table page (not the whole company's follow-up table).
-  const [pageFollowups, setPageFollowups] = useState<FollowupCall[]>([]);
-  const pageLeadIds = paginatedLeads.map(l => l.id).join(",");
-  // Re-fetch Next Call Dates when a call is scheduled anywhere (addFollowupCall
-  // updates this list), not only when the rows change.
-  const { followupCalls: liveFollowups } = useApp();
-  // …and when anyone else schedules or completes one (lib/liveRefresh.ts).
-  const { liveVersion: followupsLive } = useLiveRefresh("followups");
-  useEffect(() => {
-    if (!pageLeadIds) { setPageFollowups([]); return; }
-    let cancelled = false;
-    apiListFollowupsPage(1, 500, { leadId: pageLeadIds.split(",") })
-      .then(({ rows }) => { if (!cancelled) setPageFollowups(rows.map(mapApiFollowupToFrontend)); })
-      .catch(() => { if (!cancelled) setPageFollowups([]); });
-    return () => { cancelled = true; };
-  }, [pageLeadIds, liveFollowups, followupsLive]);
-  const nextCallDateFor = (leadId: string) => nextFollowupFor(leadId, pageFollowups);
 
   // WhatsApp / Call buttons — rendered right after Status on phones, at the
   // end of the row elsewhere.
@@ -2188,7 +2168,7 @@ export default function DataCallingPage() {
                           },
                           visibleColumns.date && { key: "date" as const, node: <td className="px-4 py-3.5">{formatDateTime(l.createdAtStr)}</td> },
                           visibleColumns.notes && { key: "notes" as const, node: <td className="px-4 py-3.5"><LeadNoteCell lead={l} compact={phoneLayout} /></td> },
-                          visibleColumns.nextCallDate && { key: "nextCallDate" as const, node: <td className="px-4 py-3.5"><NextCallCell next={nextCallDateFor(l.id)} /></td> },
+                          visibleColumns.nextCallDate && { key: "nextCallDate" as const, node: <td className="px-4 py-3.5"><NextCallCell next={nextCallFor(l)} /></td> },
                           visibleColumns.property && { key: "property" as const, node: <td className="px-4 py-3.5 [overflow-wrap:anywhere]">{l.property || "—"}</td> },
                           visibleColumns.dataCallSource && {
                             key: "dataCallSource" as const,

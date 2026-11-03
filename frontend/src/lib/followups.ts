@@ -5,6 +5,17 @@ export interface NextFollowup {
   overdue: boolean;
 }
 
+/**
+ * Next Call Date for a lead: its task time from the server (Taskezy-Server
+ * tasks/taskDue.ts) — the same date and time Pending Tasks shows, overdue
+ * once it's passed. Null when the lead has no task.
+ */
+export function nextCallFor(lead: { taskDueAt?: string }, now = Date.now()): NextFollowup | null {
+  if (!lead.taskDueAt) return null;
+  const at = new Date(lead.taskDueAt);
+  return isNaN(at.getTime()) ? null : { at, overdue: at.getTime() < now };
+}
+
 // Exact time of a follow-up. Prefers the raw ISO timestamp; falls back to the
 // display date ("YYYY-MM-DD") + time ("03:30 pm"), which `new Date()` can't parse as one string.
 export function followupTime(f: FollowupCall): number {

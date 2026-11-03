@@ -7,6 +7,7 @@ import { findDirectReportIds } from "../users/users.repository";
 import { AccessTokenPayload } from "../../utils/tokens";
 import { canSeeMissedTaskCount } from "../leads/leads.handover";
 import { FEEDBACK_PENDING_LOG_PREFIX } from "../call-attempts/feedbackLock";
+import { OPEN_CALL_ORDER_SQL } from "./taskDue";
 
 export const tasksRouter = Router();
 
@@ -126,7 +127,16 @@ tasksRouter.get(
        LEFT JOIN LATERAL (
          SELECT message, created_at FROM lead_logs WHERE lead_id = fc.lead_id AND message NOT LIKE '${FEEDBACK_PENDING_LOG_PREFIX}%' ORDER BY created_at DESC LIMIT 1
        ) ll ON fc.lead_id IS NOT NULL
-       WHERE fc.status != 'COMPLETED' ${followupScopeClause}`,
+       WHERE fc.status != 'COMPLETED'
+         -- One task per lead: the same open call the Leads page's Next Call
+         -- Date shows (taskDue.ts) — an older duplicate call adds no second task.
+         AND (fc.lead_id IS NULL OR fc.id = (
+           SELECT f.id FROM followup_calls f
+           WHERE f.lead_id = fc.lead_id AND f.status <> 'COMPLETED'
+           ORDER BY ${OPEN_CALL_ORDER_SQL("f")}
+           LIMIT 1
+         ))
+         ${followupScopeClause}`,
       followupParams
     );
 
@@ -197,6 +207,7 @@ tasksRouter.get(
     }
 
     for (const r of leadRows) {
+      // Same rule as taskDue.ts TASK_DUE_AT_SQL (the Leads page's Next Call Date).
       const dueAt = r.status_code === NEW_LEAD_CODE ? (r.assigned_at || r.created_at) : (r.latest_log_at || r.created_at);
       tasks.push({
         id: `lead-${r.id}`,
