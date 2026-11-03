@@ -10,6 +10,7 @@ import { apiGetManagerReportStats, type ManagerReportAgentStats } from "@/lib/ap
 import { TableRowsSkeleton, CardListSkeleton } from "@/components/ui/Skeletons";
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
 import { useLiveRefresh } from "@/lib/useLiveRefresh";
+import ReportNumberLink from "./ReportNumberLink";
 
 const ZERO_AGENT_STATS = { leadsCount: 0, spend: 0, bookingValue: 0, missedCount: 0, missedFollowups: 0 };
 
@@ -54,7 +55,8 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
 
   const managerRows = useMemo(() => {
     return managers.map(manager => {
-      const teamMembers = users.filter(u => u.managerId === manager.id).map(u => u.name);
+      const teamUsers = users.filter(u => u.managerId === manager.id);
+      const teamMembers = teamUsers.map(u => u.name);
 
       // Individual (manager's own leads)
       const individual = statsForName(manager.name);
@@ -63,7 +65,8 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
       // Team (sum of every direct report's own row — same "sum small
       // per-agent rows" pattern LeadDashboard.tsx's Analytics tab uses)
       const memberStats = teamMembers.map(member => ({ name: member, ...statsForName(member) }));
-      const memberBreakdown = memberStats.map(m => ({
+      const memberBreakdown = memberStats.map((m, i) => ({
+        id: teamUsers[i].id,
         name: m.name,
         leadsCount: m.leadsCount,
         spend: m.spend,
@@ -86,6 +89,8 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
 
       return {
         manager: manager.name,
+        managerId: manager.id,
+        teamIds: teamUsers.map(u => u.id),
         individualLeadsCount: individual.leadsCount,
         individualSpend: individual.spend,
         individualROI,
@@ -102,6 +107,28 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [managers, users, statsByAgentId]);
+  // A count → the leads / follow-ups behind it (Reports → detail page), with
+  // the same date range and people as the count.
+  const leadsLink = (value: number, agentIds: string[], title: string, missedOnly?: boolean, children?: React.ReactNode) => (
+    <ReportNumberLink
+      tab="manager"
+      value={value}
+      detail={{ view: "leads", title, filters: { assignedAgentId: agentIds, dateFrom: dateRange.from, dateTo: dateRange.to, missedOnly } }}
+    >
+      {children}
+    </ReportNumberLink>
+  );
+  const missedFollowupsLink = (value: number, agentId: string, title: string, children: React.ReactNode) => (
+    <ReportNumberLink
+      tab="manager"
+      value={value}
+      detail={{ view: "missed-followups", title, agentIds: [agentId], dateFrom: dateRange.from, dateTo: dateRange.to }}
+    >
+      {children}
+    </ReportNumberLink>
+  );
+  const groupIds = (row: (typeof managerRows)[number], group: "Individual" | "Team" | "Combined") =>
+    group === "Individual" ? [row.managerId] : group === "Team" ? row.teamIds : [row.managerId, ...row.teamIds];
   const managerPagination = usePagination(managerRows, 10, JSON.stringify(dateRange));
 
   return (
@@ -157,7 +184,7 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
                         <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
                           <div>
                             <span className="block text-[9px] font-semibold text-slate-400">Leads</span>
-                            <span className="font-mono font-bold text-slate-700">{leads}</span>
+                            <span className="font-mono font-bold text-slate-700">{leadsLink(leads, groupIds(row, label), `${row.manager} · ${label} leads`)}</span>
                           </div>
                           <div>
                             <span className="block text-[9px] font-semibold text-slate-400">Spend</span>
@@ -171,9 +198,11 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
                             <div>
                               <span className="block text-[9px] font-semibold text-slate-400">Missed</span>
                               {missed > 0 ? (
-                                <span className="inline-flex items-center gap-1 text-amber-700 font-bold">
-                                  <AlertTriangle className="h-3 w-3" /> {missed}
-                                </span>
+                                leadsLink(missed, groupIds(row, label), `${row.manager} · ${label} missed leads`, true, (
+                                  <span className="inline-flex items-center gap-1 text-amber-700 font-bold">
+                                    <AlertTriangle className="h-3 w-3" /> {missed}
+                                  </span>
+                                ))
                               ) : (
                                 <span className="text-slate-400">0</span>
                               )}
@@ -198,16 +227,16 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
                                 <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
                                   m.missedCount > 0 ? "bg-red-50 text-red-700 border border-red-100" : "bg-emerald-50 text-emerald-700 border border-emerald-100"
                                 }`}>
-                                  {m.missedCount} missed leads
+                                  {leadsLink(m.missedCount, [m.id], `${m.name} · Missed leads`, true, `${m.missedCount} missed leads`)}
                                 </span>
                                 <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
                                   m.missedFollowupsCount > 0 ? "bg-amber-50 text-amber-700 border border-amber-100" : "bg-emerald-50 text-emerald-700 border border-emerald-100"
                                 }`}>
-                                  {m.missedFollowupsCount} missed follow-ups
+                                  {missedFollowupsLink(m.missedFollowupsCount, m.id, `${m.name} · Missed follow-ups`, `${m.missedFollowupsCount} missed follow-ups`)}
                                 </span>
                               </div>
                               <div className="flex items-center justify-between text-[10px] text-slate-500">
-                                <span>{m.leadsCount} leads • {formatCurrency(m.spend)} spend</span>
+                                <span>{leadsLink(m.leadsCount, [m.id], `${m.name} · Leads`, false, `${m.leadsCount} leads`)} • {formatCurrency(m.spend)} spend</span>
                                 <span className="font-bold text-emerald-650">{m.roi.toFixed(1)}x ROI</span>
                               </div>
                             </div>
@@ -283,35 +312,39 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
                     </td>
 
                     {/* Individual */}
-                    <td className="px-4 py-3 font-mono text-slate-600 border-l border-slate-100">{row.individualLeadsCount}</td>
+                    <td className="px-4 py-3 font-mono text-slate-600 border-l border-slate-100">{leadsLink(row.individualLeadsCount, groupIds(row, "Individual"), `${row.manager} · Individual leads`)}</td>
                     <td className="px-4 py-3 font-mono text-slate-700">{formatCurrency(row.individualSpend)}</td>
                     <td className="px-4 py-3 font-mono font-bold text-emerald-650">{row.individualROI.toFixed(1)}x</td>
                     <td className="px-4 py-3">
                       {row.individualMissedCount > 0 ? (
-                        <span className="inline-flex items-center gap-1 text-amber-700 font-bold">
-                          <AlertTriangle className="h-3 w-3" /> {row.individualMissedCount}
-                        </span>
+                        leadsLink(row.individualMissedCount, groupIds(row, "Individual"), `${row.manager} · Individual missed leads`, true, (
+                          <span className="inline-flex items-center gap-1 text-amber-700 font-bold">
+                            <AlertTriangle className="h-3 w-3" /> {row.individualMissedCount}
+                          </span>
+                        ))
                       ) : (
                         <span className="text-slate-400">0</span>
                       )}
                     </td>
 
                     {/* Team */}
-                    <td className="px-4 py-3 font-mono text-slate-600 border-l border-slate-100">{row.teamLeadsCount}</td>
+                    <td className="px-4 py-3 font-mono text-slate-600 border-l border-slate-100">{leadsLink(row.teamLeadsCount, groupIds(row, "Team"), `${row.manager} · Team leads`)}</td>
                     <td className="px-4 py-3 font-mono text-slate-700">{formatCurrency(row.teamSpend)}</td>
                     <td className="px-4 py-3 font-mono font-bold text-emerald-650">{row.teamROI.toFixed(1)}x</td>
                     <td className="px-4 py-3">
                       {row.teamMissedCount > 0 ? (
-                        <span className="inline-flex items-center gap-1 text-red-650 font-bold">
-                          <AlertTriangle className="h-3 w-3" /> {row.teamMissedCount}
-                        </span>
+                        leadsLink(row.teamMissedCount, groupIds(row, "Team"), `${row.manager} · Team missed leads`, true, (
+                          <span className="inline-flex items-center gap-1 text-red-650 font-bold">
+                            <AlertTriangle className="h-3 w-3" /> {row.teamMissedCount}
+                          </span>
+                        ))
                       ) : (
                         <span className="text-slate-400">0</span>
                       )}
                     </td>
 
                     {/* Combined */}
-                    <td className="px-4 py-3 font-mono font-bold text-slate-800 border-l border-slate-100">{row.totalLeadsCount}</td>
+                    <td className="px-4 py-3 font-mono font-bold text-slate-800 border-l border-slate-100">{leadsLink(row.totalLeadsCount, groupIds(row, "Combined"), `${row.manager} · Combined leads`)}</td>
                     <td className="px-4 py-3 font-mono font-bold text-emerald-700">{row.combinedROI.toFixed(1)}x</td>
                   </tr>
                   {/* Team breakdown slides open/closed (always rendered so closing animates too). */}
@@ -330,16 +363,16 @@ export default function ManagerReports({ dateRange }: { dateRange: DateRange }) 
                                     <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
                                       m.missedCount > 0 ? "bg-red-50 text-red-700 border border-red-100" : "bg-emerald-50 text-emerald-700 border border-emerald-100"
                                     }`}>
-                                      {m.missedCount} missed leads
+                                      {leadsLink(m.missedCount, [m.id], `${m.name} · Missed leads`, true, `${m.missedCount} missed leads`)}
                                     </span>
                                     <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
                                       m.missedFollowupsCount > 0 ? "bg-amber-50 text-amber-700 border border-amber-100" : "bg-emerald-50 text-emerald-700 border border-emerald-100"
                                     }`}>
-                                      {m.missedFollowupsCount} missed follow-ups
+                                      {missedFollowupsLink(m.missedFollowupsCount, m.id, `${m.name} · Missed follow-ups`, `${m.missedFollowupsCount} missed follow-ups`)}
                                     </span>
                                   </div>
                                   <div className="flex items-center justify-between text-[10px] text-slate-500">
-                                    <span>{m.leadsCount} leads • {formatCurrency(m.spend)} spend</span>
+                                    <span>{leadsLink(m.leadsCount, [m.id], `${m.name} · Leads`, false, `${m.leadsCount} leads`)} • {formatCurrency(m.spend)} spend</span>
                                     <span className="font-bold text-emerald-650">{m.roi.toFixed(1)}x ROI</span>
                                   </div>
                                 </div>

@@ -130,6 +130,8 @@ teamReportRouter.get(
     const svParams: unknown[] = [];
     const svPickWhere = `${IS_SITE_VISIT_FOLLOWUP_SQL} AND ${dueConditions(q, svParams)} AND ${leadConditions(q, scope, svParams, { noDate: true })}`;
     const doneLogParam = `$${svParams.push(SITE_VISIT_DONE_LOG)}`;
+    // A visit inside the date range (the lead may also have visits outside it).
+    const svInRange = dueConditions(q, svParams);
 
     const subSourceParams: unknown[] = [];
     const subSourceScope = scope ? `AND l.assigned_agent_id = ANY($${subSourceParams.push(scope)}::uuid[])` : "";
@@ -166,7 +168,7 @@ teamReportRouter.get(
       ),
       query<{
         lead_id: string; name: string; phone: string; status_code: string; agent_id: string | null; agent_name: string | null;
-        property_name: string | null; missed_task_count: number; sv_count: string; missed_count: string; first_at: string;
+        property_name: string | null; missed_task_count: number; sv_count: string; missed_count: string; range_missed: string; range_upcoming: string; first_at: string;
         last_at: string; reason: string | null; done_at: string | null; all_missed: string; next_call_at: string | null;
       }>(
         `WITH picked AS (
@@ -176,7 +178,8 @@ teamReportRouter.get(
            WHERE ${svPickWhere}
          ),
          ev AS (
-           SELECT fc.lead_id, fc.scheduled_at, fc.created_at, fc.reschedule_reason, ${FOLLOWUP_EVER_MISSED_SQL} AS missed
+           SELECT fc.lead_id, fc.scheduled_at, fc.created_at, fc.reschedule_reason, ${FOLLOWUP_EVER_MISSED_SQL} AS missed,
+                  fc.status, (${svInRange}) AS in_range
            FROM followup_calls fc
            JOIN picked p ON p.lead_id = fc.lead_id
            WHERE ${IS_SITE_VISIT_FOLLOWUP_SQL}
@@ -185,6 +188,8 @@ teamReportRouter.get(
            SELECT lead_id,
                   count(*) AS sv_count,
                   count(*) FILTER (WHERE missed) AS missed_count,
+                  count(*) FILTER (WHERE missed AND in_range) AS range_missed,
+                  count(*) FILTER (WHERE status = 'UPCOMING' AND in_range) AS range_upcoming,
                   (array_agg(scheduled_at ORDER BY created_at))[1] AS first_at,
                   (array_agg(scheduled_at ORDER BY created_at DESC))[1] AS last_at,
                   (array_agg(reschedule_reason ORDER BY created_at DESC) FILTER (WHERE reschedule_reason IS NOT NULL))[1] AS reason
@@ -192,7 +197,7 @@ teamReportRouter.get(
            GROUP BY lead_id
          )
          SELECT pl.lead_id, l.name, l.phone, l.status_code, l.assigned_agent_id AS agent_id, ${userName("u")} AS agent_name,
-                pr.name AS property_name, l.missed_task_count, pl.sv_count, pl.missed_count, pl.first_at, pl.last_at, pl.reason,
+                pr.name AS property_name, l.missed_task_count, pl.sv_count, pl.missed_count, pl.range_missed, pl.range_upcoming, pl.first_at, pl.last_at, pl.reason,
                 (SELECT max(ll.created_at) FROM lead_logs ll WHERE ll.lead_id = l.id AND ll.message = ${doneLogParam}) AS done_at,
                 -- every missed task for the lead, calls included
                 (SELECT count(*) FROM followup_calls fc WHERE fc.lead_id = l.id AND ${FOLLOWUP_EVER_MISSED_SQL}) AS all_missed,
@@ -262,6 +267,10 @@ teamReportRouter.get(
         rescheduleCount: svCount - 1,
         siteVisitCount: svCount,
         missedCount: Number(r.missed_count),
+        // Visits inside the date range only: missed / still upcoming
+        // (Marketing's "Lead SV Missed" / "SV Scheduled").
+        rangeMissedCount: Number(r.range_missed),
+        rangeUpcomingCount: Number(r.range_upcoming),
         allMissedCount: Number(r.all_missed),
         nextCallAt: r.next_call_at,
         doneAt: r.done_at,

@@ -18,6 +18,10 @@ import { isLeadAssignableUser } from "@/lib/leadAssignment";
 import { dbCodeToFrontendStatus } from "@/lib/leadStatusMapping";
 import { maskPhone } from "@/lib/maskPII";
 import { downloadReportCsv } from "@/lib/csv";
+import { openOnRowClick, LEAD_ROW_CLASS } from "@/lib/rowClick";
+import { useLeadQuickView } from "@/components/crm/useLeadQuickView";
+import ReportNumberLink from "./ReportNumberLink";
+import type { ReportDetail } from "@/lib/reportDetail";
 import { useDialog } from "@/components/ui/DialogProvider";
 import type { ReportExportFilters } from "@/lib/apiClient";
 import {
@@ -144,7 +148,7 @@ function SubSourceBand({ options, selected, onChange }: { options: string[]; sel
 }
 
 // A report card whose rows come from the server a page at a time.
-function PagedReportCard<R>({ title, columns, fetchPage, resetKey, rowKey, emptyText, rowLabel, onClose, refreshKey }: {
+export function PagedReportCard<R>({ title, columns, fetchPage, resetKey, rowKey, emptyText, rowLabel, onClose, refreshKey, onRowClick }: {
   title: string;
   columns: { label: string; render: (row: R) => React.ReactNode }[];
   fetchPage: (page: number, pageSize: number) => Promise<{ rows: R[]; totalCount: number }>;
@@ -157,6 +161,8 @@ function PagedReportCard<R>({ title, columns, fetchPage, resetKey, rowKey, empty
   rowLabel: string;
   /** Shown as a Close link (the Missed Tasks card's list). */
   onClose?: () => void;
+  /** Makes each row clickable (e.g. open the lead's details). */
+  onRowClick?: (row: R) => void;
 }) {
   const [rows, setRows] = useState<R[]>([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -202,7 +208,11 @@ function PagedReportCard<R>({ title, columns, fetchPage, resetKey, rowKey, empty
               <tr><td colSpan={columns.length} className="py-10 text-center text-xs text-slate-400 italic">{emptyText}</td></tr>
             ) : (
               rows.map(r => (
-                <tr key={rowKey(r)}>
+                <tr
+                  key={rowKey(r)}
+                  onClick={onRowClick ? openOnRowClick(() => onRowClick(r)) : undefined}
+                  className={onRowClick ? LEAD_ROW_CLASS : undefined}
+                >
                   {columns.map(c => (
                     <td key={c.label} className={`py-3.5 pr-4 text-xs text-slate-700 [overflow-wrap:anywhere] ${onClose ? "first:pl-4" : ""}`}>{c.render(r)}</td>
                   ))}
@@ -224,7 +234,7 @@ function PagedReportCard<R>({ title, columns, fetchPage, resetKey, rowKey, empty
   );
 }
 
-const MISSED_TASK_COLUMNS: { label: string; render: (r: TeamMissedTaskRow) => React.ReactNode }[] = [
+export const MISSED_TASK_COLUMNS: { label: string; render: (r: TeamMissedTaskRow) => React.ReactNode }[] = [
   { label: "Lead Name", render: r => leadNameCell(r.lead_name, r.phone, r.missed_task_count) },
   { label: "Salesperson", render: r => r.assigned_to_name ?? "—" },
   { label: "Task", render: r => CALL_TYPE_LABEL[r.call_type] ?? r.call_type },
@@ -244,18 +254,22 @@ const DATA_CALLING_COLUMNS: { label: string; render: (r: TeamDataCallingLeadRow)
 ];
 
 // A Site Visit card's list: the leads behind its number, opened under the cards.
-function SiteVisitCardList({ title, rows, count, onClose }: {
+export function SiteVisitCardList({ title, rows, count, onClose, onRowClick, loading }: {
   title: string;
   rows: TeamSiteVisitLead[];
   count?: { label: string; value: (r: TeamSiteVisitLead) => number };
-  onClose: () => void;
+  /** Shown as a Close link; left out on the full detail page. */
+  onClose?: () => void;
+  /** Makes each row clickable (open the lead's details). */
+  onRowClick?: (row: TeamSiteVisitLead) => void;
+  loading?: boolean;
 }) {
   const { pageRows, paginationProps } = usePagination(rows, 10);
   return (
     <div className="bg-white rounded-2xl shadow-md border border-slate-100 animate-fade-in">
       <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
         <h3 className="ui-title">{title}</h3>
-        <button onClick={onClose} className="text-[11px] font-bold text-slate-400 hover:text-slate-700">Close ✕</button>
+        {onClose && <button onClick={onClose} className="text-[11px] font-bold text-slate-400 hover:text-slate-700">Close ✕</button>}
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-left text-xs border-collapse min-w-[720px]">
@@ -270,11 +284,17 @@ function SiteVisitCardList({ title, rows, count, onClose }: {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {pageRows.length === 0 ? (
+            {loading && pageRows.length === 0 ? (
+              <TableRowsSkeleton rows={4} columns={count ? 6 : 5} />
+            ) : pageRows.length === 0 ? (
               <tr><td colSpan={count ? 6 : 5} className="px-4 py-8 text-center text-slate-400 italic">No leads for this card.</td></tr>
             ) : (
               pageRows.map(r => (
-                <tr key={r.leadId} className="text-slate-700">
+                <tr
+                  key={r.leadId}
+                  onClick={onRowClick ? openOnRowClick(() => onRowClick(r)) : undefined}
+                  className={`text-slate-700 ${onRowClick ? LEAD_ROW_CLASS : ""}`}
+                >
                   <td className="px-4 py-3">{leadNameCell(r.name, r.phone, r.missedTaskCount)}</td>
                   <td className="px-4 py-3">{r.salesperson ?? "—"}</td>
                   <td className="px-4 py-3 whitespace-nowrap">{formatDate(r.scheduledAt)}</td>
@@ -310,6 +330,8 @@ export default function TeamReports({ dateRange, onDateRangeChange, initialAgent
 }) {
   const { properties, users, currentUser, activeRole } = useApp();
   const { toast } = useDialog();
+  // Clicking a lead row anywhere on this tab opens the lead's details.
+  const quickView = useLeadQuickView();
   const isAdmin = activeRole === "ADMIN";
   const isManager = !isAdmin && currentUser?.role_type === "Manager";
 
@@ -474,22 +496,33 @@ export default function TeamReports({ dateRange, onDateRangeChange, initialAgent
     job().catch(() => toast("Couldn't start the download. Please try again.", "error"));
 
   // ---- Salesperson Leads Report ----
-  const salesColumns: { label: string; value: (r: TeamReportSalespersonRow) => number }[] = dataCalling
+  // Each number opens its detail page: that salesperson's leads (or missed
+  // tasks) with the page's filters — the same ones the number is counted with.
+  const leadsOf = (r: TeamReportSalespersonRow, label: string, extra: LeadListFilters): ReportDetail => ({
+    view: "leads",
+    title: `${r.name} · ${label}`,
+    filters: { ...baseDrill, assignedAgentId: [r.agentId], ...extra }
+  });
+  const salesColumns: { label: string; value: (r: TeamReportSalespersonRow) => number; detail: (r: TeamReportSalespersonRow) => ReportDetail }[] = dataCalling
     ? [
-      { label: "Leads Assigned", value: r => r.assigned },
-      { label: "Call Made", value: r => r.callsMade },
-      { label: "Connected", value: r => r.connected },
-      { label: "Qualified Leads", value: r => r.qualified },
-      { label: "RNR", value: r => r.rnr },
-      { label: "Not Qualified", value: r => r.notQualified }
+      { label: "Leads Assigned", value: r => r.assigned, detail: r => leadsOf(r, "Leads Assigned", { assignedOnly: true }) },
+      { label: "Call Made", value: r => r.callsMade, detail: r => leadsOf(r, "Call Made", { callStatus: CALL_STATUSES }) },
+      { label: "Connected", value: r => r.connected, detail: r => leadsOf(r, "Connected", { callStatus: ["Connected"] }) },
+      { label: "Qualified Leads", value: r => r.qualified, detail: r => leadsOf(r, "Qualified Leads", qualifiedDrill) },
+      { label: "RNR", value: r => r.rnr, detail: r => leadsOf(r, "RNR", { callStatus: ["Not Reachable"] }) },
+      { label: "Not Qualified", value: r => r.notQualified, detail: r => leadsOf(r, "Not Qualified", { callSubStatus: ["Unqualified"] }) }
     ]
     : [
-      { label: "Qualified Leads", value: r => r.qualified },
-      { label: "Site Visits", value: r => r.siteVisits },
-      { label: "RNR", value: r => r.rnr },
-      { label: "Follow Ups", value: r => r.followUps },
-      { label: "Call Backs", value: r => r.callBacks },
-      { label: "Missed Tasks", value: r => r.missedTasks }
+      { label: "Qualified Leads", value: r => r.qualified, detail: r => leadsOf(r, "Qualified Leads", qualifiedDrill) },
+      { label: "Site Visits", value: r => r.siteVisits, detail: r => leadsOf(r, "Site Visits", { status: ["SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE"] }) },
+      { label: "RNR", value: r => r.rnr, detail: r => leadsOf(r, "RNR", { status: ["RNR"] }) },
+      { label: "Follow Ups", value: r => r.followUps, detail: r => leadsOf(r, "Follow Ups", { status: ["FOLLOWUP"] }) },
+      { label: "Call Backs", value: r => r.callBacks, detail: r => leadsOf(r, "Call Backs", { status: ["CALL_BACK"] }) },
+      {
+        label: "Missed Tasks",
+        value: r => r.missedTasks,
+        detail: r => ({ view: "missed-tasks", title: `${r.name} · Missed Tasks`, filters: { ...filters, assignedAgentId: [r.agentId] } })
+      }
     ];
   const { pageRows: salesRows, paginationProps: salesPagination } = usePagination(report.salespeople, 100, filtersKey);
   const downloadSalespeople = () => runDownload(() => downloadReportCsv(
@@ -568,6 +601,7 @@ export default function TeamReports({ dateRange, onDateRangeChange, initialAgent
       resetKey={filtersKey}
       emptyText="No site visits for these filters."
       onDownload={downloadSiteVisits}
+      onRowClick={r => quickView.open(r.leadId)}
       headerExtra={
         <div className="px-5 sm:px-6 pb-4 space-y-4">
           <KpiBlock band={subSourceBand}>
@@ -595,6 +629,7 @@ export default function TeamReports({ dateRange, onDateRangeChange, initialAgent
               rows={svCardRows}
               count={openSvCard.count}
               onClose={() => setSvCard(null)}
+              onRowClick={r => quickView.open(r.leadId)}
             />
           )}
         </div>
@@ -718,6 +753,7 @@ export default function TeamReports({ dateRange, onDateRangeChange, initialAgent
           emptyText="No missed tasks for these filters."
           rowLabel="Task"
           onClose={() => setSelectedCard(null)}
+          onRowClick={r => quickView.open(r.lead_id)}
         />
       ) : (
         <LeadDrillDownPanel
@@ -761,7 +797,11 @@ export default function TeamReports({ dateRange, onDateRangeChange, initialAgent
                 salesRows.map(r => (
                   <tr key={r.agentId} className="text-xs text-slate-700 tabular-nums">
                     <td className="py-3.5 pr-4 font-semibold text-slate-800 [overflow-wrap:anywhere]">{r.name}</td>
-                    {salesColumns.map(c => <td key={c.label} className="py-3.5 pr-4">{c.value(r)}</td>)}
+                    {salesColumns.map(c => (
+                      <td key={c.label} className="py-3.5 pr-4">
+                        <ReportNumberLink tab="agent" value={c.value(r)} detail={c.detail(r)} />
+                      </td>
+                    ))}
                   </tr>
                 ))
               )}
@@ -780,6 +820,7 @@ export default function TeamReports({ dateRange, onDateRangeChange, initialAgent
             resetKey={filtersKey}
             refreshKey={liveVersion}
             rowKey={r => r.lead_id}
+            onRowClick={r => quickView.open(r.lead_id)}
             emptyText="No Data Calling leads for these filters."
             rowLabel="Row"
           />
@@ -791,6 +832,7 @@ export default function TeamReports({ dateRange, onDateRangeChange, initialAgent
           <MissedTaskReport filters={filters} baseDrill={baseDrill} refreshKey={liveVersion} exportFilters={exportFilters} />
         </>
       )}
+      {quickView.drawer}
     </div>
   );
 }

@@ -16,6 +16,7 @@ import { canChangeLeadStatus, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
 import { STATUS_OPTIONS, dbCodeToFrontendStatus, frontendStatusToDbCode, nextStatusOptions, withDeadLeadGate } from "@/lib/leadStatusMapping";
 import { maskEmail, maskPhone } from "@/lib/maskPII";
 import { downloadReportCsv } from "@/lib/csv";
+import { LEAD_ROW_CLASS, openOnRowClick } from "@/lib/rowClick";
 import { useDialog } from "@/components/ui/DialogProvider";
 import {
   apiGetLead,
@@ -320,7 +321,7 @@ export default function MissedTaskReport({ filters, baseDrill, refreshKey, expor
                 const [day, time] = taskTimeParts(r.taskTime);
                 const l = r.lead;
                 return (
-                  <tr key={r.key} className="text-xs text-slate-700 align-top">
+                  <tr key={r.key} onClick={openOnRowClick(() => showLead(l))} className={`text-xs text-slate-700 align-top ${LEAD_ROW_CLASS}`}>
                     <td className="py-4 pr-4 tabular-nums">
                       <p>{day}</p>
                       <p>{time}</p>

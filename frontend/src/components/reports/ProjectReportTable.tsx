@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { Download, MinusSquare, Search, SlidersHorizontal, X } from "lucide-react";
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
+import { openOnRowClick, LEAD_ROW_CLASS } from "@/lib/rowClick";
 
 // One report card (Marketing's Project-wise Lead / Site Visits Reports, Team
 // Reports' Salesperson Site Visit Report): title, Columns → Manage Columns
@@ -56,7 +57,8 @@ export default function ProjectReportTable<R extends object>({
   menu,
   nameColumn,
   headerExtra,
-  onDownload
+  onDownload,
+  onRowClick
 }: {
   title: string;
   projectLabel: string;
@@ -78,6 +80,8 @@ export default function ProjectReportTable<R extends object>({
   headerExtra?: React.ReactNode;
   /** Shows a download button next to Columns. */
   onDownload?: () => void;
+  /** Makes each row clickable (e.g. open the lead's details). */
+  onRowClick?: (row: R) => void;
 }) {
   const name = nameColumn ?? (PROJECT_COLUMN as unknown as ReportNameColumn<R>);
   const allColumns = useMemo(
@@ -181,7 +185,11 @@ export default function ProjectReportTable<R extends object>({
               </tr>
             ) : (
               pageRows.map(r => (
-                <tr key={name.key(r)}>
+                <tr
+                  key={name.key(r)}
+                  onClick={onRowClick ? openOnRowClick(() => onRowClick(r)) : undefined}
+                  className={onRowClick ? LEAD_ROW_CLASS : undefined}
+                >
                   {showProject && (
                     <td className="py-3.5 pr-4 text-xs [overflow-wrap:anywhere]">{name.render(r)}</td>
                   )}
