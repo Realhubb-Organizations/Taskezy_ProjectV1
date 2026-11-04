@@ -2306,7 +2306,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (lead.callStatus !== callStatus || nextSub === lead.callSubStatus) logs.push({ timestamp: now, message: `Call status changed to "${callStatus}"`, user: by });
     if (nextSub !== lead.callSubStatus) logs.push({ timestamp: now, message: nextSub ? `Sub-status changed to "${nextSub}"` : "Sub-status cleared", user: by });
     logs.push({ timestamp: now, message: `Note: ${note}`, user: by });
-    const promote = callStatus === "Connected" && lead.source === "Bulk Upload";
+    const promote = callStatus === "Connected" && nextSub === "Qualified" && lead.source === "Bulk Upload";
     setAllLeads(prev => prev.map(l => (l.id === leadId
       ? {
           ...l,

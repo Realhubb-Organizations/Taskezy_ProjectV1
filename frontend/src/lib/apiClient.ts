@@ -442,6 +442,66 @@ export async function apiListLeadsPage(
   };
 }
 
+/** Filters of GET /missed-records (Taskezy-Server missedRecords.routes.ts). */
+export interface MissedRecordFilters {
+  recordIds?: string[];
+  leadIds?: string[];
+  type?: "LEAD" | "CALL";
+  /** Business day (YYYY-MM-DD) the miss happened on. */
+  missedOn?: string;
+  missedFrom?: string;
+  missedUntil?: string;
+  agentId?: string;
+}
+
+/** A frozen missed-lead record (migration 053): the lead exactly as it was when it was missed. */
+export interface ApiMissedRecord {
+  id: string;
+  /** LEAD = no first response within 20 minutes; CALL = a scheduled call not done in time. */
+  miss_type: "LEAD" | "CALL";
+  missed_at: string;
+  lead_id: string | null;
+  lead_name: string;
+  lead_phone: string | null;
+  lead_email: string | null;
+  status_code: string | null;
+  call_status: string | null;
+  call_sub_status: string | null;
+  next_call_at: string | null;
+  call_type: string | null;
+  agent_id: string | null;
+  agent_name: string | null;
+  manager_name: string | null;
+  property_name: string | null;
+  campaign: string | null;
+  source: string | null;
+  sub_source: string | null;
+  feedback: string | null;
+  notes: string | null;
+  lead_created_at: string | null;
+  assigned_at: string | null;
+  is_backfilled: boolean;
+}
+
+export async function apiListMissedRecords(
+  filters: MissedRecordFilters,
+  page: number,
+  pageSize: number
+): Promise<{ rows: ApiMissedRecord[]; totalCount: number }> {
+  const params = new URLSearchParams();
+  filters.recordIds?.forEach(id => params.append("recordIds", id));
+  filters.leadIds?.forEach(id => params.append("leadIds", id));
+  if (filters.type) params.set("type", filters.type);
+  if (filters.missedOn) params.set("missedOn", filters.missedOn);
+  if (filters.missedFrom) params.set("missedFrom", filters.missedFrom);
+  if (filters.missedUntil) params.set("missedUntil", filters.missedUntil);
+  if (filters.agentId) params.set("agentId", filters.agentId);
+  params.set("page", String(page));
+  params.set("pageSize", String(pageSize));
+  const { data, meta } = await requestWithMeta<ApiMissedRecord>(`/api/v1/missed-records?${params.toString()}`);
+  return { rows: data, totalCount: meta?.totalCount ?? data.length };
+}
+
 // Same filter shape as apiListLeadsPage, matching leads.schema.ts's
 // leadStatsQuerySchema (identical filters, no page/pageSize — an aggregate
 // has no "page"). Lets the admin Leads tab's 7 stat cards reflect the

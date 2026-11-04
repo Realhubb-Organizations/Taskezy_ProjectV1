@@ -4,7 +4,8 @@ import { createNotification } from "../modules/notifications/notifications.servi
 import { listActiveAdminIds } from "../modules/users/users.repository";
 import { BUSINESS_TIMEZONE, toBusinessDate } from "../utils/businessDate";
 import { broadcastDataChanged } from "../utils/dataChanged";
-import { leadIdsLink, leadListLink } from "../modules/notifications/notificationLinks";
+import { missedRecordIdsLink, missedRecordsLink } from "../modules/notifications/notificationLinks";
+import { INSERT_LEAD_MISS_RECORDS_SQL } from "../modules/missed-records/missedRecords.sql";
 
 const POLL_INTERVAL_MS = 60_000;
 const SLA_MINUTES = 20; // matches Reports' isMissedLead / getMissedInfo rule (reportMetrics.ts)
@@ -15,6 +16,10 @@ interface MissedLead {
   assigned_agent_id: string;
   agent_name: string;
   manager_id: string | null;
+  /** Its frozen missed_lead_records row (migration 053), saved in the same statement. */
+  record_id: string;
+  /** The claim's now() — every lead in this run shares it as missed_at. */
+  missed_at: Date;
 }
 
 /**
@@ -35,8 +40,12 @@ async function notifyMissedLeads(): Promise<void> {
   // missed — low cost, one-time — versus the alternative of risking
   // duplicate sends, which is the wrong tradeoff for a notification system:
   // duplicates erode trust and train users to ignore alerts.
+  //
+  // The same statement saves each lead's frozen missed record
+  // (missed-records/missedRecords.sql.ts), so a claimed miss always has one.
   const { rows } = await pool.query<MissedLead>(
-    `UPDATE leads l
+    `WITH claimed AS (
+     UPDATE leads l
      SET missed_notified_at = now()
      FROM users u
      WHERE u.id = l.assigned_agent_id
@@ -47,7 +56,9 @@ async function notifyMissedLeads(): Promise<void> {
        AND l.source <> 'Bulk Upload'
      RETURNING l.id, l.name, l.assigned_agent_id,
                u.first_name || COALESCE(' ' || u.last_name, '') AS agent_name,
-               u.manager_id`
+               u.manager_id
+     ), rec AS (${INSERT_LEAD_MISS_RECORDS_SQL})
+     SELECT c.*, rec.id AS record_id, now() AS missed_at FROM claimed c JOIN rec ON rec.lead_id = c.id`
   );
   if (rows.length === 0) return;
   broadcastDataChanged("leads");
@@ -85,8 +96,8 @@ async function notifyMissedLeads(): Promise<void> {
         : `${leads.length} leads have had no response within ${SLA_MINUTES} minutes of assignment: ${quoteList(leads)}.`,
       recipientUserId: agentId,
       leadId: leads.length === 1 ? leads[0].id : undefined,
-      // Several leads -> a list of just those.
-      link: leadIdsLink(title, leads.map(l => l.id), "/dashboard/crm")
+      // Opens the frozen record(s) of these misses — the leads as they were then.
+      link: missedRecordIdsLink(title, leads.map(l => l.record_id), "LEAD", leads[0].missed_at, agentId)
     });
   }
 
@@ -116,18 +127,13 @@ async function notifyMissedLeads(): Promise<void> {
         ? `${leads[0].agent_name} hasn't responded to "${leads[0].name}"`
         : `${leads[0].agent_name} hasn't responded to ${leads.length} leads (${quoteList(leads)})`
     );
-    // One agent in this escalation -> deep-link straight to their Sales
-    // Agent Report instead of the generic Reports landing page. Several
-    // agents at once has no single agent to land on, so that case keeps
-    // the plain link.
+    // One agent in this escalation -> the too-many-ids fallback link narrows
+    // to them (missedRecordIdsLink).
     const [singleAgentId] = byAgent.size === 1 ? [...byAgent.keys()] : [];
-    // Exactly one lead named in the message ("Sahith Gatla hasn't responded
-    // to 'Nandini Ali'") -> leadId wins over link in the notification click
-    // handler (NotificationBell/NotificationPopup), opening that lead's
-    // detail drawer directly instead of the agent's report.
+    // Exactly one lead named in the message: the notification stays tied to
+    // that lead (its lifecycle), but a click opens its frozen record.
     const singleLeadId = totalLeads === 1 ? agentGroups[0][0].id : undefined;
     const title = totalLeads === 1 ? "Team Lead Missed SLA" : `${totalLeads} Team Leads Missed SLA`;
-    const reportLink = singleAgentId ? `/dashboard/reports?tab=agent&agentId=${singleAgentId}` : "/dashboard/reports";
     await createNotification({
       system: "CRM",
       category: "MISSED_SLA",
@@ -135,7 +141,7 @@ async function notifyMissedLeads(): Promise<void> {
       message: `${parts.join("; ")} within ${SLA_MINUTES} minutes.`,
       recipientUserId: recipientId,
       leadId: singleLeadId,
-      link: leadIdsLink(title, agentGroups.flat().map(l => l.id), reportLink)
+      link: missedRecordIdsLink(title, agentGroups.flat().map(l => l.record_id), "LEAD", agentGroups[0][0].missed_at, singleAgentId)
     });
   }
 
@@ -173,14 +179,14 @@ async function notifyAdminDailyDigest(adminIds: string[]): Promise<void> {
   const breakdown = rows
     .map(r => `${r.agent_name}: ${r.missed_count}${r.manager_name ? ` (${r.manager_name}'s team)` : ""}`)
     .join(" · ");
-  // Opens the leads this digest counts — flagged today, up to now — on the
-  // CRM Dashboard's alert leads page (frontend lib/reportDetail.ts), so the
-  // list matches the number. The upper bound keeps an older digest showing
-  // its own leads, not the misses that came after it.
+  // Opens the frozen records of the leads this digest counts — missed today,
+  // up to now — on the CRM Dashboard's alert leads page (frontend
+  // lib/reportDetail.ts), so the list matches the number. The upper bound
+  // keeps an older digest showing its own misses, not the ones after it.
   const now = new Date();
-  const link = leadListLink(
+  const link = missedRecordsLink(
     `Missed Leads on ${toBusinessDate(now)}`,
-    { missedOn: toBusinessDate(now), missedUntil: now.toISOString() }
+    { type: "LEAD", missedOn: toBusinessDate(now), missedUntil: now.toISOString() }
   );
 
   for (const adminId of adminIds) {

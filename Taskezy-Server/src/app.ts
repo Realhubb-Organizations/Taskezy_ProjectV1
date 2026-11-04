@@ -31,6 +31,7 @@ import { sheetImportRouter } from "./modules/sheet-import/sheet-import.routes";
 import { callAttemptsRouter } from "./modules/call-attempts/call-attempts.routes";
 import { callLogRouter } from "./modules/call-log/call-log.routes";
 import { tasksRouter } from "./modules/tasks/tasks.routes";
+import { missedRecordsRouter } from "./modules/missed-records/missedRecords.routes";
 import { teamReportRouter } from "./modules/reports/teamReport.routes";
 import { reportExportsRouter } from "./modules/reports/reportExports.routes";
 import { broadcastOnWrite } from "./utils/dataChanged";
@@ -92,6 +93,7 @@ export function createApp(): Express {
   app.use("/api/v1/resale-units", resaleUnitsRouter);
   app.use("/api/v1/followups", broadcastOnWrite("followups", "tasks"), followupsRouter);
   app.use("/api/v1/tasks", tasksRouter);
+  app.use("/api/v1/missed-records", missedRecordsRouter);
   app.use("/api/v1/call-attempts", broadcastOnWrite("leads", "tasks"), callAttemptsRouter);
   app.use("/api/v1/call-log", broadcastOnWrite("calllog"), callLogRouter);
   app.use("/api/v1/attendance", attendanceRouter);

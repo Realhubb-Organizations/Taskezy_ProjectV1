@@ -826,12 +826,14 @@ export async function updateCallStatus(
   leadId: string,
   callStatus: string,
   callSubStatus: string | null,
-  // Set only when this exact update is the Connected promotion — flips
-  // source off "Bulk Upload" (graduating the lead out of Data Calling into
-  // the main CRM leads list, see AppContext.tsx's leads/dataCallingLeads
-  // split) and resets status_code to NEW_LEAD (entering the real pipeline
-  // fresh). Left undefined for every ordinary call-status update, which
-  // leaves both columns untouched.
+  // Set only when this exact update is the Connected + Qualified promotion —
+  // flips source off "Bulk Upload" (graduating the lead out of Data Calling
+  // into the main CRM leads list, see AppContext.tsx's leads/dataCallingLeads
+  // split), resets status_code to NEW_LEAD and restarts assigned_at, so it
+  // enters the real pipeline fresh: its 20-minute first-response clock and
+  // New Lead task start now, not from its Data Calling upload date. Left
+  // undefined for every ordinary call-status update, which leaves all three
+  // untouched.
   promotion: { source: string; statusCode: string } | undefined
 ): Promise<void> {
   await client.query(
@@ -839,7 +841,9 @@ export async function updateCallStatus(
      SET call_status = $1,
          call_sub_status = $5,
          source = COALESCE($2, source),
-         status_code = COALESCE($3, status_code)
+         status_code = COALESCE($3, status_code),
+         assigned_at = CASE WHEN $2::text IS NOT NULL THEN now() ELSE assigned_at END,
+         first_response_at = CASE WHEN $2::text IS NOT NULL THEN NULL ELSE first_response_at END
      WHERE id = $4`,
     [callStatus, promotion?.source ?? null, promotion?.statusCode ?? null, leadId, callSubStatus]
   );

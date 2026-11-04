@@ -25,7 +25,7 @@ import { assertTransitionAllowed, LeadStatusCode } from "./leadStatusTransitions
  * client. Returns the list of agent ids the caller's leads are restricted
  * to, or undefined for "no restriction" (Finance/Admin).
  */
-async function scopeForCaller(caller: AccessTokenPayload): Promise<string[] | undefined> {
+export async function scopeForCaller(caller: AccessTokenPayload): Promise<string[] | undefined> {
   if (caller.role !== "AGENT") return undefined;
   if (caller.roleType === "MEMBER") return [caller.sub];
   if (caller.roleType === "MANAGER") {
@@ -925,10 +925,10 @@ const VALID_CALL_STATUSES = new Set(["Connected", "Called", "Not Reachable", "Wr
 /**
  * Data Calling's own field (migration 030) — fully independent of
  * updateLeadStatus above, no transition matrix between its 4 values. A
- * Connected result promotes a bulk-uploaded lead out of the cold-outreach
- * pipeline into the main CRM leads list (see leads.repository.ts's
- * updateCallStatus for the mechanics) the same way reaching
- * Connected+Qualified used to before this field existed.
+ * Connected + Qualified result promotes a bulk-uploaded lead out of the
+ * cold-outreach pipeline into the main CRM leads list (see
+ * leads.repository.ts's updateCallStatus for the mechanics); Connected alone
+ * or Unqualified keeps it in Data Calling.
  */
 export async function updateCallStatus(
   caller: AccessTokenPayload,
@@ -951,17 +951,17 @@ export async function updateCallStatus(
   if (!existing) throw ApiError.notFound("Lead not found");
   await assertStatusChangeAllowed(caller, existing.assigned_agent_id, "change its call status");
 
-  const promotion =
-    callStatus === "Connected" && existing.source === "Bulk Upload"
-      ? { source: "Data", statusCode: "NEW_LEAD" }
-      : undefined;
-
   const nextSubStatus =
     callStatus !== "Connected"
       ? null
       : callSubStatus !== undefined
         ? callSubStatus
         : existing.call_status === "Connected" ? existing.call_sub_status : null;
+
+  const promotion =
+    callStatus === "Connected" && nextSubStatus === "Qualified" && existing.source === "Bulk Upload"
+      ? { source: "Data", statusCode: "NEW_LEAD" }
+      : undefined;
   const statusChanged = existing.call_status !== callStatus;
   const subStatusChanged = (existing.call_sub_status ?? null) !== nextSubStatus;
 
