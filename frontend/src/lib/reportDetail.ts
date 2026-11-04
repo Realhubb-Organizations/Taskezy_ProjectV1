@@ -63,7 +63,7 @@ function legacyMissedDigestHref(n: { title: string; link?: string; timestamp: st
   const sentAt = new Date(n.timestamp);
   if (isNaN(sentAt.getTime())) return undefined;
   const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(sentAt);
-  return alertLeadsHref(`Missed Leads on ${day}`, { missedOn: day, missedUntil: sentAt.toISOString(), overdueOnly: true });
+  return alertLeadsHref(`Missed Leads on ${day}`, { missedOn: day, missedUntil: sentAt.toISOString() });
 }
 
 // "Lead(s) Missed SLA" / "Team Lead(s) Missed SLA" alerts sent before they
@@ -83,18 +83,21 @@ function legacyMissedSlaHref(n: { title: string; link?: string; timestamp: strin
   return alertLeadsHref(n.title, {
     missedFrom: new Date(sentAt.getTime() - MISSED_SLA_RUN_WINDOW_MS).toISOString(),
     missedUntil: sentAt.toISOString(),
-    overdueOnly: true,
     assignedAgentId: agentId ? [decodeURIComponent(agentId)] : undefined
   });
 }
 
 // A lead-list link already stored on a notification (missedLeadScheduler.ts
 // etc., which used to point at Reports' detail page) -> the same list on the
-// alert leads page.
+// alert leads page. Lists show every lead the alert counted, so the list
+// matches its number — links sent while they were overdue-only drop that.
 function storedLeadListHref(link: string | undefined): string | undefined {
   if (!link || (!link.startsWith("/dashboard/reports?") && !link.startsWith(`${ALERT_LEADS_PATH}?`))) return undefined;
   const detail = parseAlertLeadsDetail(new URLSearchParams(link.slice(link.indexOf("?") + 1)).get("detail"));
-  return detail ? alertLeadsHref(detail.title, detail.filters) : undefined;
+  if (!detail) return undefined;
+  const filters = { ...detail.filters };
+  delete filters.overdueOnly;
+  return alertLeadsHref(detail.title, filters);
 }
 
 /** Where clicking a notification goes — the bell, the pop-up and a push tap alike. */
