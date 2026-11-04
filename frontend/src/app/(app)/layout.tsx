@@ -7,9 +7,9 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Capacitor } from "@capacitor/core";
 import { PushNotifications } from "@capacitor/push-notifications";
 import { Device } from "@capacitor/device";
-import { useApp, SystemType, CRM_ONLY_MODE } from "@/context/AppContext";
+import { useApp, SystemType, CRM_ONLY_MODE, mapApiNotificationToFrontend } from "@/context/AppContext";
 import { notificationHref } from "@/lib/reportDetail";
-import { apiRegisterDevice, apiRemoveDevice } from "@/lib/apiClient";
+import { apiGetNotification, apiRegisterDevice, apiRemoveDevice } from "@/lib/apiClient";
 import NotificationBell from "@/components/dashboard/NotificationBell";
 import NotificationPopup from "@/components/dashboard/NotificationPopup";
 import LoginAnimationOverlay from "@/components/LoginAnimationOverlay";
@@ -194,7 +194,8 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     activeSystem,
     setActiveSystem,
     showLoginSplash,
-    setShowLoginSplash
+    setShowLoginSplash,
+    markNotificationRead
   } = useApp();
 
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
@@ -315,18 +316,32 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     handles.push(PushNotifications.addListener("registrationError", (err) => {
       console.warn("Push registration failed:", err);
     }));
-    // Same destination as clicking the notification in the bell.
+    // Same destination as clicking the notification in the bell: the push
+    // only carries the notification's id and link, so the full notification
+    // (lead, title, sent time) is loaded by id first. If that fails (deleted,
+    // offline), the push's own fields are the fallback.
     handles.push(PushNotifications.addListener("pushNotificationActionPerformed", (action) => {
       const data = action.notification.data ?? {};
       const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
-      const href = notificationHref({
+      const fromPush = {
         title: action.notification.title ?? "",
         link: str(data.link),
         timestamp: "",
         system: str(data.system),
         leadId: str(data.leadId)
-      });
-      if (href) router.push(href);
+      };
+      const go = (n: Parameters<typeof notificationHref>[0]) => {
+        const href = notificationHref(n);
+        if (href) router.push(href);
+      };
+      const notificationId = str(data.notificationId);
+      if (!notificationId) return go(fromPush);
+      apiGetNotification(notificationId)
+        .then(row => {
+          markNotificationRead(row.id);
+          go(mapApiNotificationToFrontend(row));
+        })
+        .catch(() => go(fromPush));
     }));
     PushNotifications.checkPermissions().then((perm) => {
       const granted = perm.receive === "granted"

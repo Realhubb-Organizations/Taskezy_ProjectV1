@@ -160,8 +160,8 @@ notificationsRouter.get(
 // One aggregate over the same recipient-scoped WHERE as GET "/", powering
 // NotificationBell's tab badges. Group definitions mirror the frontend tabs:
 // newLeads = CRM NEW_LEAD, reminders = CRM REMINDER, activity = the rest of CRM.
-// Registered alongside the other static GET routes (no GET "/:id" exists, so
-// nothing can shadow it).
+// Registered alongside the other static GET routes, before GET "/:id" below,
+// so "/counts" isn't taken for an id.
 notificationsRouter.get(
   "/counts",
   asyncHandler(async (req, res) => {
@@ -198,6 +198,24 @@ notificationsRouter.get(
 );
 
 const idParamSchema = z.object({ id: z.string().uuid() });
+
+// One notification, for a phone push tap (the push itself only carries its
+// id and link) to route exactly like clicking it in the bell. Same recipient
+// rule as GET "/".
+notificationsRouter.get(
+  "/:id",
+  validate({ params: idParamSchema }),
+  asyncHandler(async (req, res) => {
+    const { rows } = await query(
+      `SELECT id, system, category, title, message, read, lead_id, link, created_at
+       FROM notifications
+       WHERE id = $1 AND (recipient_user_id IS NULL OR recipient_user_id = $2)`,
+      [req.params.id, req.user!.sub]
+    );
+    if (rows.length === 0) throw ApiError.notFound("Notification not found");
+    sendOk(res, rows[0]);
+  })
+);
 
 // A notification can only be marked read by its recipient, or by anyone for a
 // broadcast row (recipient_user_id IS NULL) — same visibility rule as GET.
