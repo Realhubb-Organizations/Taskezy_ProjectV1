@@ -7,6 +7,8 @@
 // (Taskezy-Server/src/jobs/followupScheduler.ts VIOLATION_WINDOW_MS), which
 // flips a follow-up to MISSED after the same delay — this just lets the UI
 // reflect that live instead of waiting for the scheduler's next poll.
+import type { Lead } from "@/context/AppContext";
+
 export const TASK_GRACE_MS = 10 * 60_000;
 
 export type TaskBucket = "missed" | "pending" | "upcoming";
@@ -24,6 +26,8 @@ export interface PendingTask {
   taskType: string; // follow-up call type (Callback / Meeting / Site Visit), or the lead status that makes it a task
   assignedTo: string;
   isDataCalling: boolean; // a Data Calling lead (source "Bulk Upload") rather than a Leads one
+  callStatus?: Lead["callStatus"]; // Data Calling leads: Connected / Called / Not Reachable / Wrong Number
+  callSubStatus?: Lead["callSubStatus"];
   missedCount?: number; // Admins/Managers only — see MissedCountBadge
 }
 
@@ -48,6 +52,8 @@ export interface PendingTaskRaw {
   taskType: string;
   assignedTo: string;
   isDataCalling?: boolean;
+  callStatus?: string | null;
+  callSubStatus?: string | null;
   missedCount?: number;
 }
 
@@ -84,6 +90,8 @@ export function applyTaskBuckets(rawTasks: PendingTaskRaw[], now: Date): Pending
       taskType: r.taskType,
       assignedTo: r.assignedTo,
       isDataCalling: r.isDataCalling === true,
+      callStatus: (r.callStatus || undefined) as Lead["callStatus"],
+      callSubStatus: (r.callSubStatus || undefined) as Lead["callSubStatus"],
       missedCount: r.missedCount
     };
   });
