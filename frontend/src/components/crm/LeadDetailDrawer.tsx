@@ -15,6 +15,7 @@ import { callSubStatusOf } from "@/lib/callSubStatus";
 import { useLeadStatusScheduler } from "@/lib/leadScheduler";
 import LeadScheduleModal from "./LeadScheduleModal";
 import MissedCountBadge from "@/components/crm/MissedCountBadge";
+import { formatFollowupDate, formatFollowupTime, nextCallFor } from "@/lib/followups";
 
 interface LeadDetailDrawerProps {
   lead: Lead | null;
@@ -246,6 +247,7 @@ export default function LeadDetailDrawer({
   // (only once it has moved). Admins/managers change it from that dropdown.
   const canReassign = canReassignThisLead(lead, currentUser, users) && reassignTargets.length > 0;
   const reassignedToLabel = lead.previousAgent ? (lead.assignedAgent || "Unassigned") : "—";
+  const nextCall = nextCallFor(lead);
 
   // Assigned/Property/Reassigned/Captured grid, plus ad-footprint fields
   // (Campaign/Meta Page/Lead Form ID) only when the lead actually carries
@@ -305,7 +307,17 @@ export default function LeadDetailDrawer({
         </span>
       )
     },
-    { label: "Captured at", value: lead.createdAtStr ? formatLogTimestamp(lead.createdAtStr) : "—" }
+    { label: "Captured at", value: lead.createdAtStr ? formatLogTimestamp(lead.createdAtStr) : "—" },
+    // Same date as the Leads table's Next Call Date column (lib/followups.ts).
+    {
+      label: "Next Call Date",
+      value: nextCall ? (
+        <span className={nextCall.overdue ? "text-red-600" : undefined} title={nextCall.overdue ? "This follow-up's time has passed and it isn't completed" : undefined}>
+          {nextCall.overdue && <span className="text-[10px] font-bold uppercase tracking-wide mr-1">Overdue</span>}
+          {formatFollowupDate(nextCall.at)}, {formatFollowupTime(nextCall.at)}
+        </span>
+      ) : "—"
+    }
   ];
   // Ad-source attribution (ad-platform/marketing concern) — Admin-only, and
   // only the fields the lead actually carries. Shown under "Campaign ▾".
