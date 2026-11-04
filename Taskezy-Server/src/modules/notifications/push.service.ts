@@ -11,6 +11,8 @@ export interface PushPayload {
   title: string;
   body: string;
   link: string | null;
+  /** CRM: the tap opens this lead, same as clicking it in the bell. */
+  leadId: string | null;
   notificationId: string;
   category: string;
   system: string;
@@ -45,7 +47,7 @@ async function sendPushToTokenRows(rows: { token: string }[], payload: PushPaylo
     const res = await getMessaging().sendEachForMulticast({
       tokens,
       notification: { title: payload.title, body: payload.body },
-      data: { link: payload.link ?? "", notificationId: payload.notificationId },
+      data: { link: payload.link ?? "", leadId: payload.leadId ?? "", system: payload.system, notificationId: payload.notificationId },
       android: { priority: "high", notification: { channelId: resolvePushChannelId(payload.category, payload.system) } }
     });
 

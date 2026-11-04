@@ -8,6 +8,7 @@ import { Capacitor } from "@capacitor/core";
 import { PushNotifications } from "@capacitor/push-notifications";
 import { Device } from "@capacitor/device";
 import { useApp, SystemType, CRM_ONLY_MODE } from "@/context/AppContext";
+import { notificationHref } from "@/lib/reportDetail";
 import { apiRegisterDevice, apiRemoveDevice } from "@/lib/apiClient";
 import NotificationBell from "@/components/dashboard/NotificationBell";
 import NotificationPopup from "@/components/dashboard/NotificationPopup";
@@ -314,9 +315,18 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     handles.push(PushNotifications.addListener("registrationError", (err) => {
       console.warn("Push registration failed:", err);
     }));
+    // Same destination as clicking the notification in the bell.
     handles.push(PushNotifications.addListener("pushNotificationActionPerformed", (action) => {
-      const link = action.notification.data?.link;
-      if (typeof link === "string" && link) router.push(link);
+      const data = action.notification.data ?? {};
+      const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
+      const href = notificationHref({
+        title: action.notification.title ?? "",
+        link: str(data.link),
+        timestamp: "",
+        system: str(data.system),
+        leadId: str(data.leadId)
+      });
+      if (href) router.push(href);
     }));
     PushNotifications.checkPermissions().then((perm) => {
       const granted = perm.receive === "granted"

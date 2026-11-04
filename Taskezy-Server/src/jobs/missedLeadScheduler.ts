@@ -4,6 +4,7 @@ import { createNotification } from "../modules/notifications/notifications.servi
 import { listActiveAdminIds } from "../modules/users/users.repository";
 import { BUSINESS_TIMEZONE, toBusinessDate } from "../utils/businessDate";
 import { broadcastDataChanged } from "../utils/dataChanged";
+import { leadIdsLink, leadListLink } from "../modules/notifications/notificationLinks";
 
 const POLL_INTERVAL_MS = 60_000;
 const SLA_MINUTES = 20; // matches Reports' isMissedLead / getMissedInfo rule (reportMetrics.ts)
@@ -74,16 +75,19 @@ async function notifyMissedLeads(): Promise<void> {
   const quoteList = (leads: MissedLead[]) => leads.map(l => `"${l.name}"`).join(", ");
 
   for (const [agentId, leads] of leadsByAgent) {
+    const title = leads.length === 1 ? "Lead Missed SLA" : `${leads.length} Leads Missed SLA`;
     await createNotification({
       system: "CRM",
       category: "MISSED_SLA",
-      title: leads.length === 1 ? "Lead Missed SLA" : `${leads.length} Leads Missed SLA`,
+      title,
       message: leads.length === 1
         ? `"${leads[0].name}" has had no response within ${SLA_MINUTES} minutes of assignment.`
         : `${leads.length} leads have had no response within ${SLA_MINUTES} minutes of assignment: ${quoteList(leads)}.`,
       recipientUserId: agentId,
       leadId: leads.length === 1 ? leads[0].id : undefined,
-      link: "/dashboard/crm"
+      // Several leads -> a list of just those, still-overdue ones (same as
+      // the Missed Leads Today digest).
+      link: leadIdsLink(title, leads.map(l => l.id), "/dashboard/crm", { overdueOnly: true })
     });
   }
 
@@ -123,14 +127,16 @@ async function notifyMissedLeads(): Promise<void> {
     // handler (NotificationBell/NotificationPopup), opening that lead's
     // detail drawer directly instead of the agent's report.
     const singleLeadId = totalLeads === 1 ? agentGroups[0][0].id : undefined;
+    const title = totalLeads === 1 ? "Team Lead Missed SLA" : `${totalLeads} Team Leads Missed SLA`;
+    const reportLink = singleAgentId ? `/dashboard/reports?tab=agent&agentId=${singleAgentId}` : "/dashboard/reports";
     await createNotification({
       system: "CRM",
       category: "MISSED_SLA",
-      title: totalLeads === 1 ? "Team Lead Missed SLA" : `${totalLeads} Team Leads Missed SLA`,
+      title,
       message: `${parts.join("; ")} within ${SLA_MINUTES} minutes.`,
       recipientUserId: recipientId,
       leadId: singleLeadId,
-      link: singleAgentId ? `/dashboard/reports?tab=agent&agentId=${singleAgentId}` : "/dashboard/reports"
+      link: leadIdsLink(title, agentGroups.flat().map(l => l.id), reportLink, { overdueOnly: true })
     });
   }
 
@@ -168,17 +174,15 @@ async function notifyAdminDailyDigest(adminIds: string[]): Promise<void> {
   const breakdown = rows
     .map(r => `${r.agent_name}: ${r.missed_count}${r.manager_name ? ` (${r.manager_name}'s team)` : ""}`)
     .join(" · ");
-  // Opens the list of the leads this digest counts — flagged today, up to
-  // now — on Reports' lead detail page (frontend lib/reportDetail.ts), with
-  // Back landing on Manager Reports. The upper bound keeps an older digest
-  // showing its own count's leads, not the misses that came after it.
+  // Opens the leads this digest counts — flagged today, up to now — that
+  // are still overdue (red Next Call Date), on the CRM Dashboard's alert
+  // leads page (frontend lib/reportDetail.ts). The upper bound keeps an older digest
+  // showing its own leads, not the misses that came after it.
   const now = new Date();
-  const detail = {
-    view: "leads",
-    title: `Missed Leads on ${toBusinessDate(now)}`,
-    filters: { missedOn: toBusinessDate(now), missedUntil: now.toISOString() }
-  };
-  const link = `/dashboard/reports?tab=manager&detail=${encodeURIComponent(JSON.stringify(detail))}`;
+  const link = leadListLink(
+    `Missed Leads on ${toBusinessDate(now)}`,
+    { missedOn: toBusinessDate(now), missedUntil: now.toISOString(), overdueOnly: true }
+  );
 
   for (const adminId of adminIds) {
     await createNotification({

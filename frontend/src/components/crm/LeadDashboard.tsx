@@ -9,6 +9,7 @@ import { isSuperAdminUser } from "@/lib/superAdmin";
 import { Sliders, Sparkles, Plus, Check, ChevronDown, Search, X, Minus, Download, RotateCcw, Users, Trash2, AlertTriangle, Building2, ClipboardList, Upload, GripVertical } from "lucide-react";
 import { STATUS_OPTIONS, PICKABLE_STATUS_OPTIONS, frontendStatusToDbCode, withDeadLeadGate, nextStatusOptions } from "@/lib/leadStatusMapping";
 import { type LeadSummaryStats } from "@/lib/leadSummaryStats";
+import { FROM_NOTIFICATIONS_PARAM, FROM_NOTIFICATIONS_VALUE } from "@/lib/reportDetail";
 import { apiListLeadsPage, apiGetLead, apiGetLeadStats, apiGetLeadAnalyticsStats, apiGetDistinctCampaigns, apiDeleteLead, apiBulkDeleteLeads, apiBulkReassignLeads, apiBulkSetLeadProperty, apiSetLeadProperty, apiSearchLeadsByPhones, type LeadListFilters, type AgentAnalyticsStats } from "@/lib/apiClient";
 import { useServerLeadList } from "@/lib/useServerLeadList";
 import { PlatformLabel, platformFromText } from "@/components/icons/ContactIcons";
@@ -159,12 +160,16 @@ export default function LeadDashboard() {
   // straight to a lead — fetched directly by id (a 404 means deleted or no
   // longer visible to this user, same silent-no-op as before) instead of
   // scanning the bulk leads array.
+  // Opened from a notification: closing that lead's panel goes to the CRM
+  // Dashboard instead of leaving them on the Leads page.
+  const closeLeadToDashboard = useRef(false);
   useEffect(() => {
     const openLeadId = searchParams.get("openLead");
     if (openLeadId) {
+      closeLeadToDashboard.current = searchParams.get(FROM_NOTIFICATIONS_PARAM) === FROM_NOTIFICATIONS_VALUE;
       apiGetLead(openLeadId)
         .then(row => setSelectedLead(mapApiLeadToFrontendLead(row)))
-        .catch(() => { /* not found / not visible to this user — no-op, same as before */ });
+        .catch(() => { closeLeadToDashboard.current = false; /* not found / not visible to this user — no-op, same as before */ });
       router.replace("/dashboard/crm");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2972,7 +2977,13 @@ export default function LeadDashboard() {
         <LeadDetailDrawer
           lead={selectedLead}
           isOpen={selectedLead !== null}
-          onClose={() => setSelectedLead(null)}
+          onClose={() => {
+            setSelectedLead(null);
+            if (closeLeadToDashboard.current) {
+              closeLeadToDashboard.current = false;
+              router.push("/crm/dashboard");
+            }
+          }}
           onUpdateStatus={handleUpdateLeadStatus}
           onReassigned={() => setLeadsRefreshKey(k => k + 1)}
           onNoteSaved={handleNoteSaved}

@@ -145,6 +145,12 @@ export interface LeadFilterConditions {
   missedOn?: string;
   /** With missedOn: only those flagged at or before this instant. */
   missedUntil?: string;
+  /** Only leads flagged missed at or after this instant. */
+  missedFrom?: string;
+  /** Only leads whose Next Call Date (TASK_DUE_AT_SQL) has passed — the red OVERDUE. */
+  overdueOnly?: boolean;
+  /** Only these leads (a notification about several leads). */
+  leadIds?: string[];
 }
 
 export interface LeadListFilter extends LeadFilterConditions {
@@ -264,6 +270,20 @@ function buildLeadWhereClause(filter: LeadFilterConditions): { whereClause: stri
   if (filter.missedUntil) {
     params.push(filter.missedUntil);
     conditions.push(`l.missed_notified_at <= $${params.length}::timestamptz`);
+  }
+
+  if (filter.missedFrom) {
+    params.push(filter.missedFrom);
+    conditions.push(`l.missed_notified_at >= $${params.length}::timestamptz`);
+  }
+
+  if (filter.overdueOnly) {
+    conditions.push(`${TASK_DUE_AT_SQL} < now()`);
+  }
+
+  if (filter.leadIds && filter.leadIds.length > 0) {
+    params.push(filter.leadIds);
+    conditions.push(`l.id = ANY($${params.length}::uuid[])`);
   }
 
   return { whereClause: conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "", params };

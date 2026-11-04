@@ -261,12 +261,8 @@ export default function NotificationBell() {
     markNotificationRead(n.id);
     setServerRows(prev => prev.map(r => (r.id === n.id ? { ...r, read: true } : r)));
     setIsOpen(false);
-    if (n.system === "CRM" && n.leadId) {
-      router.push(`/dashboard/crm?openLead=${n.leadId}`);
-    } else {
-      const href = notificationHref(n);
-      if (href) router.push(href);
-    }
+    const href = notificationHref(n);
+    if (href) router.push(href);
   };
 
   // Clears every notification of the caller's own in the system currently
