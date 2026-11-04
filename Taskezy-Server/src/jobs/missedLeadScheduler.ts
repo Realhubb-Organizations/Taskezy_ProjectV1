@@ -85,9 +85,8 @@ async function notifyMissedLeads(): Promise<void> {
         : `${leads.length} leads have had no response within ${SLA_MINUTES} minutes of assignment: ${quoteList(leads)}.`,
       recipientUserId: agentId,
       leadId: leads.length === 1 ? leads[0].id : undefined,
-      // Several leads -> a list of just those, still-overdue ones (same as
-      // the Missed Leads Today digest).
-      link: leadIdsLink(title, leads.map(l => l.id), "/dashboard/crm", { overdueOnly: true })
+      // Several leads -> a list of just those.
+      link: leadIdsLink(title, leads.map(l => l.id), "/dashboard/crm")
     });
   }
 
@@ -136,7 +135,7 @@ async function notifyMissedLeads(): Promise<void> {
       message: `${parts.join("; ")} within ${SLA_MINUTES} minutes.`,
       recipientUserId: recipientId,
       leadId: singleLeadId,
-      link: leadIdsLink(title, agentGroups.flat().map(l => l.id), reportLink, { overdueOnly: true })
+      link: leadIdsLink(title, agentGroups.flat().map(l => l.id), reportLink)
     });
   }
 
@@ -174,14 +173,14 @@ async function notifyAdminDailyDigest(adminIds: string[]): Promise<void> {
   const breakdown = rows
     .map(r => `${r.agent_name}: ${r.missed_count}${r.manager_name ? ` (${r.manager_name}'s team)` : ""}`)
     .join(" · ");
-  // Opens the leads this digest counts — flagged today, up to now — that
-  // are still overdue (red Next Call Date), on the CRM Dashboard's alert
-  // leads page (frontend lib/reportDetail.ts). The upper bound keeps an older digest
-  // showing its own leads, not the misses that came after it.
+  // Opens the leads this digest counts — flagged today, up to now — on the
+  // CRM Dashboard's alert leads page (frontend lib/reportDetail.ts), so the
+  // list matches the number. The upper bound keeps an older digest showing
+  // its own leads, not the misses that came after it.
   const now = new Date();
   const link = leadListLink(
     `Missed Leads on ${toBusinessDate(now)}`,
-    { missedOn: toBusinessDate(now), missedUntil: now.toISOString(), overdueOnly: true }
+    { missedOn: toBusinessDate(now), missedUntil: now.toISOString() }
   );
 
   for (const adminId of adminIds) {

@@ -149,7 +149,7 @@ notificationsRouter.get(
       `SELECT id, system, category, title, message, read, lead_id, link, created_at
        FROM notifications
        ${whereClause}
-       ORDER BY read ASC, created_at DESC
+       ORDER BY created_at DESC
        LIMIT $${dataParams.length - 1} OFFSET $${dataParams.length}`,
       dataParams
     );
