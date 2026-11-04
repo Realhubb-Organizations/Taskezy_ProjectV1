@@ -1007,6 +1007,13 @@ export async function reassign(client: PoolClient, leadId: string, previousAgent
      WHERE id = $3`,
     [previousAgentId, newAgentId, leadId]
   );
+  // The lead's open scheduled calls go with it — otherwise their reminders,
+  // SLA alerts ("<old agent> has not followed up…") and Dashboard tasks
+  // stay with the previous agent.
+  await client.query(
+    `UPDATE followup_calls SET assigned_to_id = $1 WHERE lead_id = $2 AND status <> 'COMPLETED'`,
+    [newAgentId, leadId]
+  );
 }
 
 /**
