@@ -853,9 +853,6 @@ export async function precheckBulkImportLeads(leads: { name: string; phone: stri
 // SCHEDULER_REQUIRED_STATUSES) — a WhatsApp status change to one of these
 // keeps the lead's scheduled call.
 const STATUSES_THAT_KEEP_A_SCHEDULE: LeadStatusCode[] = ["RNR", "CALL_BACK", "FOLLOWUP", "EOI", "SITE_VISIT_SCHEDULED"];
-// Statuses that can have a call scheduled at all (leadScheduler.ts
-// SCHEDULER_REQUIRED_STATUSES + SCHEDULER_OPTIONAL_STATUSES).
-const SCHEDULABLE_STATUSES: LeadStatusCode[] = [...STATUSES_THAT_KEEP_A_SCHEDULE, "LOW_BUDGET", "OTHER_REQUIREMENT"];
 
 /** A lead's status can be changed by the agent it's assigned to, that agent's manager, or an admin. */
 async function assertStatusChangeAllowed(caller: AccessTokenPayload, assignedAgentId: string, action = "change its status"): Promise<void> {
@@ -896,17 +893,11 @@ export async function updateLeadStatus(
       // status popups schedule a new one). After a WhatsApp message no new
       // time is asked, so the scheduled call is kept — unless the new
       // status ends the follow-ups (Not Interested, Booked, …).
-      if (!SCHEDULABLE_STATUSES.includes(statusCode)) {
-        // A status with no call scheduling (Not Interested, Booked, …) ends
-        // every scheduled call on the lead — missed ones too, so its old
-        // time can't keep it under Missed Tasks.
+      // Closes missed calls too, so an old time can't keep the lead under
+      // Missed Tasks after its status moved on.
+      if (!(keepSchedule && STATUSES_THAT_KEEP_A_SCHEDULE.includes(statusCode))) {
         await client.query(
           `UPDATE followup_calls SET status = 'COMPLETED' WHERE lead_id = $1 AND status <> 'COMPLETED'`,
-          [leadId]
-        );
-      } else if (!(keepSchedule && STATUSES_THAT_KEEP_A_SCHEDULE.includes(statusCode))) {
-        await client.query(
-          `UPDATE followup_calls SET status = 'COMPLETED' WHERE lead_id = $1 AND status = 'UPCOMING'`,
           [leadId]
         );
       }
