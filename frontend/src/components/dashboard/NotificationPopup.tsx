@@ -119,11 +119,8 @@ export default function NotificationPopup() {
   const openItem = (n: Notification) => {
     leave(groupOf(n));
     markNotificationRead(n.id);
-    if (n.system === "CRM" && n.leadId) router.push(`/dashboard/crm?openLead=${n.leadId}`);
-    else {
-      const href = notificationHref(n);
-      if (href) router.push(href);
-    }
+    const href = notificationHref(n);
+    if (href) router.push(href);
   };
 
   const onCardTap = (b: Bundle) => {

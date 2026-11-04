@@ -361,6 +361,12 @@ export interface LeadListFilters {
   missedOn?: string;
   /** With missedOn: only those flagged at or before this instant (ISO). */
   missedUntil?: string;
+  /** Only leads flagged missed at or after this instant (ISO). */
+  missedFrom?: string;
+  /** Only leads whose Next Call Date has passed (red OVERDUE). */
+  overdueOnly?: boolean;
+  /** Exactly these leads (a notification about several leads). */
+  leadIds?: string[];
   /** Date column sort (by created date); left out = the default order. */
   sortDir?: "asc" | "desc";
   /** Which date sortDir sorts by — created (default) or assigned. */
@@ -395,6 +401,9 @@ function buildLeadFilterParams(filters: LeadListFilters): URLSearchParams {
   if (filters.missedOnly) params.set("missedOnly", "true");
   if (filters.missedOn) params.set("missedOn", filters.missedOn);
   if (filters.missedUntil) params.set("missedUntil", filters.missedUntil);
+  if (filters.missedFrom) params.set("missedFrom", filters.missedFrom);
+  if (filters.overdueOnly) params.set("overdueOnly", "true");
+  filters.leadIds?.forEach(id => params.append("leadIds", id));
   if (filters.sortDir) params.set("sortDir", filters.sortDir);
   if (filters.sortDir && filters.sortField) params.set("sortField", filters.sortField);
   filters.sourceBucket?.forEach(s => params.append("sourceBucket", s));

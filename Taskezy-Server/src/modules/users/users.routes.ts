@@ -15,6 +15,7 @@ import { broadcastLeadChanged } from "../leads/leads.realtime";
 import { createNotification } from "../notifications/notifications.service";
 import { SUPER_ADMIN_EMAIL } from "../../config/superAdmin";
 import { getPresence, getDevicePresence } from "../../utils/presence";
+import { leadIdsLink } from "../notifications/notificationLinks";
 
 export const usersRouter = Router();
 
@@ -313,9 +314,10 @@ usersRouter.delete(
         system: "CRM",
         category: "REASSIGNMENT",
         title: "Leads Reassigned To You",
+        // The moved leads now with this user — just theirs, out of the whole handover.
+        link: leadIdsLink("Leads Reassigned To You", movedLeadIds, "/dashboard/crm", { assignedAgentId: [userId] }),
         message: `${count} lead${count === 1 ? "" : "s"} from ${fromUser.name} ${count === 1 ? "was" : "were"} reassigned to you by ${req.user!.name}.`,
-        recipientUserId: userId,
-        link: "/dashboard/crm"
+        recipientUserId: userId
       });
     }
     movedLeadIds.forEach(broadcastLeadChanged);

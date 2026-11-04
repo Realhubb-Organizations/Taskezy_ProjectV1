@@ -50,6 +50,9 @@ export async function listLeads(caller: AccessTokenPayload, filter: {
   missedOnly?: boolean;
   missedOn?: string;
   missedUntil?: string;
+  missedFrom?: string;
+  overdueOnly?: boolean;
+  leadIds?: string[];
   sortDir?: "asc" | "desc";
   sortField?: "created" | "assigned";
   sourceBucket?: string[];
@@ -77,6 +80,9 @@ export async function listLeads(caller: AccessTokenPayload, filter: {
     slaMinutes: filter.missedOnly ? REPORT_SLA_MINUTES : undefined,
     missedOn: filter.missedOn,
     missedUntil: filter.missedUntil,
+    missedFrom: filter.missedFrom,
+    overdueOnly: filter.overdueOnly,
+    leadIds: filter.leadIds,
     sortDir: filter.sortDir,
     sortField: filter.sortField,
     sourceBucket: filter.sourceBucket,
@@ -194,6 +200,9 @@ export async function getLeadStats(caller: AccessTokenPayload, filter: {
   missedOnly?: boolean;
   missedOn?: string;
   missedUntil?: string;
+  missedFrom?: string;
+  overdueOnly?: boolean;
+  leadIds?: string[];
 }): Promise<LeadSummaryStats> {
   const scopedToAgentIds = await scopeForCaller(caller);
   const grouped = await repo.getStats({
@@ -210,6 +219,9 @@ export async function getLeadStats(caller: AccessTokenPayload, filter: {
     slaMinutes: filter.missedOnly ? REPORT_SLA_MINUTES : undefined,
     missedOn: filter.missedOn,
     missedUntil: filter.missedUntil,
+    missedFrom: filter.missedFrom,
+    overdueOnly: filter.overdueOnly,
+    leadIds: filter.leadIds,
     scopedToAgentIds
   });
 
@@ -245,6 +257,9 @@ export async function getDistinctCampaigns(caller: AccessTokenPayload, filter: {
   missedOnly?: boolean;
   missedOn?: string;
   missedUntil?: string;
+  missedFrom?: string;
+  overdueOnly?: boolean;
+  leadIds?: string[];
 }): Promise<string[]> {
   const scopedToAgentIds = await scopeForCaller(caller);
   return repo.getDistinctCampaigns({
@@ -259,6 +274,9 @@ export async function getDistinctCampaigns(caller: AccessTokenPayload, filter: {
     slaMinutes: filter.missedOnly ? REPORT_SLA_MINUTES : undefined,
     missedOn: filter.missedOn,
     missedUntil: filter.missedUntil,
+    missedFrom: filter.missedFrom,
+    overdueOnly: filter.overdueOnly,
+    leadIds: filter.leadIds,
     scopedToAgentIds
   });
 }

@@ -34,20 +34,74 @@ export function parseReportDetail(raw: string | null): ReportDetail | null {
   }
 }
 
+// Opened from a notification (?from=notifications), the Leads page's lead
+// panel closes to the CRM Dashboard instead of leaving them on Leads.
+export const FROM_NOTIFICATIONS_PARAM = "from";
+export const FROM_NOTIFICATIONS_VALUE = "notifications";
+
+// The leads a notification is about open on their own page under the CRM
+// Dashboard (app/(app)/crm/dashboard/alert-leads), not inside Reports.
+type AlertLeadsDetail = Extract<ReportDetail, { view: "leads" }>;
+const ALERT_LEADS_PATH = "/crm/dashboard/alert-leads";
+
+function alertLeadsHref(title: string, filters: LeadListFilters): string {
+  const detail: AlertLeadsDetail = { view: "leads", title, filters };
+  return `${ALERT_LEADS_PATH}?detail=${encodeURIComponent(JSON.stringify(detail))}`;
+}
+
+export function parseAlertLeadsDetail(raw: string | null): AlertLeadsDetail | null {
+  const d = parseReportDetail(raw);
+  return d?.view === "leads" ? d : null;
+}
+
 // "Missed Leads Today: N" alerts sent before they carried their own lead list
 // link (they point at plain Reports / Manager Reports) — rebuilt from the
 // alert's time so they open the same list newer ones do (missedLeadScheduler.ts).
 const LEGACY_MISSED_DIGEST_LINKS = ["/dashboard/reports", "/dashboard/reports?tab=manager"];
-export function notificationHref(n: { title: string; link?: string; timestamp: string }): string | undefined {
-  if (!n.link || !LEGACY_MISSED_DIGEST_LINKS.includes(n.link) || !n.title.startsWith("Missed Leads Today:")) return n.link;
+function legacyMissedDigestHref(n: { title: string; link?: string; timestamp: string }): string | undefined {
+  if (!n.link || !LEGACY_MISSED_DIGEST_LINKS.includes(n.link) || !n.title.startsWith("Missed Leads Today:")) return undefined;
   const sentAt = new Date(n.timestamp);
-  if (isNaN(sentAt.getTime())) return n.link;
+  if (isNaN(sentAt.getTime())) return undefined;
   const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(sentAt);
-  return reportDetailHref("manager", {
-    view: "leads",
-    title: `Missed Leads on ${day}`,
-    filters: { missedOn: day, missedUntil: sentAt.toISOString() }
+  return alertLeadsHref(`Missed Leads on ${day}`, { missedOn: day, missedUntil: sentAt.toISOString(), overdueOnly: true });
+}
+
+// "Lead(s) Missed SLA" / "Team Lead(s) Missed SLA" alerts sent before they
+// carried their lead ids (they point at the Leads or Reports page). Every
+// lead one scheduler run flags shares one missed_notified_at, set just
+// before its alerts are sent and a full poll (60s) after the previous run's,
+// so the 30 seconds before the alert pick out exactly its leads. The
+// recipient's own lead access narrows it to theirs (an agent / a manager's
+// team); an alert naming one agent also carries their id in its link.
+const LEGACY_MISSED_SLA_TITLE = /^(\d+ )?(Team )?Leads? Missed SLA$/;
+const MISSED_SLA_RUN_WINDOW_MS = 30_000;
+function legacyMissedSlaHref(n: { title: string; link?: string; timestamp: string }): string | undefined {
+  if (!LEGACY_MISSED_SLA_TITLE.test(n.title) || n.link?.includes("detail=")) return undefined;
+  const sentAt = new Date(n.timestamp);
+  if (isNaN(sentAt.getTime())) return undefined;
+  const agentId = n.link?.match(/[?&]agentId=([^&]+)/)?.[1];
+  return alertLeadsHref(n.title, {
+    missedFrom: new Date(sentAt.getTime() - MISSED_SLA_RUN_WINDOW_MS).toISOString(),
+    missedUntil: sentAt.toISOString(),
+    overdueOnly: true,
+    assignedAgentId: agentId ? [decodeURIComponent(agentId)] : undefined
   });
+}
+
+// A lead-list link already stored on a notification (missedLeadScheduler.ts
+// etc., which used to point at Reports' detail page) -> the same list on the
+// alert leads page.
+function storedLeadListHref(link: string | undefined): string | undefined {
+  if (!link || (!link.startsWith("/dashboard/reports?") && !link.startsWith(`${ALERT_LEADS_PATH}?`))) return undefined;
+  const detail = parseAlertLeadsDetail(new URLSearchParams(link.slice(link.indexOf("?") + 1)).get("detail"));
+  return detail ? alertLeadsHref(detail.title, detail.filters) : undefined;
+}
+
+/** Where clicking a notification goes — the bell, the pop-up and a push tap alike. */
+export function notificationHref(n: { title: string; link?: string; timestamp: string; system?: string; leadId?: string }): string | undefined {
+  // A CRM alert about one lead opens that lead.
+  if (n.system === "CRM" && n.leadId) return `/dashboard/crm?openLead=${n.leadId}&${FROM_NOTIFICATIONS_PARAM}=${FROM_NOTIFICATIONS_VALUE}`;
+  return storedLeadListHref(n.link) ?? legacyMissedSlaHref(n) ?? legacyMissedDigestHref(n) ?? n.link;
 }
 
 // Where the report was scrolled to when a number was clicked, so Back can

@@ -77,7 +77,15 @@ export const listLeadsQuerySchema = z.object({
   missedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "missedOn must be YYYY-MM-DD").optional(),
   // Only those flagged up to this instant, so an older alert shows the
   // leads its own count covered, not the day's later misses too.
-  missedUntil: z.string().datetime({ offset: true }).optional()
+  missedUntil: z.string().datetime({ offset: true }).optional(),
+  // Only those flagged at or after this instant — with missedUntil, the
+  // leads one scheduler run flagged (an alert sent before it carried ids).
+  missedFrom: z.string().datetime({ offset: true }).optional(),
+  // "true" keeps only leads whose Next Call Date has passed (the red
+  // OVERDUE in the Next Call Date column — tasks/taskDue.ts).
+  overdueOnly: z.enum(["true", "false"]).optional().transform(v => v === "true"),
+  // Exactly these leads — a notification about several leads opens just them.
+  leadIds: uuidToArray
 });
 
 // Same filter shape as listLeadsQuerySchema (status/assignedAgentId/campaign/

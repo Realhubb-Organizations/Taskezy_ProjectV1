@@ -26,6 +26,7 @@ export async function createNotification(input: CreateNotificationInput): Promis
     title: input.title,
     body: input.message,
     link: input.link ?? null,
+    leadId: input.leadId ?? null,
     notificationId: rows[0].id,
     category: input.category,
     system: input.system
