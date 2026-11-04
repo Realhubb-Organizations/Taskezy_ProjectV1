@@ -1268,6 +1268,9 @@ export interface ApiPendingTaskRow {
   /** Admins/Managers only (server leaves it out for agents). */
   missedCount?: number;
   isDataCalling?: boolean;
+  /** Data Calling leads' own call status / Qualified-Unqualified. */
+  callStatus?: string | null;
+  callSubStatus?: string | null;
 }
 // Backs the sales dashboard's Pending Tasks queue (SalesPendingTasksTable/
 // TeamTasksTable/TaskInsightsCharts) — the server-side merge of open

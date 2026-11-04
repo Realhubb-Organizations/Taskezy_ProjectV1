@@ -2284,16 +2284,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     callSubStatus: "Qualified" | "Unqualified" | null | undefined,
     note: string
   ): Promise<void> => {
-    const lead = allLeads.find(l => l.id === leadId);
-    if (!lead) throw new Error("Lead not found.");
-
+    // The server finds the lead itself — it needn't be in this page's loaded
+    // list (the Dashboard's Data Calling tasks change it from there).
     if (isApiSessionActive() && isRealLeadId(leadId)) {
       const updated = mapApiLeadToFrontendLead(await apiUpdateCallStatus(leadId, callStatus, callSubStatus, note));
       // Replace the server-owned fields explicitly so a cleared sub-status
       // (undefined) doesn't get skipped by the spread.
       setAllLeads(prev => prev.map(l => (l.id === leadId ? { ...l, ...updated, callSubStatus: updated.callSubStatus } : l)));
+      refreshOwnTasksSoon();
       return;
     }
+
+    const lead = allLeads.find(l => l.id === leadId);
+    if (!lead) throw new Error("Lead not found.");
 
     // Local-only lead: same rules as the server.
     const nextSub = callStatus !== "Connected" ? undefined : callSubStatus !== undefined ? callSubStatus ?? undefined : lead.callStatus === "Connected" ? lead.callSubStatus : undefined;

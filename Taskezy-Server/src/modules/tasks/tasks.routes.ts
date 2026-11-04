@@ -58,6 +58,8 @@ interface OpenFollowupRow {
   latest_log_message: string | null;
   latest_log_at: string | null;
   is_data_calling: boolean | null;
+  call_status: string | null;
+  call_sub_status: string | null;
   missed_task_count: number | null;
 }
 
@@ -74,6 +76,8 @@ interface ActionableLeadRow {
   latest_log_message: string | null;
   latest_log_at: string | null;
   is_data_calling: boolean | null;
+  call_status: string | null;
+  call_sub_status: string | null;
   missed_task_count: number | null;
 }
 
@@ -97,6 +101,9 @@ export interface PendingTaskRow {
   missedCount?: number;
   /** The lead is a Data Calling lead (source "Bulk Upload") — lets the per-member task page split Leads / Data Calling. */
   isDataCalling: boolean;
+  /** Data Calling leads: their own call status (Connected / Called / Not Reachable / Wrong Number) and Qualified / Unqualified. */
+  callStatus?: string | null;
+  callSubStatus?: string | null;
 }
 
 /**
@@ -127,7 +134,7 @@ tasksRouter.get(
               u.first_name || COALESCE(' ' || u.last_name, '') AS assigned_to_name,
               l.name AS lead_full_name, l.phone AS lead_phone, l.email AS lead_email, ls.label AS lead_status_label,
               ll.message AS latest_log_message, ll.created_at AS latest_log_at,
-              l.source = 'Bulk Upload' AS is_data_calling, l.missed_task_count
+              l.source = 'Bulk Upload' AS is_data_calling, l.call_status, l.call_sub_status, l.missed_task_count
        FROM followup_calls fc
        JOIN users u ON u.id = fc.assigned_to_id
        LEFT JOIN leads l ON l.id = fc.lead_id
@@ -160,7 +167,7 @@ tasksRouter.get(
               l.assigned_at, l.created_at,
               u.first_name || COALESCE(' ' || u.last_name, '') AS assigned_to_name,
               ll.message AS latest_log_message, ll.created_at AS latest_log_at,
-              l.source = 'Bulk Upload' AS is_data_calling, l.missed_task_count
+              l.source = 'Bulk Upload' AS is_data_calling, l.call_status, l.call_sub_status, l.missed_task_count
        FROM leads l
        JOIN lead_statuses ls ON ls.code = l.status_code
        JOIN users u ON u.id = l.assigned_agent_id
@@ -211,6 +218,8 @@ tasksRouter.get(
         taskType: r.call_type,
         assignedTo: r.assigned_to_name || "",
         isDataCalling: r.is_data_calling === true,
+        callStatus: r.call_status,
+        callSubStatus: r.call_sub_status,
         missedCount: missedCountOf(r.missed_task_count)
       });
     }
@@ -231,6 +240,8 @@ tasksRouter.get(
         taskType: r.status_label,
         assignedTo: r.assigned_to_name || "",
         isDataCalling: r.is_data_calling === true,
+        callStatus: r.call_status,
+        callSubStatus: r.call_sub_status,
         missedCount: missedCountOf(r.missed_task_count)
       });
     }

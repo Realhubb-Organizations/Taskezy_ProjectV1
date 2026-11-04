@@ -12,6 +12,7 @@ import TablePagination, { usePagination } from "@/components/ui/TablePagination"
 import { maskPhone, maskEmail } from "@/lib/maskPII";
 import { DateSortButton, sortByDate, type SortDir } from "@/components/ui/DateSortButton";
 import MissedCountBadge from "@/components/crm/MissedCountBadge";
+import { ROW_CALL_STATUS_OPTIONS, useCallStatusUpdate } from "@/components/crm/useCallStatusUpdate";
 
 // Row colors per the sales-dashboard design: missed (no action taken),
 // pending (due now — becomes missed if not acted on within 10 min),
@@ -30,6 +31,8 @@ const formatTaskClock = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())
 // the admin/manager per-agent task page (/crm/dashboard/tasks), which passes
 // its own title/subtitle and a taskFilter (agent + tab + type + date range);
 // with those left unset it behaves exactly as the sales dashboard expects.
+const NOT_CALLED_YET = "Not called yet";
+
 export default function SalesPendingTasksTable({
   pendingTasks,
   onViewLead,
@@ -79,14 +82,17 @@ export default function SalesPendingTasksTable({
     const all = applyTaskBuckets(pendingTasks, now);
     return taskFilter ? all.filter(taskFilter) : all;
   }, [pendingTasks, now, taskFilter]);
-  const statusOptions = useMemo(() => Array.from(new Set(tasks.map(t => t.status))), [tasks]);
+  // A Data Calling lead's status is its own call status (Connected / Called /
+  // Not Reachable / Wrong Number), never the Leads statuses.
+  const statusOf = (t: PendingTask) => (t.isDataCalling ? t.callStatus || NOT_CALLED_YET : t.status);
+  const statusOptions = useMemo(() => Array.from(new Set(tasks.map(statusOf))), [tasks]);
 
   // Task Time column sort (DateSortButton); undefined = the normal order.
   const [timeSortDir, setTimeSortDir] = useState<SortDir | undefined>(undefined);
   const visibleTasks = useMemo(() => sortByDate(tasks.filter(t => {
     const q = search.trim().toLowerCase();
     const matchesSearch = !q || t.name.toLowerCase().includes(q) || t.phone.includes(q);
-    const matchesStatus = statusFilter.length === 0 || statusFilter.includes(t.status);
+    const matchesStatus = statusFilter.length === 0 || statusFilter.includes(statusOf(t));
     const matchesBucket = !bucketFilter || t.bucket === bucketFilter;
     return matchesSearch && matchesStatus && matchesBucket;
   }), timeSortDir, t => t.dueAt), [tasks, search, statusFilter, bucketFilter, timeSortDir]);
@@ -115,8 +121,29 @@ export default function SalesPendingTasksTable({
   };
 
   // Per-row status editor — only for tasks tied to a real lead.
+  const { openCallStatusChange, callStatusModal } = useCallStatusUpdate();
   const renderStatusCell = (t: PendingTask) => {
     if (!t.leadId) return <span className="font-bold text-slate-900">{t.status}</span>;
+    // Same call-status dropdown and "Update Call Status" popup as the Data
+    // Calling page.
+    if (t.isDataCalling) {
+      const leadId = t.leadId;
+      return (
+        <SearchableSelect
+          variant="inline"
+          options={ROW_CALL_STATUS_OPTIONS}
+          value={t.callStatus || ""}
+          placeholder={NOT_CALLED_YET}
+          onChange={(v) => openCallStatusChange(
+            { id: leadId, name: t.name, phone: t.phone, assignedAgent: t.assignedTo, callStatus: t.callStatus, callSubStatus: t.callSubStatus },
+            v as (typeof ROW_CALL_STATUS_OPTIONS)[number]
+          )}
+          searchPlaceholder="Search call status..."
+          panelWidth={176}
+          className="max-w-full text-slate-900"
+        />
+      );
+    }
     // Only statuses the transition matrix allows from this lead's current
     // one are offered — e.g. Site Visit Done only shows once the lead is on
     // Site Visit Scheduled (or Different Location), not from every status.
@@ -315,6 +342,7 @@ export default function SalesPendingTasksTable({
       </div>
 
       <TablePagination {...paginationProps} rowLabel="Task" />
+      {callStatusModal}
     </div>
   );
 }
