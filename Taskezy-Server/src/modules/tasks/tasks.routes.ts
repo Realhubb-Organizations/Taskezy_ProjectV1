@@ -27,12 +27,20 @@ async function scopedUserIdsForCaller(caller: AccessTokenPayload): Promise<strin
   return undefined;
 }
 
-// Statuses that mean "the agent still has to act on this" (no scheduled
-// follow-up needed to be a task) — mirrors frontend/src/lib/
-// salesPendingTasks.ts's ACTIONABLE_LEAD_STATUSES/NEW_LEAD_STATUSES (DB
-// codes, not the frontend's display labels). Must stay in lockstep.
-const ACTIONABLE_LEAD_CODES = ["NEW_LEAD", "RNR", "CALL_BACK", "FOLLOWUP"];
+// The only status that is a task without a scheduled call: a New Lead still
+// waiting for its first call. Every other task is a scheduled (or
+// rescheduled) call — a lead with no scheduled activity is never a task.
+const ACTIONABLE_LEAD_CODES = ["NEW_LEAD"];
 const NEW_LEAD_CODE = "NEW_LEAD";
+
+// A lead's scheduled call is a task only while its current status can have
+// a call scheduled (frontend leadScheduler.ts SCHEDULER_REQUIRED_STATUSES +
+// SCHEDULER_OPTIONAL_STATUSES, plus a New Lead). Not Interested, Dead Lead,
+// Broker, Cancelled, Booked, Site Visit Done… are never a task, even if an
+// old call is still open on them.
+const SCHEDULED_TASK_STATUS_CODES = [
+  "NEW_LEAD", "RNR", "CALL_BACK", "FOLLOWUP", "EOI", "SITE_VISIT_SCHEDULED", "LOW_BUDGET", "OTHER_REQUIREMENT"
+];
 
 interface OpenFollowupRow {
   id: string;
@@ -108,7 +116,7 @@ tasksRouter.get(
   asyncHandler(async (req, res) => {
     const scopedUserIds = await scopedUserIdsForCaller(req.user!);
 
-    const followupParams: unknown[] = [];
+    const followupParams: unknown[] = [SCHEDULED_TASK_STATUS_CODES];
     let followupScopeClause = "";
     if (scopedUserIds) {
       followupParams.push(scopedUserIds);
@@ -128,6 +136,7 @@ tasksRouter.get(
          SELECT message, created_at FROM lead_logs WHERE lead_id = fc.lead_id AND message NOT LIKE '${FEEDBACK_PENDING_LOG_PREFIX}%' ORDER BY created_at DESC LIMIT 1
        ) ll ON fc.lead_id IS NOT NULL
        WHERE fc.status != 'COMPLETED'
+         AND (l.id IS NULL OR l.status_code = ANY($1::text[]))
          -- One task per lead: the same open call the Leads page's Next Call
          -- Date shows (taskDue.ts) — an older duplicate call adds no second task.
          AND (fc.lead_id IS NULL OR fc.id = (
