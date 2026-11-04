@@ -1749,6 +1749,10 @@ export async function apiListNotificationsPage(
   };
 }
 
+export function apiGetNotification(notificationId: string): Promise<ApiNotificationRow> {
+  return request<ApiNotificationRow>(`/api/v1/notifications/${notificationId}`);
+}
+
 export function apiMarkNotificationRead(notificationId: string): Promise<{ read: boolean }> {
   return request<{ read: boolean }>(`/api/v1/notifications/${notificationId}/read`, { method: "PATCH" });
 }
