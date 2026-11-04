@@ -141,6 +141,10 @@ export interface LeadFilterConditions {
   missedOnly?: boolean;
   /** Required when missedOnly is true — reuse leads.service.ts's REPORT_SLA_MINUTES, don't invent a second source of truth. */
   slaMinutes?: number;
+  /** Leads the missed-lead scheduler flagged (missed_notified_at) on this business day. */
+  missedOn?: string;
+  /** With missedOn: only those flagged at or before this instant. */
+  missedUntil?: string;
 }
 
 export interface LeadListFilter extends LeadFilterConditions {
@@ -250,6 +254,16 @@ function buildLeadWhereClause(filter: LeadFilterConditions): { whereClause: stri
       (l.first_response_at IS NOT NULL AND EXTRACT(EPOCH FROM (l.first_response_at - l.assigned_at)) / 60 > $${slaParam}::numeric)
       OR (l.first_response_at IS NULL AND EXTRACT(EPOCH FROM (now() - l.assigned_at)) / 60 > $${slaParam}::numeric)
     )`);
+  }
+
+  if (filter.missedOn) {
+    params.push(filter.missedOn, BUSINESS_TIMEZONE);
+    conditions.push(`(l.missed_notified_at AT TIME ZONE $${params.length})::date = $${params.length - 1}::date`);
+  }
+
+  if (filter.missedUntil) {
+    params.push(filter.missedUntil);
+    conditions.push(`l.missed_notified_at <= $${params.length}::timestamptz`);
   }
 
   return { whereClause: conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "", params };

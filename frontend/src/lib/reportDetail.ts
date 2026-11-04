@@ -34,6 +34,22 @@ export function parseReportDetail(raw: string | null): ReportDetail | null {
   }
 }
 
+// "Missed Leads Today: N" alerts sent before they carried their own lead list
+// link (they point at plain Reports / Manager Reports) — rebuilt from the
+// alert's time so they open the same list newer ones do (missedLeadScheduler.ts).
+const LEGACY_MISSED_DIGEST_LINKS = ["/dashboard/reports", "/dashboard/reports?tab=manager"];
+export function notificationHref(n: { title: string; link?: string; timestamp: string }): string | undefined {
+  if (!n.link || !LEGACY_MISSED_DIGEST_LINKS.includes(n.link) || !n.title.startsWith("Missed Leads Today:")) return n.link;
+  const sentAt = new Date(n.timestamp);
+  if (isNaN(sentAt.getTime())) return n.link;
+  const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(sentAt);
+  return reportDetailHref("manager", {
+    view: "leads",
+    title: `Missed Leads on ${day}`,
+    filters: { missedOn: day, missedUntil: sentAt.toISOString() }
+  });
+}
+
 // Where the report was scrolled to when a number was clicked, so Back can
 // return to the same spot (the page scrolls inside <main>).
 let savedReportScroll = 0;

@@ -7,6 +7,7 @@ import { Bell, UserPlus, AlarmClock, Briefcase, DollarSign, ChevronLeft, Chevron
 import { useApp, getAvailableSystems, mapApiNotificationToFrontend, Notification, NotificationCategory, SystemType } from "@/context/AppContext";
 import { apiGetNotificationCounts, apiListNotificationsPage, type NotificationCounts, type NotificationListFilters } from "@/lib/apiClient";
 import { CardListSkeleton } from "@/components/ui/Skeletons";
+import { notificationHref } from "@/lib/reportDetail";
 
 function timeAgo(iso: string): string {
   const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
@@ -262,8 +263,9 @@ export default function NotificationBell() {
     setIsOpen(false);
     if (n.system === "CRM" && n.leadId) {
       router.push(`/dashboard/crm?openLead=${n.leadId}`);
-    } else if (n.link) {
-      router.push(n.link);
+    } else {
+      const href = notificationHref(n);
+      if (href) router.push(href);
     }
   };
 
