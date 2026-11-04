@@ -48,6 +48,8 @@ export async function listLeads(caller: AccessTokenPayload, filter: {
   search?: string;
   excludeBulkUpload?: boolean;
   missedOnly?: boolean;
+  missedOn?: string;
+  missedUntil?: string;
   sortDir?: "asc" | "desc";
   sortField?: "created" | "assigned";
   sourceBucket?: string[];
@@ -73,6 +75,8 @@ export async function listLeads(caller: AccessTokenPayload, filter: {
     excludeBulkUpload: filter.excludeBulkUpload,
     missedOnly: filter.missedOnly,
     slaMinutes: filter.missedOnly ? REPORT_SLA_MINUTES : undefined,
+    missedOn: filter.missedOn,
+    missedUntil: filter.missedUntil,
     sortDir: filter.sortDir,
     sortField: filter.sortField,
     sourceBucket: filter.sourceBucket,
@@ -188,6 +192,8 @@ export async function getLeadStats(caller: AccessTokenPayload, filter: {
   search?: string;
   excludeBulkUpload?: boolean;
   missedOnly?: boolean;
+  missedOn?: string;
+  missedUntil?: string;
 }): Promise<LeadSummaryStats> {
   const scopedToAgentIds = await scopeForCaller(caller);
   const grouped = await repo.getStats({
@@ -202,6 +208,8 @@ export async function getLeadStats(caller: AccessTokenPayload, filter: {
     excludeBulkUpload: filter.excludeBulkUpload,
     missedOnly: filter.missedOnly,
     slaMinutes: filter.missedOnly ? REPORT_SLA_MINUTES : undefined,
+    missedOn: filter.missedOn,
+    missedUntil: filter.missedUntil,
     scopedToAgentIds
   });
 
@@ -235,6 +243,8 @@ export async function getDistinctCampaigns(caller: AccessTokenPayload, filter: {
   dateTo?: string;
   excludeBulkUpload?: boolean;
   missedOnly?: boolean;
+  missedOn?: string;
+  missedUntil?: string;
 }): Promise<string[]> {
   const scopedToAgentIds = await scopeForCaller(caller);
   return repo.getDistinctCampaigns({
@@ -247,6 +257,8 @@ export async function getDistinctCampaigns(caller: AccessTokenPayload, filter: {
     excludeBulkUpload: filter.excludeBulkUpload,
     missedOnly: filter.missedOnly,
     slaMinutes: filter.missedOnly ? REPORT_SLA_MINUTES : undefined,
+    missedOn: filter.missedOn,
+    missedUntil: filter.missedUntil,
     scopedToAgentIds
   });
 }

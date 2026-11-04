@@ -357,6 +357,10 @@ export interface LeadListFilters {
   excludeBulkUpload?: boolean;
   /** Live-clock SLA check — see leads.repository.ts's buildLeadWhereClause. */
   missedOnly?: boolean;
+  /** Leads flagged missed on this business day (YYYY-MM-DD) — the "Missed Leads Today" alert's list. */
+  missedOn?: string;
+  /** With missedOn: only those flagged at or before this instant (ISO). */
+  missedUntil?: string;
   /** Date column sort (by created date); left out = the default order. */
   sortDir?: "asc" | "desc";
   /** Which date sortDir sorts by — created (default) or assigned. */
@@ -389,6 +393,8 @@ function buildLeadFilterParams(filters: LeadListFilters): URLSearchParams {
   if (filters.search) params.set("search", filters.search);
   if (filters.excludeBulkUpload) params.set("excludeBulkUpload", "true");
   if (filters.missedOnly) params.set("missedOnly", "true");
+  if (filters.missedOn) params.set("missedOn", filters.missedOn);
+  if (filters.missedUntil) params.set("missedUntil", filters.missedUntil);
   if (filters.sortDir) params.set("sortDir", filters.sortDir);
   if (filters.sortDir && filters.sortField) params.set("sortField", filters.sortField);
   filters.sourceBucket?.forEach(s => params.append("sourceBucket", s));

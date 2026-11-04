@@ -2,7 +2,7 @@ import { pool } from "../db/pool";
 import { logger } from "../utils/logger";
 import { createNotification } from "../modules/notifications/notifications.service";
 import { listActiveAdminIds } from "../modules/users/users.repository";
-import { BUSINESS_TIMEZONE } from "../utils/businessDate";
+import { BUSINESS_TIMEZONE, toBusinessDate } from "../utils/businessDate";
 import { broadcastDataChanged } from "../utils/dataChanged";
 
 const POLL_INTERVAL_MS = 60_000;
@@ -168,13 +168,17 @@ async function notifyAdminDailyDigest(adminIds: string[]): Promise<void> {
   const breakdown = rows
     .map(r => `${r.agent_name}: ${r.missed_count}${r.manager_name ? ` (${r.manager_name}'s team)` : ""}`)
     .join(" · ");
-  // This digest is a company-wide, cross-team rollup (today's misses broken
-  // down by agent AND their manager's team) — Manager Reports is the right
-  // landing page for that, not one agent's own Sales Agent Report (unlike
-  // the single-agent escalation above, which really is about just one
-  // person). Plain /dashboard/reports defaults to the Marketing tab, which
-  // has nothing to do with this notification.
-  const link = "/dashboard/reports?tab=manager";
+  // Opens the list of the leads this digest counts — flagged today, up to
+  // now — on Reports' lead detail page (frontend lib/reportDetail.ts), with
+  // Back landing on Manager Reports. The upper bound keeps an older digest
+  // showing its own count's leads, not the misses that came after it.
+  const now = new Date();
+  const detail = {
+    view: "leads",
+    title: `Missed Leads on ${toBusinessDate(now)}`,
+    filters: { missedOn: toBusinessDate(now), missedUntil: now.toISOString() }
+  };
+  const link = `/dashboard/reports?tab=manager&detail=${encodeURIComponent(JSON.stringify(detail))}`;
 
   for (const adminId of adminIds) {
     await createNotification({

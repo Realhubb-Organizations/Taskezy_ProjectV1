@@ -7,13 +7,13 @@ import { assertNoPendingFeedback } from "../call-attempts/feedbackLock";
 import * as leadsService from "./leads.service";
 
 export async function listLeadsHandler(req: Request, res: Response): Promise<void> {
-  const { page, pageSize, status, assignedAgentId, campaign, propertyId, noProperty, dateFrom, dateTo, search, excludeBulkUpload, missedOnly, sortDir, sortField, sourceBucket, campaignIgnoreCase, dataCallingOnly, assignedOnly, subSource, callStatus, callSubStatus } = req.query as unknown as {
+  const { page, pageSize, status, assignedAgentId, campaign, propertyId, noProperty, dateFrom, dateTo, search, excludeBulkUpload, missedOnly, missedOn, missedUntil, sortDir, sortField, sourceBucket, campaignIgnoreCase, dataCallingOnly, assignedOnly, subSource, callStatus, callSubStatus } = req.query as unknown as {
     page: number; pageSize: number; status?: string[]; assignedAgentId?: string[]; campaign?: string[]; propertyId?: string[]; noProperty?: boolean;
-    dateFrom?: string; dateTo?: string; search?: string; excludeBulkUpload?: boolean; missedOnly?: boolean; sortDir?: "asc" | "desc"; sortField?: "created" | "assigned";
+    dateFrom?: string; dateTo?: string; search?: string; excludeBulkUpload?: boolean; missedOnly?: boolean; missedOn?: string; missedUntil?: string; sortDir?: "asc" | "desc"; sortField?: "created" | "assigned";
     sourceBucket?: string[]; campaignIgnoreCase?: boolean; dataCallingOnly?: boolean; assignedOnly?: boolean; subSource?: string[]; callStatus?: string[]; callSubStatus?: string[];
   };
   const { rows, meta } = await leadsService.listLeads(req.user!, {
-    page, pageSize, status, assignedAgentId, campaign, propertyId, noProperty, dateFrom, dateTo, search, excludeBulkUpload, missedOnly, sortDir, sortField,
+    page, pageSize, status, assignedAgentId, campaign, propertyId, noProperty, dateFrom, dateTo, search, excludeBulkUpload, missedOnly, missedOn, missedUntil, sortDir, sortField,
     sourceBucket, campaignIgnoreCase, dataCallingOnly, assignedOnly, subSource, callStatus, callSubStatus
   });
   sendPaginated(res, rows.map(r => leadForCaller(req.user!, r)), meta);
@@ -27,20 +27,20 @@ export async function searchLeadsByPhonesHandler(req: Request, res: Response): P
 }
 
 export async function getLeadStatsHandler(req: Request, res: Response): Promise<void> {
-  const { status, assignedAgentId, campaign, propertyId, noProperty, dateFrom, dateTo, search, excludeBulkUpload, missedOnly } = req.query as unknown as {
+  const { status, assignedAgentId, campaign, propertyId, noProperty, dateFrom, dateTo, search, excludeBulkUpload, missedOnly, missedOn, missedUntil } = req.query as unknown as {
     status?: string[]; assignedAgentId?: string[]; campaign?: string[]; propertyId?: string[]; noProperty?: boolean; dateFrom?: string; dateTo?: string; search?: string;
-    excludeBulkUpload?: boolean; missedOnly?: boolean;
+    excludeBulkUpload?: boolean; missedOnly?: boolean; missedOn?: string; missedUntil?: string;
   };
-  const stats = await leadsService.getLeadStats(req.user!, { status, assignedAgentId, campaign, propertyId, noProperty, dateFrom, dateTo, search, excludeBulkUpload, missedOnly });
+  const stats = await leadsService.getLeadStats(req.user!, { status, assignedAgentId, campaign, propertyId, noProperty, dateFrom, dateTo, search, excludeBulkUpload, missedOnly, missedOn, missedUntil });
   sendOk(res, stats);
 }
 
 export async function getDistinctCampaignsHandler(req: Request, res: Response): Promise<void> {
-  const { status, assignedAgentId, propertyId, noProperty, dateFrom, dateTo, excludeBulkUpload, missedOnly } = req.query as unknown as {
+  const { status, assignedAgentId, propertyId, noProperty, dateFrom, dateTo, excludeBulkUpload, missedOnly, missedOn, missedUntil } = req.query as unknown as {
     status?: string[]; assignedAgentId?: string[]; propertyId?: string[]; noProperty?: boolean; dateFrom?: string; dateTo?: string;
-    excludeBulkUpload?: boolean; missedOnly?: boolean;
+    excludeBulkUpload?: boolean; missedOnly?: boolean; missedOn?: string; missedUntil?: string;
   };
-  const campaigns = await leadsService.getDistinctCampaigns(req.user!, { status, assignedAgentId, propertyId, noProperty, dateFrom, dateTo, excludeBulkUpload, missedOnly });
+  const campaigns = await leadsService.getDistinctCampaigns(req.user!, { status, assignedAgentId, propertyId, noProperty, dateFrom, dateTo, excludeBulkUpload, missedOnly, missedOn, missedUntil });
   sendOk(res, campaigns);
 }
 

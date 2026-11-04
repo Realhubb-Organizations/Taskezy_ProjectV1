@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { AlarmClock, Bell, Repeat, UserPlus, X } from "lucide-react";
 import { useApp, Notification } from "@/context/AppContext";
+import { notificationHref } from "@/lib/reportDetail";
 
 // iOS-style notification banners for notifications that arrive while the app
 // (web or mobile) is open:
@@ -119,7 +120,10 @@ export default function NotificationPopup() {
     leave(groupOf(n));
     markNotificationRead(n.id);
     if (n.system === "CRM" && n.leadId) router.push(`/dashboard/crm?openLead=${n.leadId}`);
-    else if (n.link) router.push(n.link);
+    else {
+      const href = notificationHref(n);
+      if (href) router.push(href);
+    }
   };
 
   const onCardTap = (b: Bundle) => {

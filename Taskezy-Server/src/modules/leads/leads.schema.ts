@@ -71,7 +71,13 @@ export const listLeadsQuerySchema = z.object({
   // Live-clock SLA check (same predicate getAgentReportStats already counts
   // with), not a stored column — "true" keeps only leads not yet responded
   // to within SLA_MINUTES, or responded to later than that.
-  missedOnly: z.enum(["true", "false"]).optional().transform(v => v === "true")
+  missedOnly: z.enum(["true", "false"]).optional().transform(v => v === "true"),
+  // The leads the missed-lead scheduler flagged on this business day
+  // (leads.missed_notified_at) — the "Missed Leads Today" alert's list.
+  missedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "missedOn must be YYYY-MM-DD").optional(),
+  // Only those flagged up to this instant, so an older alert shows the
+  // leads its own count covered, not the day's later misses too.
+  missedUntil: z.string().datetime({ offset: true }).optional()
 });
 
 // Same filter shape as listLeadsQuerySchema (status/assignedAgentId/campaign/
