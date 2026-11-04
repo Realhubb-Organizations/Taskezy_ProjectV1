@@ -1,19 +1,19 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { useApp } from "@/context/AppContext";
 import { apiListMissedRecords, ApiMissedRecord, MissedRecordFilters } from "@/lib/apiClient";
 import { dbCodeToFrontendStatus } from "@/lib/leadStatusMapping";
 import { maskPhone } from "@/lib/maskPII";
-import { FROM_NOTIFICATIONS_PARAM, FROM_NOTIFICATIONS_VALUE } from "@/lib/reportDetail";
 import { DateTimeLines, dateTimeParts } from "@/components/ui/DateTimeLines";
 import TablePagination, { DEFAULT_ROWS_PER_PAGE_OPTIONS } from "@/components/ui/TablePagination";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
+import { useLeadQuickView } from "./useLeadQuickView";
 
 // A missed alert's leads exactly as they were when they were missed — the
 // frozen missed_lead_records (migration 053), never their live data. Read
-// only; clicking a row opens the live lead on the Leads page to work it.
+// only; clicking a row opens the live lead's details panel right here (the
+// same panel as the Leads page) to work it.
 
 const missLabel = (r: ApiMissedRecord) =>
   r.miss_type === "LEAD" ? "No reply in 20 min" : `Missed ${r.call_type ? r.call_type.replace("_", " ").toLowerCase() : "call"}`;
@@ -27,8 +27,8 @@ export default function MissedRecordsList({ title, filters, onClose }: {
   filters: MissedRecordFilters;
   onClose: () => void;
 }) {
-  const router = useRouter();
   const { activeRole } = useApp();
+  const quickView = useLeadQuickView();
   const isAdmin = activeRole === "ADMIN";
   const [page, setPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(DEFAULT_ROWS_PER_PAGE_OPTIONS[0]);
@@ -50,8 +50,7 @@ export default function MissedRecordsList({ title, filters, onClose }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filtersKey, page, rowsPerPage]);
 
-  const openLead = (leadId: string) =>
-    router.push(`/dashboard/crm?openLead=${leadId}&${FROM_NOTIFICATIONS_PARAM}=${FROM_NOTIFICATIONS_VALUE}`);
+  const openLead = (leadId: string) => quickView.open(leadId);
 
   return (
     <div className="bg-white rounded-2xl shadow-md animate-fade-in">
@@ -129,6 +128,7 @@ export default function MissedRecordsList({ title, filters, onClose }: {
         onRowsPerPageChange={(n) => { setRowsPerPage(n); setPage(1); }}
         rowLabel="Missed lead"
       />
+      {quickView.drawer}
     </div>
   );
 }
