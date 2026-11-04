@@ -4,12 +4,13 @@ import React, { Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import LeadDrillDownPanel from "@/components/crm/LeadDrillDownPanel";
+import MissedRecordsList from "@/components/crm/MissedRecordsList";
 import { parseAlertLeadsDetail } from "@/lib/reportDetail";
 
-// The leads a notification is about (e.g. "3 Leads Missed SLA", "Missed
-// Leads Today: 6") — opened from the bell, the pop-up or a push tap. Lives
-// under the CRM Dashboard, so Back / Close return there. Same list as a
-// Reports number's detail page (LeadDrillDownPanel), same ?detail= shape.
+// What a notification opens — from the bell, the pop-up or a push tap: a
+// missed alert's frozen missed-lead records (MissedRecordsList), or a list
+// of live leads (LeadDrillDownPanel, e.g. "Leads Reassigned To You"). Lives
+// under the CRM Dashboard, so Back / Close return there.
 function AlertLeadsView() {
   const router = useRouter();
   const detail = parseAlertLeadsDetail(useSearchParams().get("detail"));
@@ -21,7 +22,9 @@ function AlertLeadsView() {
         <ArrowLeft className="h-4 w-4" />
         Back to Dashboard
       </button>
-      {detail ? (
+      {detail?.view === "missed-records" ? (
+        <MissedRecordsList title={detail.title} filters={detail.filters} onClose={backToDashboard} />
+      ) : detail ? (
         <LeadDrillDownPanel title={detail.title} baseFilters={detail.filters} onClose={backToDashboard} />
       ) : (
         <div className="bg-white rounded-2xl shadow-md p-8 text-center text-sm text-slate-500">

@@ -3,6 +3,8 @@ import { logger } from "../utils/logger";
 import { createNotification } from "../modules/notifications/notifications.service";
 import { listActiveAdminIds } from "../modules/users/users.repository";
 import { broadcastDataChanged } from "../utils/dataChanged";
+import { INSERT_CALL_MISS_RECORDS_SQL } from "../modules/missed-records/missedRecords.sql";
+import { missedRecordsLink } from "../modules/notifications/notificationLinks";
 
 const POLL_INTERVAL_MS = 60_000;
 const VIOLATION_WINDOW_MS = 10 * 60_000; // 10 minutes, per product decision
@@ -51,6 +53,8 @@ interface OverdueFollowup {
   lead_id: string | null;
   lead_name: string;
   agent_name: string;
+  /** Its frozen missed_lead_records row (migration 053), saved in the same statement. */
+  record_id: string;
 }
 
 /**
@@ -66,11 +70,14 @@ async function notifySlaViolations(): Promise<void> {
   // status transition are merged into one atomic UPDATE ... FROM ... RETURNING
   // so a row is claimed before any admin notification is sent for it. Worst case
   // on a crash mid-send is a missed one-time escalation, not a duplicate one.
+  // The same statement saves each call's frozen missed record
+  // (missed-records/missedRecords.sql.ts), so a claimed miss always has one.
   const { rows } = await pool.query<OverdueFollowup>(
     // VIOLATION_WINDOW_MS above must match this literal — kept as a fixed
     // SQL interval rather than a bound parameter since it's a constant, not
     // user input.
-    `UPDATE followup_calls fc
+    `WITH claimed AS (
+     UPDATE followup_calls fc
      SET violation_notified_at = now(), status = 'MISSED'
      FROM users u
      WHERE u.id = fc.assigned_to_id
@@ -78,7 +85,10 @@ async function notifySlaViolations(): Promise<void> {
        AND fc.due_notified_at IS NOT NULL
        AND fc.due_notified_at <= now() - interval '10 minutes'
        AND fc.violation_notified_at IS NULL
-     RETURNING fc.id, fc.lead_id, fc.lead_name, u.first_name || COALESCE(' ' || u.last_name, '') AS agent_name`
+     RETURNING fc.id, fc.lead_id, fc.lead_name, fc.phone, fc.scheduled_at, fc.call_type, fc.assigned_to_id,
+               u.first_name || COALESCE(' ' || u.last_name, '') AS agent_name, u.manager_id
+     ), rec AS (${INSERT_CALL_MISS_RECORDS_SQL})
+     SELECT c.id, c.lead_id, c.lead_name, c.agent_name, rec.id AS record_id FROM claimed c JOIN rec ON rec.followup_call_id = c.id`
   );
   if (rows.length === 0) return;
   broadcastDataChanged("followups", "tasks", "leads");
@@ -102,7 +112,8 @@ async function notifySlaViolations(): Promise<void> {
         message: `${row.agent_name} has not followed up on "${row.lead_name}" within 10 minutes of the reminder.`,
         recipientUserId: adminId,
         leadId: row.lead_id ?? undefined,
-        link: "/dashboard/crm"
+        // A click opens the frozen record — the lead as it was when the call was missed.
+        link: missedRecordsLink("Follow-up SLA Violation", { recordIds: [row.record_id] })
       });
     }
   }
