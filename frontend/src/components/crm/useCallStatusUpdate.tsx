@@ -14,7 +14,7 @@ import { CALL_SUB_STATUS_OPTIONS, CallSubStatus, callSubStatusOf } from "@/lib/c
 // scheduling mechanism the rest of the CRM uses via follow-ups); Connected
 // and Called commit immediately, Qualification Status is auto-derived from
 // which one was picked (see callStatusMapping.ts), never asked separately.
-// Connected promotes the lead out of Data Calling entirely (see
+// Connected + Qualified promotes the lead out of Data Calling entirely (see
 // updateCallStatus's source flip), so there's nothing further to pick here
 // — the rest of its journey happens in the main CRM pipeline.
 export const ROW_CALL_STATUS_OPTIONS: NonNullable<Lead["callStatus"]>[] = ["Connected", "Called", "Not Reachable", "Wrong Number"];
