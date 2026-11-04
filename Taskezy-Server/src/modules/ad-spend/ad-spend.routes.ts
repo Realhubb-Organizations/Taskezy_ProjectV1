@@ -448,11 +448,12 @@ adSpendRouter.get(
       const n = (i: number) => `$${from + i}`;
       return {
         params: [dateFrom ?? null, dateTo ?? null, campaigns, propertyFilterOn, propertyIds, !!noProperty, spendPlatforms],
+        // platform is the ad_platform enum on prod — compare as text.
         where: `(${n(0)}::date IS NULL OR a.spend_date >= ${n(0)}::date)
           AND (${n(1)}::date IS NULL OR a.spend_date <= ${n(1)}::date)
           AND (${n(2)}::text[] IS NULL OR LOWER(a.account_name) = ANY(${n(2)}::text[]))
           AND (NOT ${n(3)}::boolean OR a.property_id = ANY(COALESCE(${n(4)}::uuid[], '{}')) OR (${n(5)}::boolean AND a.property_id IS NULL))
-          AND (${n(6)}::text[] IS NULL OR a.platform = ANY(${n(6)}::text[]))`
+          AND (${n(6)}::text[] IS NULL OR a.platform::text = ANY(${n(6)}::text[]))`
       };
     };
 
