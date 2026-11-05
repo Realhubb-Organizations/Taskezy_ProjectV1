@@ -385,6 +385,10 @@ export interface LeadListFilters {
   callStatus?: string[];
   /** Qualified / Unqualified (Connected calls). */
   callSubStatus?: string[];
+  /** Leads these agents called with the Call button, on calledFrom..calledTo (the call's day). */
+  calledBy?: string[];
+  calledFrom?: string;
+  calledTo?: string;
 }
 
 function buildLeadFilterParams(filters: LeadListFilters): URLSearchParams {
@@ -413,6 +417,9 @@ function buildLeadFilterParams(filters: LeadListFilters): URLSearchParams {
   filters.subSource?.forEach(s => params.append("subSource", s));
   filters.callStatus?.forEach(s => params.append("callStatus", s));
   filters.callSubStatus?.forEach(s => params.append("callSubStatus", s));
+  filters.calledBy?.forEach(id => params.append("calledBy", id));
+  if (filters.calledFrom) params.set("calledFrom", filters.calledFrom);
+  if (filters.calledTo) params.set("calledTo", filters.calledTo);
   return params;
 }
 
@@ -789,7 +796,7 @@ export interface BulkReassignLeadsApiResult {
 // Queued (bulk-reassign-leads worker) — backs both pages' bulk Assign/
 // Reshuffle actions, replacing what used to be one apiReassignLead call per
 // selected lead fired directly from the browser.
-export async function apiBulkReassignLeads(leadIds: string[], newAgentId: string, note: string): Promise<BulkReassignLeadsApiResult> {
+export async function apiBulkReassignLeads(leadIds: string[], newAgentId: string, note?: string): Promise<BulkReassignLeadsApiResult> {
   const { jobId } = await request<{ jobId: string }>("/api/v1/leads/bulk-reassign", {
     method: "POST",
     body: JSON.stringify({ leadIds, newAgentId, note })
@@ -809,7 +816,7 @@ export interface BulkSetLeadPropertyApiResult {
 // "Change Property" toolbar action. Admin always allowed; a Manager needs
 // the Access Control toggle (Settings > Manage Users, Super Admin only) —
 // a 403 here means it's off for them.
-export async function apiBulkSetLeadProperty(leadIds: string[], propertyId: string | null, note: string): Promise<BulkSetLeadPropertyApiResult> {
+export async function apiBulkSetLeadProperty(leadIds: string[], propertyId: string | null, note?: string): Promise<BulkSetLeadPropertyApiResult> {
   const { jobId } = await request<{ jobId: string }>("/api/v1/leads/bulk-set-property", {
     method: "POST",
     body: JSON.stringify({ leadIds, propertyId, note })
@@ -2568,6 +2575,11 @@ function teamReportParams(filters: TeamReportFilters): URLSearchParams {
   filters.source?.forEach(s => params.append("source", s));
   filters.subSource?.forEach(s => params.append("subSource", s));
   return params;
+}
+
+/** Data Calling page's Calls Made: [leadId, agentId who called, "YYYY-MM-DD"] per lead called per day (Call button). */
+export function apiGetDataCallingCallDays(): Promise<[string, string, string][]> {
+  return request<[string, string, string][]>("/api/v1/reports/data-calling/call-days");
 }
 
 export function apiGetTeamReport(filters: TeamReportFilters): Promise<TeamReport> {

@@ -7,14 +7,15 @@ import { assertNoPendingFeedback } from "../call-attempts/feedbackLock";
 import * as leadsService from "./leads.service";
 
 export async function listLeadsHandler(req: Request, res: Response): Promise<void> {
-  const { page, pageSize, status, assignedAgentId, campaign, propertyId, noProperty, dateFrom, dateTo, search, excludeBulkUpload, missedOnly, missedOn, missedUntil, missedFrom, overdueOnly, leadIds, sortDir, sortField, sourceBucket, campaignIgnoreCase, dataCallingOnly, assignedOnly, subSource, callStatus, callSubStatus } = req.query as unknown as {
+  const { page, pageSize, status, assignedAgentId, campaign, propertyId, noProperty, dateFrom, dateTo, search, excludeBulkUpload, missedOnly, missedOn, missedUntil, missedFrom, overdueOnly, leadIds, sortDir, sortField, sourceBucket, campaignIgnoreCase, dataCallingOnly, assignedOnly, subSource, callStatus, callSubStatus, calledBy, calledFrom, calledTo } = req.query as unknown as {
     page: number; pageSize: number; status?: string[]; assignedAgentId?: string[]; campaign?: string[]; propertyId?: string[]; noProperty?: boolean;
     dateFrom?: string; dateTo?: string; search?: string; excludeBulkUpload?: boolean; missedOnly?: boolean; missedOn?: string; missedUntil?: string; missedFrom?: string; overdueOnly?: boolean; leadIds?: string[]; sortDir?: "asc" | "desc"; sortField?: "created" | "assigned";
     sourceBucket?: string[]; campaignIgnoreCase?: boolean; dataCallingOnly?: boolean; assignedOnly?: boolean; subSource?: string[]; callStatus?: string[]; callSubStatus?: string[];
+    calledBy?: string[]; calledFrom?: string; calledTo?: string;
   };
   const { rows, meta } = await leadsService.listLeads(req.user!, {
     page, pageSize, status, assignedAgentId, campaign, propertyId, noProperty, dateFrom, dateTo, search, excludeBulkUpload, missedOnly, missedOn, missedUntil, missedFrom, overdueOnly, leadIds, sortDir, sortField,
-    sourceBucket, campaignIgnoreCase, dataCallingOnly, assignedOnly, subSource, callStatus, callSubStatus
+    sourceBucket, campaignIgnoreCase, dataCallingOnly, assignedOnly, subSource, callStatus, callSubStatus, calledBy, calledFrom, calledTo
   });
   sendPaginated(res, rows.map(r => leadForCaller(req.user!, r)), meta);
 }
@@ -188,7 +189,14 @@ export async function getBulkDeleteStatusHandler(req: Request, res: Response): P
 // actions (see leads.service.ts's bulkReassignLeads for the full reasoning).
 // Open to every role, same as single-lead reassign (leads.routes.ts's
 // PATCH /:id/reassign) — permission is enforced per-lead inside the worker.
+// An Admin's Reshuffle sends no note (history then shows just "Reassigned
+// to <agent>" and the lead's own note is left alone); everyone else must.
+const assertNoteUnlessAdmin = (req: Request) => {
+  if (!req.body.note && req.user!.role !== "ADMIN") throw ApiError.badRequest("Please write a note");
+};
+
 export async function bulkReassignLeadsHandler(req: Request, res: Response): Promise<void> {
+  assertNoteUnlessAdmin(req);
   const { leadIds, newAgentId, note } = req.body;
   const jobId = await boss.send(BULK_REASSIGN_LEADS_QUEUE, { caller: req.user!, leadIds, newAgentId, note });
   if (!jobId) throw ApiError.internal("Could not queue the reassignment — try again.");
@@ -207,6 +215,7 @@ export async function getBulkReassignStatusHandler(req: Request, res: Response):
 export async function bulkSetLeadPropertyHandler(req: Request, res: Response): Promise<void> {
   // Checked here, before queueing — the worker runs without a caller.
   await leadsService.assertBulkPropertyChangeAllowed(req.user!);
+  assertNoteUnlessAdmin(req);
   const { leadIds, propertyId, note } = req.body;
   const jobId = await boss.send(BULK_SET_PROPERTY_QUEUE, { caller: req.user!, leadIds, propertyId, note });
   if (!jobId) throw ApiError.internal("Could not queue the property change — try again.");

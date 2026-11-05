@@ -52,18 +52,21 @@ export function eligibleAssignees<U extends AssignableUser>({
   properties,
   selectedPropertyIds,
   caller,
-  targetLeads
+  targetLeads,
+  allWhenNoProperty = false
 }: {
   users: U[];
   properties: Property[];
   selectedPropertyIds: Set<string>;
   caller: { id: string; role: string; role_type?: string } | null;
   targetLeads: Lead[];
+  /** Admin's Reshuffle: no property picked = every sales member is eligible. */
+  allWhenNoProperty?: boolean;
 }): U[] {
-  if (selectedPropertyIds.size === 0 || !caller) return [];
+  if (!caller || (selectedPropertyIds.size === 0 && !allWhenNoProperty)) return [];
 
   const selectedProps = properties.filter(p => selectedPropertyIds.has(p.id));
-  let anyAllMembers = false;
+  let anyAllMembers = selectedPropertyIds.size === 0;
   const teamIds = new Set<string>();
   selectedProps.forEach(p => {
     if (p.teamAssignmentMode === "CUSTOM_MEMBERS" && p.assignedTeam && p.assignedTeam.length > 0) {

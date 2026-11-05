@@ -48,7 +48,7 @@ interface BulkReassignLeadsJobData {
   caller: AccessTokenPayload;
   leadIds: string[];
   newAgentId: string;
-  note: string;
+  note?: string;
 }
 
 // Main CRM Leads page's bulk "Change Property" toolbar action — same
@@ -58,7 +58,7 @@ interface BulkSetPropertyJobData {
   caller: AccessTokenPayload;
   leadIds: string[];
   propertyId: string | null;
-  note: string;
+  note?: string;
 }
 
 // CallFeedbackGate's Save & Continue (call-attempts.routes.ts's PATCH /:id)

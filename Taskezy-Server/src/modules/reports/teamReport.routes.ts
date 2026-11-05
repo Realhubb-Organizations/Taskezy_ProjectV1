@@ -106,6 +106,22 @@ function dueConditions(q: TeamReportQuery, params: unknown[]): string {
   return c.join(" AND ");
 }
 
+/**
+ * A call made with the Call button (call_attempts, channel CALL) — the day
+ * it was made (business calendar), alias `ca`. "Calls Made" = different
+ * leads each agent called that day, counted for the agent who called.
+ */
+const CALL_DAY_SQL = (tz: string) => `(COALESCE(ca.started_at, ca.created_at) AT TIME ZONE ${tz})::date`;
+
+/** Date bounds on the call's own day (not the lead's created date). */
+function callDayConditions(q: TeamReportQuery, params: unknown[]): string {
+  const p = (v: unknown) => `$${params.push(v)}`;
+  const c = [`ca.channel = 'CALL'`];
+  if (q.dateFrom) c.push(`${CALL_DAY_SQL(p(BUSINESS_TIMEZONE))} >= ${p(q.dateFrom)}::date`);
+  if (q.dateTo) c.push(`${CALL_DAY_SQL(p(BUSINESS_TIMEZONE))} <= ${p(q.dateTo)}::date`);
+  return c.join(" AND ");
+}
+
 const userName = (alias: string) => `NULLIF(TRIM(${alias}.first_name || COALESCE(' ' || ${alias}.last_name, '')), '')`;
 
 teamReportRouter.get(
@@ -137,7 +153,13 @@ teamReportRouter.get(
     const subSourceParams: unknown[] = [];
     const subSourceScope = scope ? `AND l.assigned_agent_id = ANY($${subSourceParams.push(scope)}::uuid[])` : "";
 
-    const [byAgentResult, missedResult, svResult, subSourceResult] = await Promise.all([
+    // Calls Made (Data Calling): from the Call button, against who called —
+    // reshuffling a lead or changing its status never adds to it.
+    const callParams: unknown[] = [];
+    const callWhere = `${callDayConditions(q, callParams)} AND ${leadConditions(q, scope, callParams, { noDate: true, agentColumn: "ca.caller_user_id" })}`;
+    const callTz = `$${callParams.push(BUSINESS_TIMEZONE)}`;
+
+    const [byAgentResult, missedResult, svResult, subSourceResult, callsResult] = await Promise.all([
       query<Record<string, string | null>>(
         `SELECT l.assigned_agent_id AS agent_id, ${userName("u")} AS agent_name,
                 count(*) AS total,
@@ -218,7 +240,19 @@ teamReportRouter.get(
           `SELECT DISTINCT l.sub_source FROM leads l WHERE l.sub_source IS NOT NULL ${subSourceScope} ORDER BY l.sub_source`,
           subSourceParams
         )
-        : Promise.resolve({ rows: [] as { sub_source: string }[] })
+        : Promise.resolve({ rows: [] as { sub_source: string }[] }),
+      dataCalling
+        ? query<{ agent_id: string; agent_name: string | null; calls: string }>(
+          `SELECT ca.caller_user_id AS agent_id, max(${userName("u")}) AS agent_name,
+                  count(DISTINCT (ca.lead_id, ${CALL_DAY_SQL(callTz)})) AS calls
+           FROM call_attempts ca
+           JOIN leads l ON l.id = ca.lead_id
+           LEFT JOIN users u ON u.id = ca.caller_user_id
+           WHERE ${callWhere}
+           GROUP BY ca.caller_user_id`,
+          callParams
+        )
+        : Promise.resolve({ rows: [] as { agent_id: string; agent_name: string | null; calls: string }[] })
     ]);
 
     // One row per salesperson with leads or missed tasks in the filters;
@@ -247,6 +281,15 @@ teamReportRouter.get(
       (Object.keys(counts) as (keyof typeof counts)[]).forEach(k => { kpis[k] += counts[k]; });
       if (a.agent_id) Object.assign(rowFor(a.agent_id, a.agent_name), counts);
     });
+    if (dataCalling) {
+      // Replaces the lead-based count above (leads now owned with a call status).
+      kpis.callsMade = 0;
+      rows.forEach(r => { r.callsMade = 0; });
+      callsResult.rows.forEach(c => {
+        kpis.callsMade += Number(c.calls);
+        rowFor(c.agent_id, c.agent_name).callsMade = Number(c.calls);
+      });
+    }
     missedResult.rows.forEach(m => {
       kpis.missedTasks += Number(m.missed);
       // A removed agent has no id left — keyed by name ("removed:<name>"; the
@@ -357,6 +400,27 @@ teamReportRouter.get(
     );
     if (!canSeeMissedTaskCount(req.user!)) rows.forEach(r => { delete r.missed_task_count; });
     sendPaginated(res, rows, { page: q.page, pageSize: q.pageSize, totalCount, totalPages: Math.max(1, Math.ceil(totalCount / q.pageSize)) });
+  })
+);
+
+// Data Calling page's Calls Made: every (lead, agent who called, day) from
+// the Call button, for Data Calling leads — one compact [leadId, agentId,
+// "YYYY-MM-DD"] row each, scoped to who the caller may see. The page counts
+// different leads called per day from these (reshuffles never add any).
+teamReportRouter.get(
+  "/data-calling/call-days",
+  asyncHandler(async (req, res) => {
+    const scope = await scopeForCaller(req.user!);
+    const params: unknown[] = [BUSINESS_TIMEZONE];
+    const scopeSql = scope ? `AND ca.caller_user_id = ANY($${params.push(scope)}::uuid[])` : "";
+    const { rows } = await query<{ lead_id: string; caller_user_id: string; day: string }>(
+      `SELECT DISTINCT ca.lead_id, ca.caller_user_id, ${CALL_DAY_SQL("$1")}::text AS day
+       FROM call_attempts ca
+       JOIN leads l ON l.id = ca.lead_id
+       WHERE ca.channel = 'CALL' AND l.sub_source IS NOT NULL ${scopeSql}`,
+      params
+    );
+    sendOk(res, rows.map(r => [r.lead_id, r.caller_user_id, r.day]));
   })
 );
 

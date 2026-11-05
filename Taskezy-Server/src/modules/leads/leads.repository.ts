@@ -132,6 +132,10 @@ export interface LeadFilterConditions {
   callStatus?: string[];
   /** Qualified / Unqualified — only set on Connected calls. */
   callSubStatus?: string[];
+  /** Leads these agents called with the Call button (call_attempts), on calledFrom..calledTo (call's business day). */
+  calledBy?: string[];
+  calledFrom?: string;
+  calledTo?: string;
   /** Date column sort; left out = most recently assigned first. */
   sortDir?: "asc" | "desc";
   /** Which date sortDir sorts by — created_at (default) or assigned_at. */
@@ -216,6 +220,18 @@ function buildLeadWhereClause(filter: LeadFilterConditions): { whereClause: stri
   if (filter.callStatus && filter.callStatus.length > 0) {
     params.push(filter.callStatus);
     conditions.push(`l.call_status = ANY($${params.length}::text[])`);
+  }
+  if (filter.calledBy && filter.calledBy.length > 0) {
+    params.push(filter.calledBy);
+    const callConds = [`ca.lead_id = l.id`, `ca.channel = 'CALL'`, `ca.caller_user_id = ANY($${params.length}::uuid[])`];
+    let day = "";
+    if (filter.calledFrom || filter.calledTo) {
+      params.push(BUSINESS_TIMEZONE);
+      day = `(COALESCE(ca.started_at, ca.created_at) AT TIME ZONE $${params.length})::date`;
+    }
+    if (filter.calledFrom) { params.push(filter.calledFrom); callConds.push(`${day} >= $${params.length}::date`); }
+    if (filter.calledTo) { params.push(filter.calledTo); callConds.push(`${day} <= $${params.length}::date`); }
+    conditions.push(`EXISTS (SELECT 1 FROM call_attempts ca WHERE ${callConds.join(" AND ")})`);
   }
   if (filter.callSubStatus && filter.callSubStatus.length > 0) {
     params.push(filter.callSubStatus);

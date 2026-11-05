@@ -62,6 +62,11 @@ export const listLeadsQuerySchema = z.object({
   subSource: stringToArray,
   callStatus: stringToArray,
   callSubStatus: stringToArray,
+  // Team Reports' Call Made drill-down: leads these agents called with the
+  // Call button, on these days (the call's day, not the lead's created date).
+  calledBy: uuidToArray,
+  calledFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "calledFrom must be YYYY-MM-DD").optional(),
+  calledTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "calledTo must be YYYY-MM-DD").optional(),
   // Already supported by buildLeadWhereClause/findMany (used by the Leads
   // Analytics tab's own aggregate) — just not previously exposed here.
   propertyId: uuidToArray,
@@ -199,11 +204,12 @@ export const bulkDeleteJobIdParamSchema = z.object({
 
 // Backs both Data Calling's and the main CRM Leads page's bulk Assign/
 // Reshuffle toolbar actions (see leads.service.ts's bulkReassignLeads) —
-// same note requirement as single-lead reassign (reassignLeadSchema).
+// same note requirement as single-lead reassign (reassignLeadSchema) — except
+// an Admin's Reshuffle, which has no note (checked in the handler).
 export const bulkReassignLeadsSchema = z.object({
   leadIds: z.array(z.string().uuid()).min(1).max(5000),
   newAgentId: z.string().uuid(),
-  note: noteText
+  note: noteText.optional()
 });
 
 export const bulkReassignJobIdParamSchema = z.object({
@@ -216,7 +222,8 @@ export const bulkReassignJobIdParamSchema = z.object({
 export const bulkSetLeadPropertySchema = z.object({
   leadIds: z.array(z.string().uuid()).min(1).max(5000),
   propertyId: z.string().uuid().nullable(),
-  note: noteText
+  // Optional only for an Admin's Reshuffle (checked in the handler).
+  note: noteText.optional()
 });
 
 export const bulkSetPropertyJobIdParamSchema = z.object({

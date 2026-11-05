@@ -20,7 +20,9 @@ import LeadNoteCell from "@/components/crm/LeadNoteCell";
 import LeadRowActionsMenu from "@/components/crm/LeadRowActionsMenu";
 import { isPhoneLayout } from "@/lib/viewport";
 import { dateRangeLabel } from "@/lib/dateRangeLabel";
-import { apiBulkDeleteLeads, apiBulkReassignLeads, apiDeleteLead } from "@/lib/apiClient";
+import { apiBulkDeleteLeads, apiBulkReassignLeads, apiBulkSetLeadProperty, apiDeleteLead, apiGetDataCallingCallDays } from "@/lib/apiClient";
+import { useLiveRefresh } from "@/lib/useLiveRefresh";
+import { isSuperAdminUser } from "@/lib/superAdmin";
 import { maskPhone, maskEmail } from "@/lib/maskPII";
 import { ExcelIcon } from "@/components/icons/ContactIcons";
 import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/callTrigger";
@@ -158,7 +160,7 @@ function computeAnalyticsPerformanceRows(list: Lead[], groupBy: (l: Lead) => str
     return {
       name,
       totalLeads: group.length,
-      callsMade: group.filter(l => l.logs && l.logs.length > 0).length,
+      callsMade: 0, // filled from the Call button's records (withCallsMade)
       connected: group.filter(l => l.callStatus === "Connected").length,
       qualifiedLeads,
       unqualifiedLeads: group.length - qualifiedLeads,
@@ -173,7 +175,7 @@ function analyticsLeadMatchesMetric(l: Lead, metric: AnalyticsChartMetric): bool
   switch (metric) {
     case "Qualified": return isQualifiedCall(l);
     case "RNR": return l.callStatus === "Not Reachable";
-    case "Calls Made": return !!(l.logs && l.logs.length > 0);
+    case "Calls Made": return false; // counted from the Call button's records (chartData)
     case "Total Leads": return true;
     case "Not Qualified": return isUnqualifiedCall(l);
   }
@@ -389,9 +391,32 @@ export default function DataCallingPage() {
   // Total, like this page used to do) — same page-wide decision already
   // applied to the Dashboard/Campaigns pages, so a lead outside the
   // selected range no longer silently inflates RNR/Not Qualified/etc.
+  // Calls Made — only calls made with the Call button (call_attempts), never
+  // a reshuffle, reassignment or status change. Counted as different leads
+  // called per day, for the agent who called, on the call's own day.
+  const { liveVersion: callsLiveVersion } = useLiveRefresh("leads");
+  const [callDays, setCallDays] = useState<[string, string, string][]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    apiGetDataCallingCallDays().then(rows => { if (!cancelled) setCallDays(rows); }).catch(() => { /* keep the last numbers */ });
+    return () => { cancelled = true; };
+  }, [callsLiveVersion]);
+  const leadById = useMemo(() => new Map(leads.map(l => [l.id, l])), [leads]);
+  const userNameById = useMemo(() => new Map(users.map(u => [u.id, u.name])), [users]);
+  /** Different leads called per day among `rows` — a lead called twice on one day counts once. */
+  const countLeadDays = (rows: [string, string, string][]) => new Set(rows.map(([leadId, , day]) => `${leadId}|${day}`)).size;
+  // Calls on leads this page shows, on a day that passes `dayOk`, optionally only these leads.
+  const callsWhere = (dayOk: (day: string) => boolean, leadOk: (l: Lead) => boolean = () => true) =>
+    callDays.filter(([leadId, , day]) => { const l = leadById.get(leadId); return !!l && leadOk(l) && dayOk(day); });
+  const calledLeads = (rows: [string, string, string][]) => {
+    const ids = new Set(rows.map(([leadId]) => leadId));
+    return leads.filter(l => ids.has(l.id));
+  };
+  const summaryCallDayOk = (day: string) => dateInRange(`${day}T12:00:00`, mapDateRangeToKey(dateRange), today, summaryCustomRange);
+  const summaryCalls = useMemo(() => callsWhere(summaryCallDayOk), [callDays, leadById, dateRange, summaryCustomRange]);
+
   const categoryLeads: Record<string, Lead[]> = useMemo(() => ({
     "Total Leads Assigned": leads.filter(l => !!l.assignedAgent),
-    "Calls Made": leads.filter(l => l.logs && l.logs.length > 0),
     // Qualified/Not Qualified is Data Calling's own Connected sub-status
     // (lib/callSubStatus.ts), not a CRM-wide status list — a
     // Connected+Unqualified lead must not also count as "qualified".
@@ -405,13 +430,15 @@ export default function DataCallingPage() {
     Object.entries(categoryLeads).forEach(([key, list]) => {
       out[key] = list.filter(leadInSelectedRange);
     });
+    // Leads called in the range (the call's day, not the lead's upload day).
+    out["Calls Made"] = calledLeads(summaryCalls);
     return out;
-  }, [categoryLeads, dateRange, summaryCustomRange]);
+  }, [categoryLeads, dateRange, summaryCustomRange, summaryCalls]);
 
   // Summary metrics — real, no hardcoded fallbacks.
   const summaryMetrics = useMemo(() => ({
     totalAssigned: categoryLeadsInRange["Total Leads Assigned"].length,
-    callsMade: categoryLeadsInRange["Calls Made"].length,
+    callsMade: countLeadDays(summaryCalls),
     qualifiedLeads: categoryLeadsInRange["Qualified Leads"].length,
     rnr: categoryLeadsInRange["RNR"].length,
     notQualified: categoryLeadsInRange["Not Qualified"].length
@@ -449,24 +476,32 @@ export default function DataCallingPage() {
     [analyticsDateFilteredLeads, analyticsSubSources]
   );
 
+  // Analytics Calls Made: Sub-Source scope + the calendar applied to the call's day.
+  const analyticsCallDayOk = (day: string) => !appliedCustomRange || (day >= appliedCustomRange.start && day <= appliedCustomRange.end);
+  const inAnalyticsSubSource = (l: Lead) => analyticsSubSources.length === 0 || (!!l.source && analyticsSubSources.includes(l.source));
+  const analyticsCalls = useMemo(
+    () => callsWhere(analyticsCallDayOk, inAnalyticsSubSource),
+    [callDays, leadById, appliedCustomRange, analyticsSubSources]
+  );
+
   const analyticsSummaryMetrics = useMemo(() => ({
     totalAssigned: subSourceScopedLeads.filter(l => !!l.assignedAgent).length,
-    callsMade: subSourceScopedLeads.filter(l => l.logs && l.logs.length > 0).length,
+    callsMade: countLeadDays(analyticsCalls),
     qualifiedLeads: subSourceScopedLeads.filter(isQualifiedCall).length,
     rnr: subSourceScopedLeads.filter(l => l.callStatus === "Not Reachable").length,
     notQualified: subSourceScopedLeads.filter(isUnqualifiedCall).length
-  }), [subSourceScopedLeads]);
+  }), [subSourceScopedLeads, analyticsCalls]);
 
   // Real underlying lead list behind each Analytics stat card, keyed the
   // same way as the Data Calling tab's own categoryLeadsInRange — so
   // clicking a card here drills into exactly what it counted.
   const analyticsCategoryLeads: Record<string, Lead[]> = useMemo(() => ({
     "Total Leads Assigned": subSourceScopedLeads.filter(l => !!l.assignedAgent),
-    "Calls Made": subSourceScopedLeads.filter(l => l.logs && l.logs.length > 0),
+    "Calls Made": calledLeads(analyticsCalls),
     "Qualified Leads": subSourceScopedLeads.filter(isQualifiedCall),
     "RNR": subSourceScopedLeads.filter(l => l.callStatus === "Not Reachable"),
     "Not Qualified": subSourceScopedLeads.filter(isUnqualifiedCall)
-  }), [subSourceScopedLeads]);
+  }), [subSourceScopedLeads, analyticsCalls]);
 
   // Manager sees only their own direct reports' rows here — never other
   // managers' teams, and never a row for themself (this table is about
@@ -480,18 +515,36 @@ export default function DataCallingPage() {
     () => new Set(users.filter(u => u.managerId === currentUser?.id).map(u => u.name)),
     [users, currentUser]
   );
+  // Calls Made per row from the Call button — an agent's calls stay theirs
+  // after their leads are reshuffled to someone else.
+  const withCallsMade = (rows: AnalyticsPerformanceRow[], keyOf: (call: [string, string, string]) => string | undefined) => {
+    const byKey = new Map<string, [string, string, string][]>();
+    analyticsCalls.forEach(c => {
+      const key = keyOf(c);
+      if (!key) return;
+      if (!byKey.has(key)) byKey.set(key, []);
+      byKey.get(key)!.push(c);
+    });
+    const out = rows.map(r => ({ ...r, callsMade: countLeadDays(byKey.get(r.name) ?? []) }));
+    byKey.forEach((calls, name) => {
+      if (!out.some(r => r.name === name)) {
+        out.push({ name, totalLeads: 0, callsMade: countLeadDays(calls), connected: 0, qualifiedLeads: 0, unqualifiedLeads: 0, rnr: 0, siteVisits: 0, qualificationRate: "0.0%" });
+      }
+    });
+    return out;
+  };
   const salespersonRows = useMemo(() => {
-    const rows = computeAnalyticsPerformanceRows(subSourceScopedLeads, l => l.assignedAgent);
+    const rows = withCallsMade(computeAnalyticsPerformanceRows(subSourceScopedLeads, l => l.assignedAgent), ([, agentId]) => userNameById.get(agentId));
     return isAdmin ? rows : rows.filter(r => myTeamMemberNames.has(r.name));
-  }, [subSourceScopedLeads, isAdmin, myTeamMemberNames]);
+  }, [subSourceScopedLeads, isAdmin, myTeamMemberNames, analyticsCalls, userNameById]);
   const filteredSalespersonRows = useMemo(() => {
     const q = salespersonSearch.trim().toLowerCase();
     return q ? salespersonRows.filter(r => r.name.toLowerCase().includes(q)) : salespersonRows;
   }, [salespersonRows, salespersonSearch]);
 
   const sourceRows = useMemo(
-    () => computeAnalyticsPerformanceRows(analyticsDateFilteredLeads, l => l.source),
-    [analyticsDateFilteredLeads]
+    () => withCallsMade(computeAnalyticsPerformanceRows(analyticsDateFilteredLeads, l => l.source), ([leadId]) => leadById.get(leadId)?.source),
+    [analyticsDateFilteredLeads, analyticsCalls, leadById]
   );
   const filteredSourceRows = useMemo(() => {
     const q = sourceSearch.trim().toLowerCase();
@@ -532,14 +585,16 @@ export default function DataCallingPage() {
   const chartData = useMemo(() => {
     return chartDays.map(day => {
       const dayStr = day.toDateString();
-      const dayLeads = subSourceScopedLeads.filter(l => l.createdAtStr && new Date(l.createdAtStr).toDateString() === dayStr);
-      const value = dayLeads.filter(l => analyticsLeadMatchesMetric(l, analyticsChartMetric)).length;
+      // Calls Made: different leads called with the Call button that day.
+      const value = analyticsChartMetric === "Calls Made"
+        ? countLeadDays(callsWhere(d => d === toIsoDate(day), inAnalyticsSubSource))
+        : subSourceScopedLeads.filter(l => l.createdAtStr && new Date(l.createdAtStr).toDateString() === dayStr && analyticsLeadMatchesMetric(l, analyticsChartMetric)).length;
       return {
         label: day.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }),
         value
       };
     });
-  }, [chartDays, subSourceScopedLeads, analyticsChartMetric]);
+  }, [chartDays, subSourceScopedLeads, analyticsChartMetric, callDays, leadById, analyticsSubSources]);
 
   const chartAverage = chartData.length > 0
     ? chartData.reduce((sum, d) => sum + d.value, 0) / chartData.length
@@ -853,8 +908,14 @@ export default function DataCallingPage() {
   const [assignSelectedPropertyIds, setAssignSelectedPropertyIds] = useState<Set<string>>(new Set());
   const [assignSelectedAssigneeIds, setAssignSelectedAssigneeIds] = useState<string[]>([]);
 
+  // Admin's Reshuffle: every field is optional — Property alone, Assignee
+  // alone, or both; no note. A picked Property is applied to the leads only
+  // for the Super Admin (who may change properties); otherwise it just
+  // narrows the assignee list as before. Same as the Leads page.
+  const adminReshuffle = isAdmin && assignFlowMode === "reshuffle";
+  const reshuffleSetsProperty = adminReshuffle && isSuperAdminUser(currentUser?.email);
   const eligibleAssignees = useMemo(() => {
-    if (assignSelectedPropertyIds.size === 0) return [];
+    if (assignSelectedPropertyIds.size === 0) return adminReshuffle ? users.filter(u => u.role === "AGENT") : [];
     const selectedProps = properties.filter(p => assignSelectedPropertyIds.has(p.id));
     let anyAllMembers = false;
     const restrictedIds = new Set<string>();
@@ -866,9 +927,11 @@ export default function DataCallingPage() {
       }
     });
     return anyAllMembers ? users.filter(u => u.role === "AGENT") : users.filter(u => restrictedIds.has(u.id));
-  }, [assignSelectedPropertyIds, properties, users]);
+  }, [assignSelectedPropertyIds, properties, users, adminReshuffle]);
   const [assignNote, setAssignNote] = useState("");
-  const canConfirmAssign = assignSelectedPropertyIds.size > 0 && assignSelectedAssigneeIds.length > 0 && assignNote.trim().length > 0;
+  const canConfirmAssign = adminReshuffle
+    ? assignSelectedAssigneeIds.length > 0 || (reshuffleSetsProperty && assignSelectedPropertyIds.size > 0)
+    : assignSelectedPropertyIds.size > 0 && assignSelectedAssigneeIds.length > 0 && assignNote.trim().length > 0;
   const [assignSubmitting, setAssignSubmitting] = useState(false);
   const [assignError, setAssignError] = useState("");
 
@@ -902,13 +965,34 @@ export default function DataCallingPage() {
     // Several assignees: leads are dealt out evenly, one bulk-reassign job each.
     const agentIds = assignSelectedAssigneeIds;
     const agentName = agentIds.length === 1 ? users.find(u => u.id === agentIds[0])?.name || "" : `${agentIds.length} members`;
-    const note = assignNote.trim();
+    // Admin's Reshuffle sends no note: the lead's own note stays, history just says "Reassigned to <agent>".
+    const note = adminReshuffle ? undefined : assignNote.trim();
+    const newPropertyId = reshuffleSetsProperty ? Array.from(assignSelectedPropertyIds)[0] : undefined;
     const targetIds = flowTargetIds;
     const mode = assignFlowMode;
 
     setAssignSubmitting(true);
     setAssignError("");
     try {
+      // Admin's Reshuffle with a Property: set it first, leaving every other field as it is.
+      if (newPropertyId) {
+        const r = await apiBulkSetLeadProperty(targetIds, newPropertyId);
+        if (r.failed.length > 0) {
+          setAssignError(`${r.updated > 0 ? `Property set on ${r.updated} lead${r.updated === 1 ? "" : "s"}, but ` : ""}${r.failed.length} could not be changed: ${r.failed[0].reason}`);
+          return;
+        }
+        if (agentIds.length === 0) {
+          setSelectedIds(prev => {
+            const next = new Set(prev);
+            targetIds.forEach(id => next.delete(id));
+            return next;
+          });
+          setAssignFlowMode(null);
+          const propertyName = properties.find(p => p.id === newPropertyId)?.name ?? "the property";
+          toast(`Property set to ${propertyName} on ${r.updated} lead${r.updated === 1 ? "" : "s"}` + (r.skipped > 0 ? ` (${r.skipped} already on it)` : "") + ".", "success");
+          return;
+        }
+      }
       const shares = splitEvenly(targetIds, agentIds.length);
       const result = { moved: 0, skipped: 0, failed: [] as { reason: string }[] };
       for (let i = 0; i < agentIds.length; i++) {
@@ -2242,14 +2326,26 @@ export default function DataCallingPage() {
               {/* Select Property */}
               <div className="space-y-1.5">
                 <label className="block text-sm font-bold text-slate-800">Select Property</label>
-                <SearchableMultiSelect
-                  variant="field"
-                  selected={Array.from(assignSelectedPropertyIds)}
-                  onChange={changePropertySelection}
-                  options={properties.map(p => ({ value: p.id, label: p.name }))}
-                  placeholder="Select property"
-                  searchPlaceholder="Search property..."
-                />
+                {reshuffleSetsProperty ? (
+                  // One property — it's set on the leads.
+                  <SearchableSelect
+                    variant="field"
+                    value={Array.from(assignSelectedPropertyIds)[0] ?? ""}
+                    onChange={(id) => changePropertySelection(id ? [id] : [])}
+                    options={properties.map(p => ({ value: p.id, label: p.name }))}
+                    placeholder="Select property"
+                    searchPlaceholder="Search property..."
+                  />
+                ) : (
+                  <SearchableMultiSelect
+                    variant="field"
+                    selected={Array.from(assignSelectedPropertyIds)}
+                    onChange={changePropertySelection}
+                    options={properties.map(p => ({ value: p.id, label: p.name }))}
+                    placeholder="Select property"
+                    searchPlaceholder="Search property..."
+                  />
+                )}
               </div>
 
               {/* Select Assignee — locked until at least one property is picked */}
@@ -2262,7 +2358,7 @@ export default function DataCallingPage() {
                   selected={assignSelectedAssigneeIds}
                   onChange={setAssignSelectedAssigneeIds}
                   options={eligibleAssignees.map(u => ({ value: u.id, label: u.name }))}
-                  disabled={assignSelectedPropertyIds.size === 0}
+                  disabled={assignSelectedPropertyIds.size === 0 && !adminReshuffle}
                   placeholder="Select Member"
                   searchPlaceholder="Search assignee..."
                 />
@@ -2271,6 +2367,7 @@ export default function DataCallingPage() {
                 )}
               </div>
 
+              {!adminReshuffle && (
               <div className="space-y-1.5">
                 <label htmlFor="dc-assign-note" className="block text-sm font-bold text-slate-800">
                   Note <span className="text-red-600">*</span>
@@ -2286,6 +2383,7 @@ export default function DataCallingPage() {
                 />
                 <p className="text-[11px] text-slate-400">Required. Saved as the lead&apos;s note and in its activity history.</p>
               </div>
+              )}
               {assignError && <p className="text-[11px] text-red-600 font-semibold">{assignError}</p>}
             </div>
             <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100">
