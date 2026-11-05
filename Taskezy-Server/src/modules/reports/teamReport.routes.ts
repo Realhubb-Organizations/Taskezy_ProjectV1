@@ -10,6 +10,7 @@ import { AccessTokenPayload } from "../../utils/tokens";
 import { findDirectReportIds } from "../users/users.repository";
 import { LEAD_SOURCE_BUCKET_SQL } from "../leads/leads.repository";
 import { canSeeMissedTaskCount } from "../leads/leads.handover";
+import { MISSED_BY_JOIN_SQL } from "./siteVisitSql";
 import { FOLLOWUP_EVER_MISSED_SQL, IS_SITE_VISIT_FOLLOWUP_SQL, SITE_VISIT_DONE_LOG } from "./siteVisitSql";
 
 // Reports → Team Reports (frontend TeamReports.tsx): KPI cards, the
@@ -123,7 +124,7 @@ teamReportRouter.get(
     const leadWhere = leadConditions(q, scope, leadParams);
 
     const taskParams: unknown[] = [];
-    const taskWhere = `${FOLLOWUP_EVER_MISSED_SQL} AND ${dueConditions(q, taskParams)} AND ${leadConditions(q, scope, taskParams, { noDate: true, agentColumn: "fc.assigned_to_id" })}`;
+    const taskWhere = `${FOLLOWUP_EVER_MISSED_SQL} AND ${dueConditions(q, taskParams)} AND ${leadConditions(q, scope, taskParams, { noDate: true, agentColumn: "r.agent_id" })}`;
 
     // Site visits: leads with a visit due in the range, then every visit
     // those leads ever had (for the first date, reschedules and misses).
@@ -156,14 +157,17 @@ teamReportRouter.get(
         leadParams
       ),
       // Missed Tasks = follow-up tasks (any type) that went missed, counted
-      // against whoever the task was for.
-      query<{ agent_id: string; agent_name: string | null; missed: string }>(
-        `SELECT fc.assigned_to_id AS agent_id, ${userName("u")} AS agent_name, count(*) AS missed
+      // against the agent the task belonged to when it was missed — never
+      // whoever has the lead now. A removed agent (no user row) keeps their
+      // misses under their saved name.
+      query<{ agent_id: string | null; agent_name: string | null; missed: string }>(
+        `SELECT r.agent_id, COALESCE(max(${userName("u")}), max(r.agent_name)) AS agent_name, count(*) AS missed
          FROM followup_calls fc
+         ${MISSED_BY_JOIN_SQL}
          JOIN leads l ON l.id = fc.lead_id
-         LEFT JOIN users u ON u.id = fc.assigned_to_id
+         LEFT JOIN users u ON u.id = r.agent_id
          WHERE ${taskWhere}
-         GROUP BY fc.assigned_to_id, u.first_name, u.last_name`,
+         GROUP BY r.agent_id, CASE WHEN r.agent_id IS NULL THEN r.agent_name END`,
         taskParams
       ),
       query<{
@@ -245,7 +249,9 @@ teamReportRouter.get(
     });
     missedResult.rows.forEach(m => {
       kpis.missedTasks += Number(m.missed);
-      rowFor(m.agent_id, m.agent_name).missedTasks = Number(m.missed);
+      // A removed agent has no id left — keyed by name ("removed:<name>"; the
+      // page shows their count without a drill-down link).
+      rowFor(m.agent_id ?? `removed:${m.agent_name ?? ""}`, m.agent_name).missedTasks = Number(m.missed);
     });
 
     const showMissedCount = canSeeMissedTaskCount(req.user!);
@@ -323,11 +329,11 @@ teamReportRouter.get(
     const q = req.query as unknown as Paged & { search?: string; leadStatus?: string[] };
     const scope = await scopeForCaller(req.user!);
     const params: unknown[] = [];
-    let where = `${FOLLOWUP_EVER_MISSED_SQL} AND ${dueConditions(q, params)} AND ${leadConditions(q, scope, params, { noDate: true, agentColumn: "fc.assigned_to_id" })}`;
+    let where = `${FOLLOWUP_EVER_MISSED_SQL} AND ${dueConditions(q, params)} AND ${leadConditions(q, scope, params, { noDate: true, agentColumn: "r.agent_id" })}`;
     if (q.search) where += ` AND l.name ILIKE $${params.push(`%${q.search}%`)}`;
     if (q.leadStatus?.length) where += ` AND l.status_code = ANY($${params.push(q.leadStatus)}::text[])`;
     const countResult = await query<{ count: string }>(
-      `SELECT count(*) FROM followup_calls fc JOIN leads l ON l.id = fc.lead_id WHERE ${where}`,
+      `SELECT count(*) FROM followup_calls fc ${MISSED_BY_JOIN_SQL} JOIN leads l ON l.id = fc.lead_id WHERE ${where}`,
       params
     );
     const totalCount = Number(countResult.rows[0]?.count ?? 0);
@@ -336,11 +342,12 @@ teamReportRouter.get(
       `SELECT fc.id, fc.lead_id, l.name AS lead_name, l.phone, l.email, l.notes, l.assigned_agent_id, pr.name AS property_name,
               ${userName("la")} AS lead_agent_name, fc.scheduled_at, fc.status, l.status_code AS lead_status,
               CASE WHEN ${IS_SITE_VISIT_FOLLOWUP_SQL} THEN 'SITE_VISIT' ELSE fc.call_type END AS call_type,
-              ${userName("u")} AS assigned_to_name, l.missed_task_count,
+              COALESCE(${userName("u")}, r.agent_name) AS assigned_to_name, l.missed_task_count,
               (SELECT min(nx.scheduled_at) FROM followup_calls nx WHERE nx.lead_id = l.id AND nx.status = 'UPCOMING') AS next_call_at
        FROM followup_calls fc
+       ${MISSED_BY_JOIN_SQL}
        JOIN leads l ON l.id = fc.lead_id
-       LEFT JOIN users u ON u.id = fc.assigned_to_id
+       LEFT JOIN users u ON u.id = r.agent_id
        LEFT JOIN users la ON la.id = l.assigned_agent_id
        LEFT JOIN properties pr ON pr.id = l.property_id
        WHERE ${where}

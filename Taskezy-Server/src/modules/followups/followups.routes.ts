@@ -14,7 +14,7 @@ import { AccessTokenPayload } from "../../utils/tokens";
 import { assertNoScheduleConflict } from "./scheduleConflict";
 import { broadcastLeadChanged } from "../leads/leads.realtime";
 import { BUSINESS_TIMEZONE } from "../../utils/businessDate";
-import { FOLLOWUP_EVER_MISSED_SQL, IS_SITE_VISIT_FOLLOWUP_SQL } from "../reports/siteVisitSql";
+import { FOLLOWUP_EVER_MISSED_SQL, IS_SITE_VISIT_FOLLOWUP_SQL, MISSED_BY_JOIN_SQL } from "../reports/siteVisitSql";
 import { assertNoPendingFeedback } from "../call-attempts/feedbackLock";
 
 export const followupsRouter = Router();
@@ -50,6 +50,16 @@ const LIST_SELECT = `
          fc.due_notified_at, fc.violation_notified_at, l.missed_task_count AS lead_missed_count
   FROM followup_calls fc
   JOIN users u ON u.id = fc.assigned_to_id
+  LEFT JOIN leads l ON l.id = fc.lead_id
+`;
+
+// everMissed list: the agent shown is the one who missed the call.
+const MISSED_LIST_SELECT = `
+  SELECT fc.id, fc.scheduled_at, fc.status, fc.lead_id, fc.lead_name, fc.phone, fc.call_type,
+         r.agent_id AS assigned_to_id, r.agent_name AS assigned_to_name,
+         fc.due_notified_at, fc.violation_notified_at, l.missed_task_count AS lead_missed_count
+  FROM followup_calls fc
+  ${MISSED_BY_JOIN_SQL}
   LEFT JOIN leads l ON l.id = fc.lead_id
 `;
 
@@ -118,9 +128,13 @@ followupsRouter.get(
 
     const conditions: string[] = [];
     const params: unknown[] = [];
+    // everMissed: each call belongs to the agent who missed it (r.agent_id),
+    // not whoever it's assigned to now — same as getMissedFollowupCount.
+    const agentColumn = everMissed ? "r.agent_id" : "fc.assigned_to_id";
+    const missedJoin = everMissed ? MISSED_BY_JOIN_SQL : "";
     if (scopedAssigneeIds) {
       params.push(scopedAssigneeIds);
-      conditions.push(`fc.assigned_to_id = ANY($${params.length}::uuid[])`);
+      conditions.push(`${agentColumn} = ANY($${params.length}::uuid[])`);
     }
     if (leadId && leadId.length > 0) {
       params.push(leadId);
@@ -128,7 +142,7 @@ followupsRouter.get(
     }
     if (assignedToId && assignedToId.length > 0) {
       params.push(assignedToId);
-      conditions.push(`fc.assigned_to_id = ANY($${params.length}::uuid[])`);
+      conditions.push(`${agentColumn} = ANY($${params.length}::uuid[])`);
     }
     // Whole business (IST) days — a bare ::date here is midnight UTC, which
     // put calls between 00:00 and 05:30 IST on the previous day.
@@ -152,13 +166,13 @@ followupsRouter.get(
     }
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
-    const countResult = await query<{ count: string }>(`SELECT count(*) FROM followup_calls fc ${whereClause}`, params);
+    const countResult = await query<{ count: string }>(`SELECT count(*) FROM followup_calls fc ${missedJoin} ${whereClause}`, params);
     const totalCount = Number(countResult.rows[0]?.count ?? 0);
 
     const offset = (page - 1) * pageSize;
     const dataParams = [...params, pageSize, offset];
     const { rows } = await query<Record<string, unknown>>(
-      `${LIST_SELECT} ${whereClause} ORDER BY fc.scheduled_at LIMIT $${dataParams.length - 1} OFFSET $${dataParams.length}`,
+      `${everMissed ? MISSED_LIST_SELECT : LIST_SELECT} ${whereClause} ORDER BY fc.scheduled_at LIMIT $${dataParams.length - 1} OFFSET $${dataParams.length}`,
       dataParams
     );
     if (!canSeeMissedTaskCount(req.user!)) rows.forEach(r => { delete r.lead_missed_count; });
