@@ -108,7 +108,7 @@ export default function ReportDetailView({ detail, onBack }: { detail: ReportDet
           title={detail.title}
           columns={MISSED_FOLLOWUP_COLUMNS}
           fetchPage={async (page, size) => {
-            const r = await apiListFollowupsPage(page, size, { status: ["MISSED"], assignedToId: detail.agentIds, dateFrom: detail.dateFrom, dateTo: detail.dateTo });
+            const r = await apiListFollowupsPage(page, size, { everMissed: true, assignedToId: detail.agentIds, dateFrom: detail.dateFrom, dateTo: detail.dateTo });
             return { rows: r.rows, totalCount: r.totalCount };
           }}
           resetKey={resetKey}

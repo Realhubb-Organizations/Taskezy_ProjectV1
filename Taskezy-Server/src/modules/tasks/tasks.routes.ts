@@ -144,6 +144,8 @@ tasksRouter.get(
        ) ll ON fc.lead_id IS NOT NULL
        WHERE fc.status != 'COMPLETED'
          AND (l.id IS NULL OR l.status_code = ANY($1::text[]))
+         -- Connected + Unqualified Data Calling leads are out of the follow-up workflow.
+         AND NOT (l.call_status IS NOT DISTINCT FROM 'Connected' AND l.call_sub_status IS NOT DISTINCT FROM 'Unqualified')
          -- One task per lead: the same open call the Leads page's Next Call
          -- Date shows (taskDue.ts) — an older duplicate call adds no second task.
          AND (fc.lead_id IS NULL OR fc.id = (
@@ -176,6 +178,8 @@ tasksRouter.get(
          SELECT message, created_at FROM lead_logs WHERE lead_id = l.id AND message NOT LIKE '${FEEDBACK_PENDING_LOG_PREFIX}%' ORDER BY created_at DESC LIMIT 1
        ) ll ON true
        WHERE l.status_code = ANY($1::text[])
+         -- Connected + Unqualified Data Calling leads are out of the follow-up workflow.
+         AND NOT (l.call_status IS NOT DISTINCT FROM 'Connected' AND l.call_sub_status IS NOT DISTINCT FROM 'Unqualified')
          -- The agent's latest action was a WhatsApp message: no next call is
          -- asked there, so the message itself never makes the lead due
          -- (Pending/Missed). It's a task again once it has a scheduled call

@@ -37,3 +37,14 @@ export const TASK_DUE_AT_SQL = `COALESCE(
     WHEN l.status_code IN ('RNR', 'CALL_BACK', 'FOLLOWUP') THEN COALESCE(${LATEST_LOG_SQL("created_at")}, l.created_at)
   END
 )`;
+
+/** A New Lead's first call is overdue only once Pending Tasks marks it Missed — the same 10 minutes (frontend lib/salesPendingTasks.ts TASK_GRACE_MS). */
+export const NEW_LEAD_TASK_GRACE_MINUTES = 10;
+
+/** Lead `l`'s task is the New Lead first call (rule 2, no open scheduled call). */
+export const TASK_IS_NEW_LEAD_SQL = `(l.status_code = 'NEW_LEAD' AND NOT EXISTS (
+  SELECT 1 FROM followup_calls f WHERE f.lead_id = l.id AND f.status <> 'COMPLETED'
+))`;
+
+/** Lead `l`'s Next Call Date has passed (red OVERDUE) — a New Lead first call only after its grace. */
+export const TASK_OVERDUE_SQL = `(${TASK_DUE_AT_SQL} + CASE WHEN ${TASK_IS_NEW_LEAD_SQL} THEN interval '${NEW_LEAD_TASK_GRACE_MINUTES} minutes' ELSE interval '0' END) < now()`;

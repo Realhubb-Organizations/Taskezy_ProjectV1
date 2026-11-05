@@ -277,6 +277,8 @@ export interface Lead {
   missedTaskCount?: number;
   /** Task time — the same date/time Pending Tasks uses (server tasks/taskDue.ts); shown as Next Call Date. */
   taskDueAt?: string;
+  /** The task is a New Lead's first call — overdue only after NEW_LEAD_TASK_GRACE_MS. */
+  taskIsNewLead?: boolean;
 }
 
 export interface AdSpendRecord {
@@ -805,7 +807,8 @@ export function mapApiLeadToFrontendLead(row: ApiLeadRow): Lead {
     createdAtStr: row.created_at,
     deadLeadCallDays: Number(row.dead_lead_call_days ?? 0),
     missedTaskCount: row.missed_task_count,
-    taskDueAt: row.task_due_at ?? undefined
+    taskDueAt: row.task_due_at ?? undefined,
+    taskIsNewLead: row.task_is_new_lead === true
   };
 }
 
@@ -2307,6 +2310,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (nextSub !== lead.callSubStatus) logs.push({ timestamp: now, message: nextSub ? `Sub-status changed to "${nextSub}"` : "Sub-status cleared", user: by });
     logs.push({ timestamp: now, message: `Note: ${note}`, user: by });
     const promote = callStatus === "Connected" && nextSub === "Qualified" && lead.source === "Bulk Upload";
+    const demote = !!lead.subSource && lead.source === "Data" && !(callStatus === "Connected" && nextSub === "Qualified");
     setAllLeads(prev => prev.map(l => (l.id === leadId
       ? {
           ...l,
@@ -2316,7 +2320,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           notesUpdatedAt: now,
           notesUpdatedBy: by,
           logs,
-          ...(promote ? { source: "Data", status: "New Lead" as LeadStatus } : {})
+          ...(promote ? { source: "Data", status: "New Lead" as LeadStatus } : {}),
+          ...(demote ? { source: "Bulk Upload" } : {})
         }
       : l)));
   };

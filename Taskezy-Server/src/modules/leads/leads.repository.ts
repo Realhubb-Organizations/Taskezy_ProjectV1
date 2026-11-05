@@ -1,8 +1,9 @@
 import { PoolClient } from "pg";
-import { TASK_DUE_AT_SQL } from "../tasks/taskDue";
+import { TASK_DUE_AT_SQL, TASK_IS_NEW_LEAD_SQL, TASK_OVERDUE_SQL } from "../tasks/taskDue";
 import { pool, query, withTransaction } from "../../db/pool";
 import { BUSINESS_TIMEZONE } from "../../utils/businessDate";
 import { normalizeForeignPhone } from "../../utils/validation";
+import { FOLLOWUP_EVER_MISSED_SQL } from "../reports/siteVisitSql";
 
 /** leads.phone is CHECK'd to a bare 10-digit Indian mobile or a "+<country code>" foreign number — strip formatting/country code before insert. Shared by every external lead-ingest source (Meta webhook, sheet import). */
 /**
@@ -96,6 +97,8 @@ export interface LeadListRow {
   missed_task_count: number;
   /** Task time — see tasks/taskDue.ts. NULL = no task. */
   task_due_at: string | null;
+  /** The task is a New Lead's first call — overdue only after NEW_LEAD_TASK_GRACE_MINUTES. */
+  task_is_new_lead: boolean;
   logs: { message: string; timestamp: string; user: string }[];
 }
 
@@ -147,7 +150,7 @@ export interface LeadFilterConditions {
   missedUntil?: string;
   /** Only leads flagged missed at or after this instant. */
   missedFrom?: string;
-  /** Only leads whose Next Call Date (TASK_DUE_AT_SQL) has passed — the red OVERDUE. */
+  /** Only leads whose Next Call Date has passed (TASK_OVERDUE_SQL) — the red OVERDUE. */
   overdueOnly?: boolean;
   /** Only these leads (a notification about several leads). */
   leadIds?: string[];
@@ -278,7 +281,7 @@ function buildLeadWhereClause(filter: LeadFilterConditions): { whereClause: stri
   }
 
   if (filter.overdueOnly) {
-    conditions.push(`${TASK_DUE_AT_SQL} < now()`);
+    conditions.push(TASK_OVERDUE_SQL);
   }
 
   if (filter.leadIds && filter.leadIds.length > 0) {
@@ -306,6 +309,7 @@ const LIST_SELECT = `
     l.missed_task_count,
     -- The lead's task time: Pending Tasks' date and the Next Call Date column (tasks/taskDue.ts)
     ${TASK_DUE_AT_SQL} AS task_due_at,
+    ${TASK_IS_NEW_LEAD_SQL} AS task_is_new_lead,
     COALESCE(
       (SELECT json_agg(json_build_object('message', ll.message, 'timestamp', ll.created_at, 'user', ll.user_name_snapshot) ORDER BY ll.created_at)
        FROM lead_logs ll
@@ -523,7 +527,9 @@ export async function getMissedFollowupCount(
   dateFrom?: string,
   dateTo?: string
 ): Promise<number> {
-  const conditions: string[] = [`fc.status = 'MISSED'`];
+  // Every call the agent ever missed — still counted after it's later
+  // handled or closed on reassignment (same rule as the Salesperson Missed Task Report).
+  const conditions: string[] = [FOLLOWUP_EVER_MISSED_SQL];
   const params: unknown[] = [];
   if (assignedToId) {
     params.push(assignedToId);
@@ -608,9 +614,9 @@ export async function getManagerReportStatsByAgent(
        GROUP BY account_name
      ),
      followup_stats AS (
-       SELECT fc.assigned_to_id, count(*) FILTER (WHERE fc.status = 'MISSED') AS missed_followups
+       SELECT fc.assigned_to_id, count(*) AS missed_followups
        FROM followup_calls fc
-       WHERE fc.status = 'MISSED' ${followupScopeClause} ${followupDateClause}
+       WHERE ${FOLLOWUP_EVER_MISSED_SQL} ${followupScopeClause} ${followupDateClause}
        GROUP BY fc.assigned_to_id
      )
      SELECT l.assigned_agent_id,
@@ -829,23 +835,32 @@ export async function updateCallStatus(
   // Set only when this exact update is the Connected + Qualified promotion —
   // flips source off "Bulk Upload" (graduating the lead out of Data Calling
   // into the main CRM leads list, see AppContext.tsx's leads/dataCallingLeads
-  // split), resets status_code to NEW_LEAD and restarts assigned_at, so it
+  // split), resets status_code to NEW_LEAD and restarts assigned_at (and the
+  // missed-lead check), so it
   // enters the real pipeline fresh: its 20-minute first-response clock and
   // New Lead task start now, not from its Data Calling upload date. Left
   // undefined for every ordinary call-status update, which leaves all three
   // untouched.
-  promotion: { source: string; statusCode: string } | undefined
+  promotion: { source: string; statusCode: string } | undefined,
+  // The reverse: an already-promoted lead whose result is no longer
+  // Connected + Qualified goes back to "Bulk Upload", out of the main Leads
+  // list, Pending Tasks and Missed. status_code and the SLA fields are left
+  // as they are.
+  demote = false
 ): Promise<void> {
   await client.query(
     `UPDATE leads
      SET call_status = $1,
          call_sub_status = $5,
-         source = COALESCE($2, source),
+         source = CASE WHEN $6::boolean THEN 'Bulk Upload' ELSE COALESCE($2, source) END,
          status_code = COALESCE($3, status_code),
          assigned_at = CASE WHEN $2::text IS NOT NULL THEN now() ELSE assigned_at END,
-         first_response_at = CASE WHEN $2::text IS NOT NULL THEN NULL ELSE first_response_at END
+         first_response_at = CASE WHEN $2::text IS NOT NULL THEN NULL ELSE first_response_at END,
+         -- Fresh 20-minute missed-lead check too (jobs/missedLeadScheduler.ts),
+         -- even if an earlier promotion of this lead already fired one.
+         missed_notified_at = CASE WHEN $2::text IS NOT NULL THEN NULL ELSE missed_notified_at END
      WHERE id = $4`,
-    [callStatus, promotion?.source ?? null, promotion?.statusCode ?? null, leadId, callSubStatus]
+    [callStatus, promotion?.source ?? null, promotion?.statusCode ?? null, leadId, callSubStatus, demote]
   );
 }
 
@@ -1000,24 +1015,28 @@ export async function getAssignedAgentId(id: string): Promise<string | undefined
 }
 
 /** Must run inside the same transaction as insertLeadLog. Restarts the SLA clock, matching the frontend's reassignLead. */
-export async function reassign(client: PoolClient, leadId: string, previousAgentId: string, newAgentId: string): Promise<void> {
+/** Returns how many of the previous agent's open follow-ups (missed + upcoming) it closed. */
+export async function reassign(client: PoolClient, leadId: string, previousAgentId: string, newAgentId: string): Promise<number> {
   await client.query(
     // previous_agent_name keeps the previous owner's name on the lead, so
     // "Reassigned From" survives that user being deleted (migration 032).
     `UPDATE leads
      SET previous_agent_id = $1,
          previous_agent_name = (SELECT first_name || COALESCE(' ' || last_name, '') FROM users WHERE id = $1),
-         assigned_agent_id = $2, reassigned_at = now(), assigned_at = now(), first_response_at = NULL
+         assigned_agent_id = $2, reassigned_at = now(), assigned_at = now(), first_response_at = NULL,
+         -- The previous agent's missed tasks don't follow the lead to the new one.
+         missed_task_count = 0
      WHERE id = $3`,
     [previousAgentId, newAgentId, leadId]
   );
-  // The lead's open scheduled calls go with it — otherwise their reminders,
-  // SLA alerts ("<old agent> has not followed up…") and Dashboard tasks
-  // stay with the previous agent.
-  await client.query(
-    `UPDATE followup_calls SET assigned_to_id = $1 WHERE lead_id = $2 AND status <> 'COMPLETED'`,
-    [newAgentId, leadId]
+  // The previous agent's open calls — missed and upcoming — are closed, not
+  // handed over: they stay assigned to that agent (missed ones also in
+  // missed_lead_records), and the new agent starts with a fresh timeline.
+  const closed = await client.query(
+    `UPDATE followup_calls SET status = 'COMPLETED' WHERE lead_id = $1 AND status <> 'COMPLETED'`,
+    [leadId]
   );
+  return closed.rowCount ?? 0;
 }
 
 /**
