@@ -144,6 +144,8 @@ tasksRouter.get(
          SELECT message, created_at FROM lead_logs WHERE lead_id = fc.lead_id AND message NOT LIKE '${FEEDBACK_PENDING_LOG_PREFIX}%' ORDER BY created_at DESC LIMIT 1
        ) ll ON fc.lead_id IS NOT NULL
        WHERE fc.status != 'COMPLETED'
+         -- An inactive user's calls are no one's task; they come back if the user is reactivated.
+         AND u.status = 'ACTIVE'
          AND (l.id IS NULL OR l.status_code = ANY($1::text[]))
          -- Connected + Unqualified Data Calling leads are out of the follow-up workflow.
          AND NOT (l.call_status IS NOT DISTINCT FROM 'Connected' AND l.call_sub_status IS NOT DISTINCT FROM 'Unqualified')
@@ -179,6 +181,7 @@ tasksRouter.get(
          SELECT message, created_at FROM lead_logs WHERE lead_id = l.id AND message NOT LIKE '${FEEDBACK_PENDING_LOG_PREFIX}%' ORDER BY created_at DESC LIMIT 1
        ) ll ON true
        WHERE l.status_code = ANY($1::text[])
+         AND u.status = 'ACTIVE'
          -- Connected + Unqualified Data Calling leads are out of the follow-up workflow.
          AND NOT (l.call_status IS NOT DISTINCT FROM 'Connected' AND l.call_sub_status IS NOT DISTINCT FROM 'Unqualified')
          -- The agent's latest action was a WhatsApp message: no next call is
