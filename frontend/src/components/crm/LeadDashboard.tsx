@@ -1010,14 +1010,24 @@ export default function LeadDashboard() {
   const [assignAssigneeIds, setAssignAssigneeIds] = useState<string[]>([]);
   const [assignNote, setAssignNote] = useState("");
   const flowTargetLeads = assignFlowMode === "reshuffle" ? selectedAssignedLeads : selectedUnassignedLeads;
+  // Admin's Reshuffle: every field is optional — Property alone, Assignee
+  // alone, or both; no note. A picked Property is applied to the leads only
+  // when the admin may change properties (Super Admin); otherwise it just
+  // narrows the assignee list as before.
+  const adminReshuffle = isAdmin && assignFlowMode === "reshuffle";
+  const reshuffleSetsProperty = adminReshuffle && canBulkChangeProperty;
   const assigneeOptions = eligibleAssignees({
     users,
     properties,
     selectedPropertyIds: assignPropertyIds,
     caller: currentUser,
-    targetLeads: flowTargetLeads
+    targetLeads: flowTargetLeads,
+    allWhenNoProperty: adminReshuffle
   });
-  const canConfirmAssign = assignPropertyIds.size > 0 && assignAssigneeIds.length > 0 && assignAssigneeIds.every(id => assigneeOptions.some(u => u.id === id)) && assignNote.trim().length > 0;
+  const assigneesValid = assignAssigneeIds.every(id => assigneeOptions.some(u => u.id === id));
+  const canConfirmAssign = adminReshuffle
+    ? assigneesValid && (assignAssigneeIds.length > 0 || (reshuffleSetsProperty && assignPropertyIds.size > 0))
+    : assignPropertyIds.size > 0 && assignAssigneeIds.length > 0 && assigneesValid && assignNote.trim().length > 0;
 
   const [assignSubmitting, setAssignSubmitting] = useState(false);
   const [assignError, setAssignError] = useState("");
@@ -1048,25 +1058,48 @@ export default function LeadDashboard() {
   // sent as one bulk-reassign job per assignee, results added together.
   const confirmBulkAssign = async () => {
     const assignees = assignAssigneeIds.map(id => users.find(u => u.id === id)).filter((u): u is NonNullable<typeof u> => !!u);
-    if (!canConfirmAssign || !assignFlowMode || assignees.length === 0 || assignSubmitting) return;
+    const newPropertyId = reshuffleSetsProperty ? Array.from(assignPropertyIds)[0] : undefined;
+    if (!canConfirmAssign || !assignFlowMode || (assignees.length === 0 && !newPropertyId) || assignSubmitting) return;
     const mode = assignFlowMode;
     const targetLeads = flowTargetLeads;
     const assigneeLabel = assignees.length === 1 ? assignees[0].name : `${assignees.length} members`;
+    // Admin's Reshuffle sends no note: the lead's own note stays, history just says "Reassigned to <agent>".
+    const note = adminReshuffle ? undefined : assignNote.trim();
 
     setAssignSubmitting(true);
     setAssignError("");
     try {
+      // Admin's Reshuffle with a Property: set it first, leaving every other field as it is.
+      let propertyUpdated = 0;
+      if (newPropertyId) {
+        const r = await apiBulkSetLeadProperty(targetLeads.map(l => l.id), newPropertyId);
+        propertyUpdated = r.updated;
+        if (r.failed.length > 0) {
+          if (r.updated > 0) setLeadsRefreshKey(k => k + 1);
+          setAssignError(`${r.updated > 0 ? `Property set on ${r.updated} lead${r.updated === 1 ? "" : "s"}, but ` : ""}${r.failed.length} could not be changed: ${r.failed[0].reason}`);
+          return;
+        }
+        if (assignees.length === 0) {
+          clearSelected(targetLeads.map(l => l.id));
+          if (r.updated > 0) setLeadsRefreshKey(k => k + 1);
+          setAssignFlowMode(null);
+          const propertyName = properties.find(p => p.id === newPropertyId)?.name ?? "the property";
+          setSuccessMsg(`Property set to ${propertyName} on ${r.updated} lead${r.updated === 1 ? "" : "s"}` + (r.skipped > 0 ? ` (${r.skipped} already on it)` : "") + ".");
+          setTimeout(() => setSuccessMsg(""), 4000);
+          return;
+        }
+      }
       const shares = splitEvenly(targetLeads.map(l => l.id), assignees.length);
       const result = { moved: 0, skipped: 0, failed: [] as { reason: string }[] };
       for (let i = 0; i < assignees.length; i++) {
         if (shares[i].length === 0) continue;
-        const r = await apiBulkReassignLeads(shares[i], assignees[i].id, assignNote.trim());
+        const r = await apiBulkReassignLeads(shares[i], assignees[i].id, note);
         result.moved += r.moved;
         result.skipped += r.skipped;
         result.failed.push(...r.failed);
       }
       clearSelected(targetLeads.map(l => l.id));
-      if (result.moved > 0) setLeadsRefreshKey(k => k + 1);
+      if (result.moved > 0 || propertyUpdated > 0) setLeadsRefreshKey(k => k + 1);
 
       if (result.failed.length > 0) {
         setAssignError(
@@ -2705,14 +2738,26 @@ export default function LeadDashboard() {
 
                 <div className="space-y-1.5">
                   <label className="block text-sm font-bold text-slate-800">Select Property</label>
-                  <SearchableMultiSelect
-                    variant="field"
-                    selected={Array.from(assignPropertyIds)}
-                    onChange={(ids) => { setAssignPropertyIds(new Set(ids)); setAssignAssigneeIds([]); }}
-                    options={properties.map(p => ({ value: p.id, label: p.name }))}
-                    placeholder="Select property"
-                    searchPlaceholder="Search property..."
-                  />
+                  {reshuffleSetsProperty ? (
+                    // One property — it's set on the leads.
+                    <SearchableSelect
+                      variant="field"
+                      value={Array.from(assignPropertyIds)[0] ?? ""}
+                      onChange={(id) => { setAssignPropertyIds(new Set(id ? [id] : [])); setAssignAssigneeIds([]); }}
+                      options={properties.map(p => ({ value: p.id, label: p.name }))}
+                      placeholder="Select property"
+                      searchPlaceholder="Search property..."
+                    />
+                  ) : (
+                    <SearchableMultiSelect
+                      variant="field"
+                      selected={Array.from(assignPropertyIds)}
+                      onChange={(ids) => { setAssignPropertyIds(new Set(ids)); setAssignAssigneeIds([]); }}
+                      options={properties.map(p => ({ value: p.id, label: p.name }))}
+                      placeholder="Select property"
+                      searchPlaceholder="Search property..."
+                    />
+                  )}
                 </div>
 
                 <div className="space-y-1.5">
@@ -2724,7 +2769,7 @@ export default function LeadDashboard() {
                     selected={assignAssigneeIds}
                     onChange={setAssignAssigneeIds}
                     options={assigneeOptions.map(u => ({ value: u.id, label: u.name }))}
-                    disabled={assignPropertyIds.size === 0}
+                    disabled={assignPropertyIds.size === 0 && !adminReshuffle}
                     placeholder="Select Member"
                     searchPlaceholder="Search assignee..."
                   />
@@ -2738,6 +2783,7 @@ export default function LeadDashboard() {
                   )}
                 </div>
 
+                {!adminReshuffle && (
                 <div className="space-y-1.5">
                   <label htmlFor="assign-note" className="block text-sm font-bold text-slate-800">
                     Note <span className="text-red-600">*</span>
@@ -2753,6 +2799,7 @@ export default function LeadDashboard() {
                   />
                   <p className="text-[11px] text-slate-400">Required. Saved as the lead&apos;s note and in its activity history.</p>
                 </div>
+                )}
               </div>
               {assignError && (
                 <div className="mx-6 mb-4 p-2.5 bg-red-50 border border-red-100 text-[11px] text-red-700 rounded-xl font-bold flex items-center gap-2">

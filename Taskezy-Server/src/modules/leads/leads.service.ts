@@ -62,6 +62,9 @@ export async function listLeads(caller: AccessTokenPayload, filter: {
   subSource?: string[];
   callStatus?: string[];
   callSubStatus?: string[];
+  calledBy?: string[];
+  calledFrom?: string;
+  calledTo?: string;
 }) {
   const scopedToAgentIds = await scopeForCaller(caller);
   const { rows, totalCount } = await repo.findMany({
@@ -92,6 +95,9 @@ export async function listLeads(caller: AccessTokenPayload, filter: {
     subSource: filter.subSource,
     callStatus: filter.callStatus,
     callSubStatus: filter.callSubStatus,
+    calledBy: filter.calledBy,
+    calledFrom: filter.calledFrom,
+    calledTo: filter.calledTo,
     scopedToAgentIds
   });
   return {
@@ -1122,7 +1128,7 @@ export async function bulkSetLeadProperty(
   caller: AccessTokenPayload,
   leadIds: string[],
   propertyId: string | null,
-  note: string
+  note?: string
 ): Promise<BulkSetLeadPropertyResult> {
   const ids = Array.from(new Set(leadIds));
   let updated = 0;
@@ -1249,7 +1255,7 @@ export async function bulkReassignLeads(
   caller: AccessTokenPayload,
   leadIds: string[],
   newAgentId: string,
-  note: string
+  note?: string
 ): Promise<BulkReassignLeadsResult> {
   const ids = Array.from(new Set(leadIds));
   let moved = 0;
