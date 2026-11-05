@@ -81,6 +81,8 @@ async function notifySlaViolations(): Promise<void> {
      SET violation_notified_at = now(), status = 'MISSED'
      FROM users u
      WHERE u.id = fc.assigned_to_id
+       -- An inactive user's calls aren't marked missed or escalated.
+       AND u.status = 'ACTIVE'
        AND fc.status = 'UPCOMING'
        AND fc.due_notified_at IS NOT NULL
        AND fc.due_notified_at <= now() - interval '10 minutes'
