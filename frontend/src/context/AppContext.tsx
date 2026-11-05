@@ -732,7 +732,7 @@ interface AppActions {
 
   // Calendar actions
   addCalendarEvent: (event: Omit<CalendarEvent, "id">) => void;
-  addFollowupCall: (input: { scheduledAt: string; leadId?: string; leadName: string; phone?: string; callType: "CALLBACK" | "MEETING" | "SITE_VISIT"; assignedToName: string; rescheduleReason?: string }) => void;
+  addFollowupCall: (input: { scheduledAt: string; leadId?: string; leadName: string; phone?: string; callType: "CALLBACK" | "MEETING" | "SITE_VISIT"; assignedToName: string; rescheduleReason?: string; logActivity?: boolean }) => Promise<void>;
   /** Record a follow-up that was already created through the API (e.g. by the call-feedback popup), so tables showing Next Call Date refresh. */
   recordFollowupCreated: (row: ApiFollowupRow) => void;
   deleteCalendarEvent: (id: string) => void;
@@ -1843,23 +1843,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Writes to followup_calls alongside calendar_events (see addCalendarEvent
   // call sites for SITE_VISIT/FOLLOWUP reminders) — the followup_calls table
   // used to only ever contain whatever was seeded, since nothing wrote to it.
-  const addFollowupCall = (input: { scheduledAt: string; leadId?: string; leadName: string; phone?: string; callType: "CALLBACK" | "MEETING" | "SITE_VISIT"; assignedToName: string; rescheduleReason?: string }) => {
+  // Resolves once saved. A Schedule Call ▾ booking (logActivity) rejects on
+  // failure so its dropdown can show why; other callers keep the old
+  // fire-and-forget behaviour.
+  const addFollowupCall = (input: { scheduledAt: string; leadId?: string; leadName: string; phone?: string; callType: "CALLBACK" | "MEETING" | "SITE_VISIT"; assignedToName: string; rescheduleReason?: string; logActivity?: boolean }): Promise<void> => {
     const assignee = users.find(u => u.name === input.assignedToName);
-    if (!isApiSessionActive() || !assignee) return;
-    apiCreateFollowup({
+    if (!isApiSessionActive() || !assignee) return Promise.resolve();
+    const saved = apiCreateFollowup({
       scheduledAt: input.scheduledAt,
       leadId: input.leadId && isRealId(input.leadId) ? input.leadId : undefined,
       leadName: input.leadName,
       phone: input.phone,
       callType: input.callType,
       assignedToId: assignee.id,
-      rescheduleReason: input.rescheduleReason
+      rescheduleReason: input.rescheduleReason,
+      logActivity: input.logActivity
     })
       .then((created) => {
         setFollowupCalls(prev => [...prev, mapApiFollowupToFrontend(created)]);
         refreshOwnTasksSoon(); // the new call shows as Upcoming right away
-      })
-      .catch((err) => console.warn("Could not persist new follow-up to the database:", err));
+      });
+    if (input.logActivity) return saved;
+    return saved.catch((err) => console.warn("Could not persist new follow-up to the database:", err));
   };
 
   const recordFollowupCreated = (row: ApiFollowupRow) => {

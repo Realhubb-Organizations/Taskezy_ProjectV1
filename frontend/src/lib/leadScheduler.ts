@@ -13,6 +13,12 @@ import { findOpenFollowup, formatFollowupWhen, findAgentScheduleConflict, agentC
 // Save & Continue still changes the status either way.
 export const SCHEDULER_REQUIRED_STATUSES: LeadStatus[] = ["RNR", "Call Back", "Followup", "EOI", "Site Visit Scheduled"];
 export const SCHEDULER_OPTIONAL_STATUSES: LeadStatus[] = ["Low Budget", "Other requirement"];
+// A lead sitting in one of these can have its next call booked straight
+// from the lead details panel's Schedule Call ▾, without a status change.
+export const CALL_SCHEDULE_STATUSES: LeadStatus[] = [
+  "RNR", "Call Back", "Followup", "Site Visit Scheduled",
+  "Site Visit Done", "Low Budget", "EOI", "Other requirement", "Different Location"
+];
 
 export interface PendingLeadSchedule {
   leadId: string;
@@ -23,6 +29,8 @@ export interface PendingLeadSchedule {
   status: LeadStatus;
   /** false for SCHEDULER_OPTIONAL_STATUSES — date/time can be left blank. */
   required: boolean;
+  /** Booking a call only (Schedule Call ▾) — the status stays as it is. */
+  scheduleOnly?: boolean;
 }
 
 interface SchedulableLead {
@@ -48,14 +56,9 @@ export function useLeadStatusScheduler(commit: (leadId: string, status: LeadStat
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
+  // Every status changes straight away, no popup — the next call is booked
+  // from the lead details panel's Schedule Call ▾ instead.
   const requestChange = (lead: SchedulableLead, status: LeadStatus) => {
-    const required = SCHEDULER_REQUIRED_STATUSES.includes(status);
-    const optional = SCHEDULER_OPTIONAL_STATUSES.includes(status);
-    if (required || optional) {
-      setError("");
-      setPendingSchedule({ leadId: lead.id, leadName: lead.name, phone: lead.phone, property: lead.property, assignedAgent: lead.assignedAgent, status, required });
-      return;
-    }
     commit(lead.id, status);
   };
 
@@ -65,8 +68,11 @@ export function useLeadStatusScheduler(commit: (leadId: string, status: LeadStat
     setError("");
   };
 
-  const confirmSchedule = async ({ date, time, note, rescheduleReason }: { date: string; time: string; note: string; rescheduleReason?: string }) => {
-    if (!pendingSchedule || submitting) return;
+  type ScheduleInput = { date: string; time: string; note: string; rescheduleReason?: string };
+  // Returns true once saved. `target` is the popup's pending lead, or a
+  // Schedule Call ▾ booking (scheduleOnly) that never opens the popup.
+  const runSchedule = async (target: PendingLeadSchedule, { date, time, note, rescheduleReason }: ScheduleInput): Promise<boolean> => {
+    if (submitting) return false;
     // Validated once, reused below — LeadScheduleModal's own date/time
     // inputs should always produce a real date, but CallFeedbackGate's
     // equivalent check already guards this defensively and this one didn't.
@@ -75,11 +81,11 @@ export function useLeadStatusScheduler(commit: (leadId: string, status: LeadStat
       const parsed = new Date(`${date}T${time}`);
       if (isNaN(parsed.getTime())) {
         setError("That date/time isn't valid. Please pick it again.");
-        return;
+        return false;
       }
       if (parsed.getTime() < Date.now()) {
         setError("The scheduled time must be in the future.");
-        return;
+        return false;
       }
       scheduledAtIso = parsed.toISOString();
     }
@@ -90,16 +96,16 @@ export function useLeadStatusScheduler(commit: (leadId: string, status: LeadStat
       // (status included) if the picked time is within 5 minutes of
       // another lead's already-scheduled follow-up for this same agent.
       if (scheduledAtIso) {
-        const ownerId = users.find(u => u.name === pendingSchedule.assignedAgent)?.id;
+        const ownerId = users.find(u => u.name === target.assignedAgent)?.id;
         if (ownerId) {
-          const conflict = await findAgentScheduleConflict(ownerId, scheduledAtIso, pendingSchedule.leadId);
+          const conflict = await findAgentScheduleConflict(ownerId, scheduledAtIso, target.leadId);
           if (conflict) {
             setError(agentConflictMessage(conflict));
-            return;
+            return false;
           }
         }
       }
-      await commit(pendingSchedule.leadId, pendingSchedule.status);
+      if (!target.scheduleOnly) await commit(target.leadId, target.status);
       // Same Notes field the Notes column's pencil-edit and CallFeedbackGate's
       // own note field both write to (PATCH /leads/:id/notes, a straight
       // replace) — saved whenever something was typed, independent of
@@ -109,7 +115,7 @@ export function useLeadStatusScheduler(commit: (leadId: string, status: LeadStat
       // persisted onto the lead itself — so the status changed but the
       // agent's comment never showed up anywhere a user would look for it.
       if (note.trim()) {
-        await apiUpdateLeadNote(pendingSchedule.leadId, note.trim());
+        await apiUpdateLeadNote(target.leadId, note.trim());
       }
       // Optional statuses can be submitted with no date/time at all — just
       // a status change with maybe a note, no reminder to schedule.
@@ -120,60 +126,79 @@ export function useLeadStatusScheduler(commit: (leadId: string, status: LeadStat
         // Existing" discards this pick entirely (no notification/calendar
         // event/follow-up created, the original stays untouched); the
         // status change and note above have already been saved either way.
-        const existing = await findOpenFollowup(pendingSchedule.leadId);
+        // Schedule Call ▾ is itself the deliberate change of an existing
+        // booking, so it skips this ask (the new time replaces the old one).
+        const existing = target.scheduleOnly ? null : await findOpenFollowup(target.leadId);
         if (existing) {
           const scheduleAgain = await confirm({
             title: "Already scheduled",
-            message: `${pendingSchedule.leadName} already has a follow-up scheduled ${formatFollowupWhen(existing.scheduled_at)}. Schedule again, or keep the existing one?`,
+            message: `${target.leadName} already has a follow-up scheduled ${formatFollowupWhen(existing.scheduled_at)}. Schedule again, or keep the existing one?`,
             confirmLabel: "Schedule Again",
             cancelLabel: "Keep Existing"
           });
           if (!scheduleAgain) {
             setPendingSchedule(null);
-            return;
+            return false;
           }
           // Rescheduling the same lead is always allowed (no 5-minute rule
           // here, that's cross-lead only) — but picking the exact same
           // minute as the one just kept open is almost certainly a mistake.
           if (isTooCloseToExistingSchedule(scheduledAtIso, existing.scheduled_at)) {
             setError("Pick a time at least 1 minute apart from the existing schedule.");
-            return;
+            return false;
           }
         }
-        const isSiteVisit = pendingSchedule.status === "Site Visit Scheduled";
+        const isSiteVisit = target.status === "Site Visit Scheduled";
+        // Saved first — if it fails, no reminder or calendar entry is left behind.
+        await addFollowupCall({
+          scheduledAt: scheduledAtIso,
+          leadId: target.leadId,
+          leadName: target.leadName,
+          phone: target.phone,
+          callType: isSiteVisit ? "SITE_VISIT" : "CALLBACK",
+          assignedToName: target.assignedAgent || "",
+          rescheduleReason: isSiteVisit ? rescheduleReason : undefined,
+          logActivity: target.scheduleOnly
+        });
         addNotification({
           system: "CRM",
           category: "REMINDER",
-          title: `${pendingSchedule.status} Reminder Set`,
-          message: `${pendingSchedule.leadName} • ${date} at ${time}${note.trim() ? ` — ${note.trim()}` : ""}`,
-          leadId: pendingSchedule.leadId
+          title: `${target.status} Reminder Set`,
+          message: `${target.leadName} • ${date} at ${time}${note.trim() ? ` — ${note.trim()}` : ""}`,
+          leadId: target.leadId
         });
         addCalendarEvent({
           system: "CRM",
           type: isSiteVisit ? "SITE_VISIT" : "FOLLOWUP",
-          title: `${pendingSchedule.status} — ${pendingSchedule.leadName}`,
+          title: `${target.status} — ${target.leadName}`,
           date,
           time,
-          description: note.trim() || pendingSchedule.property || "Property",
-          leadId: pendingSchedule.leadId
-        });
-        addFollowupCall({
-          scheduledAt: scheduledAtIso,
-          leadId: pendingSchedule.leadId,
-          leadName: pendingSchedule.leadName,
-          phone: pendingSchedule.phone,
-          callType: isSiteVisit ? "SITE_VISIT" : "CALLBACK",
-          assignedToName: pendingSchedule.assignedAgent || "",
-          rescheduleReason: isSiteVisit ? rescheduleReason : undefined
+          description: note.trim() || target.property || "Property",
+          leadId: target.leadId
         });
       }
       setPendingSchedule(null);
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save. Please try again.");
+      return false;
     } finally {
       setSubmitting(false);
     }
   };
 
-  return { requestChange, pendingSchedule, cancelSchedule, confirmSchedule, submitting, error };
+  const confirmSchedule = async (input: ScheduleInput) => {
+    if (pendingSchedule) await runSchedule(pendingSchedule, input);
+  };
+
+  // Schedule Call ▾: book the lead's next call, leaving its status unchanged.
+  const scheduleCall = (lead: SchedulableLead, status: LeadStatus, at: { date: string; time: string; rescheduleReason?: string }) => {
+    setError("");
+    return runSchedule(
+      { leadId: lead.id, leadName: lead.name, phone: lead.phone, property: lead.property, assignedAgent: lead.assignedAgent, status, required: true, scheduleOnly: true },
+      { ...at, note: "" }
+    );
+  };
+
+  return { requestChange, scheduleCall, pendingSchedule, cancelSchedule, confirmSchedule, submitting, error };
 }

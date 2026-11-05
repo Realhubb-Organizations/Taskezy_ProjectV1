@@ -1406,6 +1406,8 @@ export interface CreateFollowupApiInput {
   assignedToId: string;
   /** Why a site visit moved to a new date (Team Reports). */
   rescheduleReason?: string;
+  /** Also add a line to the lead's Activity History (Schedule Call ▾). */
+  logActivity?: boolean;
 }
 
 export function apiCreateFollowup(input: CreateFollowupApiInput): Promise<ApiFollowupRow> {

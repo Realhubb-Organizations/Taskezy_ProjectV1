@@ -174,8 +174,14 @@ const createFollowupSchema = z.object({
   callType: z.enum(["CALLBACK", "MEETING", "SITE_VISIT"]),
   assignedToId: z.string().uuid(),
   // Why a site visit moved (Team Reports' Reschedule Reason, migration 051).
-  rescheduleReason: z.string().trim().max(500).optional()
+  rescheduleReason: z.string().trim().max(500).optional(),
+  // Booked from the lead details panel's Schedule Call ▾ — also noted in the
+  // lead's Activity History (other bookings already log their own call outcome).
+  logActivity: z.boolean().optional()
 });
+
+const scheduledAtLabel = (at: Date) =>
+  at.toLocaleString("en-IN", { timeZone: BUSINESS_TIMEZONE, day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true });
 
 // Same three-way ownership rule as leads.service.ts's
 // assertStatusChangeAllowed — duplicated rather than imported (that one
@@ -262,6 +268,14 @@ followupsRouter.post(
         throw ApiError.badRequest("That lead or assignee doesn't exist.");
       }
       throw err;
+    }
+    if (req.body.leadId && req.body.logActivity) {
+      const what = req.body.callType === "SITE_VISIT" ? "Site visit" : "Next call";
+      const reason = req.body.rescheduleReason ? ` Reason: ${req.body.rescheduleReason}` : "";
+      await pool.query(
+        `INSERT INTO lead_logs (lead_id, user_id, user_name_snapshot, message) VALUES ($1, $2, $3, $4)`,
+        [req.body.leadId, req.user!.sub, req.user!.name, `${what} scheduled for ${scheduledAtLabel(new Date(req.body.scheduledAt))}.${reason}`]
+      );
     }
     const { rows: created } = await query(`${SELECT} WHERE fc.id = $1`, [insertedId]);
     // The lead's Next Call Date (task_due_at on GET /leads) changed too.

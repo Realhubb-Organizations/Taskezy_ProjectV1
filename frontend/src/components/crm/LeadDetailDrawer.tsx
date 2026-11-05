@@ -12,8 +12,9 @@ import { maskPhone, maskEmail } from "@/lib/maskPII";
 import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/callTrigger";
 import { WhatsAppIcon, PlatformLabel } from "@/components/icons/ContactIcons";
 import { callSubStatusOf } from "@/lib/callSubStatus";
-import { useLeadStatusScheduler } from "@/lib/leadScheduler";
+import { CALL_SCHEDULE_STATUSES, useLeadStatusScheduler } from "@/lib/leadScheduler";
 import LeadScheduleModal from "./LeadScheduleModal";
+import NextCallDropdown from "./NextCallDropdown";
 import MissedCountBadge from "@/components/crm/MissedCountBadge";
 import { formatFollowupDate, formatFollowupTime, nextCallFor } from "@/lib/followups";
 
@@ -248,11 +249,23 @@ export default function LeadDetailDrawer({
   const canReassign = canReassignThisLead(lead, currentUser, users) && reassignTargets.length > 0;
   const reassignedToLabel = lead.previousAgent ? (lead.assignedAgent || "Unassigned") : "—";
   const nextCall = nextCallFor(lead);
+  // Schedule Call ▾ — book the next call for a lead in one of these statuses.
+  const canScheduleCall = CALL_SCHEDULE_STATUSES.includes(localStatus) && canChangeLeadStatus(lead, currentUser, users);
 
   // Assigned/Property/Reassigned/Captured grid, plus ad-footprint fields
   // (Campaign/Meta Page/Lead Form ID) only when the lead actually carries
   // them — no empty rows for manually-entered or non-Meta leads.
-  const metaFields: { label: string; labelExtra?: React.ReactNode; value: React.ReactNode }[] = [
+  const nextCallText: React.ReactNode = nextCall ? (
+    <span
+      className={nextCall.overdue ? "text-red-600" : nextCall.due ? "text-amber-600" : undefined}
+      title={nextCall.overdue ? "This follow-up's time has passed and it isn't completed" : nextCall.due ? "This call is due now — it becomes overdue if not done within 10 minutes" : undefined}
+    >
+      {nextCall.overdue && <span className="text-[10px] font-bold uppercase tracking-wide mr-1">Overdue</span>}
+      {nextCall.due && <span className="text-[10px] font-bold uppercase tracking-wide mr-1">Due now</span>}
+      {formatFollowupDate(nextCall.at)}, {formatFollowupTime(nextCall.at)}
+    </span>
+  ) : "—";
+  const metaFields: { label: string; labelExtra?: React.ReactNode; value: React.ReactNode; wrap?: boolean }[] = [
     {
       label: "Assigned To",
       value: (
@@ -311,17 +324,24 @@ export default function LeadDetailDrawer({
     // Same date as the Leads table's Next Call Date column (lib/followups.ts).
     {
       label: "Next Call Date",
-      value: nextCall ? (
-        <span
-          className={nextCall.overdue ? "text-red-600" : nextCall.due ? "text-amber-600" : undefined}
-          title={nextCall.overdue ? "This follow-up's time has passed and it isn't completed" : nextCall.due ? "This call is due now — it becomes overdue if not done within 10 minutes" : undefined}
-        >
-          {nextCall.overdue && <span className="text-[10px] font-bold uppercase tracking-wide mr-1">Overdue</span>}
-          {nextCall.due && <span className="text-[10px] font-bold uppercase tracking-wide mr-1">Due now</span>}
-          {formatFollowupDate(nextCall.at)}, {formatFollowupTime(nextCall.at)}
-        </span>
-      ) : "—"
-    }
+      // Shown in full — the date and time must never be cut off.
+      wrap: true,
+      value: nextCallText
+    },
+    // Schedule Call ▾ — books the next call; Next Call Date then shows that time.
+    ...(canScheduleCall ? [{
+      label: "Schedule Call",
+      value: (
+        <NextCallDropdown
+          label="Select"
+          leadId={lead.id}
+          siteVisit={localStatus === "Site Visit Scheduled"}
+          saving={scheduler.submitting}
+          error={scheduler.error}
+          onSave={(at) => scheduler.scheduleCall(lead, localStatus, at)}
+        />
+      )
+    }] : [])
   ];
   // Ad-source attribution (ad-platform/marketing concern) — Admin-only, and
   // only the fields the lead actually carries. Shown under "Campaign ▾".
@@ -538,7 +558,7 @@ export default function LeadDetailDrawer({
           {metaFields.map(f => (
             <div key={f.label} className="min-w-0">
               <span className="text-slate-800 font-extrabold text-xs flex items-center gap-1.5 mb-1">{f.label} :{f.labelExtra}</span>
-              <span className="text-slate-700 font-medium block truncate">{f.value}</span>
+              <span className={`text-slate-700 font-medium block ${f.wrap ? "" : "truncate"}`}>{f.value}</span>
             </div>
           ))}
         </div>
