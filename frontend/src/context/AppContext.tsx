@@ -30,6 +30,7 @@ import {
   apiResetUserPassword,
   apiChangePassword,
   apiDeleteUser,
+  apiDeactivateUser,
   apiListProperties,
   apiCreateProperty,
   apiEditProperty,
@@ -712,6 +713,7 @@ interface AppActions {
   addTeamMember: (user: Omit<User, "id" | "created_at" | "updated_at">) => Promise<void>;
   /** Waits for the server; throws its message on failure. `handover` is required when the user holds leads. */
   deleteTeamMember: (userId: string, handover?: { reassignTo: string[]; note: string }) => Promise<{ reassignedLeads: number }>;
+  deactivateTeamMember: (userId: string, handover?: { reassignTo: string[]; note: string }) => Promise<{ reassignedLeads: number }>;
   deleteLead: (leadId: string) => void;
   removeLeadsLocally: (leadIds: string[]) => void;
   editLead: (leadId: string, updatedFields: Partial<Lead>) => void;
@@ -2768,6 +2770,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return { reassignedLeads };
   };
 
+  const deactivateTeamMember = async (id: string, handover?: { reassignTo: string[]; note: string }) => {
+    let reassignedLeads = 0;
+    if (isApiSessionActive() && isRealId(id)) {
+      reassignedLeads = (await apiDeactivateUser(id, handover)).reassignedLeads ?? 0;
+    }
+    setUsers(prev => prev.map(u => (u.id === id ? { ...u, status: "INACTIVE" as const } : u)));
+    return { reassignedLeads };
+  };
+
   const deleteLead = (id: string) => {
     setAllLeads(prev => prev.filter(l => l.id !== id));
     if (isApiSessionActive() && isRealLeadId(id)) {
@@ -2976,6 +2987,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         markInvoicePaid,
         addTeamMember,
         deleteTeamMember,
+        deactivateTeamMember,
         deleteLead,
         removeLeadsLocally,
         editLead,

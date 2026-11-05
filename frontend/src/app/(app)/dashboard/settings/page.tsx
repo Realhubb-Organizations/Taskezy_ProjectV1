@@ -434,6 +434,8 @@ export default function SettingsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [deletingUser, setDeletingUser] = useState<{ id: string; name: string } | null>(null);
+  // Set to Inactive in the editor: the other edits are saved, then this popup asks who gets their leads.
+  const [deactivatingUser, setDeactivatingUser] = useState<{ id: string; name: string } | null>(null);
   const [successMsg, setSuccessMsg] = useState("");
 
   const [firstName, setFirstName] = useState("");
@@ -746,7 +748,13 @@ export default function SettingsPage() {
     if (Object.keys(errors).length > 0) return;
     setEditSaving(true);
     try {
-      await updateUserFields(selectedUser.id, firstName.trim(), lastName.trim(), passwordHash, designation.trim(), roleType, status, managerId || null, email.trim());
+      const currentStatus = selectedUser.status === "INACTIVE" ? "INACTIVE" : "ACTIVE";
+      const goingInactive = status === "INACTIVE" && currentStatus !== "INACTIVE";
+      await updateUserFields(selectedUser.id, firstName.trim(), lastName.trim(), passwordHash, designation.trim(), roleType, goingInactive ? currentStatus : status, managerId || null, email.trim());
+      if (goingInactive) {
+        setDeactivatingUser({ id: selectedUser.id, name: `${firstName.trim()} ${lastName.trim()}`.trim() });
+        return;
+      }
       setSuccessMsg(`Successfully updated ${firstName.trim()} ${lastName.trim()}${passwordHash ? " and set a new password" : ""}.`);
       setSelectedUser(null);
       setTimeout(() => setSuccessMsg(""), 5000);
@@ -2478,6 +2486,20 @@ export default function SettingsPage() {
                   <AlertTriangle className="h-3.5 w-3.5" />
                   Delete this user
                 </button>
+              )}
+              {deactivatingUser && (
+                <DeleteUserModal
+                  user={deactivatingUser}
+                  mode="deactivate"
+                  onClose={() => setDeactivatingUser(null)}
+                  onDeleted={(message) => {
+                    setDeactivatingUser(null);
+                    setSelectedUser(null);
+                    setSuccessMsg(message);
+                    setTimeout(() => setSuccessMsg(""), 5000);
+                    setTimeout(() => setUsersRefreshKey(k => k + 1), 400);
+                  }}
+                />
               )}
               {deletingUser && (
                 <DeleteUserModal

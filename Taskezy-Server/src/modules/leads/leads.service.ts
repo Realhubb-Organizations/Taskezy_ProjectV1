@@ -1,5 +1,5 @@
 import type { PoolClient } from "pg";
-import { withTransaction } from "../../db/pool";
+import { query, withTransaction } from "../../db/pool";
 import { AccessTokenPayload } from "../../utils/tokens";
 import { ApiError } from "../../utils/ApiError";
 import * as repo from "./leads.repository";
@@ -463,6 +463,7 @@ export async function getLead(caller: AccessTokenPayload, id: string) {
 export async function createLead(caller: AccessTokenPayload, input: CreateLeadInput) {
   // A manager adds leads for themselves or their own direct reports only.
   if (caller.role !== "ADMIN") await assertUploadAssigneeAllowed(caller, input.assignedAgentId);
+  await assertActiveAssignees([input.assignedAgentId]);
   // Mirrors addLead()'s duplicate-phone rule in AppContext.tsx — the leads.phone
   // UNIQUE constraint would also catch this, but checking first gives a clean
   // 409 with a useful message instead of a raw constraint-violation error.
@@ -624,6 +625,7 @@ export async function bulkImportLeads(input: BulkImportLeadsInput): Promise<Bulk
   const pickPropertyAgent =
     input.assignmentMode === "PROPERTY" ? await createPropertyAgentPicker(input.propertyId!) : undefined;
   const agentIds = input.assignmentMode === "AGENT" ? input.agentIds ?? [] : [];
+  await assertActiveAssignees(agentIds);
 
   const skipped: BulkImportSkippedRow[] = [];
   let duplicates = 0;
@@ -1037,6 +1039,16 @@ export async function editLead(caller: AccessTokenPayload, leadId: string, input
  * just in the UI, since the route is open to every authenticated role.
  */
 /** Uploading (single or bulk): a manager may assign new leads to themselves or a direct report only. */
+/** New leads only ever go to active users — never an inactive (or deleted) one. */
+async function assertActiveAssignees(agentIds: string[]): Promise<void> {
+  const ids = Array.from(new Set(agentIds));
+  if (ids.length === 0) return;
+  const { rows } = await query<{ count: string }>(`SELECT count(*) FROM users WHERE id = ANY($1::uuid[]) AND status = 'ACTIVE'`, [ids]);
+  if (Number(rows[0]?.count ?? 0) !== ids.length) {
+    throw ApiError.badRequest("Leads can only be assigned to active users.");
+  }
+}
+
 async function assertUploadAssigneeAllowed(caller: AccessTokenPayload, agentId: string): Promise<void> {
   if (caller.role === "ADMIN" || agentId === caller.sub) return;
   const target = await usersRepo.findById(agentId);

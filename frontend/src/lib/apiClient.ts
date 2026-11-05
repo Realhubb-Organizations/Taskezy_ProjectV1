@@ -993,6 +993,17 @@ export function apiDeleteUser(
   });
 }
 
+/** Make a user inactive — their leads go to `handover` first (same rules as delete). */
+export function apiDeactivateUser(
+  userId: string,
+  handover?: { reassignTo: string[]; note: string }
+): Promise<{ deactivated: boolean; reassignedLeads?: number }> {
+  return request<{ deactivated: boolean; reassignedLeads?: number }>(`/api/v1/users/${userId}/deactivate`, {
+    method: "POST",
+    body: JSON.stringify(handover ?? {})
+  });
+}
+
 // --- Properties ---
 export interface ApiPropertyRow {
   id: string;
