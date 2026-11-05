@@ -306,6 +306,8 @@ export interface ApiLeadRow {
   missed_task_count?: number;
   /** The lead's task time (Pending Tasks' date = Next Call Date) — see Taskezy-Server tasks/taskDue.ts. Null = no task. */
   task_due_at?: string | null;
+  /** The task is a New Lead's first call — overdue only after NEW_LEAD_TASK_GRACE_MS. */
+  task_is_new_lead?: boolean;
   logs: { message: string; timestamp: string; user: string }[];
 }
 
@@ -1352,6 +1354,8 @@ export function apiGetPendingTasks(): Promise<ApiPendingTaskRow[]> {
 // param multi-select over MISSED/UPCOMING/COMPLETED.
 export interface FollowupListFilters {
   status?: ("MISSED" | "UPCOMING" | "COMPLETED")[];
+  /** Every call ever missed, even if later handled or closed. */
+  everMissed?: boolean;
   // "Just the follow-ups for these leads" — e.g. a drill-down table's
   // next-call-date column, without paging through every follow-up.
   leadId?: string[];
@@ -1378,6 +1382,7 @@ export async function apiListFollowupsPage(
 ): Promise<FollowupsPageResult> {
   const params = new URLSearchParams();
   filters.status?.forEach(s => params.append("status", s));
+  if (filters.everMissed) params.set("everMissed", "true");
   filters.leadId?.forEach(id => params.append("leadId", id));
   filters.assignedToId?.forEach(id => params.append("assignedToId", id));
   if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);

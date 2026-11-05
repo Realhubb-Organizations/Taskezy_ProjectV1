@@ -962,11 +962,17 @@ export async function updateCallStatus(
     callStatus === "Connected" && nextSubStatus === "Qualified" && existing.source === "Bulk Upload"
       ? { source: "Data", statusCode: "NEW_LEAD" }
       : undefined;
+  // Only Connected + Qualified belongs in the main Leads pipeline. A lead
+  // promoted earlier (source "Data", still carrying its Data Calling
+  // sub_source) that's now marked anything else goes back to Data Calling.
+  const demote =
+    !!existing.sub_source && existing.source === "Data" &&
+    !(callStatus === "Connected" && nextSubStatus === "Qualified");
   const statusChanged = existing.call_status !== callStatus;
   const subStatusChanged = (existing.call_sub_status ?? null) !== nextSubStatus;
 
   await withTransaction(async (client) => {
-    await repo.updateCallStatus(client, leadId, callStatus, nextSubStatus, promotion);
+    await repo.updateCallStatus(client, leadId, callStatus, nextSubStatus, promotion, demote);
     if (statusChanged || !subStatusChanged) {
       await repo.insertLeadLog(client, leadId, caller.sub, caller.name, `Call status changed to "${callStatus}"`);
     }
@@ -988,6 +994,15 @@ export async function updateCallStatus(
         caller.sub,
         caller.name,
         `Lead qualified and transferred to main leads (source changed from "Bulk Upload" to "${promotion.source}").`
+      );
+    }
+    if (demote) {
+      await repo.insertLeadLog(
+        client,
+        leadId,
+        caller.sub,
+        caller.name,
+        `Lead no longer qualified and moved back to Data Calling (source changed from "Data" to "Bulk Upload").`
       );
     }
   });
@@ -1155,6 +1170,10 @@ export async function assertBulkPropertyChangeAllowed(caller: AccessTokenPayload
 
 // `note` is required from the API (reassignLeadSchema); automatic internal
 // reassignments (e.g. reassignUnassignedSheetLeads) pass none and only log the event.
+/** Activity line for the previous agent's open follow-ups closed on reassignment (repo.reassign). */
+const closedFollowupsLog = (n: number) =>
+  `${n} open follow-up${n === 1 ? "" : "s"} from the previous agent closed on reassignment.`;
+
 export async function reassignLead(caller: AccessTokenPayload, leadId: string, newAgentId: string, note?: string) {
   const previousAgentId = await repo.getAssignedAgentId(leadId);
   if (!previousAgentId) throw ApiError.notFound("Lead not found");
@@ -1180,9 +1199,10 @@ export async function reassignLead(caller: AccessTokenPayload, leadId: string, n
 
   try {
     await withTransaction(async (client) => {
-      await repo.reassign(client, leadId, previousAgentId, newAgentId);
+      const closedFollowups = await repo.reassign(client, leadId, previousAgentId, newAgentId);
       if (note) await repo.setNote(client, leadId, note, caller.sub);
       await repo.insertLeadLog(client, leadId, caller.sub, caller.name, note ? `Reassigned to ${newAgentName}. Note: ${note}` : `Reassigned to ${newAgentName}`);
+      if (closedFollowups > 0) await repo.insertLeadLog(client, leadId, caller.sub, caller.name, closedFollowupsLog(closedFollowups));
     });
   } catch (err) {
     // newAgentId references users(id) — a well-formed but nonexistent UUID
@@ -1281,11 +1301,12 @@ export async function handOverLeadsInTransaction(
   const received = new Map<string, number>();
   for (let i = 0; i < leadIds.length; i++) {
     const target = targets[i % targets.length];
-    await repo.reassign(client, leadIds[i], fromUser.id, target.id);
+    const closedFollowups = await repo.reassign(client, leadIds[i], fromUser.id, target.id);
     // The lead's visible note names only its own new owner — never the other
     // agents who got the rest of the split (see leads.handover.ts).
     await repo.setNote(client, leadIds[i], `Reassigned from ${fromUser.name} to ${target.name}.`, caller.sub);
     await repo.insertLeadLog(client, leadIds[i], caller.sub, caller.name, `Reassigned from ${fromUser.name} to ${target.name} (${fromUser.name} was removed).`);
+    if (closedFollowups > 0) await repo.insertLeadLog(client, leadIds[i], caller.sub, caller.name, closedFollowupsLog(closedFollowups));
     // The admin's own note (may mention everyone) — admins & managers only.
     await repo.insertLeadLog(client, leadIds[i], caller.sub, caller.name, `${HANDOVER_NOTE_PREFIX}${note}`);
     received.set(target.id, (received.get(target.id) ?? 0) + 1);

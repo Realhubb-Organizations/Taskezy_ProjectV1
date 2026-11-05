@@ -14,7 +14,7 @@ import { AccessTokenPayload } from "../../utils/tokens";
 import { assertNoScheduleConflict } from "./scheduleConflict";
 import { broadcastLeadChanged } from "../leads/leads.realtime";
 import { BUSINESS_TIMEZONE } from "../../utils/businessDate";
-import { IS_SITE_VISIT_FOLLOWUP_SQL } from "../reports/siteVisitSql";
+import { FOLLOWUP_EVER_MISSED_SQL, IS_SITE_VISIT_FOLLOWUP_SQL } from "../reports/siteVisitSql";
 import { assertNoPendingFeedback } from "../call-attempts/feedbackLock";
 
 export const followupsRouter = Router();
@@ -94,7 +94,10 @@ const listFollowupsQuerySchema = z.object({
   // on this column — kept identical on purpose, so a row-level fetch here
   // can never disagree with that count for the same date range.
   dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateFrom must be YYYY-MM-DD").optional(),
-  dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateTo must be YYYY-MM-DD").optional()
+  dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateTo must be YYYY-MM-DD").optional(),
+  // Every call ever missed, even if later handled or closed — the same set
+  // getMissedFollowupCount counts (Manager Reports' Missed Follow-ups drill-down).
+  everMissed: z.enum(["true", "false"]).optional().transform(v => v === "true")
 });
 
 // Mirrors leads.service.ts's scopeForCaller rule: a Member only ever sees
@@ -107,9 +110,9 @@ followupsRouter.get(
   "/",
   validate({ query: listFollowupsQuerySchema }),
   asyncHandler(async (req, res) => {
-    const { page, pageSize, status, leadId, assignedToId, dateFrom, dateTo } = req.query as unknown as {
+    const { page, pageSize, status, leadId, assignedToId, dateFrom, dateTo, everMissed } = req.query as unknown as {
       page: number; pageSize: number; status?: ("MISSED" | "UPCOMING" | "COMPLETED")[]; leadId?: string[];
-      assignedToId?: string[]; dateFrom?: string; dateTo?: string;
+      assignedToId?: string[]; dateFrom?: string; dateTo?: string; everMissed?: boolean;
     };
     const scopedAssigneeIds = await scopedAssigneeIdsForCaller(req.user!);
 
@@ -137,6 +140,7 @@ followupsRouter.get(
       params.push(dateTo, BUSINESS_TIMEZONE);
       conditions.push(`fc.scheduled_at < (($${params.length - 1}::date + 1)::timestamp AT TIME ZONE $${params.length})`);
     }
+    if (everMissed) conditions.push(FOLLOWUP_EVER_MISSED_SQL);
     if (status && status.length > 0) {
       if (status.length === 1) {
         params.push(status[0]);
