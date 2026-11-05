@@ -240,7 +240,10 @@ export async function getAssignmentPool(propertyId: string): Promise<{ teamAssig
 
   if (property.team_assignment_mode === "CUSTOM_MEMBERS") {
     const { rows: members } = await query<{ user_id: string; percentage: number | null }>(
-      `SELECT user_id, percentage FROM property_team_members WHERE property_id = $1`,
+      // Inactive members stay on the list but get no new leads (percentages re-weight over the rest).
+      `SELECT ptm.user_id, ptm.percentage FROM property_team_members ptm
+       JOIN users u ON u.id = ptm.user_id
+       WHERE ptm.property_id = $1 AND u.status = 'ACTIVE'`,
       [propertyId]
     );
     return {

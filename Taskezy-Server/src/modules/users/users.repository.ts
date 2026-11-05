@@ -281,6 +281,12 @@ export async function findDirectReportNames(managerId: string): Promise<string[]
 }
 
 /** Deletes the user inside an open transaction (see the DELETE /users/:id handover). */
+/** Before a user is deleted: their call records go with them (the leads' own history, lead_logs, stays). */
+export async function deleteCallRecordsWithClient(client: PoolClient, id: string): Promise<void> {
+  await client.query(`DELETE FROM call_attempts WHERE caller_user_id = $1`, [id]);
+  await client.query(`DELETE FROM device_call_log WHERE user_id = $1`, [id]);
+}
+
 export async function removeWithClient(client: PoolClient, id: string): Promise<boolean> {
   const { rowCount } = await client.query(`DELETE FROM users WHERE id = $1`, [id]);
   return (rowCount ?? 0) > 0;

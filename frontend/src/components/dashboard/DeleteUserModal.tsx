@@ -15,15 +15,20 @@ import { LineSkeleton } from "@/components/ui/Skeletons";
 // z-[150]: above the user editor (z-40), below the dropdown panel (z-[200]) so the member picker opens on top.
 export default function DeleteUserModal({
   user,
+  mode = "delete",
   onClose,
   onDeleted
 }: {
   user: { id: string; name: string };
+  /** "deactivate": the same lead handover, then the user is made inactive instead of deleted. */
+  mode?: "delete" | "deactivate";
   onClose: () => void;
   /** Called after the server deleted the user, with a message to show. */
   onDeleted: (message: string) => void;
 }) {
-  const { users, deleteTeamMember } = useApp();
+  const { users, deleteTeamMember, deactivateTeamMember } = useApp();
+  const deactivating = mode === "deactivate";
+  const doneWord = deactivating ? "made inactive" : "deleted";
   const [leadCount, setLeadCount] = useState<number | null>(null);
   const [reportNames, setReportNames] = useState<string[]>([]);
   const [loadError, setLoadError] = useState(false);
@@ -88,15 +93,16 @@ export default function DeleteUserModal({
     setSubmitting(true);
     setError("");
     try {
-      const { reassignedLeads } = await deleteTeamMember(user.id, needsHandover ? { reassignTo: memberIds, note: trimmedNote } : undefined);
+      const handover = needsHandover ? { reassignTo: memberIds, note: trimmedNote } : undefined;
+      const { reassignedLeads } = await (deactivating ? deactivateTeamMember : deleteTeamMember)(user.id, handover);
       const names = memberIds.map(id => members.find(m => m.id === id)?.name ?? "Member").join(", ");
       onDeleted(
         reassignedLeads > 0
           ? `Removed ${user.name}. ${reassignedLeads} lead${reassignedLeads === 1 ? "" : "s"} reassigned to ${names}.`
-          : `Removed ${user.name} from the roster.`
+          : deactivating ? `${user.name} is now inactive.` : `Removed ${user.name} from the roster.`
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not delete the user. Please try again.");
+      setError(err instanceof Error ? err.message : `Could not ${deactivating ? "make the user inactive" : "delete the user"}. Please try again.`);
       setSubmitting(false);
     }
   };
@@ -111,7 +117,7 @@ export default function DeleteUserModal({
         onSubmit={(e) => { e.preventDefault(); submit(); }}
       >
         <div className="px-6 pt-6 pb-4 border-b border-slate-100 shrink-0">
-          <h3 className="ui-title">Delete user?</h3>
+          <h3 className="ui-title">{deactivating ? "Make user inactive?" : "Delete user?"}</h3>
         </div>
 
         <div className="px-6 py-5 space-y-4 overflow-y-auto">
@@ -122,14 +128,18 @@ export default function DeleteUserModal({
             </div>
           ) : !needsHandover ? (
             <p className="text-sm text-slate-700">
-              Are you sure you want to delete <span className="font-bold">{user.name}</span>? This can&apos;t be undone.
+              {deactivating ? (
+                <>Are you sure you want to make <span className="font-bold">{user.name}</span> inactive? They won&apos;t be able to log in.</>
+              ) : (
+                <>Are you sure you want to delete <span className="font-bold">{user.name}</span>? This can&apos;t be undone.</>
+              )}
             </p>
           ) : (
             <>
               {leadsUnknown ? (
                 <p className="text-sm text-slate-700">
                   Choose who should get <span className="font-bold">{user.name}</span>&apos;s leads (if they have any).
-                  They&apos;ll be split evenly, and {user.name} is deleted only after the leads are reassigned.{" "}
+                  They&apos;ll be split evenly, and {user.name} is {doneWord} only after the leads are reassigned.{" "}
                   <button type="button" onClick={() => setLoadNonce(n => n + 1)} className="font-bold text-[#0B1E6E] hover:underline">
                     Check lead count again
                   </button>
@@ -138,7 +148,7 @@ export default function DeleteUserModal({
                 <p className="text-sm text-slate-700">
                   <span className="font-bold">{user.name}</span> has{" "}
                   <span className="font-bold">{leadCount} lead{leadCount === 1 ? "" : "s"}</span>. Choose who should get them.
-                  They&apos;ll be split evenly, and {user.name} is deleted only after the leads are reassigned.
+                  They&apos;ll be split evenly, and {user.name} is {doneWord} only after the leads are reassigned.
                 </p>
               )}
 
@@ -182,7 +192,7 @@ export default function DeleteUserModal({
             </>
           )}
 
-          {leadCount !== null && reportNames.length > 0 && (
+          {!deactivating && leadCount !== null && reportNames.length > 0 && (
             <div className="p-2.5 bg-amber-50 border border-amber-100 text-[11px] text-amber-800 rounded-xl font-semibold flex items-start gap-2">
               <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-px" />
               <span>
@@ -214,7 +224,9 @@ export default function DeleteUserModal({
             disabled={!canSubmit}
             className="ui-btn ui-btn-danger disabled:bg-slate-300 disabled:cursor-not-allowed"
           >
-            {submitting ? "Deleting..." : needsHandover ? "Reassign & delete" : "Delete"}
+            {deactivating
+              ? (submitting ? "Saving..." : needsHandover ? "Reassign & make inactive" : "Make inactive")
+              : (submitting ? "Deleting..." : needsHandover ? "Reassign & delete" : "Delete")}
           </button>
         </div>
       </form>

@@ -19,6 +19,53 @@ import { leadIdsLink } from "../notifications/notificationLinks";
 
 export const usersRouter = Router();
 
+type HandoverUser = { id: string; first_name: string; last_name: string | null };
+
+/**
+ * Hands every lead `existing` holds to `reassignTo` (round-robin, with the
+ * admin's note), inside the caller's transaction — shared by delete and
+ * make-inactive. Throws if they hold leads and no one was chosen.
+ */
+async function handOverAllLeads(
+  client: Parameters<Parameters<typeof withTransaction>[0]>[0],
+  caller: AccessTokenPayload,
+  existing: HandoverUser,
+  action: string,
+  reassignTo: string[] | undefined,
+  note: string | undefined
+): Promise<{ received: Map<string, number>; movedLeadIds: string[] }> {
+  const fromUser = { id: existing.id, name: `${existing.first_name}${existing.last_name ? " " + existing.last_name : ""}` };
+  const leadIds = await leadsRepo.lockLeadIdsForAgent(client, existing.id);
+  if (leadIds.length === 0) return { received: new Map(), movedLeadIds: [] };
+  if (!reassignTo?.length || !note) {
+    throw ApiError.conflict(`${fromUser.name} has ${leadIds.length} lead${leadIds.length === 1 ? "" : "s"}. Choose who should get them before ${action}.`);
+  }
+  const ids = Array.from(new Set(reassignTo));
+  if (ids.includes(existing.id)) throw ApiError.badRequest(`Leads can't be reassigned to the user being ${action === "deleting" ? "deleted" : "made inactive"}.`);
+  const found = await repo.findActiveSalesUsersByIds(client, ids);
+  if (found.length !== ids.length) throw ApiError.badRequest("Leads can only go to active sales agents or managers.");
+  // Keep the admin's order so the round-robin is predictable.
+  const targets = ids.map(id => found.find(u => u.id === id)!);
+  const received = await leadsService.handOverLeadsInTransaction(client, caller, fromUser, leadIds, targets, note);
+  return { received, movedLeadIds: leadIds };
+}
+
+/** After a handover commits: tell each receiver, and refresh the moved leads everywhere. */
+async function notifyHandover(caller: AccessTokenPayload, fromName: string, received: Map<string, number>, movedLeadIds: string[]): Promise<void> {
+  for (const [userId, count] of received) {
+    await createNotification({
+      system: "CRM",
+      category: "REASSIGNMENT",
+      title: "Leads Reassigned To You",
+      // The moved leads now with this user — just theirs, out of the whole handover.
+      link: leadIdsLink("Leads Reassigned To You", movedLeadIds, "/dashboard/crm", { assignedAgentId: [userId] }),
+      message: `${count} lead${count === 1 ? "" : "s"} from ${fromName} ${count === 1 ? "was" : "were"} reassigned to you by ${caller.name}.`,
+      recipientUserId: userId
+    });
+  }
+  movedLeadIds.forEach(broadcastLeadChanged);
+}
+
 usersRouter.use(requireAuth);
 
 // Same three-way split as leads.service.ts's scopeForCaller — duplicated
@@ -156,6 +203,15 @@ usersRouter.patch(
       }
     }
 
+    // Making someone inactive with leads goes through POST /:id/deactivate,
+    // which asks who gets those leads first.
+    if (req.body.status === "INACTIVE" && existing.status !== "INACTIVE") {
+      const leadCount = await leadsRepo.countLeadsForAgent(existing.id);
+      if (leadCount > 0) {
+        throw ApiError.conflict(`${existing.first_name} has ${leadCount} lead${leadCount === 1 ? "" : "s"}. Choose who should get them before making them inactive.`);
+      }
+    }
+
     if (req.body.managerId === req.params.id) {
       throw ApiError.badRequest("A user cannot report to themselves.");
     }
@@ -275,20 +331,7 @@ usersRouter.delete(
     let clearedReports = 0;
     try {
       await withTransaction(async (client) => {
-        const leadIds = await leadsRepo.lockLeadIdsForAgent(client, existing.id);
-        if (leadIds.length > 0) {
-          if (!reassignTo?.length || !note) {
-            throw ApiError.conflict(`${fromUser.name} has ${leadIds.length} lead${leadIds.length === 1 ? "" : "s"}. Choose who should get them before deleting.`);
-          }
-          const ids = Array.from(new Set(reassignTo));
-          if (ids.includes(existing.id)) throw ApiError.badRequest("Leads can't be reassigned to the user being deleted.");
-          const found = await repo.findActiveSalesUsersByIds(client, ids);
-          if (found.length !== ids.length) throw ApiError.badRequest("Leads can only go to active sales agents or managers.");
-          // Keep the admin's order so the round-robin is predictable.
-          const targets = ids.map(id => found.find(u => u.id === id)!);
-          received = await leadsService.handOverLeadsInTransaction(client, req.user!, fromUser, leadIds, targets, note);
-          movedLeadIds = leadIds;
-        }
+        ({ received, movedLeadIds } = await handOverAllLeads(client, req.user!, existing, "deleting", reassignTo, note));
         const leftover = await leadsRepo.moveFollowupsToLeadOwners(client, existing.id);
         if (leftover > 0) {
           throw ApiError.conflict(`${fromUser.name} still has ${leftover} follow-up${leftover === 1 ? "" : "s"} not linked to a lead and cannot be deleted.`);
@@ -298,30 +341,51 @@ usersRouter.delete(
         clearedReports = await repo.clearReportsTo(client, existing.id);
         // Leads keep this user's name as "Reassigned From" after they're gone.
         await leadsRepo.detachPreviousAgent(client, existing.id, fromUser.name);
+        await repo.deleteCallRecordsWithClient(client, existing.id);
         await repo.removeWithClient(client, existing.id);
       });
     } catch (err) {
-      // invoices / reimbursement_claims reference users with ON DELETE
-      // RESTRICT for audit/financial history — a real, expected failure mode.
+      // reimbursement_claims and Meta connections reference users with ON
+      // DELETE RESTRICT for audit/financial history — a real, expected failure mode.
       if (isForeignKeyViolation(err)) {
-        throw ApiError.conflict("This user has invoices or claims linked to them and cannot be deleted. Reassign or remove those first.");
+        throw ApiError.conflict("This user has expense claims or a connected Meta account linked to them and cannot be deleted. Remove those first.");
       }
       throw err;
     }
 
-    for (const [userId, count] of received) {
-      await createNotification({
-        system: "CRM",
-        category: "REASSIGNMENT",
-        title: "Leads Reassigned To You",
-        // The moved leads now with this user — just theirs, out of the whole handover.
-        link: leadIdsLink("Leads Reassigned To You", movedLeadIds, "/dashboard/crm", { assignedAgentId: [userId] }),
-        message: `${count} lead${count === 1 ? "" : "s"} from ${fromUser.name} ${count === 1 ? "was" : "were"} reassigned to you by ${req.user!.name}.`,
-        recipientUserId: userId
-      });
-    }
-    movedLeadIds.forEach(broadcastLeadChanged);
+    await notifyHandover(req.user!, fromUser.name, received, movedLeadIds);
     sendOk(res, { deleted: true, reassignedLeads: movedLeadIds.length, clearedReports });
+  })
+);
+
+// Make a user inactive: their leads are handed over first (same popup and
+// rules as delete), then the status changes — together or not at all.
+usersRouter.post(
+  "/:id/deactivate",
+  requireRole("ADMIN"),
+  validate({ params: userIdParamSchema, body: deleteUserSchema }),
+  asyncHandler(async (req, res) => {
+    const existing = await repo.findById(req.params.id);
+    if (!existing) throw ApiError.notFound("User not found");
+    if (existing.status === "INACTIVE") throw ApiError.badRequest("This user is already inactive.");
+    if (req.params.id === req.user!.sub) throw ApiError.badRequest("You cannot make your own account inactive.");
+    if (existing.role === "ADMIN" && (await repo.countAdmins(existing.id)) === 0) {
+      throw ApiError.badRequest("Cannot deactivate the last active administrator account.");
+    }
+
+    const { reassignTo, note } = req.body as { reassignTo?: string[]; note?: string };
+    const fromName = `${existing.first_name}${existing.last_name ? " " + existing.last_name : ""}`;
+    let received = new Map<string, number>();
+    let movedLeadIds: string[] = [];
+    await withTransaction(async (client) => {
+      ({ received, movedLeadIds } = await handOverAllLeads(client, req.user!, existing, "making them inactive", reassignTo, note));
+      // Their calls on other people's leads go to those leads' owners.
+      await leadsRepo.moveFollowupsToLeadOwners(client, existing.id);
+      await client.query(`UPDATE users SET status = 'INACTIVE' WHERE id = $1`, [existing.id]);
+    });
+
+    await notifyHandover(req.user!, fromName, received, movedLeadIds);
+    sendOk(res, { deactivated: true, reassignedLeads: movedLeadIds.length });
   })
 );
 
