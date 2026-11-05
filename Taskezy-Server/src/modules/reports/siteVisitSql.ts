@@ -26,5 +26,13 @@ export const IS_SITE_VISIT_FOLLOWUP_SQL = `(fc.call_type = 'SITE_VISIT' OR (
  */
 export const FOLLOWUP_EVER_MISSED_SQL = `(fc.status = 'MISSED' OR fc.violation_notified_at IS NOT NULL)`;
 
+/**
+ * A missed call's frozen record (alias `r`, migration 053) — r.agent_id is
+ * the agent the call belonged to when it was missed. Agent-wise missed-task
+ * counts use it instead of fc.assigned_to_id, which can change afterwards
+ * (lead reassigned, agent removed), so a miss never moves to another agent.
+ */
+export const MISSED_BY_JOIN_SQL = `JOIN missed_lead_records r ON r.followup_call_id = fc.id AND r.miss_type = 'CALL'`;
+
 /** Log line updateLeadStatus writes when a lead moves to Site Visit Done. */
 export const SITE_VISIT_DONE_LOG = 'Status changed to "SITE_VISIT_DONE"';

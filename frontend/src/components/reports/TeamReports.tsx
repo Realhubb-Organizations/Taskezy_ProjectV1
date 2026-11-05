@@ -799,7 +799,9 @@ export default function TeamReports({ dateRange, onDateRangeChange, initialAgent
                     <td className="py-3.5 pr-4 font-semibold text-slate-800 [overflow-wrap:anywhere]">{r.name}</td>
                     {salesColumns.map(c => (
                       <td key={c.label} className="py-3.5 pr-4">
-                        <ReportNumberLink tab="agent" value={c.value(r)} detail={c.detail(r)} />
+                        {/* A removed agent ("removed:<name>", server) keeps their missed tasks
+                            under their name, but has no account to open a list for. */}
+                        {r.agentId.startsWith("removed:") ? c.value(r) : <ReportNumberLink tab="agent" value={c.value(r)} detail={c.detail(r)} />}
                       </td>
                     ))}
                   </tr>

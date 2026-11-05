@@ -35,11 +35,12 @@ const NEW_LEAD_CODE = "NEW_LEAD";
 
 // A lead's scheduled call is a task only while its current status can have
 // a call scheduled (frontend leadScheduler.ts SCHEDULER_REQUIRED_STATUSES +
-// SCHEDULER_OPTIONAL_STATUSES, plus a New Lead). Not Interested, Dead Lead,
-// Broker, Cancelled, Booked, Site Visit Done… are never a task, even if an
-// old call is still open on them.
+// SCHEDULER_OPTIONAL_STATUSES + CALL_SCHEDULE_STATUSES, plus a New Lead).
+// Not Interested, Dead Lead, Broker, Cancelled, Booked… are never a task,
+// even if an old call is still open on them.
 const SCHEDULED_TASK_STATUS_CODES = [
-  "NEW_LEAD", "RNR", "CALL_BACK", "FOLLOWUP", "EOI", "SITE_VISIT_SCHEDULED", "LOW_BUDGET", "OTHER_REQUIREMENT"
+  "NEW_LEAD", "RNR", "CALL_BACK", "FOLLOWUP", "EOI", "SITE_VISIT_SCHEDULED", "LOW_BUDGET", "OTHER_REQUIREMENT",
+  "SITE_VISIT_DONE", "DIFFERENT_LOCATION"
 ];
 
 interface OpenFollowupRow {

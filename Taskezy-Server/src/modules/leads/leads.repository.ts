@@ -1,9 +1,9 @@
 import { PoolClient } from "pg";
-import { TASK_DUE_AT_SQL, TASK_IS_NEW_LEAD_SQL, TASK_OVERDUE_SQL } from "../tasks/taskDue";
+import { TASK_DUE_AT_SQL, TASK_OVERDUE_SQL } from "../tasks/taskDue";
 import { pool, query, withTransaction } from "../../db/pool";
 import { BUSINESS_TIMEZONE } from "../../utils/businessDate";
 import { normalizeForeignPhone } from "../../utils/validation";
-import { FOLLOWUP_EVER_MISSED_SQL } from "../reports/siteVisitSql";
+import { FOLLOWUP_EVER_MISSED_SQL, MISSED_BY_JOIN_SQL } from "../reports/siteVisitSql";
 
 /** leads.phone is CHECK'd to a bare 10-digit Indian mobile or a "+<country code>" foreign number — strip formatting/country code before insert. Shared by every external lead-ingest source (Meta webhook, sheet import). */
 /**
@@ -97,8 +97,6 @@ export interface LeadListRow {
   missed_task_count: number;
   /** Task time — see tasks/taskDue.ts. NULL = no task. */
   task_due_at: string | null;
-  /** The task is a New Lead's first call — overdue only after NEW_LEAD_TASK_GRACE_MINUTES. */
-  task_is_new_lead: boolean;
   logs: { message: string; timestamp: string; user: string }[];
 }
 
@@ -309,7 +307,6 @@ const LIST_SELECT = `
     l.missed_task_count,
     -- The lead's task time: Pending Tasks' date and the Next Call Date column (tasks/taskDue.ts)
     ${TASK_DUE_AT_SQL} AS task_due_at,
-    ${TASK_IS_NEW_LEAD_SQL} AS task_is_new_lead,
     COALESCE(
       (SELECT json_agg(json_build_object('message', ll.message, 'timestamp', ll.created_at, 'user', ll.user_name_snapshot) ORDER BY ll.created_at)
        FROM lead_logs ll
@@ -528,16 +525,17 @@ export async function getMissedFollowupCount(
   dateTo?: string
 ): Promise<number> {
   // Every call the agent ever missed — still counted after it's later
-  // handled or closed on reassignment (same rule as the Salesperson Missed Task Report).
+  // handled or closed on reassignment, and always against the agent who
+  // missed it (r.agent_id), never whoever has the lead now.
   const conditions: string[] = [FOLLOWUP_EVER_MISSED_SQL];
   const params: unknown[] = [];
   if (assignedToId) {
     params.push(assignedToId);
-    conditions.push(`fc.assigned_to_id = $${params.length}`);
+    conditions.push(`r.agent_id = $${params.length}`);
   }
   if (scopedToAgentIds) {
     params.push(scopedToAgentIds);
-    conditions.push(`fc.assigned_to_id = ANY($${params.length}::uuid[])`);
+    conditions.push(`r.agent_id = ANY($${params.length}::uuid[])`);
   }
   // Whole business (IST) days, same as the follow-ups list.
   if (dateFrom) {
@@ -549,7 +547,7 @@ export async function getMissedFollowupCount(
     conditions.push(`fc.scheduled_at < (($${params.length - 1}::date + 1)::timestamp AT TIME ZONE $${params.length})`);
   }
   const { rows } = await query<{ count: string }>(
-    `SELECT count(*) FROM followup_calls fc WHERE ${conditions.join(" AND ")}`,
+    `SELECT count(*) FROM followup_calls fc ${MISSED_BY_JOIN_SQL} WHERE ${conditions.join(" AND ")}`,
     params
   );
   return Number(rows[0]?.count ?? 0);
@@ -592,7 +590,7 @@ export async function getManagerReportStatsByAgent(
   let followupScopeClause = "";
   if (filter.scopedToAgentIds) {
     params.push(filter.scopedToAgentIds);
-    followupScopeClause = `AND fc.assigned_to_id = ANY($${params.length}::uuid[])`;
+    followupScopeClause = `AND r.agent_id = ANY($${params.length}::uuid[])`;
   }
   let followupDateClause = "";
   // Whole business (IST) days, same as the follow-ups list.
@@ -613,11 +611,13 @@ export async function getManagerReportStatsByAgent(
          AND ($${dateToParam}::date IS NULL OR spend_date <= $${dateToParam}::date)
        GROUP BY account_name
      ),
+     -- Against the agent who missed each call (r.agent_id), not the lead's current owner.
      followup_stats AS (
-       SELECT fc.assigned_to_id, count(*) AS missed_followups
+       SELECT r.agent_id AS assigned_to_id, count(*) AS missed_followups
        FROM followup_calls fc
+       ${MISSED_BY_JOIN_SQL}
        WHERE ${FOLLOWUP_EVER_MISSED_SQL} ${followupScopeClause} ${followupDateClause}
-       GROUP BY fc.assigned_to_id
+       GROUP BY r.agent_id
      )
      SELECT l.assigned_agent_id,
             count(*) AS leads_count,
