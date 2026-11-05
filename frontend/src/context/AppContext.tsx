@@ -277,8 +277,6 @@ export interface Lead {
   missedTaskCount?: number;
   /** Task time — the same date/time Pending Tasks uses (server tasks/taskDue.ts); shown as Next Call Date. */
   taskDueAt?: string;
-  /** The task is a New Lead's first call — overdue only after NEW_LEAD_TASK_GRACE_MS. */
-  taskIsNewLead?: boolean;
 }
 
 export interface AdSpendRecord {
@@ -807,8 +805,7 @@ export function mapApiLeadToFrontendLead(row: ApiLeadRow): Lead {
     createdAtStr: row.created_at,
     deadLeadCallDays: Number(row.dead_lead_call_days ?? 0),
     missedTaskCount: row.missed_task_count,
-    taskDueAt: row.task_due_at ?? undefined,
-    taskIsNewLead: row.task_is_new_lead === true
+    taskDueAt: row.task_due_at ?? undefined
   };
 }
 

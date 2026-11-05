@@ -10,9 +10,6 @@
 import type { Lead } from "@/context/AppContext";
 
 export const TASK_GRACE_MS = 10 * 60_000;
-// Next Call Date shows a New Lead's first call as OVERDUE only after this
-// same window (Taskezy-Server tasks/taskDue.ts NEW_LEAD_TASK_GRACE_MINUTES).
-export const NEW_LEAD_TASK_GRACE_MS = TASK_GRACE_MS;
 
 export type TaskBucket = "missed" | "pending" | "upcoming";
 

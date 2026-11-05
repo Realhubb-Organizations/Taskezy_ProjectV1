@@ -1,22 +1,26 @@
 import type { FollowupCall } from "@/context/AppContext";
-import { NEW_LEAD_TASK_GRACE_MS } from "@/lib/salesPendingTasks";
+import { TASK_GRACE_MS } from "@/lib/salesPendingTasks";
 
 export interface NextFollowup {
   at: Date;
+  /** Missed: past its time by more than the 10-minute window (red). */
   overdue: boolean;
+  /** Due now: its time has come but it's still inside the 10-minute window (yellow). */
+  due?: boolean;
 }
 
 /**
  * Next Call Date for a lead: its task time from the server (Taskezy-Server
- * tasks/taskDue.ts) — the same date and time Pending Tasks shows, overdue
- * once it's passed (a New Lead's first call only once it's Missed in
- * Pending Tasks, 10 minutes on). Null when the lead has no task.
+ * tasks/taskDue.ts) — the same date and time Pending Tasks shows: due now
+ * for its first 10 minutes (Pending there), then overdue (Missed there).
+ * Null when the lead has no task.
  */
-export function nextCallFor(lead: { taskDueAt?: string; taskIsNewLead?: boolean }, now = Date.now()): NextFollowup | null {
+export function nextCallFor(lead: { taskDueAt?: string }, now = Date.now()): NextFollowup | null {
   if (!lead.taskDueAt) return null;
   const at = new Date(lead.taskDueAt);
-  const graceMs = lead.taskIsNewLead ? NEW_LEAD_TASK_GRACE_MS : 0;
-  return isNaN(at.getTime()) ? null : { at, overdue: at.getTime() + graceMs < now };
+  if (isNaN(at.getTime())) return null;
+  const overdue = at.getTime() + TASK_GRACE_MS < now;
+  return { at, overdue, due: !overdue && at.getTime() <= now };
 }
 
 // Exact time of a follow-up. Prefers the raw ISO timestamp; falls back to the

@@ -306,8 +306,6 @@ export interface ApiLeadRow {
   missed_task_count?: number;
   /** The lead's task time (Pending Tasks' date = Next Call Date) — see Taskezy-Server tasks/taskDue.ts. Null = no task. */
   task_due_at?: string | null;
-  /** The task is a New Lead's first call — overdue only after NEW_LEAD_TASK_GRACE_MS. */
-  task_is_new_lead?: boolean;
   logs: { message: string; timestamp: string; user: string }[];
 }
 

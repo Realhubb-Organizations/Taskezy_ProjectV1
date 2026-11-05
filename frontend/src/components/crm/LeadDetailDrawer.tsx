@@ -312,8 +312,12 @@ export default function LeadDetailDrawer({
     {
       label: "Next Call Date",
       value: nextCall ? (
-        <span className={nextCall.overdue ? "text-red-600" : undefined} title={nextCall.overdue ? "This follow-up's time has passed and it isn't completed" : undefined}>
+        <span
+          className={nextCall.overdue ? "text-red-600" : nextCall.due ? "text-amber-600" : undefined}
+          title={nextCall.overdue ? "This follow-up's time has passed and it isn't completed" : nextCall.due ? "This call is due now — it becomes overdue if not done within 10 minutes" : undefined}
+        >
           {nextCall.overdue && <span className="text-[10px] font-bold uppercase tracking-wide mr-1">Overdue</span>}
+          {nextCall.due && <span className="text-[10px] font-bold uppercase tracking-wide mr-1">Due now</span>}
           {formatFollowupDate(nextCall.at)}, {formatFollowupTime(nextCall.at)}
         </span>
       ) : "—"

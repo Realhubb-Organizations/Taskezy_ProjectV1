@@ -1,5 +1,5 @@
 import { PoolClient } from "pg";
-import { TASK_DUE_AT_SQL, TASK_IS_NEW_LEAD_SQL, TASK_OVERDUE_SQL } from "../tasks/taskDue";
+import { TASK_DUE_AT_SQL, TASK_OVERDUE_SQL } from "../tasks/taskDue";
 import { pool, query, withTransaction } from "../../db/pool";
 import { BUSINESS_TIMEZONE } from "../../utils/businessDate";
 import { normalizeForeignPhone } from "../../utils/validation";
@@ -97,8 +97,6 @@ export interface LeadListRow {
   missed_task_count: number;
   /** Task time — see tasks/taskDue.ts. NULL = no task. */
   task_due_at: string | null;
-  /** The task is a New Lead's first call — overdue only after NEW_LEAD_TASK_GRACE_MINUTES. */
-  task_is_new_lead: boolean;
   logs: { message: string; timestamp: string; user: string }[];
 }
 
@@ -309,7 +307,6 @@ const LIST_SELECT = `
     l.missed_task_count,
     -- The lead's task time: Pending Tasks' date and the Next Call Date column (tasks/taskDue.ts)
     ${TASK_DUE_AT_SQL} AS task_due_at,
-    ${TASK_IS_NEW_LEAD_SQL} AS task_is_new_lead,
     COALESCE(
       (SELECT json_agg(json_build_object('message', ll.message, 'timestamp', ll.created_at, 'user', ll.user_name_snapshot) ORDER BY ll.created_at)
        FROM lead_logs ll
