@@ -1136,6 +1136,8 @@ export interface BulkSetLeadPropertyResult {
 // Bulk counterpart to setLeadProperty above — same per-lead-loop shape as
 // bulkReassignLeads (one lead's failure can't block the rest; each call
 // reuses the single-lead function's own validation/logging).
+const BULK_SET_PROPERTY_CHUNK_SIZE = 1000;
+
 export async function bulkSetLeadProperty(
   caller: AccessTokenPayload,
   leadIds: string[],
@@ -1143,27 +1145,31 @@ export async function bulkSetLeadProperty(
   note?: string
 ): Promise<BulkSetLeadPropertyResult> {
   const ids = Array.from(new Set(leadIds));
+
+  // Validated once for the whole job, not once per lead — these only depend
+  // on the caller and the target property, never on which lead is being
+  // touched (see leads.repository.ts's setLeadPropertyChunk for the batched
+  // per-lead work this used to redo, including fetching the same row 3x).
+  if (caller.role === "ADMIN" && !(await usersRepo.isSuperAdmin(caller.sub))) {
+    throw ApiError.forbidden("Only the Super Admin can change a lead's property.");
+  }
+  const next = propertyId ? await findPropertyById(propertyId) : undefined;
+  if (propertyId && !next) throw ApiError.badRequest("That property no longer exists.");
+  const scopedToAgentIds = await scopeForCaller(caller);
+
   let updated = 0;
   let skipped = 0;
   const failed: { id: string; reason: string }[] = [];
 
-  for (const id of ids) {
-    try {
-      const before = await repo.findById(id, await scopeForCaller(caller));
-      if (!before) {
-        failed.push({ id, reason: "Lead not found" });
-        continue;
-      }
-      if ((before.property_id ?? null) === propertyId) {
-        skipped++;
-        continue;
-      }
-      await setLeadProperty(caller, id, propertyId, note);
-      updated++;
-    } catch (err) {
-      failed.push({ id, reason: err instanceof ApiError ? err.message : "Unexpected error" });
-    }
+  for (let i = 0; i < ids.length; i += BULK_SET_PROPERTY_CHUNK_SIZE) {
+    const chunk = ids.slice(i, i + BULK_SET_PROPERTY_CHUNK_SIZE);
+    const result = await repo.setLeadPropertyChunk(chunk, propertyId, next?.name, scopedToAgentIds, note, { userId: caller.sub, name: caller.name });
+    updated += result.updated.length;
+    skipped += result.skipped.length;
+    result.notFound.forEach((id) => failed.push({ id, reason: "Lead not found" }));
   }
+
+  if (updated > 0) broadcastManyLeadsChanged();
 
   return { requested: ids.length, updated, skipped, failed };
 }
@@ -1263,6 +1269,8 @@ export interface BulkReassignLeadsResult {
 // "each lead is its own transaction" reasoning as bulkDeleteLeads: one
 // blocked lead must not roll back the others), just server-side and
 // sequential instead of client-side and concurrent.
+const BULK_REASSIGN_CHUNK_SIZE = 1000;
+
 export async function bulkReassignLeads(
   caller: AccessTokenPayload,
   leadIds: string[],
@@ -1270,31 +1278,51 @@ export async function bulkReassignLeads(
   note?: string
 ): Promise<BulkReassignLeadsResult> {
   const ids = Array.from(new Set(leadIds));
+
+  // Validated once for the whole job, not once per lead — assertReassignAllowed
+  // and the new-agent checks only depend on the caller and newAgentId, never
+  // on which lead is being moved. The old per-lead reassignLead() path redid
+  // all of this (plus a fresh scopeForCaller DB round trip) on every single
+  // lead — see leads.repository.ts's reassignLeadsChunk for the batched
+  // per-lead work that replaces it.
+  await assertReassignAllowed(caller, newAgentId);
+  const newAgent = await usersRepo.findById(newAgentId);
+  if (!newAgent) throw ApiError.badRequest("New agent not found.");
+  if (newAgent.role !== "AGENT" || newAgent.status !== "ACTIVE" || (newAgent.department && newAgent.department !== "SALES")) {
+    throw ApiError.badRequest("Leads can only be reassigned to active sales agents or managers.");
+  }
+  const newAgentName = `${newAgent.first_name}${newAgent.last_name ? " " + newAgent.last_name : ""}`;
+  const scopedToAgentIds = await scopeForCaller(caller);
+
   let moved = 0;
   let skipped = 0;
   const failed: { id: string; reason: string }[] = [];
 
-  for (const id of ids) {
-    const currentAgentId = await repo.getAssignedAgentId(id);
-    if (!currentAgentId) {
-      failed.push({ id, reason: "Lead not found" });
-      continue;
-    }
-    if (currentAgentId === newAgentId) {
-      skipped++;
-      continue;
-    }
-    try {
-      await reassignLead(caller, id, newAgentId, note);
-      // No-op unless this lead was still on the internal UNASSIGNED
-      // sentinel (see the LeadStatus segregation memory) — promotes it to
-      // NEW_LEAD now that it has a real owner, same as the Assign flow did
-      // client-side before.
-      await repo.markLeadNewIfUnassigned(id);
-      moved++;
-    } catch (err) {
-      failed.push({ id, reason: err instanceof ApiError ? err.message : "Unexpected error" });
-    }
+  for (let i = 0; i < ids.length; i += BULK_REASSIGN_CHUNK_SIZE) {
+    const chunk = ids.slice(i, i + BULK_REASSIGN_CHUNK_SIZE);
+    const result = await repo.reassignLeadsChunk(chunk, newAgentId, newAgentName, scopedToAgentIds, note, { userId: caller.sub, name: caller.name });
+    moved += result.moved.length;
+    skipped += result.skipped.length;
+    result.notFound.forEach((id) => failed.push({ id, reason: "Lead not found" }));
+    result.outOfScope.forEach((id) => failed.push({ id, reason: "You can only reassign your own team's leads." }));
+  }
+
+  // One notification summarizing the whole batch, not one per lead — a
+  // 300-lead reassignment used to mean 300 separate notifications/pushes to
+  // the same new agent in a few seconds (the exact flood class
+  // missedLeadScheduler.ts already guards against elsewhere).
+  if (moved > 0) {
+    await createNotification({
+      system: "CRM",
+      category: "REASSIGNMENT",
+      title: moved === 1 ? "Lead Reassigned To You" : `${moved} Leads Reassigned To You`,
+      message: moved === 1
+        ? `1 lead was reassigned to you by ${caller.name}.`
+        : `${moved} leads were reassigned to you by ${caller.name}.`,
+      recipientUserId: newAgentId,
+      link: "/dashboard/crm"
+    });
+    broadcastManyLeadsChanged();
   }
 
   return { requested: ids.length, moved, skipped, failed };
