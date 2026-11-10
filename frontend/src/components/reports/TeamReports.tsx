@@ -40,6 +40,7 @@ import {
   type TeamReportSalespersonRow,
   type TeamSiteVisitLead
 } from "@/lib/apiClient";
+import { QUALIFIED_STATUS_FILTER } from "@/lib/qualifiedLeads";
 
 // Reports → Team Reports, from GET /reports/team (Taskezy-Server
 // reports/teamReport.routes.ts), scoped server-side: Admin = everyone,
@@ -56,7 +57,7 @@ const SOURCE_OPTIONS: { value: MarketingSource; label: string }[] = [
   { value: "DATA", label: "Data" }
 ];
 // Same "qualified" statuses as the server.
-const QUALIFIED_CODES = ["CALL_BACK", "FOLLOWUP", "EOI", "SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE", "BOOKED"];
+const CALL_BACK_CODES = ["CALL_BACK", "LOW_BUDGET"]; // Low Budget counts as a Call Back
 // No salesperson can match this — used when the Team and Salesperson picks don't overlap.
 const NOBODY = "00000000-0000-0000-0000-000000000000";
 
@@ -445,7 +446,7 @@ export default function TeamReports({ dateRange, onDateRangeChange, initialAgent
       ? { dataCallingOnly: true, subSource: filters.subSource }
       : { excludeBulkUpload: true, sourceBucket: filters.source })
   };
-  const qualifiedDrill: LeadListFilters = dataCalling ? { callSubStatus: ["Qualified"] } : { status: QUALIFIED_CODES };
+  const qualifiedDrill: LeadListFilters = dataCalling ? { callSubStatus: ["Qualified"] } : { status: [QUALIFIED_STATUS_FILTER] };
   // Call Made = leads an agent called with the Call button in the date range
   // (the call's day), whoever has the lead now — same as the server's count.
   const calledDrill = (agentIds: string[]): LeadListFilters => ({
@@ -471,7 +472,7 @@ export default function TeamReports({ dateRange, onDateRangeChange, initialAgent
       { label: "Site Visits", value: k.siteVisits, color: "text-[#FF0000]", drill: { status: ["SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE"] } },
       { label: "RNR", value: k.rnr, color: "text-[#FF8C00]", drill: { status: ["RNR"] } },
       { label: "Follow Ups", value: k.followUps, color: "text-[#0084FF]", drill: { status: ["FOLLOWUP"] } },
-      { label: "Call Backs", value: k.callBacks, color: "text-[#FF8C00]", drill: { status: ["CALL_BACK"] } },
+      { label: "Call Backs", value: k.callBacks, color: "text-[#FF8C00]", drill: { status: CALL_BACK_CODES } },
       { label: "Missed Tasks", value: k.missedTasks, color: "text-[#0084FF]" }
     ];
   const [selectedCard, setSelectedCard] = useState<string | null>(null);
@@ -524,7 +525,7 @@ export default function TeamReports({ dateRange, onDateRangeChange, initialAgent
       { label: "Site Visits", value: r => r.siteVisits, detail: r => leadsOf(r, "Site Visits", { status: ["SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE"] }) },
       { label: "RNR", value: r => r.rnr, detail: r => leadsOf(r, "RNR", { status: ["RNR"] }) },
       { label: "Follow Ups", value: r => r.followUps, detail: r => leadsOf(r, "Follow Ups", { status: ["FOLLOWUP"] }) },
-      { label: "Call Backs", value: r => r.callBacks, detail: r => leadsOf(r, "Call Backs", { status: ["CALL_BACK"] }) },
+      { label: "Call Backs", value: r => r.callBacks, detail: r => leadsOf(r, "Call Backs", { status: CALL_BACK_CODES }) },
       {
         label: "Missed Tasks",
         value: r => r.missedTasks,

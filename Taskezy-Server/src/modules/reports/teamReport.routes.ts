@@ -11,6 +11,7 @@ import { findDirectReportIds } from "../users/users.repository";
 import { LEAD_SOURCE_BUCKET_SQL } from "../leads/leads.repository";
 import { canSeeMissedTaskCount } from "../leads/leads.handover";
 import { MISSED_BY_JOIN_SQL } from "./siteVisitSql";
+import { QUALIFIED_LEAD_SQL } from "../leads/qualifiedLeads";
 import { FOLLOWUP_EVER_MISSED_SQL, IS_SITE_VISIT_FOLLOWUP_SQL, SITE_VISIT_DONE_LOG } from "./siteVisitSql";
 
 // Reports → Team Reports (frontend TeamReports.tsx): KPI cards, the
@@ -28,7 +29,8 @@ teamReportRouter.use(requireAuth);
 teamReportRouter.use(requireRole("ADMIN", "AGENT"));
 
 // Same "qualified" statuses as Marketing Reports (ad-spend.routes.ts BUYER_CODES).
-const QUALIFIED_CODES = ["CALL_BACK", "FOLLOWUP", "EOI", "SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE", "BOOKED"];
+// Team Reports (Leads): Qualified follows the one rule (leads/qualifiedLeads.ts).
+const CALL_BACK_CODES = ["CALL_BACK", "LOW_BUDGET"]; // Low Budget counts as a Call Back
 
 const toArray = z.union([z.string(), z.array(z.string())])
   .optional()
@@ -133,7 +135,7 @@ teamReportRouter.get(
     const dataCalling = q.mode === "DATA_CALLING";
     // Data Calling counts calls the way the Data Calling page does: Qualified /
     // Not Qualified = a Connected call's sub-status, RNR = Not Reachable.
-    const qualifiedSql = dataCalling ? `(l.call_status = 'Connected' AND l.call_sub_status = 'Qualified')` : `l.status_code = ANY('{${QUALIFIED_CODES.join(",")}}'::text[])`;
+    const qualifiedSql = dataCalling ? `(l.call_status = 'Connected' AND l.call_sub_status = 'Qualified')` : QUALIFIED_LEAD_SQL("l");
     const rnrSql = dataCalling ? `l.call_status = 'Not Reachable'` : `l.status_code = 'RNR'`;
 
     const leadParams: unknown[] = [];
@@ -171,7 +173,7 @@ teamReportRouter.get(
                 count(*) FILTER (WHERE l.status_code IN ('SITE_VISIT_SCHEDULED', 'SITE_VISIT_DONE')) AS site_visits,
                 count(*) FILTER (WHERE ${rnrSql}) AS rnr,
                 count(*) FILTER (WHERE l.status_code = 'FOLLOWUP') AS follow_ups,
-                count(*) FILTER (WHERE l.status_code = 'CALL_BACK') AS call_backs
+                count(*) FILTER (WHERE l.status_code = ANY('{${CALL_BACK_CODES.join(",")}}'::text[])) AS call_backs
          FROM leads l
          LEFT JOIN users u ON u.id = l.assigned_agent_id
          WHERE ${leadWhere}

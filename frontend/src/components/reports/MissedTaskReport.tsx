@@ -174,7 +174,7 @@ export default function MissedTaskReport({ filters, baseDrill, refreshKey, expor
   ) : (
     <SearchableSelect
       variant="inline"
-      options={withDeadLeadGate([l.status, ...nextStatusOptions(l.status).map(c => c.status)], l, isAdmin)}
+      options={withDeadLeadGate([l.status, ...nextStatusOptions(l.status, isAdmin).map(c => c.status)], l, isAdmin)}
       value={l.status}
       onChange={(v) => statusScheduler.requestChange(l, v as LeadStatus)}
       searchPlaceholder="Search status..."

@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Search, Copy, Check, X } from "lucide-react";
 import { LeadStatus, useApp } from "@/context/AppContext";
 import { ApiPendingTaskRow } from "@/lib/apiClient";
-import { nextStatusOptions } from "@/lib/leadStatusMapping";
+import { nextStatusOptions, NO_GOING_BACK_STATUSES } from "@/lib/leadStatusMapping";
 import { applyTaskBuckets, PendingTask, TaskBucket } from "@/lib/salesPendingTasks";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
@@ -147,7 +147,9 @@ export default function SalesPendingTasksTable({
     // Only statuses the transition matrix allows from this lead's current
     // one are offered — e.g. Site Visit Done only shows once the lead is on
     // Site Visit Scheduled (or Different Location), not from every status.
-    const options: string[] = [t.status, ...nextStatusOptions(t.status as LeadStatus).map(c => c.status)];
+    // Reached Followup / Site Visit: never back to RNR, Dead Lead or Call Back.
+    const options: string[] = [t.status, ...nextStatusOptions(t.status as LeadStatus, isAdmin).map(c => c.status)
+      .filter(st => !(t.reachedStage && NO_GOING_BACK_STATUSES.includes(st)))];
     return (
       <SearchableSelect
         variant="inline"

@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { QUALIFIED_LEAD_SQL, QUALIFIED_STATUS_CODES, RNR_NOT_PICKED_UP_SQL, RNR_PICKED_UP_SQL, UNQUALIFIED_LEAD_SQL, UNQUALIFIED_STATUS_CODES } from "../leads/qualifiedLeads";
 import { z } from "zod";
 import { requireAuth, requireRole } from "../../middleware/auth";
 import { validate } from "../../middleware/validate";
@@ -63,8 +64,10 @@ const campaignLeadStatsQuerySchema = z.object({
 // Mirrors frontend/src/lib/campaignBuilder.ts's QUALIFIED_LEAD_STATUSES/
 // UNQUALIFIED_LEAD_STATUSES/SITE_VISIT_LEAD_STATUSES (DB codes, not the
 // frontend's display labels) — must stay in lockstep with that file.
-const QUALIFIED_CODES = ["CALL_BACK", "FOLLOWUP", "EOI", "SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE", "BOOKED"];
-const UNQUALIFIED_CODES = ["DEAD_LEAD", "RNR", "NOT_INTERESTED"];
+// The one qualified / unqualified rule (leads/qualifiedLeads.ts): these
+// lists plus RNR picked up (qualified) / never picked up (unqualified).
+const QUALIFIED_CODES = QUALIFIED_STATUS_CODES;
+const UNQUALIFIED_CODES = UNQUALIFIED_STATUS_CODES;
 const SITE_VISIT_CODES = ["SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE"];
 
 /**
@@ -137,8 +140,8 @@ adSpendRouter.get(
        ),
        snapshot AS (
          SELECT k.campaign_name,
-                count(*) FILTER (WHERE l.status_code = ANY($4::text[])) AS qualified,
-                count(*) FILTER (WHERE l.status_code = ANY($5::text[])) AS unqualified,
+                count(*) FILTER (WHERE l.status_code = ANY($4::text[]) OR ${RNR_PICKED_UP_SQL("l")}) AS qualified,
+                count(*) FILTER (WHERE l.status_code = ANY($5::text[]) OR ${RNR_NOT_PICKED_UP_SQL("l")}) AS unqualified,
                 count(*) FILTER (WHERE l.status_code = ANY($6::text[])) AS site_visits
          FROM leads l
          JOIN known_campaigns k ON LOWER(COALESCE(l.campaign, l.source)) = LOWER(k.campaign_name)
@@ -206,7 +209,7 @@ adSpendRouter.get(
        leads_daily AS (
          SELECT k.campaign_name, (l.created_at AT TIME ZONE $3)::date AS day,
                 count(*) AS total,
-                count(*) FILTER (WHERE l.status_code = ANY($4::text[])) AS qualified,
+                count(*) FILTER (WHERE l.status_code = ANY($4::text[]) OR ${RNR_PICKED_UP_SQL("l")}) AS qualified,
                 count(*) FILTER (WHERE l.status_code = ANY($5::text[])) AS site_visit,
                 count(*) FILTER (WHERE l.status_code = 'FOLLOWUP') AS follow_up,
                 count(*) FILTER (WHERE l.status_code = 'CALL_BACK') AS call_back
@@ -355,7 +358,7 @@ adSpendRouter.get(
   asyncHandler(async (_req, res) => {
     const { rows } = await query<{ ad_id: string; qualified_leads: string; synced_leads: string }>(
       `SELECT l.meta_ad_id AS ad_id,
-              count(*) FILTER (WHERE l.status_code = ANY($1::text[])) AS qualified_leads,
+              count(*) FILTER (WHERE l.status_code = ANY($1::text[]) OR ${RNR_PICKED_UP_SQL("l")}) AS qualified_leads,
               count(*) AS synced_leads
        FROM leads l
        WHERE l.meta_ad_id IS NOT NULL
@@ -377,8 +380,11 @@ adSpendRouter.get(
 // NON_BUYER_CODES is its own, wider set (also includes Low Budget and
 // Cancelled, unlike campaign-lead-stats' UNQUALIFIED_CODES above). Must
 // stay in lockstep with reportMetrics.ts if either list ever changes.
-const BUYER_CODES = ["CALL_BACK", "FOLLOWUP", "EOI", "SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE", "BOOKED"];
-const NON_BUYER_CODES = ["DEAD_LEAD", "RNR", "LOW_BUDGET", "CANCELLED", "NOT_INTERESTED"];
+// Qualified / unqualified now follow the one rule (leads/qualifiedLeads.ts):
+// BUYER = qualified statuses (+ RNR picked up), NON_BUYER = unqualified
+// statuses + Cancelled (+ RNR never picked up).
+const BUYER_CODES = QUALIFIED_STATUS_CODES;
+const NON_BUYER_CODES = [...UNQUALIFIED_STATUS_CODES, "CANCELLED"];
 const VISIT_CODES = ["SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE"];
 
 // ── Marketing Reports (Reports → Marketing tab) ─────────────────────────
@@ -469,7 +475,7 @@ adSpendRouter.get(
     const [kpiResult, campaignResult, projectResult, siteVisitResult] = await Promise.all([
       query<{ total: string; qualified: string; rnr: string; follow_ups: string; call_backs: string; site_visits: string }>(
         `SELECT count(*) AS total,
-                count(*) FILTER (WHERE l.status_code = ANY($1::text[])) AS qualified,
+                count(*) FILTER (WHERE l.status_code = ANY($1::text[]) OR ${RNR_PICKED_UP_SQL("l")}) AS qualified,
                 count(*) FILTER (WHERE l.status_code = 'RNR') AS rnr,
                 count(*) FILTER (WHERE l.status_code = 'FOLLOWUP') AS follow_ups,
                 count(*) FILTER (WHERE l.status_code = 'CALL_BACK') AS call_backs,
@@ -504,9 +510,9 @@ adSpendRouter.get(
         `WITH lead_rows AS (
            SELECT l.property_id, COALESCE(l.property_id::text, 'none') AS project_key,
                   count(*) AS total,
-                  count(*) FILTER (WHERE l.status_code = ANY($1::text[])) AS qualified,
+                  count(*) FILTER (WHERE l.status_code = ANY($1::text[]) OR ${RNR_PICKED_UP_SQL("l")}) AS qualified,
                   count(*) FILTER (WHERE l.status_code = 'FOLLOWUP') AS follow_ups,
-                  count(*) FILTER (WHERE l.status_code IN (${UNQUALIFIED_CODES.map(c => `'${c}'`).join(", ")})) AS unqualified,
+                  count(*) FILTER (WHERE ${UNQUALIFIED_LEAD_SQL("l")}) AS unqualified,
                   count(*) FILTER (WHERE l.status_code = 'RNR') AS rnr,
                   count(*) FILTER (WHERE l.status_code = 'LOW_BUDGET') AS low_budget,
                   count(*) FILTER (WHERE l.status_code = 'OTHER_REQUIREMENT') AS other_req
@@ -563,8 +569,8 @@ adSpendRouter.get(
            SELECT l.property_id, COALESCE(l.property_id::text, 'none') AS project_key,
                   count(*) FILTER (WHERE l.status_code = 'SITE_VISIT_DONE') AS completed,
                   count(*) FILTER (WHERE l.status_code = 'BOOKED') AS booked,
-                  count(*) FILTER (WHERE l.status_code IN (${BUYER_CODES.map(c => `'${c}'`).join(", ")})) AS qualified,
-                  count(*) FILTER (WHERE l.status_code IN (${UNQUALIFIED_CODES.map(c => `'${c}'`).join(", ")})) AS unqualified,
+                  count(*) FILTER (WHERE ${QUALIFIED_LEAD_SQL("l")}) AS qualified,
+                  count(*) FILTER (WHERE ${UNQUALIFIED_LEAD_SQL("l")}) AS unqualified,
                   count(*) FILTER (WHERE l.status_code IN ('SITE_VISIT_SCHEDULED', 'SITE_VISIT_DONE')) AS sv_status_leads
            FROM leads l
            WHERE ${statusLeads.where}
@@ -669,8 +675,8 @@ adSpendRouter.get(
         buyer_count: string; non_buyer_count: string; converted_count: string;
         total_count: string; booking_value: string; booking_count: string;
       }>(
-        `SELECT count(*) FILTER (WHERE l.status_code = ANY($4::text[])) AS buyer_count,
-                count(*) FILTER (WHERE l.status_code = ANY($5::text[])) AS non_buyer_count,
+        `SELECT count(*) FILTER (WHERE l.status_code = ANY($4::text[]) OR ${RNR_PICKED_UP_SQL("l")}) AS buyer_count,
+                count(*) FILTER (WHERE l.status_code = ANY($5::text[]) OR ${RNR_NOT_PICKED_UP_SQL("l")}) AS non_buyer_count,
                 count(*) FILTER (WHERE l.status_code = ANY($6::text[])) AS converted_count,
                 count(*) AS total_count,
                 COALESCE(SUM(l.deal_value) FILTER (WHERE l.status_code = 'BOOKED'), 0) AS booking_value,
@@ -681,8 +687,8 @@ adSpendRouter.get(
       ),
       query<{ campaign: string; buyer_count: string; non_buyer_count: string; booking_value: string }>(
         `SELECT l.campaign,
-                count(*) FILTER (WHERE l.status_code = ANY($4::text[])) AS buyer_count,
-                count(*) FILTER (WHERE l.status_code = ANY($5::text[])) AS non_buyer_count,
+                count(*) FILTER (WHERE l.status_code = ANY($4::text[]) OR ${RNR_PICKED_UP_SQL("l")}) AS buyer_count,
+                count(*) FILTER (WHERE l.status_code = ANY($5::text[]) OR ${RNR_NOT_PICKED_UP_SQL("l")}) AS non_buyer_count,
                 COALESCE(SUM(l.deal_value) FILTER (WHERE l.status_code = 'BOOKED'), 0) AS booking_value
          FROM leads l
          WHERE l.campaign IS NOT NULL AND ${dateBounds}

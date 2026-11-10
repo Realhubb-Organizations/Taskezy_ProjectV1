@@ -84,9 +84,20 @@ export function isDeadLeadEligible(lead: Lead): boolean {
  * every status-change dropdown (LeadDashboard, LeadDrillDownPanel,
  * LeadDetailDrawer) so they can't drift onto different rules.
  */
+// Once a lead has reached Followup or a Site Visit, it can never go back to
+// these — for everyone, admins included (the server enforces the same rule).
+export const NO_GOING_BACK_STATUSES: LeadStatus[] = ["RNR", "Dead Lead", "Call Back"];
+export const NO_GOING_BACK_HINT = "This lead has already reached Followup or Site Visit, so it can't go back to this status.";
+
 export function withDeadLeadGate(options: LeadStatus[], lead: Lead, isAdmin: boolean): (LeadStatus | DropdownOption)[] {
-  if (isAdmin) return options;
-  return options.map((status): LeadStatus | DropdownOption => {
+  const gated = options.map((status): LeadStatus | DropdownOption =>
+    lead.reachedFollowupOrSiteVisit && status !== lead.status && NO_GOING_BACK_STATUSES.includes(status)
+      ? { value: status, label: status, disabled: true, disabledHint: NO_GOING_BACK_HINT }
+      : status
+  );
+  if (isAdmin) return gated;
+  return gated.map((status): LeadStatus | DropdownOption => {
+    if (typeof status !== "string") return status;
     if (status !== "Dead Lead" || isDeadLeadEligible(lead)) return status;
     const have = lead.deadLeadCallDays ?? 0;
     const remaining = DEAD_LEAD_MIN_CALL_DAYS - have;
@@ -199,9 +210,13 @@ export const LEAD_STATUS_TRANSITIONS: Record<LeadStatus, { allowed: LeadStatus[]
   }
 };
 
-/** Every status a lead currently on `current` may move to, each tagged with whether it needs a confirm step. */
-export function nextStatusOptions(current: LeadStatus): { status: LeadStatus; needsConfirm: boolean }[] {
+/** Every status a lead currently on `current` may move to, each tagged with whether it needs a confirm step. Admins may pick any status. */
+export function nextStatusOptions(current: LeadStatus, isAdmin = false): { status: LeadStatus; needsConfirm: boolean }[] {
   const rule = LEAD_STATUS_TRANSITIONS[current];
+  if (isAdmin) {
+    return STATUS_OPTIONS.filter(status => status !== current)
+      .map(status => ({ status, needsConfirm: rule?.optional.includes(status) ?? false }));
+  }
   if (!rule) return STATUS_OPTIONS.map(status => ({ status, needsConfirm: false }));
   return [
     ...rule.allowed.map(status => ({ status, needsConfirm: false })),

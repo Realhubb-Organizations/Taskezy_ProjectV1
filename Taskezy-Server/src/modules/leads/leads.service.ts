@@ -1,4 +1,5 @@
 import type { PoolClient } from "pg";
+import { QUALIFIED_STATUS_CODES } from "./qualifiedLeads";
 import { query, withTransaction } from "../../db/pool";
 import { AccessTokenPayload } from "../../utils/tokens";
 import { ApiError } from "../../utils/ApiError";
@@ -65,6 +66,8 @@ export async function listLeads(caller: AccessTokenPayload, filter: {
   calledBy?: string[];
   calledFrom?: string;
   calledTo?: string;
+  qualifiedOnly?: boolean;
+  unqualifiedOnly?: boolean;
 }) {
   const scopedToAgentIds = await scopeForCaller(caller);
   const { rows, totalCount } = await repo.findMany({
@@ -98,6 +101,8 @@ export async function listLeads(caller: AccessTokenPayload, filter: {
     calledBy: filter.calledBy,
     calledFrom: filter.calledFrom,
     calledTo: filter.calledTo,
+    qualifiedOnly: filter.qualifiedOnly,
+    unqualifiedOnly: filter.unqualifiedOnly,
     scopedToAgentIds
   });
   return {
@@ -291,7 +296,7 @@ export async function getDistinctCampaigns(caller: AccessTokenPayload, filter: {
 // kept here (DB codes, not frontend display strings) for the same reason
 // the 7-stat-card codes above are, but must stay in lockstep with that
 // file if either list ever changes.
-const UNQUALIFIED_CODES = ["RNR", "LOW_BUDGET", "DEAD_LEAD", "NOT_INTERESTED"];
+// (Qualified / unqualified now come from the one rule in qualifiedLeads.ts.)
 const SITE_VISIT_CODES = ["SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE"];
 
 export interface AgentAnalyticsStats {
@@ -325,7 +330,6 @@ export async function getLeadAnalyticsStats(caller: AccessTokenPayload, filter: 
       dateTo: filter.dateTo,
       scopedToAgentIds
     },
-    UNQUALIFIED_CODES,
     SITE_VISIT_CODES
   );
   return rows.map(r => {
@@ -334,7 +338,7 @@ export async function getLeadAnalyticsStats(caller: AccessTokenPayload, filter: 
     return {
       assignedAgentId: r.assigned_agent_id,
       total,
-      qualified: total - unqualified,
+      qualified: Number(r.qualified),
       unqualified,
       siteVisits: Number(r.site_visits)
     };
@@ -344,7 +348,8 @@ export async function getLeadAnalyticsStats(caller: AccessTokenPayload, filter: 
 // Mirrors frontend/src/lib/reportMetrics.ts's BUYER_STATUSES (the Agent
 // report's "Qualified" bucket) and VISIT_OR_MEETING_STATUSES — same
 // lockstep requirement as the other code-list constants above.
-const REPORT_QUALIFIED_CODES = ["CALL_BACK", "FOLLOWUP", "EOI", "SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE", "BOOKED"];
+// Statuses that are always qualified — plus RNR picked up (qualifiedLeads.ts), added in the query.
+const REPORT_QUALIFIED_CODES = QUALIFIED_STATUS_CODES;
 const REPORT_SITE_VISIT_CODES = ["SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE"];
 
 export interface AgentReportStats {
@@ -885,7 +890,7 @@ export async function updateLeadStatus(
   // matrix — every other code path that writes status_code is either
   // system-driven (markLeadNewIfUnassigned) or an initial INSERT, neither
   // of which is a user-initiated transition.
-  await assertTransitionAllowed(existing.status_code, statusCode, leadId);
+  await assertTransitionAllowed(existing.status_code, statusCode, leadId, caller.role === "ADMIN");
 
   const stampFirstResponse = existing.status_code === "NEW_LEAD"; // first-ever status change
 

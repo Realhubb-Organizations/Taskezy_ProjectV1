@@ -6,6 +6,7 @@
 // circular dependency even though leadSummaryStats.ts itself imports a type
 // from AppContext.tsx, which imports functions from this very file.
 import type { LeadSummaryStats } from "@/lib/leadSummaryStats";
+import { QUALIFIED_STATUS_FILTER, UNQUALIFIED_STATUS_FILTER } from "./qualifiedLeads";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
 const ACCESS_TOKEN_STORAGE_KEY = "taskezy_access_token";
@@ -306,6 +307,8 @@ export interface ApiLeadRow {
   missed_task_count?: number;
   /** The lead's task time (Pending Tasks' date = Next Call Date) — see Taskezy-Server tasks/taskDue.ts. Null = no task. */
   task_due_at?: string | null;
+  /** Reached Followup / Site Visit at some point — RNR, Dead Lead and Call Back are off. */
+  reached_followup_or_site_visit?: boolean;
   logs: { message: string; timestamp: string; user: string }[];
 }
 
@@ -393,7 +396,12 @@ export interface LeadListFilters {
 
 function buildLeadFilterParams(filters: LeadListFilters): URLSearchParams {
   const params = new URLSearchParams();
-  filters.status?.forEach(s => params.append("status", s));
+  // Qualified / Unqualified markers (lib/qualifiedLeads.ts) become the server's own flags.
+  filters.status?.forEach(s => {
+    if (s === QUALIFIED_STATUS_FILTER) params.set("qualifiedOnly", "true");
+    else if (s === UNQUALIFIED_STATUS_FILTER) params.set("unqualifiedOnly", "true");
+    else params.append("status", s);
+  });
   filters.assignedAgentId?.forEach(a => params.append("assignedAgentId", a));
   filters.campaign?.forEach(c => params.append("campaign", c));
   filters.propertyId?.forEach(p => params.append("propertyId", p));
@@ -1346,6 +1354,8 @@ export interface ApiPendingTaskRow {
   /** Admins/Managers only (server leaves it out for agents). */
   missedCount?: number;
   isDataCalling?: boolean;
+  /** Lead reached Followup / Site Visit — RNR, Dead Lead and Call Back are off. */
+  reachedStage?: boolean;
   /** Data Calling leads' own call status / Qualified-Unqualified. */
   callStatus?: string | null;
   callSubStatus?: string | null;
