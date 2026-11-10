@@ -428,6 +428,68 @@ export interface AgentAnalyticsRow {
  * siteVisitCodes in leads.service.ts). qualified = total - unqualified is
  * computed in the service layer, matching the frontend's own computeLeadStats.
  */
+/** Leads Analytics' property card — same numbers as getAnalyticsStatsByAgent, one row per property (null = no property). */
+export interface PropertyAnalyticsRow {
+  property_id: string | null;
+  total: string;
+  qualified: string;
+  unqualified: string;
+  site_visits: string;
+}
+
+export async function getAnalyticsStatsByProperty(filter: LeadFilterConditions, siteVisitCodes: string[]): Promise<PropertyAnalyticsRow[]> {
+  const { whereClause, params } = buildLeadWhereClause(filter);
+  params.push(siteVisitCodes);
+  const { rows } = await query<PropertyAnalyticsRow>(
+    `SELECT l.property_id,
+            count(*) AS total,
+            count(*) FILTER (WHERE ${QUALIFIED_LEAD_SQL("l")}) AS qualified,
+            count(*) FILTER (WHERE ${UNQUALIFIED_LEAD_SQL("l")}) AS unqualified,
+            count(*) FILTER (WHERE l.status_code = ANY($${params.length}::text[])) AS site_visits
+     FROM leads l
+     ${whereClause}
+     GROUP BY l.property_id`,
+    params
+  );
+  return rows;
+}
+
+/**
+ * Leads Analytics' RNR Analysis averages, from the Call button's records
+ * (call_attempts, CALL), for the leads in the filters:
+ *   per_lead_day  = calls made per RNR lead per day it was called
+ *   before_dead   = calls made per Dead Lead before it was marked dead
+ * NULL when there's nothing to average.
+ */
+export async function getRnrCallAverages(filter: LeadFilterConditions): Promise<{ per_lead_day: number | null; before_dead: number | null }> {
+  const { whereClause, params } = buildLeadWhereClause(filter);
+  params.push(BUSINESS_TIMEZONE);
+  const tz = `$${params.length}`;
+  const andOr = whereClause ? `${whereClause} AND` : "WHERE";
+  const { rows } = await query<{ per_lead_day: string | null; before_dead: string | null }>(
+    `WITH rnr AS (SELECT l.id FROM leads l ${andOr} l.status_code = 'RNR'),
+          dead AS (
+            SELECT l.id, (SELECT max(dl.created_at) FROM lead_logs dl
+                          WHERE dl.lead_id = l.id AND dl.message = 'Status changed to "DEAD_LEAD"') AS dead_at
+            FROM leads l ${andOr} l.status_code = 'DEAD_LEAD'
+          )
+     SELECT
+       (SELECT count(*)::numeric / NULLIF(count(DISTINCT (ca.lead_id, (COALESCE(ca.started_at, ca.created_at) AT TIME ZONE ${tz})::date)), 0)
+        FROM call_attempts ca JOIN rnr ON rnr.id = ca.lead_id WHERE ca.channel = 'CALL') AS per_lead_day,
+       (SELECT avg(c) FROM (
+          SELECT (SELECT count(*) FROM call_attempts ca
+                  WHERE ca.lead_id = dead.id AND ca.channel = 'CALL'
+                    AND (dead.dead_at IS NULL OR COALESCE(ca.started_at, ca.created_at) <= dead.dead_at)) AS c
+          FROM dead) x) AS before_dead`,
+    params
+  );
+  const r = rows[0];
+  return {
+    per_lead_day: r?.per_lead_day == null ? null : Number(r.per_lead_day),
+    before_dead: r?.before_dead == null ? null : Number(r.before_dead)
+  };
+}
+
 export async function getAnalyticsStatsByAgent(
   filter: LeadFilterConditions,
   siteVisitCodes: string[]

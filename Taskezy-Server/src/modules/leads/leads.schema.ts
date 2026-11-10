@@ -114,6 +114,8 @@ export const distinctCampaignsQuerySchema = leadStatsQuerySchema.omit({ search: 
 // does have a Property one the plain Leads tab doesn't.
 export const leadAnalyticsStatsQuerySchema = z.object({
   propertyId: uuidToArray,
+  // Member filter — used by the property card and RNR averages.
+  assignedAgentId: uuidToArray,
   campaign: stringToArray,
   dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateFrom must be YYYY-MM-DD").optional(),
   dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateTo must be YYYY-MM-DD").optional()

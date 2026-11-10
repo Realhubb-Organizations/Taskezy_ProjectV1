@@ -566,6 +566,36 @@ export function apiGetLeadAnalyticsStats(filters: LeadAnalyticsStatsFilters = {}
   return request<AgentAnalyticsStats[]>(`/api/v1/leads/analytics-stats${qs ? `?${qs}` : ""}`);
 }
 
+/** Leads Analytics' property card: one row per property (null = no property). */
+export interface PropertyAnalyticsStats {
+  propertyId: string | null;
+  total: number;
+  qualified: number;
+  unqualified: number;
+  siteVisits: number;
+}
+
+/** Same filters as apiGetLeadAnalyticsStats, plus the Member filter (assignedAgentId). */
+function analyticsParams(filters: LeadAnalyticsStatsFilters & { assignedAgentId?: string[] }): string {
+  const params = new URLSearchParams();
+  filters.propertyId?.forEach(p => params.append("propertyId", p));
+  filters.campaign?.forEach(c => params.append("campaign", c));
+  filters.assignedAgentId?.forEach(a => params.append("assignedAgentId", a));
+  if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
+  if (filters.dateTo) params.set("dateTo", filters.dateTo);
+  const qs = params.toString();
+  return qs ? `?${qs}` : "";
+}
+
+export function apiGetLeadAnalyticsPropertyStats(filters: LeadAnalyticsStatsFilters & { assignedAgentId?: string[] } = {}): Promise<PropertyAnalyticsStats[]> {
+  return request<PropertyAnalyticsStats[]>(`/api/v1/leads/analytics-stats-by-property${analyticsParams(filters)}`);
+}
+
+/** RNR Analysis averages from the Call button's records (null = nothing to average yet). */
+export function apiGetRnrCallAverages(filters: LeadAnalyticsStatsFilters & { assignedAgentId?: string[] } = {}): Promise<{ callsPerLeadPerDay: number | null; callsBeforeDead: number | null }> {
+  return request(`/api/v1/leads/rnr-call-averages${analyticsParams(filters)}`);
+}
+
 export interface AgentReportStats {
   assigned: number;
   contacted: number;

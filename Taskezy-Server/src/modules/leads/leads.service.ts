@@ -345,6 +345,36 @@ export async function getLeadAnalyticsStats(caller: AccessTokenPayload, filter: 
   });
 }
 
+export interface PropertyAnalyticsStats {
+  propertyId: string | null;
+  total: number;
+  qualified: number;
+  unqualified: number;
+  siteVisits: number;
+}
+
+type AnalyticsFilter = { propertyId?: string[]; campaign?: string[]; dateFrom?: string; dateTo?: string; assignedAgentId?: string[] };
+
+/** Leads Analytics' property card — same filters as getLeadAnalyticsStats, plus the Member filter. */
+export async function getLeadAnalyticsStatsByProperty(caller: AccessTokenPayload, filter: AnalyticsFilter): Promise<PropertyAnalyticsStats[]> {
+  const scopedToAgentIds = await scopeForCaller(caller);
+  const rows = await repo.getAnalyticsStatsByProperty({ ...filter, scopedToAgentIds }, SITE_VISIT_CODES);
+  return rows.map(r => ({
+    propertyId: r.property_id,
+    total: Number(r.total),
+    qualified: Number(r.qualified),
+    unqualified: Number(r.unqualified),
+    siteVisits: Number(r.site_visits)
+  }));
+}
+
+/** Leads Analytics' RNR Analysis averages (Call button records), same filters as the property card. */
+export async function getRnrCallAverages(caller: AccessTokenPayload, filter: AnalyticsFilter) {
+  const scopedToAgentIds = await scopeForCaller(caller);
+  const r = await repo.getRnrCallAverages({ ...filter, scopedToAgentIds });
+  return { callsPerLeadPerDay: r.per_lead_day, callsBeforeDead: r.before_dead };
+}
+
 // Mirrors frontend/src/lib/reportMetrics.ts's BUYER_STATUSES (the Agent
 // report's "Qualified" bucket) and VISIT_OR_MEETING_STATUSES — same
 // lockstep requirement as the other code-list constants above.
