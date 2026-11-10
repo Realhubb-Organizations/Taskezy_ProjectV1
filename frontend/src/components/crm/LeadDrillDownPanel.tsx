@@ -444,7 +444,7 @@ export default function LeadDrillDownPanel({ title, baseFilters, onClose }: {
       // one are offered — e.g. Site Visit Done only shows once the lead is
       // on Site Visit Scheduled (or Different Location), not from every
       // status. Same gate as LeadDashboard.tsx's inline status cell.
-      options={withDeadLeadGate([l.status, ...nextStatusOptions(l.status).map(c => c.status)], l, activeRole === "ADMIN")}
+      options={withDeadLeadGate([l.status, ...nextStatusOptions(l.status, activeRole === "ADMIN").map(c => c.status)], l, activeRole === "ADMIN")}
       value={l.status}
       onChange={(v) => statusScheduler.requestChange(l, v as LeadStatus)}
       searchPlaceholder="Search status..."

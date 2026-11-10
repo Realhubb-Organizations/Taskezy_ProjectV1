@@ -29,6 +29,7 @@ export interface PendingTask {
   callStatus?: Lead["callStatus"]; // Data Calling leads: Connected / Called / Not Reachable / Wrong Number
   callSubStatus?: Lead["callSubStatus"];
   missedCount?: number; // Admins/Managers only — see MissedCountBadge
+  reachedStage?: boolean; // reached Followup / Site Visit — RNR, Dead Lead and Call Back are off
 }
 
 // The server-fetched, not-yet-bucketed shape (AppContext.tsx's pendingTasks,
@@ -52,6 +53,7 @@ export interface PendingTaskRaw {
   taskType: string;
   assignedTo: string;
   isDataCalling?: boolean;
+  reachedStage?: boolean;
   callStatus?: string | null;
   callSubStatus?: string | null;
   missedCount?: number;
@@ -92,7 +94,8 @@ export function applyTaskBuckets(rawTasks: PendingTaskRaw[], now: Date): Pending
       isDataCalling: r.isDataCalling === true,
       callStatus: (r.callStatus || undefined) as Lead["callStatus"],
       callSubStatus: (r.callSubStatus || undefined) as Lead["callSubStatus"],
-      missedCount: r.missedCount
+      missedCount: r.missedCount,
+      reachedStage: r.reachedStage === true
     };
   });
 

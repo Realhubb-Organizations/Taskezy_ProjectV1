@@ -95,6 +95,27 @@ const TRANSITIONS: Record<LeadStatusCode, { allowed: LeadStatusCode[]; optional:
 // status picker before it would even be rejected server-side.
 export const DEAD_LEAD_MIN_CALL_DAYS = 15;
 
+// Once a lead has reached Followup or a Site Visit (now or at any time
+// before), it can never go back to RNR, Dead Lead or Call Back — whoever
+// is changing it, admins included (requested 2026-11-10).
+const NO_GOING_BACK_TO: LeadStatusCode[] = ["RNR", "DEAD_LEAD", "CALL_BACK"];
+
+/** Lead `alias` is on, or has ever been on, Followup / Site Visit Scheduled / Site Visit Done. */
+export const REACHED_FOLLOWUP_OR_SITE_VISIT_SQL = (alias: string) => `(${alias}.status_code IN ('FOLLOWUP', 'SITE_VISIT_SCHEDULED', 'SITE_VISIT_DONE')
+  OR EXISTS (SELECT 1 FROM lead_logs rl WHERE rl.lead_id = ${alias}.id
+             AND rl.message IN ('Status changed to "FOLLOWUP"', 'Status changed to "SITE_VISIT_SCHEDULED"', 'Status changed to "SITE_VISIT_DONE"')))`;
+
+async function assertNotGoingBack(toCode: LeadStatusCode, leadId: string): Promise<void> {
+  if (!NO_GOING_BACK_TO.includes(toCode)) return;
+  const { rows } = await query<{ reached: boolean }>(
+    `SELECT ${REACHED_FOLLOWUP_OR_SITE_VISIT_SQL("l")} AS reached FROM leads l WHERE l.id = $1`,
+    [leadId]
+  );
+  if (rows[0]?.reached) {
+    throw ApiError.badRequest(`This lead has already reached Followup or Site Visit, so it can't go back to "${LABEL[toCode]}".`);
+  }
+}
+
 /**
  * Counts distinct business-calendar days (BUSINESS_TIMEZONE, so a late-
  * night call doesn't land on the wrong day) call_attempts has a real phone
@@ -117,8 +138,11 @@ async function assertDeadLeadCallHistorySatisfied(leadId: string): Promise<void>
 }
 
 /** Single enforcement point for every lead-status change — see updateLeadStatus in leads.service.ts. */
-export async function assertTransitionAllowed(fromCode: string, toCode: LeadStatusCode, leadId: string): Promise<void> {
+export async function assertTransitionAllowed(fromCode: string, toCode: LeadStatusCode, leadId: string, isAdmin = false): Promise<void> {
   if (fromCode === toCode) return; // not a transition — e.g. editing dealValue without changing status
+  await assertNotGoingBack(toCode, leadId);
+  // Admins can move a lead to any status (no matrix, no Dead Lead call-days rule).
+  if (isAdmin) return;
 
   const rule = TRANSITIONS[fromCode as LeadStatusCode];
   if (!rule) return; // fromCode predates migration 030 or is otherwise unrecognized — don't block on a status this matrix doesn't know, the FK/enum elsewhere already guards valid codes going forward

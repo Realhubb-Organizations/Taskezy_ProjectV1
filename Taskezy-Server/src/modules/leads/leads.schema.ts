@@ -67,6 +67,10 @@ export const listLeadsQuerySchema = z.object({
   calledBy: uuidToArray,
   calledFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "calledFrom must be YYYY-MM-DD").optional(),
   calledTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "calledTo must be YYYY-MM-DD").optional(),
+  // Qualified / Unqualified drill-downs — the one rule (qualifiedLeads.ts),
+  // which a plain status list can't express (RNR depends on a picked-up call).
+  qualifiedOnly: z.enum(["true", "false"]).optional().transform(v => v === "true"),
+  unqualifiedOnly: z.enum(["true", "false"]).optional().transform(v => v === "true"),
   // Already supported by buildLeadWhereClause/findMany (used by the Leads
   // Analytics tab's own aggregate) — just not previously exposed here.
   propertyId: uuidToArray,

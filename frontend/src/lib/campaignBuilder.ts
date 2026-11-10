@@ -30,8 +30,10 @@ export interface CampaignItem {
 }
 
 export const CAMPAIGN_STATUSES: CampaignItem["status"][] = ["Active", "Pause", "Stopped"];
-export const QUALIFIED_LEAD_STATUSES = ["Call Back", "Followup", "EOI", "Site Visit Scheduled", "Site Visit Done", "Booked"];
-export const UNQUALIFIED_LEAD_STATUSES = ["Dead Lead", "RNR"];
+// Same as the one qualified rule (lib/qualifiedLeads.ts), minus RNR: an RNR
+// lead is qualified only when the customer picked up — the server decides that.
+export const QUALIFIED_LEAD_STATUSES = ["Followup", "Site Visit Scheduled", "Site Visit Done", "EOI", "Booked", "Low Budget", "Other requirement", "Different Location"];
+export const UNQUALIFIED_LEAD_STATUSES = ["Dead Lead", "Not Interested"];
 export const SITE_VISIT_LEAD_STATUSES = ["Site Visit Scheduled", "Site Visit Done"];
 export const BOOKING_LEAD_STATUSES = ["Booked"];
 

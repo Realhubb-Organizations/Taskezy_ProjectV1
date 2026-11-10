@@ -7,7 +7,7 @@ import { App as CapacitorApp } from "@capacitor/app";
 import { PhoneCall, MessageCircle, Check, X } from "lucide-react";
 import { useApp, LeadStatus, Lead, mapApiLeadToFrontendLead } from "@/context/AppContext";
 import { apiUpdateLeadStatus, apiUpdateCallStatus, apiUpdateLeadNote, apiGetLead, apiGetSiteVisitHistory } from "@/lib/apiClient";
-import { nextStatusOptions, frontendStatusToDbCode } from "@/lib/leadStatusMapping";
+import { nextStatusOptions, frontendStatusToDbCode, NO_GOING_BACK_STATUSES } from "@/lib/leadStatusMapping";
 import { CALL_SUB_STATUS_OPTIONS, CallSubStatus, callSubStatusOf } from "@/lib/callSubStatus";
 import { SCHEDULER_REQUIRED_STATUSES } from "@/lib/leadScheduler";
 import { findAgentScheduleConflict, agentConflictMessage } from "@/lib/duplicateFollowupCheck";
@@ -57,7 +57,8 @@ const todayIso = () => {
 };
 
 export default function CallFeedbackGate() {
-  const { pendingCallAttempt, submitCallFeedback, holdCallFeedbackOnLead, users } = useApp();
+  const { pendingCallAttempt, submitCallFeedback, holdCallFeedbackOnLead, users, currentUser } = useApp();
+  const isAdmin = currentUser?.role === "ADMIN";
   const isWhatsApp = pendingCallAttempt?.channel === "WHATSAPP";
 
   // Fetched directly by id instead of scanning the bulk leads/dataCallingLeads
@@ -87,9 +88,11 @@ export default function CallFeedbackGate() {
   // can't actually commit anything the backend wouldn't also reject).
   const statusOptions = useMemo(() => {
     if (!lead || isDataCallingLead) return [];
-    const choices = nextStatusOptions(lead.status).map(c => c.status);
+    const choices = nextStatusOptions(lead.status, isAdmin).map(c => c.status)
+      // Reached Followup / Site Visit: never back to RNR, Dead Lead or Call Back.
+      .filter(st => !(lead.reachedFollowupOrSiteVisit && NO_GOING_BACK_STATUSES.includes(st)));
     return [lead.status, ...choices];
-  }, [lead, isDataCallingLead]);
+  }, [lead, isDataCallingLead, isAdmin]);
 
   // Has this lead had a site visit before? Then a new Site Visit Scheduled
   // date is a reschedule and we ask why (Reports → Team Reports). If the

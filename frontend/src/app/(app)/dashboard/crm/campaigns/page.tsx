@@ -58,6 +58,7 @@ import type { LeadSummaryStats } from "@/lib/leadSummaryStats";
 import { DateSortButton } from "@/components/ui/DateSortButton";
 import { useLiveRefresh } from "@/lib/useLiveRefresh";
 import { useBackgroundRefresh } from "@/lib/liveRefresh";
+import { QUALIFIED_STATUS_FILTER } from "@/lib/qualifiedLeads";
 
 // Same icon URLs the admin leads page uses for these platforms (LeadDashboard.tsx).
 const PLATFORM_ICON_URL: Partial<Record<CampaignItem["platform"], string>> = {
@@ -511,7 +512,7 @@ export default function AdminCampaignsPage() {
   // ad-spend.routes.ts) — undefined means "every lead," for Total Leads.
   const CATEGORY_STATUS_CODES: Record<string, string[] | undefined> = {
     "Total Leads": undefined,
-    "Qualified Leads": ["CALL_BACK", "FOLLOWUP", "EOI", "SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE", "BOOKED"],
+    "Qualified Leads": [QUALIFIED_STATUS_FILTER], // the one qualified rule (lib/qualifiedLeads.ts)
     "Site Visits": ["SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE"],
     "Follow Ups": ["FOLLOWUP"],
     "Call Backs": ["CALL_BACK"]
@@ -953,7 +954,7 @@ export default function AdminCampaignsPage() {
   // single capped fetch would risk undercounting a campaign with >500
   // qualified leads ever (this has no date bound, same as the Deep Dive
   // number it drills into).
-  const QUALIFIED_DB_CODES = ["CALL_BACK", "FOLLOWUP", "EOI", "SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE", "BOOKED"];
+  const QUALIFIED_DB_CODES = [QUALIFIED_STATUS_FILTER]; // the one qualified rule (lib/qualifiedLeads.ts)
   const isQualifiedLeadsDrillOpen = analyticsDrillView?.type === "qualifiedLeads";
   const qualifiedLeadsBaseFilters: LeadListFilters = isQualifiedLeadsDrillOpen
     ? { campaign: [analyticsDrillView!.campaign.name], status: QUALIFIED_DB_CODES }

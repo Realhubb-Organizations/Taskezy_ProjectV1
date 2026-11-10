@@ -271,6 +271,8 @@ export interface Lead {
   // DEAD_LEAD_MIN_CALL_DAYS / isDeadLeadEligible. undefined for a
   // locally-created lead that hasn't round-tripped through the API yet.
   deadLeadCallDays?: number;
+  /** Reached Followup / Site Visit at some point — can't go back to RNR, Dead Lead or Call Back. */
+  reachedFollowupOrSiteVisit?: boolean;
   // Manager/Admin-only (migration 047) — how many times a follow-up tied
   // to this lead was flagged MISSED. Stripped server-side for agents, so
   // undefined there (never something to branch display logic on alone —
@@ -806,6 +808,7 @@ export function mapApiLeadToFrontendLead(row: ApiLeadRow): Lead {
     firstResponseAt: row.first_response_at || undefined,
     createdAtStr: row.created_at,
     deadLeadCallDays: Number(row.dead_lead_call_days ?? 0),
+    reachedFollowupOrSiteVisit: row.reached_followup_or_site_visit === true,
     missedTaskCount: row.missed_task_count,
     taskDueAt: row.task_due_at ?? undefined
   };

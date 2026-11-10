@@ -23,6 +23,7 @@ import {
   type MarketingSiteVisitRow,
   type MarketingSource
 } from "@/lib/apiClient";
+import { QUALIFIED_STATUS_FILTER, UNQUALIFIED_STATUS_FILTER } from "@/lib/qualifiedLeads";
 
 // Reports → Marketing tab. One set of filters (Campaigns / Date Range /
 // Property / Team / Source) drives both the KPI cards and the Project-wise
@@ -37,8 +38,8 @@ const SOURCE_OPTIONS: { value: MarketingSource; label: string }[] = [
   { value: "DATA", label: "Data" }
 ];
 
-// Same "qualified" statuses as the server (ad-spend.routes.ts BUYER_CODES).
-const QUALIFIED_CODES = ["CALL_BACK", "FOLLOWUP", "EOI", "SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE", "BOOKED"];
+// The one qualified / unqualified rule (lib/qualifiedLeads.ts) — drill-downs use its markers.
+const QUALIFIED_CODES = [QUALIFIED_STATUS_FILTER];
 
 const ZERO_STATS: MarketingProjectStats = {
   kpis: { activeCampaigns: 0, totalLeads: 0, qualified: 0, rnr: 0, followUps: 0, callBacks: 0, siteVisits: 0 },
@@ -56,7 +57,7 @@ const formatPercent = (part: number, whole: number) => (whole > 0 ? `${((part / 
 // the project's leads with a site visit in the range.
 type LeadLink = (row: { propertyId: string | null; propertyName: string | null }, value: number, label: string, status?: string[]) => React.ReactNode;
 type VisitLink = (row: MarketingSiteVisitRow, value: number, label: string, match?: "missed" | "upcoming") => React.ReactNode;
-const UNQUALIFIED_CODES = ["DEAD_LEAD", "RNR", "NOT_INTERESTED"];
+const UNQUALIFIED_CODES = [UNQUALIFIED_STATUS_FILTER];
 
 // Project-wise Lead Report — usual columns first; `extra` ones start hidden.
 const leadReportColumns = (leads: LeadLink): ProjectReportColumn<MarketingProjectRow>[] => [

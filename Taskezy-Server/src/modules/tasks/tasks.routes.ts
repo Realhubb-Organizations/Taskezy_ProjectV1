@@ -6,6 +6,7 @@ import { query } from "../../db/pool";
 import { findDirectReportIds } from "../users/users.repository";
 import { AccessTokenPayload } from "../../utils/tokens";
 import { canSeeMissedTaskCount } from "../leads/leads.handover";
+import { REACHED_FOLLOWUP_OR_SITE_VISIT_SQL } from "../leads/leadStatusTransitions";
 import { FEEDBACK_PENDING_LOG_PREFIX } from "../call-attempts/feedbackLock";
 import { OPEN_CALL_ORDER_SQL } from "./taskDue";
 
@@ -62,6 +63,7 @@ interface OpenFollowupRow {
   call_status: string | null;
   call_sub_status: string | null;
   missed_task_count: number | null;
+  reached_stage: boolean | null;
 }
 
 interface ActionableLeadRow {
@@ -80,6 +82,7 @@ interface ActionableLeadRow {
   call_status: string | null;
   call_sub_status: string | null;
   missed_task_count: number | null;
+  reached_stage: boolean | null;
 }
 
 export interface PendingTaskRow {
@@ -105,6 +108,8 @@ export interface PendingTaskRow {
   /** Data Calling leads: their own call status (Connected / Called / Not Reachable / Wrong Number) and Qualified / Unqualified. */
   callStatus?: string | null;
   callSubStatus?: string | null;
+  /** The lead reached Followup / Site Visit — RNR, Dead Lead and Call Back are off. */
+  reachedStage: boolean;
 }
 
 /**
@@ -135,7 +140,8 @@ tasksRouter.get(
               u.first_name || COALESCE(' ' || u.last_name, '') AS assigned_to_name,
               l.name AS lead_full_name, l.phone AS lead_phone, l.email AS lead_email, ls.label AS lead_status_label,
               ll.message AS latest_log_message, ll.created_at AS latest_log_at,
-              l.source = 'Bulk Upload' AS is_data_calling, l.call_status, l.call_sub_status, l.missed_task_count
+              l.source = 'Bulk Upload' AS is_data_calling, l.call_status, l.call_sub_status, l.missed_task_count,
+              ${REACHED_FOLLOWUP_OR_SITE_VISIT_SQL("l")} AS reached_stage
        FROM followup_calls fc
        JOIN users u ON u.id = fc.assigned_to_id
        LEFT JOIN leads l ON l.id = fc.lead_id
@@ -172,7 +178,8 @@ tasksRouter.get(
               l.assigned_at, l.created_at,
               u.first_name || COALESCE(' ' || u.last_name, '') AS assigned_to_name,
               ll.message AS latest_log_message, ll.created_at AS latest_log_at,
-              l.source = 'Bulk Upload' AS is_data_calling, l.call_status, l.call_sub_status, l.missed_task_count
+              l.source = 'Bulk Upload' AS is_data_calling, l.call_status, l.call_sub_status, l.missed_task_count,
+              ${REACHED_FOLLOWUP_OR_SITE_VISIT_SQL("l")} AS reached_stage
        FROM leads l
        JOIN lead_statuses ls ON ls.code = l.status_code
        JOIN users u ON u.id = l.assigned_agent_id
@@ -228,7 +235,8 @@ tasksRouter.get(
         isDataCalling: r.is_data_calling === true,
         callStatus: r.call_status,
         callSubStatus: r.call_sub_status,
-        missedCount: missedCountOf(r.missed_task_count)
+        missedCount: missedCountOf(r.missed_task_count),
+        reachedStage: r.reached_stage === true
       });
     }
 
@@ -250,7 +258,8 @@ tasksRouter.get(
         isDataCalling: r.is_data_calling === true,
         callStatus: r.call_status,
         callSubStatus: r.call_sub_status,
-        missedCount: missedCountOf(r.missed_task_count)
+        missedCount: missedCountOf(r.missed_task_count),
+        reachedStage: r.reached_stage === true
       });
     }
 

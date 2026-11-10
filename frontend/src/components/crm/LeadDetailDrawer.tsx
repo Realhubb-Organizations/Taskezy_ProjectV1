@@ -140,7 +140,7 @@ export default function LeadDetailDrawer({
   // (leadStatusTransitions.ts), so a stale option here can't actually
   // commit anything it shouldn't — this is purely about not showing a
   // choice that would just come back as a 400.
-  const statusChoices = nextStatusOptions(localStatus);
+  const statusChoices = nextStatusOptions(localStatus, activeRole === "ADMIN");
   const statusOptionsList = withDeadLeadGate([localStatus, ...statusChoices.map(c => c.status)], lead, activeRole === "ADMIN");
 
   const handleSelectStatus = async (nextStatus: LeadStatus) => {

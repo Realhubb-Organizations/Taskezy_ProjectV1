@@ -1,5 +1,7 @@
 import { PoolClient } from "pg";
 import { TASK_DUE_AT_SQL, TASK_OVERDUE_SQL } from "../tasks/taskDue";
+import { REACHED_FOLLOWUP_OR_SITE_VISIT_SQL } from "./leadStatusTransitions";
+import { QUALIFIED_LEAD_SQL, RNR_PICKED_UP_SQL, UNQUALIFIED_LEAD_SQL } from "./qualifiedLeads";
 import { pool, query, withTransaction } from "../../db/pool";
 import { BUSINESS_TIMEZONE } from "../../utils/businessDate";
 import { normalizeForeignPhone } from "../../utils/validation";
@@ -89,6 +91,8 @@ export interface LeadListRow {
   // DEAD_LEAD_MIN_CALL_DAYS threshold is met, instead of only finding out
   // on a rejected save.
   dead_lead_call_days: string;
+  /** Reached Followup / Site Visit at some point — can't go back to RNR, Dead Lead or Call Back. */
+  reached_followup_or_site_visit: boolean;
   // Permanent counter (migration 047), incremented by the SLA scheduler
   // (jobs/followupScheduler.ts) every time a follow-up tied to this lead
   // is flagged MISSED — survives that follow-up row later being
@@ -136,6 +140,9 @@ export interface LeadFilterConditions {
   calledBy?: string[];
   calledFrom?: string;
   calledTo?: string;
+  /** Only qualified / only unqualified leads (qualifiedLeads.ts). */
+  qualifiedOnly?: boolean;
+  unqualifiedOnly?: boolean;
   /** Date column sort; left out = most recently assigned first. */
   sortDir?: "asc" | "desc";
   /** Which date sortDir sorts by — created_at (default) or assigned_at. */
@@ -221,6 +228,8 @@ function buildLeadWhereClause(filter: LeadFilterConditions): { whereClause: stri
     params.push(filter.callStatus);
     conditions.push(`l.call_status = ANY($${params.length}::text[])`);
   }
+  if (filter.qualifiedOnly) conditions.push(QUALIFIED_LEAD_SQL("l"));
+  if (filter.unqualifiedOnly) conditions.push(UNQUALIFIED_LEAD_SQL("l"));
   if (filter.calledBy && filter.calledBy.length > 0) {
     params.push(filter.calledBy);
     const callConds = [`ca.lead_id = l.id`, `ca.channel = 'CALL'`, `ca.caller_user_id = ANY($${params.length}::uuid[])`];
@@ -320,6 +329,7 @@ const LIST_SELECT = `
     l.source, l.sub_source, l.call_status, l.call_sub_status, l.campaign, l.meta_page_name, l.meta_form_id, l.meta_ad_id,
     (SELECT count(DISTINCT (ca.created_at AT TIME ZONE '${BUSINESS_TIMEZONE}')::date)
      FROM call_attempts ca WHERE ca.lead_id = l.id AND ca.channel = 'CALL') AS dead_lead_call_days,
+    ${REACHED_FOLLOWUP_OR_SITE_VISIT_SQL("l")} AS reached_followup_or_site_visit,
     l.missed_task_count,
     -- The lead's task time: Pending Tasks' date and the Next Call Date column (tasks/taskDue.ts)
     ${TASK_DUE_AT_SQL} AS task_due_at,
@@ -401,6 +411,7 @@ export async function getDistinctCampaigns(filter: LeadFilterConditions): Promis
 export interface AgentAnalyticsRow {
   assigned_agent_id: string;
   total: string;
+  qualified: string;
   unqualified: string;
   site_visits: string;
 }
@@ -419,17 +430,17 @@ export interface AgentAnalyticsRow {
  */
 export async function getAnalyticsStatsByAgent(
   filter: LeadFilterConditions,
-  unqualifiedCodes: string[],
   siteVisitCodes: string[]
 ): Promise<AgentAnalyticsRow[]> {
   const { whereClause, params } = buildLeadWhereClause(filter);
-  params.push(unqualifiedCodes, siteVisitCodes);
-  const unqualifiedParam = params.length - 1;
+  params.push(siteVisitCodes);
   const siteVisitParam = params.length;
   const { rows } = await query<AgentAnalyticsRow>(
     `SELECT l.assigned_agent_id,
             count(*) AS total,
-            count(*) FILTER (WHERE l.status_code = ANY($${unqualifiedParam}::text[])) AS unqualified,
+            -- The one qualified / unqualified rule (qualifiedLeads.ts).
+            count(*) FILTER (WHERE ${QUALIFIED_LEAD_SQL("l")}) AS qualified,
+            count(*) FILTER (WHERE ${UNQUALIFIED_LEAD_SQL("l")}) AS unqualified,
             count(*) FILTER (WHERE l.status_code = ANY($${siteVisitParam}::text[])) AS site_visits
      FROM leads l
      ${whereClause}
@@ -501,7 +512,7 @@ export async function getAgentReportStats(
      )
      SELECT count(*) AS assigned,
             count(*) FILTER (WHERE l.status_code != 'NEW_LEAD') AS contacted,
-            count(*) FILTER (WHERE l.status_code = ANY($${qualifiedParam}::text[])) AS qualified,
+            count(*) FILTER (WHERE l.status_code = ANY($${qualifiedParam}::text[]) OR ${RNR_PICKED_UP_SQL("l")}) AS qualified,
             count(*) FILTER (WHERE l.status_code = ANY($${siteVisitParam}::text[])) AS site_visits,
             COALESCE(SUM(l.deal_value) FILTER (WHERE l.status_code = 'BOOKED'), 0) AS booking_value,
             count(*) FILTER (WHERE l.status_code = 'BOOKED') AS booking_count,

@@ -40,6 +40,7 @@ import { DateSortButton, type SortDir } from "@/components/ui/DateSortButton";
 import { useLiveRefresh } from "@/lib/useLiveRefresh";
 import { useBackgroundRefresh } from "@/lib/liveRefresh";
 import MissedCountBadge from "@/components/crm/MissedCountBadge";
+import { QUALIFIED_STATUS_FILTER, UNQUALIFIED_STATUS_FILTER } from "@/lib/qualifiedLeads";
 
 // The admin leads table's togglable columns (beyond the always-shown Lead
 // Name/Email/Assigned To) — driven by the Filter panel's Settings modal.
@@ -104,7 +105,8 @@ function PaginatedSubList<T>({ items, rowLabel, children }: { items: T[]; rowLab
 // drill-down click handlers (which need to set the Leads tab's status
 // filter to "whichever statuses this number represents") share one
 // definition instead of drifting apart.
-const UNQUALIFIED_STATUSES: LeadStatus[] = ["RNR", "Low Budget", "Dead Lead", "Not Interested"];
+// The one qualified / unqualified rule (lib/qualifiedLeads.ts) — drill-downs use its markers.
+const UNQUALIFIED_STATUSES = [UNQUALIFIED_STATUS_FILTER];
 const SITE_VISIT_STATUSES: LeadStatus[] = ["Site Visit Scheduled", "Site Visit Done"];
 
 // The Leads Analytics per-agent table's togglable columns — Member Name
@@ -322,7 +324,7 @@ export default function LeadDashboard() {
     // one are offered — e.g. Site Visit Done only shows once the lead is on
     // Site Visit Scheduled (or Different Location), not from every status.
     // The backend re-enforces this independently (leadStatusTransitions.ts).
-    const allOptions = [l.status, ...nextStatusOptions(l.status).map(c => c.status)];
+    const allOptions = [l.status, ...nextStatusOptions(l.status, isAdmin).map(c => c.status)];
     return (
       <SearchableSelect
         variant="inline"
@@ -730,11 +732,12 @@ export default function LeadDashboard() {
   const [analyticsDrilldown, setAnalyticsDrilldown] = useState<{ title: string; baseFilters: LeadListFilters } | null>(null);
   const [drilldownSearchOpen, setDrilldownSearchOpen] = useState(false);
 
-  const openAnalyticsDrilldown = (assignedNames: string[], statusScope: LeadStatus[] | null, title: string) => {
+  const openAnalyticsDrilldown = (assignedNames: string[], statusScope: string[] | null, title: string) => {
     const effectiveNames = analyticsMemberFilter.length > 0 ? assignedNames.filter(n => analyticsMemberFilter.includes(n)) : assignedNames;
     const assignedAgentId = users.filter(u => effectiveNames.includes(u.name)).map(u => u.id);
     const propertyId = properties.filter(p => analyticsPropertyFilter.includes(p.name)).map(p => p.id);
-    const status = statusScope ? statusScope.map(s => frontendStatusToDbCode(s)).filter((c): c is string => !!c) : undefined;
+    // Qualified / Unqualified markers pass through as they are (apiClient turns them into server flags).
+    const status = statusScope ? statusScope.map(s => (s.startsWith("@") ? s : frontendStatusToDbCode(s as LeadStatus))).filter((c): c is string => !!c) : undefined;
     setAnalyticsDrilldown({
       title,
       baseFilters: {
@@ -760,7 +763,7 @@ export default function LeadDashboard() {
   } = useServerLeadList(analyticsDrilldown?.baseFilters ?? {}, 8);
 
 
-  const QUALIFIED_STATUS_OPTIONS = STATUS_OPTIONS.filter(s => !UNQUALIFIED_STATUSES.includes(s));
+  const QUALIFIED_STATUS_OPTIONS = [QUALIFIED_STATUS_FILTER];
 
   // Manager/Member actually work this table by calling/WhatsApping leads
   // straight from the row, so the Actions column starts visible for them
