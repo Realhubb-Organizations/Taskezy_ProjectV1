@@ -182,6 +182,25 @@ export async function hasAdSetsForCampaign(campaignId: string): Promise<boolean>
   return (result.rowCount ?? 0) > 0;
 }
 
+// Tells syncOnce whether this campaign's CAMPAIGN-LEVEL spend (ad_spend_records
+// — the table the Campaigns page's cards/chart and Marketing Reports actually
+// read from) has ever had its one-time wide backfill. Checking "any row
+// exists" (like hasAdLevelSpendRecordsForAd does) isn't enough here — almost
+// every campaign already has rows from the normal rolling window, which would
+// make that check true immediately and skip the backfill for good. Instead
+// this checks for a row OLDER than the current rolling window's start: if
+// none exists, this campaign has only ever been seen through the narrow
+// window and still needs its wide pull. Once backfilled, its oldest row is
+// ~365 days old — always older than any future window's start — so this
+// never re-triggers for the same campaign.
+export async function hasOlderCampaignSpendHistory(campaignId: string, olderThan: string): Promise<boolean> {
+  const result = await pool.query(
+    "SELECT 1 FROM ad_spend_records WHERE meta_campaign_id = $1 AND spend_date < $2 LIMIT 1",
+    [campaignId, olderThan]
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
 // Tells syncOnce whether this ad has ever had its insights pulled before —
 // the only ad-level rows that exist are the normal rolling lookback
 // window's worth, so an ad discovered late (its campaign already gone

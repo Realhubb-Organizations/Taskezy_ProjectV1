@@ -965,6 +965,83 @@ export async function setPropertyId(client: PoolClient, leadId: string, property
   await client.query(`UPDATE leads SET property_id = $1 WHERE id = $2`, [propertyId, leadId]);
 }
 
+export interface SetLeadPropertyChunkResult {
+  updated: string[];
+  skipped: string[]; // already has this property
+  notFound: string[]; // doesn't exist, or outside the caller's scope (indistinguishable from the caller's point of view, matching findById's own scoped-filter behavior)
+}
+
+/**
+ * Batched version of setLeadProperty for bulk property changes — one
+ * transaction per chunk, one set-based query per step instead of ~5
+ * queries x N leads (each lead was previously re-validated and re-fetched
+ * through the full single-lead path, including a redundant findById
+ * fetched 3 times over for the same row).
+ */
+export async function setLeadPropertyChunk(
+  ids: string[],
+  propertyId: string | null,
+  newPropertyName: string | undefined,
+  scopedToAgentIds: string[] | undefined,
+  note: string | undefined,
+  actor: { userId: string; name: string }
+): Promise<SetLeadPropertyChunkResult> {
+  if (ids.length === 0) return { updated: [], skipped: [], notFound: [] };
+
+  return withTransaction(async (client) => {
+    const { rows: existingRows } = await client.query<{ id: string; assigned_agent_id: string; property_id: string | null; property_name: string | null }>(
+      `SELECT l.id, l.assigned_agent_id, l.property_id, p.name AS property_name
+       FROM leads l LEFT JOIN properties p ON p.id = l.property_id
+       WHERE l.id = ANY($1::uuid[]) FOR UPDATE OF l`,
+      [ids]
+    );
+    const foundIds = new Set(existingRows.map(r => r.id));
+    const notFound = ids.filter(id => !foundIds.has(id));
+
+    const skipped: string[] = [];
+    const candidates: { id: string; beforeName: string | null }[] = [];
+    for (const row of existingRows) {
+      // Same outcome as the single-lead path's scoped findById: a lead
+      // outside the caller's scope is reported identically to "doesn't exist".
+      if (scopedToAgentIds && !scopedToAgentIds.includes(row.assigned_agent_id)) { notFound.push(row.id); continue; }
+      if ((row.property_id ?? null) === propertyId) { skipped.push(row.id); continue; }
+      candidates.push({ id: row.id, beforeName: row.property_name });
+    }
+    if (candidates.length === 0) return { updated: [], skipped, notFound };
+
+    const candidateIds = candidates.map(c => c.id);
+    await client.query(`UPDATE leads SET property_id = $1 WHERE id = ANY($2::uuid[])`, [propertyId, candidateIds]);
+    if (note) {
+      await client.query(
+        `UPDATE leads SET notes = $1, notes_updated_at = now(), notes_updated_by = $2 WHERE id = ANY($3::uuid[])`,
+        [note, actor.userId, candidateIds]
+      );
+    }
+
+    const logLeadIds: string[] = [];
+    const logUserIds: string[] = [];
+    const logUserNames: string[] = [];
+    const logMessages: string[] = [];
+    for (const c of candidates) {
+      const message = !newPropertyName
+        ? `Property removed (was "${c.beforeName}")`
+        : c.beforeName
+          ? `Property changed from "${c.beforeName}" to "${newPropertyName}"`
+          : `Property set to "${newPropertyName}"`;
+      logLeadIds.push(c.id);
+      logUserIds.push(actor.userId);
+      logUserNames.push(actor.name);
+      logMessages.push(note ? `${message}. Note: ${note}` : message);
+    }
+    await client.query(
+      `INSERT INTO lead_logs (lead_id, user_id, user_name_snapshot, message) SELECT * FROM unnest($1::uuid[], $2::uuid[], $3::text[], $4::text[])`,
+      [logLeadIds, logUserIds, logUserNames, logMessages]
+    );
+
+    return { updated: candidateIds, skipped, notFound };
+  });
+}
+
 /** Locks and returns every lead held by `agentId`, oldest first (for handing them over before the agent is deleted). */
 export async function lockLeadIdsForAgent(client: PoolClient, agentId: string): Promise<string[]> {
   const { rows } = await client.query<{ id: string }>(
@@ -1126,6 +1203,107 @@ export async function reassign(client: PoolClient, leadId: string, previousAgent
     [leadId]
   );
   return closed.rowCount ?? 0;
+}
+
+export interface ReassignLeadsChunkResult {
+  moved: string[];
+  skipped: string[]; // already assigned to the new agent
+  notFound: string[];
+  outOfScope: string[]; // exists, but outside a Manager caller's own team — a distinct, named reason, unlike setLeadPropertyChunk's "indistinguishable from not found"
+}
+
+/**
+ * Batched version of reassign for bulk reassignment — one transaction per
+ * chunk, one set-based query per step instead of ~8 sequential queries x N
+ * leads (each lead previously re-ran the ENTIRE single-lead reassignLead
+ * path, including re-fetching the caller's team scope from the DB on every
+ * iteration even though it never changes within one bulk job).
+ */
+export async function reassignLeadsChunk(
+  ids: string[],
+  newAgentId: string,
+  newAgentName: string,
+  scopedToAgentIds: string[] | undefined,
+  note: string | undefined,
+  actor: { userId: string; name: string }
+): Promise<ReassignLeadsChunkResult> {
+  if (ids.length === 0) return { moved: [], skipped: [], notFound: [], outOfScope: [] };
+
+  return withTransaction(async (client) => {
+    const { rows: existingRows } = await client.query<{ id: string; assigned_agent_id: string }>(
+      `SELECT id, assigned_agent_id FROM leads WHERE id = ANY($1::uuid[]) FOR UPDATE`,
+      [ids]
+    );
+    const foundIds = new Set(existingRows.map(r => r.id));
+    const notFound = ids.filter(id => !foundIds.has(id));
+
+    const outOfScope: string[] = [];
+    const skipped: string[] = [];
+    const candidateIds: string[] = [];
+    for (const row of existingRows) {
+      if (scopedToAgentIds && !scopedToAgentIds.includes(row.assigned_agent_id)) { outOfScope.push(row.id); continue; }
+      if (row.assigned_agent_id === newAgentId) { skipped.push(row.id); continue; }
+      candidateIds.push(row.id);
+    }
+    if (candidateIds.length === 0) return { moved: [], skipped, notFound, outOfScope };
+
+    // Open follow-ups each candidate will close, counted before the UPDATE
+    // below changes them — same count the single-lead path's closedFollowupsLog uses.
+    const { rows: closedCountRows } = await client.query<{ lead_id: string; closed: string }>(
+      `SELECT lead_id, count(*) AS closed FROM followup_calls WHERE lead_id = ANY($1::uuid[]) AND status <> 'COMPLETED' GROUP BY lead_id`,
+      [candidateIds]
+    );
+    const closedCountByLead = new Map(closedCountRows.map(r => [r.lead_id, Number(r.closed)]));
+
+    // All SET expressions below see each row's pre-update values (standard
+    // Postgres UPDATE semantics), so previous_agent_id/previous_agent_name
+    // correctly capture the OLD owner even though assigned_agent_id is
+    // overwritten in the very same statement — matches reassign()'s per-row version exactly.
+    await client.query(
+      `UPDATE leads
+       SET previous_agent_id = assigned_agent_id,
+           previous_agent_name = (SELECT first_name || COALESCE(' ' || last_name, '') FROM users WHERE id = leads.assigned_agent_id),
+           assigned_agent_id = $2, reassigned_at = now(), assigned_at = now(), first_response_at = NULL,
+           missed_task_count = 0,
+           status_code = CASE WHEN status_code = 'UNASSIGNED' THEN 'NEW_LEAD' ELSE status_code END
+       WHERE id = ANY($1::uuid[])`,
+      [candidateIds, newAgentId]
+    );
+    await client.query(
+      `UPDATE followup_calls SET status = 'COMPLETED' WHERE lead_id = ANY($1::uuid[]) AND status <> 'COMPLETED'`,
+      [candidateIds]
+    );
+    if (note) {
+      await client.query(
+        `UPDATE leads SET notes = $1, notes_updated_at = now(), notes_updated_by = $2 WHERE id = ANY($3::uuid[])`,
+        [note, actor.userId, candidateIds]
+      );
+    }
+
+    const logLeadIds: string[] = [];
+    const logUserIds: string[] = [];
+    const logUserNames: string[] = [];
+    const logMessages: string[] = [];
+    for (const id of candidateIds) {
+      logLeadIds.push(id);
+      logUserIds.push(actor.userId);
+      logUserNames.push(actor.name);
+      logMessages.push(note ? `Reassigned to ${newAgentName}. Note: ${note}` : `Reassigned to ${newAgentName}`);
+      const closed = closedCountByLead.get(id) ?? 0;
+      if (closed > 0) {
+        logLeadIds.push(id);
+        logUserIds.push(actor.userId);
+        logUserNames.push(actor.name);
+        logMessages.push(`${closed} open follow-up${closed === 1 ? "" : "s"} from the previous agent closed on reassignment.`);
+      }
+    }
+    await client.query(
+      `INSERT INTO lead_logs (lead_id, user_id, user_name_snapshot, message) SELECT * FROM unnest($1::uuid[], $2::uuid[], $3::text[], $4::text[])`,
+      [logLeadIds, logUserIds, logUserNames, logMessages]
+    );
+
+    return { moved: candidateIds, skipped, notFound, outOfScope };
+  });
 }
 
 /**

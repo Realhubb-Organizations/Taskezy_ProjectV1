@@ -1601,6 +1601,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!currentUser) return;
     apiListProperties().then((rows) => setProperties(rows.map(mapApiPropertyToFrontend))).catch(() => { /* keep the previous list */ });
   });
+  // Bulk-loaded ad-spend records (Campaigns tab table, CSV export, Deep
+  // Dive's base list) — loaded once at login otherwise, so without this a
+  // completed Meta/Google sync never showed up on an already-open session
+  // short of a manual reload. Admin-only, same as the initial load, so a
+  // Manager/Member session's adspend bump doesn't eat a guaranteed 403.
+  useThrottledOnChange(dataVersion.adspend, 30_000, () => {
+    if (!currentUser || currentUser.role !== "ADMIN") return;
+    apiListAdSpend().then((rows) => setAdSpendRecords(rows.map(mapApiAdSpendToFrontend))).catch(() => { /* keep the previous list */ });
+  });
   // Full reload of the bulk-loaded leads (Data Calling, dashboard cards read
   // these) — only for bulk changes, where fetching each changed lead one by
   // one would flood the API. At most once a minute.

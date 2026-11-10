@@ -9,7 +9,7 @@ import { publishToAll } from "./sseHub";
 // Changes landing within COALESCE_MS of each other go out as ONE event, so a
 // bulk import / bulk reassign of hundreds of leads is a single refresh on
 // every screen, not hundreds.
-export type DataTopic = "leads" | "followups" | "tasks" | "calllog" | "properties" | "users" | "calendar";
+export type DataTopic = "leads" | "followups" | "tasks" | "calllog" | "properties" | "users" | "calendar" | "adspend";
 
 const COALESCE_MS = 1000;
 const pending = new Set<DataTopic>();

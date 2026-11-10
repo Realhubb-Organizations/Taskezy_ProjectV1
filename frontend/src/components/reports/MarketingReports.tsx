@@ -138,7 +138,10 @@ export default function MarketingReports({ dateRange, onDateRangeChange }: { dat
   // ---- Data ----
   const [stats, setStats] = useState<MarketingProjectStats>(ZERO_STATS);
   const [loading, setLoading] = useState(true);
-  const { liveVersion, isBackground } = useLiveRefresh("leads");
+  // "adspend" so a completed Meta/Google sync (background or manual) shows
+  // up here live too, same as the Campaigns page — these numbers read the
+  // same ad_spend_records table via apiGetMarketingProjectStats below.
+  const { liveVersion, isBackground } = useLiveRefresh("leads", "adspend");
   const filters = {
     dateFrom: dateRange.from,
     dateTo: dateRange.to,

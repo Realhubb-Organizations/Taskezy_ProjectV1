@@ -10,6 +10,7 @@ import {
 } from "../modules/meta/meta-client";
 import * as metaRepo from "../modules/meta/meta.repository";
 import { businessDateOffset } from "../utils/businessDate";
+import { broadcastDataChanged } from "../utils/dataChanged";
 
 const POLL_INTERVAL_MS = 6 * 60 * 60 * 1000; // spend doesn't need per-minute freshness like leads
 const LOOKBACK_DAYS = 35; // covers the Reports page's "Last 30 Days" preset with buffer for late-arriving data
@@ -18,6 +19,17 @@ const LOOKBACK_DAYS = 35; // covers the Reports page's "Last 30 Days" preset wit
 // comfortably covers this business's real campaign lifespans without
 // pushing into Meta's harder historical limits (~37 months).
 const FIRST_SYNC_LOOKBACK_DAYS = 365;
+
+// Caps how many campaigns can trigger the one-time 365-day campaign-level
+// backfill (see hasOlderCampaignSpendHistory) in a single 6h cycle. Without
+// this, the first cycle after this shipped would try to wide-backfill every
+// existing campaign across every ad account at once — a much bigger burst
+// than the per-ad version ever sees, risking Meta's per-ad-account rate
+// limit and delaying the fresh-data sync the still-ACTIVE campaigns need
+// that same cycle. Campaigns past the cap just get their normal 35-day sync
+// this cycle and take their turn on a later one — raise this if rate limits
+// comfortably allow it, lower it if cycles start failing.
+const MAX_WIDE_BACKFILLS_PER_CYCLE = 5;
 
 function isoDateNDaysAgo(n: number): string {
   return businessDateOffset(-n);
@@ -72,6 +84,7 @@ async function runSync(): Promise<void> {
 
   const since = isoDateNDaysAgo(LOOKBACK_DAYS);
   const until = isoDateNDaysAgo(0);
+  let wideBackfillsThisCycle = 0;
 
   for (const account of adAccounts) {
     let campaigns;
@@ -87,7 +100,15 @@ async function runSync(): Promise<void> {
       try {
         const propertyId = await metaRepo.upsertCampaign({ id: campaign.id, adAccountId: account.id, name: campaign.name, status });
 
-        const dailyInsights = await getCampaignDailyInsights(campaign.id, account.userToken, since, until);
+        // One-time wide backfill, same reasoning as the per-ad version below
+        // — see hasOlderCampaignSpendHistory's comment — capped per cycle so
+        // a large backlog of un-backfilled campaigns can't all fire at once.
+        const hasOlderHistory = await metaRepo.hasOlderCampaignSpendHistory(campaign.id, since);
+        const needsWideBackfill = !hasOlderHistory && wideBackfillsThisCycle < MAX_WIDE_BACKFILLS_PER_CYCLE;
+        if (needsWideBackfill) wideBackfillsThisCycle++;
+        const campaignSince = needsWideBackfill ? isoDateNDaysAgo(FIRST_SYNC_LOOKBACK_DAYS) : since;
+
+        const dailyInsights = await getCampaignDailyInsights(campaign.id, account.userToken, campaignSince, until);
         for (const day of dailyInsights) {
           await metaRepo.upsertSpendRecord({
             campaignId: campaign.id,
@@ -177,6 +198,11 @@ async function runSync(): Promise<void> {
     }
   }
 
+  // Lets a Campaigns page already open live-refresh its numbers instead of
+  // needing a manual reload to see this cycle's new/backfilled rows — the
+  // same `data-changed` mechanism every other live number on this app
+  // already uses, not a new polling path.
+  broadcastDataChanged("adspend");
   logger.info({ adAccounts: adAccounts.length }, "Meta ad spend sync cycle complete");
 }
 

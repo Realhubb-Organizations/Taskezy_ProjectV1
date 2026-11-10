@@ -143,6 +143,24 @@ export interface UpsertGoogleAdLevelSpendInput {
 // account has never had ANY ad-level insight row, this sync's call uses
 // a much wider window so newly-discovered inactive ads don't miss their
 // real activity the way a narrow 35-day first look could.
+// Mirrors meta.repository's hasOlderCampaignSpendHistory, at account
+// granularity since Google's campaign-level daily stats call is account-wide
+// (see googleAdsSpendSync.ts's runSync — one getAccountDailyStats call covers
+// every campaign under the account, not one call per campaign). Checks for a
+// row OLDER than the current rolling window's start, not just "any row" —
+// almost every account already has rows from the normal rolling window, so
+// an "any row" check would never trigger the backfill for an existing
+// account, only a brand-new one.
+export async function hasOlderSpendHistoryForAccount(accountId: string, olderThan: string): Promise<boolean> {
+  const result = await pool.query(
+    `SELECT 1 FROM ad_spend_records a
+     JOIN google_ads_campaigns gc ON gc.id = a.google_campaign_id
+     WHERE gc.account_id = $1 AND a.spend_date < $2 LIMIT 1`,
+    [accountId, olderThan]
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
 export async function hasAdLevelSpendRecordsForAccount(accountId: string): Promise<boolean> {
   const result = await pool.query(
     `SELECT 1 FROM google_ad_level_spend_records gls
