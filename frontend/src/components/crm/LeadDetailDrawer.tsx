@@ -92,9 +92,10 @@ export default function LeadDetailDrawer({
     const others = users.filter(u => u.name !== lead?.assignedAgent && isLeadAssignableUser(u));
     if (activeRole === "ADMIN") return others;
     if (currentUser.role_type === "Manager") {
-      // Herself plus her direct reports (same as the server), minus the
-      // lead's current owner — so a one-person team still offers the manager.
-      return others.filter(u => u.id === currentUser.id || u.managerId === currentUser.id);
+      // Herself, her direct reports and every other manager (same as the
+      // server), minus the lead's current owner — so a one-person team still
+      // offers the manager.
+      return others.filter(u => u.id === currentUser.id || u.managerId === currentUser.id || u.role_type === "Manager");
     }
     // Agents can't reassign leads (admins and managers only).
     return [];

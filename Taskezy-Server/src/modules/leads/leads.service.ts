@@ -1068,7 +1068,10 @@ async function assertReassignAllowed(caller: AccessTokenPayload, newAgentId: str
     if (newAgentId === caller.sub) return;
     const target = await usersRepo.findById(newAgentId);
     if (target?.manager_id === caller.sub) return;
-    throw ApiError.forbidden("You can only reassign leads to one of your own direct reports.");
+    // Any other active sales manager too — managers look after different
+    // locations, so a lead for another manager's location goes straight to them.
+    if (target?.role === "AGENT" && target.role_type === "MANAGER" && target.status === "ACTIVE") return;
+    throw ApiError.forbidden("You can only reassign leads to your own direct reports or to another manager.");
   }
 
   // Agents can't reassign (the route already refuses them); kept as a guard
