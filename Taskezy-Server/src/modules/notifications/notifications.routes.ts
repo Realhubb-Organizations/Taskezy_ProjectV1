@@ -62,8 +62,11 @@ notificationsRouter.get("/stream", (req, res) => {
   // just the user's overall connection) actually closes. ?deviceLabel=
   // (native app only, see presence.routes.ts) overrides the User-Agent
   // guess, since a WebView's UA can't tell two phones apart.
+  // Capped to match presence.routes.ts's heartbeat schema (z.string().max(200))
+  // — a query param has no schema validation like a JSON body does, so this
+  // is the one place that cap has to be enforced by hand.
   const rawDeviceLabel = req.query.deviceLabel;
-  const deviceLabel = typeof rawDeviceLabel === "string" && rawDeviceLabel
+  const deviceLabel = typeof rawDeviceLabel === "string" && rawDeviceLabel && rawDeviceLabel.length <= 200
     ? rawDeviceLabel
     : describeDevice(req.headers["user-agent"]);
   const unsubscribe = subscribe(userId, res, deviceLabel);

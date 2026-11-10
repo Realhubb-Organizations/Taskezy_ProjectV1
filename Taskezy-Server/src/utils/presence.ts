@@ -12,6 +12,15 @@ const heartbeats = new Map<string, { active: boolean; lastHeartbeatAt: number; l
 // loginOtp.ts) — lets a web device row show its own live dot. The native
 // app's one row has no equivalent label to key by here, so it just falls
 // back to the user's overall status (see users.routes.ts's /:id/devices).
+//
+// deviceLabel is caller-supplied (see presence.routes.ts) and nothing ever
+// evicted an entry here — any authenticated user could send a new random
+// label on every heartbeat and grow this map forever (unbounded in-memory
+// DoS, no special privilege needed). MAX_DEVICES_PER_USER bounds it: no
+// real person has more than a handful of devices, so capping well above
+// that and evicting the least-recently-updated entry when exceeded can
+// never affect genuine use, only an attacker trying to flood it.
+const MAX_DEVICES_PER_USER = 20;
 const deviceHeartbeats = new Map<string, Map<string, { active: boolean; lastHeartbeatAt: number }>>();
 
 // A heartbeat older than this is ignored (treated as idle) even if it last
@@ -34,6 +43,14 @@ export function recordHeartbeat(userId: string, active: boolean, deviceLabel?: s
       byDevice = new Map();
       deviceHeartbeats.set(userId, byDevice);
     }
+    // Map iteration order is insertion order, and re-setting an existing
+    // key doesn't change its position — so the first key is genuinely the
+    // least-recently-updated one, not just the oldest-inserted.
+    if (!byDevice.has(deviceLabel) && byDevice.size >= MAX_DEVICES_PER_USER) {
+      const oldest = byDevice.keys().next().value;
+      if (oldest !== undefined) byDevice.delete(oldest);
+    }
+    byDevice.delete(deviceLabel); // re-insert at the end so it's treated as most-recently-updated
     byDevice.set(deviceLabel, { active, lastHeartbeatAt: now });
   }
 }
