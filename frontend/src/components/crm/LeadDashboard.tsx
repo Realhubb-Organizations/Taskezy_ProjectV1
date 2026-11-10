@@ -1,19 +1,19 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useApp, Lead, LeadStatus, mapApiLeadToFrontendLead } from "@/context/AppContext";
 import { useDialog } from "@/components/ui/DialogProvider";
 import { isSuperAdminUser } from "@/lib/superAdmin";
-import { Sliders, Sparkles, Plus, Check, ChevronDown, Search, X, Minus, Download, RotateCcw, Users, Trash2, AlertTriangle, Building2, ClipboardList, Upload, GripVertical } from "lucide-react";
+import { Sliders, Sparkles, Plus, Check, ChevronDown, Search, X, Minus, Download, RotateCcw, Users, Trash2, AlertTriangle, Building2, ClipboardList, Upload, GripVertical, CirclePlus, CircleMinus, ArrowLeft } from "lucide-react";
 import { STATUS_OPTIONS, PICKABLE_STATUS_OPTIONS, frontendStatusToDbCode, withDeadLeadGate, nextStatusOptions } from "@/lib/leadStatusMapping";
 import { type LeadSummaryStats } from "@/lib/leadSummaryStats";
 import { FROM_NOTIFICATIONS_PARAM, FROM_NOTIFICATIONS_VALUE } from "@/lib/reportDetail";
-import { apiListLeadsPage, apiGetLead, apiGetLeadStats, apiGetLeadAnalyticsStats, apiGetDistinctCampaigns, apiDeleteLead, apiBulkDeleteLeads, apiBulkReassignLeads, apiBulkSetLeadProperty, apiSetLeadProperty, apiSearchLeadsByPhones, type LeadListFilters, type AgentAnalyticsStats } from "@/lib/apiClient";
+import { apiListLeadsPage, apiGetLead, apiGetLeadStats, apiGetLeadAnalyticsStats, apiGetDistinctCampaigns, apiDeleteLead, apiBulkDeleteLeads, apiBulkReassignLeads, apiBulkSetLeadProperty, apiSetLeadProperty, apiSearchLeadsByPhones, apiGetLeadAnalyticsPropertyStats, apiGetRnrCallAverages, type LeadListFilters, type AgentAnalyticsStats, type PropertyAnalyticsStats } from "@/lib/apiClient";
 import { useServerLeadList } from "@/lib/useServerLeadList";
 import { PlatformLabel, platformFromText } from "@/components/icons/ContactIcons";
-import ExpandChevron, { CollapsibleCell } from "@/components/ui/ExpandChevron";
+import { CollapsibleCell } from "@/components/ui/ExpandChevron";
 import { isPhoneLayout } from "@/lib/viewport";
 import { dateRangeLabel } from "@/lib/dateRangeLabel";
 import { openOnRowClick, LEAD_ROW_CLASS } from "@/lib/rowClick";
@@ -95,7 +95,8 @@ function PaginatedSubList<T>({ items, rowLabel, children }: { items: T[]; rowLab
   return (
     <>
       {children(pageRows)}
-      <TablePagination {...paginationProps} rowLabel={rowLabel} className="!px-0 !pb-0" />
+      {/* A team that fits on one page needs no footer. */}
+      {items.length > 10 && <TablePagination {...paginationProps} rowLabel={rowLabel} className="!px-0 !pb-0" />}
     </>
   );
 }
@@ -128,8 +129,10 @@ const ANALYTICS_COLUMNS: { key: AnalyticsColumnKey; label: string }[] = [
 ];
 
 const ANALYTICS_DEFAULT_VISIBLE_COLUMNS: Record<AnalyticsColumnKey, boolean> = {
-  teamTotal: true, total: true, qualified: true, unqualified: true, siteVisits: true, qlPct: true, ql2svPct: true
+  teamTotal: false, total: true, qualified: true, unqualified: true, siteVisits: true, qlPct: true, ql2svPct: true
 };
+// The Property card's columns — same as the member table's, minus the team-only one.
+const PROPERTY_COLUMN_KEYS = ["total", "qualified", "unqualified", "siteVisits", "qlPct", "ql2svPct"] as const;
 
 export default function LeadDashboard() {
   const {
@@ -426,6 +429,8 @@ export default function LeadDashboard() {
     const params = new URLSearchParams(searchParams.toString());
     if (adminTab === "analytics") params.set("tab", "analytics");
     else params.delete("tab");
+    // Leaving the analytics tab also leaves its lead-list page.
+    if (adminTab !== "analytics") params.delete("drill");
     const query = params.toString();
     router.replace(`/dashboard/crm${query ? `?${query}` : ""}`, { scroll: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -729,27 +734,68 @@ export default function LeadDashboard() {
   // discrete page-by-page pagination (same pattern as LeadDrillDownPanel),
   // not the old continuous scroll-spy, which needed every row mounted at
   // once and risked undercounting a busy agent/team's real total.
-  const [analyticsDrilldown, setAnalyticsDrilldown] = useState<{ title: string; baseFilters: LeadListFilters } | null>(null);
+  // What was clicked (who / which statuses / which property); its lead-list
+  // filters are worked out live below, so the list page's own date /
+  // property / campaign controls keep applying to it.
+  const [analyticsDrilldown, setAnalyticsDrilldown] = useState<{
+    title: string;
+    names: string[] | null; // null = every member (still narrowed by the Member filter)
+    statusScope: string[] | null;
+    property?: string | null; // a Property card row: its id, or null = no property
+  } | null>(null);
   const [drilldownSearchOpen, setDrilldownSearchOpen] = useState(false);
 
-  const openAnalyticsDrilldown = (assignedNames: string[], statusScope: string[] | null, title: string) => {
-    const effectiveNames = analyticsMemberFilter.length > 0 ? assignedNames.filter(n => analyticsMemberFilter.includes(n)) : assignedNames;
-    const assignedAgentId = users.filter(u => effectiveNames.includes(u.name)).map(u => u.id);
-    const propertyId = properties.filter(p => analyticsPropertyFilter.includes(p.name)).map(p => p.id);
+  // The lead list is its own page: opening it adds ?drill=1 to the address,
+  // so the browser's Back button (or the page's Back link) returns here.
+  const drillParams = (drill: boolean) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (drill) params.set("drill", "1");
+    else params.delete("drill");
+    const query = params.toString();
+    return `/dashboard/crm${query ? `?${query}` : ""}`;
+  };
+  const openAnalyticsDrilldown = (assignedNames: string[] | null, statusScope: string[] | null, title: string, property?: string | null) => {
+    setAnalyticsDrilldown({ title, names: assignedNames, statusScope, property });
+    setDrilldownSearchOpen(false);
+    if (!searchParams.get("drill")) router.push(drillParams(true), { scroll: false });
+    window.scrollTo({ top: 0 });
+  };
+  const closeAnalyticsDrilldown = () => {
+    // Step back over the ?drill=1 entry (the effect below then closes it).
+    if (searchParams.get("drill")) router.back();
+    else setAnalyticsDrilldown(null);
+  };
+  // Browser Back (?drill gone) closes the list; a reload on ?drill=1 has
+  // nothing to show, so it drops the param.
+  useEffect(() => {
+    const drillInUrl = !!searchParams.get("drill");
+    if (!drillInUrl && analyticsDrilldown) setAnalyticsDrilldown(null);
+    if (drillInUrl && !analyticsDrilldown) router.replace(drillParams(false), { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
+  const analyticsDrilldownFilters: LeadListFilters = useMemo(() => {
+    if (!analyticsDrilldown) return {};
+    const { names, statusScope, property } = analyticsDrilldown;
+    const memberNames = names
+      ? (analyticsMemberFilter.length > 0 ? names.filter(n => analyticsMemberFilter.includes(n)) : names)
+      : (analyticsMemberFilter.length > 0 ? analyticsMemberFilter : null);
+    const memberIds = memberNames ? users.filter(u => memberNames.includes(u.name)).map(u => u.id) : undefined;
+    const propertyFilterIds = properties.filter(p => analyticsPropertyFilter.includes(p.name)).map(p => p.id);
     // Qualified / Unqualified markers pass through as they are (apiClient turns them into server flags).
     const status = statusScope ? statusScope.map(s => (s.startsWith("@") ? s : frontendStatusToDbCode(s as LeadStatus))).filter((c): c is string => !!c) : undefined;
-    setAnalyticsDrilldown({
-      title,
-      baseFilters: {
-        assignedAgentId,
-        propertyId: propertyId.length > 0 ? propertyId : undefined,
-        campaign: analyticsCampaignFilter.length > 0 ? analyticsCampaignFilter : undefined,
-        status,
-        ...dateRangeToServerBounds(analyticsDateRange, analyticsCustomRange, today)
-      }
-    });
-    setDrilldownSearchOpen(false);
-  };
+    return {
+      // No matching member = an id matching nobody, so the list is empty rather than unfiltered.
+      assignedAgentId: memberIds ? (memberIds.length > 0 ? memberIds : ["00000000-0000-0000-0000-000000000000"]) : undefined,
+      ...(property !== undefined
+        ? (property === null ? { noProperty: true } : { propertyId: [property] })
+        : { propertyId: propertyFilterIds.length > 0 ? propertyFilterIds : undefined }),
+      campaign: analyticsCampaignFilter.length > 0 ? analyticsCampaignFilter : undefined,
+      status,
+      ...dateRangeToServerBounds(analyticsDateRange, analyticsCustomRange, today)
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analyticsDrilldown, analyticsMemberFilter, analyticsPropertyFilter, analyticsCampaignFilter, analyticsDateRange, analyticsCustomRange, users, properties]);
 
   const {
     rows: analyticsDrilldownRows,
@@ -760,7 +806,7 @@ export default function LeadDashboard() {
     sortDir: drilldownSortDir,
     setSortDir: setDrilldownSortDir,
     paginationProps: analyticsDrilldownPaginationProps
-  } = useServerLeadList(analyticsDrilldown?.baseFilters ?? {}, 8);
+  } = useServerLeadList(analyticsDrilldownFilters, 8);
 
 
   const QUALIFIED_STATUS_OPTIONS = [QUALIFIED_STATUS_FILTER];
@@ -1304,6 +1350,34 @@ export default function LeadDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [analyticsPropertyFilter, analyticsCampaignFilter, analyticsDateRange, analyticsCustomRange, properties, leadsLive]);
 
+  // Property card + RNR Analysis averages — same filters, plus the Member filter (server-side here).
+  const [propertyStats, setPropertyStats] = useState<PropertyAnalyticsStats[]>([]);
+  const [propertySearch, setPropertySearch] = useState("");
+  const [rnrSearchOpen, setRnrSearchOpen] = useState(false);
+  const [propertySearchOpen, setPropertySearchOpen] = useState(false);
+  const [propertyPage, setPropertyPage] = useState(1);
+  const [propertyRowsPerPage, setPropertyRowsPerPage] = useState(100);
+  const [rnrAverages, setRnrAverages] = useState<{ callsPerLeadPerDay: number | null; callsBeforeDead: number | null }>({ callsPerLeadPerDay: null, callsBeforeDead: null });
+  useEffect(() => {
+    let cancelled = false;
+    const propertyIds = properties.filter(p => analyticsPropertyFilter.includes(p.name)).map(p => p.id);
+    const memberIds = users.filter(u => analyticsMemberFilter.includes(u.name)).map(u => u.id);
+    const filters = {
+      propertyId: propertyIds.length > 0 ? propertyIds : undefined,
+      campaign: analyticsCampaignFilter.length > 0 ? analyticsCampaignFilter : undefined,
+      assignedAgentId: memberIds.length > 0 ? memberIds : undefined,
+      ...dateRangeToServerBounds(analyticsDateRange, analyticsCustomRange, today)
+    };
+    apiGetLeadAnalyticsPropertyStats(filters)
+      .then(result => { if (!cancelled) setPropertyStats(result); })
+      .catch(() => { /* keep the previous numbers on a transient failure */ });
+    apiGetRnrCallAverages(filters)
+      .then(result => { if (!cancelled) setRnrAverages(result); })
+      .catch(() => { /* keep the previous numbers on a transient failure */ });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analyticsPropertyFilter, analyticsCampaignFilter, analyticsMemberFilter, analyticsDateRange, analyticsCustomRange, properties, users, leadsLive]);
+
   const statsByAgentId = new Map(analyticsStats.map(r => [r.assignedAgentId, r]));
   const userIdByName = new Map(users.map(u => [u.name, u.id]));
 
@@ -1340,18 +1414,27 @@ export default function LeadDashboard() {
   // two real conversion rates derived from those same counts (no new data
   // needed): QL's %age = qualified/total, QL2SV %age = of the qualified
   // leads, what share also reached a site-visit status.
+  // A manager's row is the whole team: the manager's own leads plus every
+  // direct report's — the expanded Team Member rows add up to it (the
+  // manager is listed there too when they hold leads themselves).
   const adminManagerRows = agentsList.map(agentName => {
-    const stats = statsForAgentName(agentName);
+    const own = statsForAgentName(agentName);
     const salesUser = salesTeamUsers.find(u => u.name === agentName);
     const isManager = salesUser?.role_type === "Manager";
-    const directReports = isManager && salesUser
+    const reports = isManager && salesUser
       ? salesTeamUsers
           .filter(u => u.managerId === salesUser.id)
           .map(member => ({ name: member.name, ...statsForAgentName(member.name) }))
       : [];
-    const teamTotal = stats.total + directReports.reduce((sum, d) => sum + d.total, 0);
-    return { agentName, isManager, directReports, teamTotal, ...stats };
-  }).filter(row => row.isManager && (row.total > 0 || row.directReports.some(d => d.total > 0)));
+    const directReports = [...(own.total > 0 ? [{ name: agentName, ...own }] : []), ...reports];
+    const team = directReports.reduce((acc, d) => ({
+      total: acc.total + d.total,
+      qualified: acc.qualified + d.qualified,
+      unqualified: acc.unqualified + d.unqualified,
+      siteVisits: acc.siteVisits + d.siteVisits
+    }), { total: 0, qualified: 0, unqualified: 0, siteVisits: 0 });
+    return { agentName, isManager, directReports, teamTotal: team.total, ...team, ...deriveRates(team.total, team.qualified, team.siteVisits) };
+  }).filter(row => row.isManager && row.total > 0);
 
   // Leads held by anyone outside a manager's team (no manager set, or a
   // non-sales user) are grouped under one "No manager assigned" row so they
@@ -1441,6 +1524,98 @@ export default function LeadDashboard() {
     .filter((d): d is string => !!d)
     .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
 
+  // RNR Analysis averages: whole numbers stay whole, otherwise one decimal.
+  const formatAverage = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
+
+  // Shared toolbar: the main analytics view (with Member) and the lead-list page (without).
+  const renderAnalyticsToolbar = (showMember: boolean) => (
+              <div className="flex flex-wrap items-center justify-end gap-2.5 p-4 border-b border-slate-100">
+                {/* CSV export is switched off for now (shown, not clickable);
+                    drop `disabled` to bring it back — handleExportAnalytics is intact. */}
+                <button
+                  type="button"
+                  onClick={handleExportAnalytics}
+                  disabled
+                  aria-disabled="true"
+                  title="Export as CSV — coming soon"
+                  className="h-9 w-9 shrink-0 flex items-center justify-center bg-white border border-slate-200 rounded-xl text-[#0B1E6E] hover:bg-slate-50 shadow-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white"
+                >
+                  <Download className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsColumnsSettingsOpen(true)}
+                  title="Filter"
+                  className="h-9 w-9 shrink-0 flex items-center justify-center bg-white border border-slate-200 rounded-xl text-[#0B1E6E] hover:bg-slate-50 shadow-sm transition-colors"
+                >
+                  <Sliders className="h-4 w-4" />
+                </button>
+
+                {/* Date range — the shared calendar, same as the Leads tab but with
+                    fully independent state. Applying switches to "custom"; the ×
+                    clears back to the default This Month bucket. */}
+                <DateRangePicker
+                  value={analyticsDateRange === "custom" ? analyticsCustomRange : null}
+                  onChange={(range) => {
+                    setAnalyticsCustomRange(range);
+                    setAnalyticsDateRange(range ? "custom" : "month");
+                    setAnalyticsPage(1);
+                  }}
+                  emptyLabel={DATE_RANGE_OPTIONS.find(o => o.value === analyticsDateRange)?.label ?? "Custom Range"}
+                />
+
+                {showMember && (
+                <SearchableMultiSelect variant="toolbar"
+                  options={agentsList}
+                  selected={analyticsMemberFilter}
+                  onChange={(next) => { setAnalyticsPage(1); setAnalyticsMemberFilter(next); }}
+                  placeholder="Member"
+                  searchPlaceholder="Search members..."
+                  panelWidth={200}
+                />
+                )}
+
+                <SearchableMultiSelect variant="toolbar"
+                  options={analyticsPropertiesList}
+                  selected={analyticsPropertyFilter}
+                  onChange={(next) => { setAnalyticsPage(1); setAnalyticsPropertyFilter(next); }}
+                  placeholder="Property"
+                  searchPlaceholder="Search properties..."
+                  panelWidth={200}
+                />
+
+                {/* Campaigns — grouped by ad platform, same as the Leads tab's own
+                    Campaigns dropdown — Admin-only, same tier as that one and the
+                    Source/Ad Set Name columns. See
+                    project_crm_role_based_lead_scoping memory (2026-10-09). */}
+                {isAdmin && (
+                  <SearchableMultiSelect variant="toolbar"
+                    options={analyticsCampaignOptions}
+                    selected={analyticsCampaignFilter}
+                    onChange={(next) => { setAnalyticsPage(1); setAnalyticsCampaignFilter(next); }}
+                    placeholder="Campaigns"
+                    searchPlaceholder="Search campaigns..."
+                    renderLabel={(l) => <PlatformLabel text={l} />}
+                    panelWidth={260}
+                    align="right"
+                  />
+                )}
+              </div>
+  );
+
+  // Property card rows — the server's per-property numbers, named from the property list.
+  const propertyRows = propertyStats
+    .map(r => ({
+      ...r,
+      name: r.propertyId ? (properties.find(p => p.id === r.propertyId)?.name ?? "Unknown property") : "Not set",
+      ...deriveRates(r.total, r.qualified, r.siteVisits)
+    }))
+    .filter(r => !propertySearch || r.name.toLowerCase().includes(propertySearch.toLowerCase()))
+    .sort((a, b) => b.total - a.total);
+  const propertyTotalPages = Math.max(1, Math.ceil(propertyRows.length / propertyRowsPerPage));
+  const propertyCurrentPage = Math.min(propertyPage, propertyTotalPages);
+  const propertyPageRows = propertyRows.slice((propertyCurrentPage - 1) * propertyRowsPerPage, propertyCurrentPage * propertyRowsPerPage);
+
   return (
     <div className="space-y-4 pb-12 animate-fade-in">
       <div className="flex flex-wrap justify-between items-center gap-3">
@@ -1453,7 +1628,7 @@ export default function LeadDashboard() {
               Leads
             </button>
             <button
-              onClick={() => setAdminTab("analytics")}
+              onClick={() => { if (analyticsDrilldown) closeAnalyticsDrilldown(); setAdminTab("analytics"); }}
               className={`ui-toggle-item ${adminTab === "analytics" ? "ui-toggle-item-active" : ""}`}
             >
               Leads Analytics
@@ -2127,416 +2302,17 @@ export default function LeadDashboard() {
         ) : (
           /* Leads Analytics tab — real per-agent lead-quality breakdown */
           <div className="space-y-4">
-            <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden">
-              <div className="flex flex-wrap items-center justify-end gap-2.5 p-4 border-b border-slate-100">
-                {/* CSV export is switched off for now (shown, not clickable);
-                    drop `disabled` to bring it back — handleExportAnalytics is intact. */}
-                <button
-                  type="button"
-                  onClick={handleExportAnalytics}
-                  disabled
-                  aria-disabled="true"
-                  title="Export as CSV — coming soon"
-                  className="h-9 w-9 shrink-0 flex items-center justify-center bg-white border border-slate-200 rounded-xl text-[#0B1E6E] hover:bg-slate-50 shadow-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white"
-                >
-                  <Download className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsColumnsSettingsOpen(true)}
-                  title="Filter"
-                  className="h-9 w-9 shrink-0 flex items-center justify-center bg-white border border-slate-200 rounded-xl text-[#0B1E6E] hover:bg-slate-50 shadow-sm transition-colors"
-                >
-                  <Sliders className="h-4 w-4" />
-                </button>
-
-                {/* Date range — the shared calendar, same as the Leads tab but with
-                    fully independent state. Applying switches to "custom"; the ×
-                    clears back to the default This Month bucket. */}
-                <DateRangePicker
-                  value={analyticsDateRange === "custom" ? analyticsCustomRange : null}
-                  onChange={(range) => {
-                    setAnalyticsCustomRange(range);
-                    setAnalyticsDateRange(range ? "custom" : "month");
-                    setAnalyticsPage(1);
-                  }}
-                  emptyLabel={DATE_RANGE_OPTIONS.find(o => o.value === analyticsDateRange)?.label ?? "Custom Range"}
-                />
-
-                <SearchableMultiSelect variant="toolbar"
-                  options={agentsList}
-                  selected={analyticsMemberFilter}
-                  onChange={(next) => { setAnalyticsPage(1); setAnalyticsMemberFilter(next); }}
-                  placeholder="Member"
-                  searchPlaceholder="Search members..."
-                  panelWidth={200}
-                />
-
-                <SearchableMultiSelect variant="toolbar"
-                  options={analyticsPropertiesList}
-                  selected={analyticsPropertyFilter}
-                  onChange={(next) => { setAnalyticsPage(1); setAnalyticsPropertyFilter(next); }}
-                  placeholder="Property"
-                  searchPlaceholder="Search properties..."
-                  panelWidth={200}
-                />
-
-                {/* Campaigns — grouped by ad platform, same as the Leads tab's own
-                    Campaigns dropdown — Admin-only, same tier as that one and the
-                    Source/Ad Set Name columns. See
-                    project_crm_role_based_lead_scoping memory (2026-10-09). */}
-                {isAdmin && (
-                  <SearchableMultiSelect variant="toolbar"
-                    options={analyticsCampaignOptions}
-                    selected={analyticsCampaignFilter}
-                    onChange={(next) => { setAnalyticsPage(1); setAnalyticsCampaignFilter(next); }}
-                    placeholder="Campaigns"
-                    searchPlaceholder="Search campaigns..."
-                    renderLabel={(l) => <PlatformLabel text={l} />}
-                    panelWidth={260}
-                    align="right"
-                  />
-                )}
-              </div>
-
+            {analyticsDrilldown ? (
               <>
-                {isAdmin ? (
-                  <>
-                  <div className="overflow-x-auto">
-                    <table
-                      className="w-full text-left text-xs border-collapse table-fixed"
-                      style={{ minWidth: (1 + ANALYTICS_COLUMNS.filter(c => analyticsVisibleColumns[c.key]).length) * 150 }}
-                    >
-                      <colgroup>
-                        {/* Wider name column: the name, its "+N" team pill and the chevron share it. */}
-                        <col className="w-[220px]" />
-                        {analyticsVisibleColumns.teamTotal && <col />}
-                        {analyticsVisibleColumns.total && <col />}
-                        {analyticsVisibleColumns.qualified && <col />}
-                        {analyticsVisibleColumns.unqualified && <col />}
-                        {analyticsVisibleColumns.siteVisits && <col />}
-                        {analyticsVisibleColumns.qlPct && <col />}
-                        {analyticsVisibleColumns.ql2svPct && <col />}
-                      </colgroup>
-                      <thead>
-                        <tr className="border-b border-slate-200 text-left text-xs font-bold text-slate-800">
-                          <th className="px-4 py-3 whitespace-nowrap">
-                            {analyticsManagerSearchOpen ? (
-                              <div className="flex items-center gap-1">
-                                <input
-                                  autoFocus
-                                  value={analyticsManagerSearch}
-                                  onChange={(e) => setAnalyticsManagerSearch(e.target.value)}
-                                  onBlur={() => { if (!analyticsManagerSearch) setAnalyticsManagerSearchOpen(false); }}
-                                  placeholder="Search manager..."
-                                  className="min-w-0 flex-1 bg-white border border-brand-400 rounded-md px-1.5 py-1 text-[11px] font-normal focus:outline-none"
-                                />
-                                <button
-                                  onMouseDown={(e) => e.preventDefault()}
-                                  onClick={() => { setAnalyticsManagerSearch(""); setAnalyticsManagerSearchOpen(false); }}
-                                  className="text-slate-400 hover:text-slate-700 shrink-0"
-                                  title="Close search"
-                                >
-                                  <X className="h-3.5 w-3.5" />
-                                </button>
-                              </div>
-                            ) : (
-                              <div className="flex items-center gap-1.5">
-                                Manager Name
-                                <button onClick={() => setAnalyticsManagerSearchOpen(true)} className="text-slate-400 hover:text-brand-700" title="Search">
-                                  <Search className="h-3 w-3" />
-                                </button>
-                              </div>
-                            )}
-                          </th>
-                          {analyticsVisibleColumns.teamTotal && <th className="px-4 py-3 whitespace-nowrap">Team Total Leads</th>}
-                          {analyticsVisibleColumns.total && <th className="px-4 py-3 whitespace-nowrap">Total Leads Assigned</th>}
-                          {analyticsVisibleColumns.qualified && <th className="px-4 py-3 whitespace-nowrap">Qualified Leads</th>}
-                          {analyticsVisibleColumns.unqualified && <th className="px-4 py-3 whitespace-nowrap">Unqualified Leads</th>}
-                          {analyticsVisibleColumns.siteVisits && <th className="px-4 py-3 whitespace-nowrap">Site Visit Leads</th>}
-                          {analyticsVisibleColumns.qlPct && <th className="px-4 py-3 whitespace-nowrap">QL&apos;s %age</th>}
-                          {analyticsVisibleColumns.ql2svPct && <th className="px-4 py-3 whitespace-nowrap">QL2SV %age</th>}
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 text-slate-700">
-                        {isDataLoading && analyticsPageRows.length === 0 ? (
-                          <TableRowsSkeleton rows={8} columns={1 + ANALYTICS_COLUMNS.filter(c => analyticsVisibleColumns[c.key]).length} />
-                        ) : analyticsPageRows.length === 0 ? (
-                          <tr>
-                            <td colSpan={1 + ANALYTICS_COLUMNS.filter(c => analyticsVisibleColumns[c.key]).length} className="px-4 py-10 text-center">
-                              <p className="text-sm font-semibold text-slate-600">No leads in this date range</p>
-                              <p className="text-[11px] text-slate-400 mt-1">Try a wider date range or clear the filters above.</p>
-                            </td>
-                          </tr>
-                        ) : analyticsPageRows.map(row => {
-                          const isExpanded = expandedManagers.has(row.agentName);
-                          const visibleColCount = ANALYTICS_COLUMNS.filter(c => analyticsVisibleColumns[c.key]).length;
-                          const teamNames = [row.agentName, ...row.directReports.map(d => d.name)];
-                          return (
-                            <React.Fragment key={row.agentName}>
-                              <tr className={`transition-colors ${isExpanded ? "bg-slate-50" : "hover:bg-slate-50/60"}`}>
-                                <td className="px-4 py-3 font-bold">
-                                  <div className="flex items-center gap-2 min-w-0">
-                                    <StatCell
-                                      value={row.agentName}
-                                      onClick={() => openAnalyticsDrilldown(teamNames, null, `${row.agentName}'s Team — All Leads`)}
-                                      className="truncate min-w-0"
-                                    />
-                                    {row.isManager && (
-                                      <button
-                                        type="button"
-                                        onClick={() => toggleManagerExpand(row.agentName)}
-                                        title={isExpanded ? "Collapse team" : "Expand team"}
-                                        aria-expanded={isExpanded}
-                                        className="group/expand ml-auto flex items-center gap-2 shrink-0"
-                                      >
-                                        {row.directReports.length > 0 && <span className="glass-chip">+{row.directReports.length}</span>}
-                                        <ExpandChevron open={isExpanded} />
-                                      </button>
-                                    )}
-                                  </div>
-                                </td>
-                                {analyticsVisibleColumns.teamTotal && (
-                                  <td className="px-4 py-3 font-semibold">
-                                    <StatCell value={row.teamTotal} onClick={() => openAnalyticsDrilldown(teamNames, null, `${row.agentName}'s Team — All Leads`)} />
-                                  </td>
-                                )}
-                                {analyticsVisibleColumns.total && (
-                                  <td className="px-4 py-3 font-semibold">
-                                    <StatCell value={row.total} onClick={() => openAnalyticsDrilldown([row.agentName], null, `${row.agentName} — All Leads`)} />
-                                  </td>
-                                )}
-                                {analyticsVisibleColumns.qualified && (
-                                  <td className="px-4 py-3 font-semibold">
-                                    <StatCell value={row.qualified} onClick={() => openAnalyticsDrilldown([row.agentName], QUALIFIED_STATUS_OPTIONS, `${row.agentName} — Qualified Leads`)} />
-                                  </td>
-                                )}
-                                {analyticsVisibleColumns.unqualified && (
-                                  <td className="px-4 py-3 font-semibold">
-                                    <StatCell value={row.unqualified} onClick={() => openAnalyticsDrilldown([row.agentName], UNQUALIFIED_STATUSES, `${row.agentName} — Unqualified Leads`)} />
-                                  </td>
-                                )}
-                                {analyticsVisibleColumns.siteVisits && (
-                                  <td className="px-4 py-3 font-semibold">
-                                    <StatCell value={row.siteVisits} onClick={() => openAnalyticsDrilldown([row.agentName], SITE_VISIT_STATUSES, `${row.agentName} — Site Visit Leads`)} />
-                                  </td>
-                                )}
-                                {analyticsVisibleColumns.qlPct && (
-                                  <td className="px-4 py-3 font-semibold">
-                                    <StatCell value={`${row.qlPct.toFixed(2)}%`} onClick={() => openAnalyticsDrilldown([row.agentName], QUALIFIED_STATUS_OPTIONS, `${row.agentName} — Qualified Leads`)} />
-                                  </td>
-                                )}
-                                {analyticsVisibleColumns.ql2svPct && (
-                                  <td className="px-4 py-3 font-semibold">
-                                    <StatCell value={`${row.ql2svPct.toFixed(2)}%`} onClick={() => openAnalyticsDrilldown([row.agentName], SITE_VISIT_STATUSES, `${row.agentName} — Site Visit Leads`)} />
-                                  </td>
-                                )}
-                              </tr>
-                              {/* Team rows slide open/closed (always rendered so the
-                                  close animates too). */}
-                              {row.isManager && (
-                                <tr className={isExpanded ? "" : "!border-t-0"} aria-hidden={!isExpanded}>
-                                  <td colSpan={1 + visibleColCount} className="p-0 bg-slate-50/60">
-                                    <CollapsibleCell open={isExpanded} className="px-4 py-3">
-                                      {row.directReports.length === 0 ? (
-                                        <p className="text-[11px] text-slate-400 italic py-1">No team members reporting to {row.agentName} yet.</p>
-                                      ) : (
-                                        <PaginatedSubList items={row.directReports} rowLabel="Member">
-                                          {(pageRows) => (
-                                            <table className="w-full text-left text-[11px] border-collapse table-fixed">
-                                              <colgroup>
-                                                <col />
-                                                {analyticsVisibleColumns.total && <col />}
-                                                {analyticsVisibleColumns.qualified && <col />}
-                                                {analyticsVisibleColumns.unqualified && <col />}
-                                                {analyticsVisibleColumns.siteVisits && <col />}
-                                                {analyticsVisibleColumns.qlPct && <col />}
-                                                {analyticsVisibleColumns.ql2svPct && <col />}
-                                              </colgroup>
-                                              <thead>
-                                                <tr className="border-b border-slate-200 text-left text-xs font-bold text-slate-800">
-                                                  <th className="px-4 py-3 whitespace-nowrap">Team Member</th>
-                                                  {analyticsVisibleColumns.total && <th className="px-4 py-3 whitespace-nowrap">Total Leads Assigned</th>}
-                                                  {analyticsVisibleColumns.qualified && <th className="px-4 py-3 whitespace-nowrap">Qualified Leads</th>}
-                                                  {analyticsVisibleColumns.unqualified && <th className="px-4 py-3 whitespace-nowrap">Unqualified Leads</th>}
-                                                  {analyticsVisibleColumns.siteVisits && <th className="px-4 py-3 whitespace-nowrap">Site Visit Leads</th>}
-                                                  {analyticsVisibleColumns.qlPct && <th className="px-4 py-3 whitespace-nowrap">QL&apos;s %age</th>}
-                                                  {analyticsVisibleColumns.ql2svPct && <th className="px-4 py-3 whitespace-nowrap">QL2SV %age</th>}
-                                                </tr>
-                                              </thead>
-                                              <tbody className="divide-y divide-slate-100 text-slate-700">
-                                                {pageRows.map(member => (
-                                                  <tr key={member.name}>
-                                                    <td className="px-4 py-3 font-semibold">
-                                                      <StatCell value={member.name} onClick={() => openAnalyticsDrilldown([member.name], null, `${member.name} — All Leads`)} />
-                                                    </td>
-                                                    {analyticsVisibleColumns.total && (
-                                                      <td className="px-4 py-3">
-                                                        <StatCell value={member.total} onClick={() => openAnalyticsDrilldown([member.name], null, `${member.name} — All Leads`)} />
-                                                      </td>
-                                                    )}
-                                                    {analyticsVisibleColumns.qualified && (
-                                                      <td className="px-4 py-3">
-                                                        <StatCell value={member.qualified} onClick={() => openAnalyticsDrilldown([member.name], QUALIFIED_STATUS_OPTIONS, `${member.name} — Qualified Leads`)} />
-                                                      </td>
-                                                    )}
-                                                    {analyticsVisibleColumns.unqualified && (
-                                                      <td className="px-4 py-3">
-                                                        <StatCell value={member.unqualified} onClick={() => openAnalyticsDrilldown([member.name], UNQUALIFIED_STATUSES, `${member.name} — Unqualified Leads`)} />
-                                                      </td>
-                                                    )}
-                                                    {analyticsVisibleColumns.siteVisits && (
-                                                      <td className="px-4 py-3">
-                                                        <StatCell value={member.siteVisits} onClick={() => openAnalyticsDrilldown([member.name], SITE_VISIT_STATUSES, `${member.name} — Site Visit Leads`)} />
-                                                      </td>
-                                                    )}
-                                                    {analyticsVisibleColumns.qlPct && (
-                                                      <td className="px-4 py-3">
-                                                        <StatCell value={`${member.qlPct.toFixed(2)}%`} onClick={() => openAnalyticsDrilldown([member.name], QUALIFIED_STATUS_OPTIONS, `${member.name} — Qualified Leads`)} />
-                                                      </td>
-                                                    )}
-                                                    {analyticsVisibleColumns.ql2svPct && (
-                                                      <td className="px-4 py-3">
-                                                        <StatCell value={`${member.ql2svPct.toFixed(2)}%`} onClick={() => openAnalyticsDrilldown([member.name], SITE_VISIT_STATUSES, `${member.name} — Site Visit Leads`)} />
-                                                      </td>
-                                                    )}
-                                                  </tr>
-                                                ))}
-                                              </tbody>
-                                            </table>
-                                          )}
-                                        </PaginatedSubList>
-                                      )}
-                                    </CollapsibleCell>
-                                  </td>
-                                </tr>
-                              )}
-                            </React.Fragment>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  <TablePagination
-                    totalRows={adminAgentBreakdown.length}
-                    page={analyticsCurrentPage}
-                    rowsPerPage={analyticsRowsPerPage}
-                    onPageChange={setAnalyticsPage}
-                    onRowsPerPageChange={setAnalyticsRowsPerPage}
-                    rowLabel="Manager"
-                  />
-                  </>
-                ) : (
-                  // Manager viewer: scopeForCaller already restricts this tab
-                  // to exactly one row (the manager's own) — a "Manager Name"
-                  // table with one row and a click to expand it is a pointless
-                  // extra layer, so skip straight to a flat list: the manager's
-                  // own individual stats as the first row, then each direct
-                  // report, using the same "Team Member" columns the nested
-                  // view already used. See project_crm_role_based_lead_scoping
-                  // memory (2026-10-10).
-                  (() => {
-                    const ownRow = adminAgentBreakdown[0];
-                    const flatMembers = ownRow
-                      ? [
-                          {
-                            name: ownRow.agentName,
-                            total: ownRow.total,
-                            qualified: ownRow.qualified,
-                            unqualified: ownRow.unqualified,
-                            siteVisits: ownRow.siteVisits,
-                            qlPct: ownRow.qlPct,
-                            ql2svPct: ownRow.ql2svPct
-                          },
-                          ...ownRow.directReports
-                        ]
-                      : [];
-                    if (isDataLoading && flatMembers.length === 0) {
-                      return <TableRowsSkeleton rows={6} columns={1 + ANALYTICS_COLUMNS.filter(c => c.key !== "teamTotal" && analyticsVisibleColumns[c.key]).length} />;
-                    }
-                    if (flatMembers.length === 0) {
-                      return (
-                        <div className="px-4 py-10 text-center">
-                          <p className="text-sm font-semibold text-slate-600">No leads in this date range</p>
-                          <p className="text-[11px] text-slate-400 mt-1">Try a wider date range or clear the filters above.</p>
-                        </div>
-                      );
-                    }
-                    return (
-                      <div className="overflow-x-auto">
-                        <PaginatedSubList items={flatMembers} rowLabel="Member">
-                          {(pageRows) => (
-                            <table className="w-full text-left text-xs border-collapse table-fixed">
-                              <colgroup>
-                                <col />
-                                {analyticsVisibleColumns.total && <col />}
-                                {analyticsVisibleColumns.qualified && <col />}
-                                {analyticsVisibleColumns.unqualified && <col />}
-                                {analyticsVisibleColumns.siteVisits && <col />}
-                                {analyticsVisibleColumns.qlPct && <col />}
-                                {analyticsVisibleColumns.ql2svPct && <col />}
-                              </colgroup>
-                              <thead>
-                                <tr className="border-b border-slate-200 text-left text-xs font-bold text-slate-800">
-                                  <th className="px-4 py-3 whitespace-nowrap">Team Member</th>
-                                  {analyticsVisibleColumns.total && <th className="px-4 py-3 whitespace-nowrap">Total Leads Assigned</th>}
-                                  {analyticsVisibleColumns.qualified && <th className="px-4 py-3 whitespace-nowrap">Qualified Leads</th>}
-                                  {analyticsVisibleColumns.unqualified && <th className="px-4 py-3 whitespace-nowrap">Unqualified Leads</th>}
-                                  {analyticsVisibleColumns.siteVisits && <th className="px-4 py-3 whitespace-nowrap">Site Visit Leads</th>}
-                                  {analyticsVisibleColumns.qlPct && <th className="px-4 py-3 whitespace-nowrap">QL&apos;s %age</th>}
-                                  {analyticsVisibleColumns.ql2svPct && <th className="px-4 py-3 whitespace-nowrap">QL2SV %age</th>}
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-slate-100 text-slate-700">
-                                {pageRows.map(member => (
-                                  <tr key={member.name}>
-                                    <td className="px-4 py-3 font-semibold">
-                                      <StatCell value={member.name} onClick={() => openAnalyticsDrilldown([member.name], null, `${member.name} — All Leads`)} />
-                                    </td>
-                                    {analyticsVisibleColumns.total && (
-                                      <td className="px-4 py-3">
-                                        <StatCell value={member.total} onClick={() => openAnalyticsDrilldown([member.name], null, `${member.name} — All Leads`)} />
-                                      </td>
-                                    )}
-                                    {analyticsVisibleColumns.qualified && (
-                                      <td className="px-4 py-3">
-                                        <StatCell value={member.qualified} onClick={() => openAnalyticsDrilldown([member.name], QUALIFIED_STATUS_OPTIONS, `${member.name} — Qualified Leads`)} />
-                                      </td>
-                                    )}
-                                    {analyticsVisibleColumns.unqualified && (
-                                      <td className="px-4 py-3">
-                                        <StatCell value={member.unqualified} onClick={() => openAnalyticsDrilldown([member.name], UNQUALIFIED_STATUSES, `${member.name} — Unqualified Leads`)} />
-                                      </td>
-                                    )}
-                                    {analyticsVisibleColumns.siteVisits && (
-                                      <td className="px-4 py-3">
-                                        <StatCell value={member.siteVisits} onClick={() => openAnalyticsDrilldown([member.name], SITE_VISIT_STATUSES, `${member.name} — Site Visit Leads`)} />
-                                      </td>
-                                    )}
-                                    {analyticsVisibleColumns.qlPct && (
-                                      <td className="px-4 py-3">
-                                        <StatCell value={`${member.qlPct.toFixed(2)}%`} onClick={() => openAnalyticsDrilldown([member.name], QUALIFIED_STATUS_OPTIONS, `${member.name} — Qualified Leads`)} />
-                                      </td>
-                                    )}
-                                    {analyticsVisibleColumns.ql2svPct && (
-                                      <td className="px-4 py-3">
-                                        <StatCell value={`${member.ql2svPct.toFixed(2)}%`} onClick={() => openAnalyticsDrilldown([member.name], SITE_VISIT_STATUSES, `${member.name} — Site Visit Leads`)} />
-                                      </td>
-                                    )}
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          )}
-                        </PaginatedSubList>
-                      </div>
-                    );
-                  })()
-                )}
-              </>
-            </div>
-
+                {/* The lead list opened from a number — its own page, with a way back. */}
+                <button
+                  type="button"
+                  onClick={closeAnalyticsDrilldown}
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900"
+                >
+                  <ArrowLeft className="h-3.5 w-3.5" /> Back
+                  <span className="font-normal text-slate-400">· {analyticsDrilldown.title}</span>
+                </button>
             {/* Drill-down card — opened by clicking any manager/team-member
                 name or number above. Shows the real matching Lead rows right
                 here on the Analytics tab (no tab switch), same shape as the
@@ -2545,17 +2321,7 @@ export default function LeadDashboard() {
                 Campaign. */}
             {analyticsDrilldown && (
                 <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden animate-fade-in">
-                  <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
-                    <h3 className="ui-section-title">{analyticsDrilldown.title}</h3>
-                    <button
-                      type="button"
-                      onClick={() => setAnalyticsDrilldown(null)}
-                      className="text-slate-400 hover:text-slate-700"
-                      title="Close"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  </div>
+                  {renderAnalyticsToolbar(false)}
                   {analyticsDrilldownTotal === 0 && !analyticsDrilldownLoading ? (
                     <p className="text-xs text-slate-400 italic p-6">No leads match this view.</p>
                   ) : (
@@ -2657,21 +2423,471 @@ export default function LeadDashboard() {
                 </div>
             )}
 
+              </>
+            ) : (
+            <>
+            <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden">
+              {renderAnalyticsToolbar(true)}
+
+              <>
+                {isAdmin ? (
+                  <>
+                  <div className="overflow-x-auto">
+                    <table
+                      className="w-full text-left text-xs border-collapse table-fixed"
+                      style={{ minWidth: (1 + ANALYTICS_COLUMNS.filter(c => analyticsVisibleColumns[c.key]).length) * 150 }}
+                    >
+                      <colgroup>
+                        {/* Wider name column: the name, its "+N" team pill and the chevron share it. */}
+                        <col className="w-[220px]" />
+                        {analyticsVisibleColumns.teamTotal && <col />}
+                        {analyticsVisibleColumns.total && <col />}
+                        {analyticsVisibleColumns.qualified && <col />}
+                        {analyticsVisibleColumns.unqualified && <col />}
+                        {analyticsVisibleColumns.siteVisits && <col />}
+                        {analyticsVisibleColumns.qlPct && <col />}
+                        {analyticsVisibleColumns.ql2svPct && <col />}
+                      </colgroup>
+                      <thead>
+                        <tr className="border-b border-slate-200 text-left text-xs font-bold text-slate-800">
+                          <th className="px-4 py-3 whitespace-nowrap">
+                            {analyticsManagerSearchOpen ? (
+                              <div className="flex items-center gap-1">
+                                <input
+                                  autoFocus
+                                  value={analyticsManagerSearch}
+                                  onChange={(e) => setAnalyticsManagerSearch(e.target.value)}
+                                  onBlur={() => { if (!analyticsManagerSearch) setAnalyticsManagerSearchOpen(false); }}
+                                  placeholder="Search member..."
+                                  className="min-w-0 flex-1 bg-white border border-brand-400 rounded-md px-1.5 py-1 text-[11px] font-normal focus:outline-none"
+                                />
+                                <button
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onClick={() => { setAnalyticsManagerSearch(""); setAnalyticsManagerSearchOpen(false); }}
+                                  className="text-slate-400 hover:text-slate-700 shrink-0"
+                                  title="Close search"
+                                >
+                                  <X className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-1.5">
+                                Member Name
+                                <button onClick={() => setAnalyticsManagerSearchOpen(true)} className="text-slate-400 hover:text-brand-700" title="Search">
+                                  <Search className="h-3 w-3" />
+                                </button>
+                              </div>
+                            )}
+                          </th>
+                          {analyticsVisibleColumns.teamTotal && <th className="px-4 py-3 whitespace-nowrap">Team Total Leads</th>}
+                          {analyticsVisibleColumns.total && <th className="px-4 py-3 whitespace-nowrap">Total Leads Assigned</th>}
+                          {analyticsVisibleColumns.qualified && <th className="px-4 py-3 whitespace-nowrap">Qualified Leads</th>}
+                          {analyticsVisibleColumns.unqualified && <th className="px-4 py-3 whitespace-nowrap">Unqualified Leads</th>}
+                          {analyticsVisibleColumns.siteVisits && <th className="px-4 py-3 whitespace-nowrap">Site Visit Leads</th>}
+                          {analyticsVisibleColumns.qlPct && <th className="px-4 py-3 whitespace-nowrap">QL&apos;s %age</th>}
+                          {analyticsVisibleColumns.ql2svPct && <th className="px-4 py-3 whitespace-nowrap">QL2SV %age</th>}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 text-slate-700">
+                        {isDataLoading && analyticsPageRows.length === 0 ? (
+                          <TableRowsSkeleton rows={8} columns={1 + ANALYTICS_COLUMNS.filter(c => analyticsVisibleColumns[c.key]).length} />
+                        ) : analyticsPageRows.length === 0 ? (
+                          <tr>
+                            <td colSpan={1 + ANALYTICS_COLUMNS.filter(c => analyticsVisibleColumns[c.key]).length} className="px-4 py-10 text-center">
+                              <p className="text-sm font-semibold text-slate-600">No leads in this date range</p>
+                              <p className="text-[11px] text-slate-400 mt-1">Try a wider date range or clear the filters above.</p>
+                            </td>
+                          </tr>
+                        ) : analyticsPageRows.map(row => {
+                          const isExpanded = expandedManagers.has(row.agentName);
+                          const visibleColCount = ANALYTICS_COLUMNS.filter(c => analyticsVisibleColumns[c.key]).length;
+                          const teamNames = [row.agentName, ...row.directReports.map(d => d.name)];
+                          return (
+                            <React.Fragment key={row.agentName}>
+                              <tr className={`transition-colors ${isExpanded ? "bg-neutral-100 text-neutral-500" : "hover:bg-slate-50/60"}`}>
+                                <td className="px-4 py-3 font-bold">
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <StatCell
+                                      value={row.agentName}
+                                      onClick={() => openAnalyticsDrilldown(teamNames, null, `${row.agentName}'s Team — All Leads`)}
+                                      className="truncate min-w-0"
+                                    />
+                                    {row.isManager && (
+                                      <button
+                                        type="button"
+                                        onClick={() => toggleManagerExpand(row.agentName)}
+                                        title={isExpanded ? "Collapse team" : "Expand team"}
+                                        aria-expanded={isExpanded}
+                                        className="shrink-0 text-slate-500 hover:text-slate-800"
+                                      >
+                                        {isExpanded ? <CircleMinus className="h-3 w-3" /> : <CirclePlus className="h-3 w-3" />}
+                                      </button>
+                                    )}
+                                  </div>
+                                </td>
+                                {analyticsVisibleColumns.teamTotal && (
+                                  <td className="px-4 py-3 font-semibold">
+                                    <StatCell value={row.teamTotal} onClick={() => openAnalyticsDrilldown(teamNames, null, `${row.agentName}'s Team — All Leads`)} />
+                                  </td>
+                                )}
+                                {analyticsVisibleColumns.total && (
+                                  <td className="px-4 py-3 font-semibold">
+                                    <StatCell value={row.total} onClick={() => openAnalyticsDrilldown(teamNames, null, `${row.agentName} — All Leads`)} />
+                                  </td>
+                                )}
+                                {analyticsVisibleColumns.qualified && (
+                                  <td className="px-4 py-3 font-semibold">
+                                    <StatCell value={row.qualified} onClick={() => openAnalyticsDrilldown(teamNames, QUALIFIED_STATUS_OPTIONS, `${row.agentName} — Qualified Leads`)} />
+                                  </td>
+                                )}
+                                {analyticsVisibleColumns.unqualified && (
+                                  <td className="px-4 py-3 font-semibold">
+                                    <StatCell value={row.unqualified} onClick={() => openAnalyticsDrilldown(teamNames, UNQUALIFIED_STATUSES, `${row.agentName} — Unqualified Leads`)} />
+                                  </td>
+                                )}
+                                {analyticsVisibleColumns.siteVisits && (
+                                  <td className="px-4 py-3 font-semibold">
+                                    <StatCell value={row.siteVisits} onClick={() => openAnalyticsDrilldown(teamNames, SITE_VISIT_STATUSES, `${row.agentName} — Site Visit Leads`)} />
+                                  </td>
+                                )}
+                                {analyticsVisibleColumns.qlPct && (
+                                  <td className="px-4 py-3 font-semibold">
+                                    <StatCell value={`${row.qlPct.toFixed(2)}%`} onClick={() => openAnalyticsDrilldown(teamNames, QUALIFIED_STATUS_OPTIONS, `${row.agentName} — Qualified Leads`)} />
+                                  </td>
+                                )}
+                                {analyticsVisibleColumns.ql2svPct && (
+                                  <td className="px-4 py-3 font-semibold">
+                                    <StatCell value={`${row.ql2svPct.toFixed(2)}%`} onClick={() => openAnalyticsDrilldown(teamNames, SITE_VISIT_STATUSES, `${row.agentName} — Site Visit Leads`)} />
+                                  </td>
+                                )}
+                              </tr>
+                              {/* Team rows slide open/closed (always rendered so the
+                                  close animates too). */}
+                              {row.isManager && (
+                                <tr className={isExpanded ? "" : "!border-t-0"} aria-hidden={!isExpanded}>
+                                  <td colSpan={1 + visibleColCount} className="p-0 bg-white">
+                                    <CollapsibleCell open={isExpanded} className="pl-40 pr-4 py-5">
+                                      {row.directReports.length === 0 ? (
+                                        <p className="text-[11px] text-slate-400 italic py-1">No team members reporting to {row.agentName} yet.</p>
+                                      ) : (
+                                        <PaginatedSubList items={row.directReports} rowLabel="Member">
+                                          {(pageRows) => (
+                                            <table className="w-full text-left text-xs border-collapse table-fixed">
+                                              <colgroup>
+                                                <col />
+                                                {analyticsVisibleColumns.total && <col />}
+                                                {analyticsVisibleColumns.qualified && <col />}
+                                                {analyticsVisibleColumns.unqualified && <col />}
+                                                {analyticsVisibleColumns.siteVisits && <col />}
+                                                {analyticsVisibleColumns.qlPct && <col />}
+                                                {analyticsVisibleColumns.ql2svPct && <col />}
+                                              </colgroup>
+                                              <thead>
+                                                <tr className="border-b border-slate-200 text-left text-xs font-bold text-slate-800">
+                                                  <th className="px-4 py-3 whitespace-nowrap">Team Member</th>
+                                                  {analyticsVisibleColumns.total && <th className="px-4 py-3 whitespace-nowrap">Total Leads Assigned</th>}
+                                                  {analyticsVisibleColumns.qualified && <th className="px-4 py-3 whitespace-nowrap">Qualified Leads</th>}
+                                                  {analyticsVisibleColumns.unqualified && <th className="px-4 py-3 whitespace-nowrap">Unqualified Leads</th>}
+                                                  {analyticsVisibleColumns.siteVisits && <th className="px-4 py-3 whitespace-nowrap">Site Visit Leads</th>}
+                                                  {analyticsVisibleColumns.qlPct && <th className="px-4 py-3 whitespace-nowrap">QL&apos;s %age</th>}
+                                                  {analyticsVisibleColumns.ql2svPct && <th className="px-4 py-3 whitespace-nowrap">QL2SV %age</th>}
+                                                </tr>
+                                              </thead>
+                                              <tbody className="divide-y divide-slate-100 text-slate-800 border-b border-slate-100">
+                                                {pageRows.map(member => (
+                                                  <tr key={member.name}>
+                                                    <td className="px-4 py-4">
+                                                      <StatCell value={member.name} onClick={() => openAnalyticsDrilldown([member.name], null, `${member.name} — All Leads`)} />
+                                                    </td>
+                                                    {analyticsVisibleColumns.total && (
+                                                      <td className="px-4 py-4">
+                                                        <StatCell value={member.total} onClick={() => openAnalyticsDrilldown([member.name], null, `${member.name} — All Leads`)} />
+                                                      </td>
+                                                    )}
+                                                    {analyticsVisibleColumns.qualified && (
+                                                      <td className="px-4 py-4">
+                                                        <StatCell value={member.qualified} onClick={() => openAnalyticsDrilldown([member.name], QUALIFIED_STATUS_OPTIONS, `${member.name} — Qualified Leads`)} />
+                                                      </td>
+                                                    )}
+                                                    {analyticsVisibleColumns.unqualified && (
+                                                      <td className="px-4 py-4">
+                                                        <StatCell value={member.unqualified} onClick={() => openAnalyticsDrilldown([member.name], UNQUALIFIED_STATUSES, `${member.name} — Unqualified Leads`)} />
+                                                      </td>
+                                                    )}
+                                                    {analyticsVisibleColumns.siteVisits && (
+                                                      <td className="px-4 py-4">
+                                                        <StatCell value={member.siteVisits} onClick={() => openAnalyticsDrilldown([member.name], SITE_VISIT_STATUSES, `${member.name} — Site Visit Leads`)} />
+                                                      </td>
+                                                    )}
+                                                    {analyticsVisibleColumns.qlPct && (
+                                                      <td className="px-4 py-4">
+                                                        <StatCell value={`${member.qlPct.toFixed(2)}%`} onClick={() => openAnalyticsDrilldown([member.name], QUALIFIED_STATUS_OPTIONS, `${member.name} — Qualified Leads`)} />
+                                                      </td>
+                                                    )}
+                                                    {analyticsVisibleColumns.ql2svPct && (
+                                                      <td className="px-4 py-4">
+                                                        <StatCell value={`${member.ql2svPct.toFixed(2)}%`} onClick={() => openAnalyticsDrilldown([member.name], SITE_VISIT_STATUSES, `${member.name} — Site Visit Leads`)} />
+                                                      </td>
+                                                    )}
+                                                  </tr>
+                                                ))}
+                                              </tbody>
+                                            </table>
+                                          )}
+                                        </PaginatedSubList>
+                                      )}
+                                    </CollapsibleCell>
+                                  </td>
+                                </tr>
+                              )}
+                            </React.Fragment>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <TablePagination
+                    totalRows={adminAgentBreakdown.length}
+                    page={analyticsCurrentPage}
+                    rowsPerPage={analyticsRowsPerPage}
+                    onPageChange={setAnalyticsPage}
+                    onRowsPerPageChange={setAnalyticsRowsPerPage}
+                  />
+                  </>
+                ) : (
+                  // Manager viewer: scopeForCaller already restricts this tab
+                  // to exactly one row (the manager's own) — a "Manager Name"
+                  // table with one row and a click to expand it is a pointless
+                  // extra layer, so skip straight to a flat list: the manager's
+                  // own individual stats as the first row, then each direct
+                  // report, using the same "Team Member" columns the nested
+                  // view already used. See project_crm_role_based_lead_scoping
+                  // memory (2026-10-10).
+                  (() => {
+                    const ownRow = adminAgentBreakdown[0];
+                    // The manager (when holding leads) and each direct report.
+                    const flatMembers = ownRow ? ownRow.directReports : [];
+                    if (isDataLoading && flatMembers.length === 0) {
+                      return <TableRowsSkeleton rows={6} columns={1 + ANALYTICS_COLUMNS.filter(c => c.key !== "teamTotal" && analyticsVisibleColumns[c.key]).length} />;
+                    }
+                    if (flatMembers.length === 0) {
+                      return (
+                        <div className="px-4 py-10 text-center">
+                          <p className="text-sm font-semibold text-slate-600">No leads in this date range</p>
+                          <p className="text-[11px] text-slate-400 mt-1">Try a wider date range or clear the filters above.</p>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="overflow-x-auto">
+                        <PaginatedSubList items={flatMembers} rowLabel="Member">
+                          {(pageRows) => (
+                            <table className="w-full text-left text-xs border-collapse table-fixed">
+                              <colgroup>
+                                <col />
+                                {analyticsVisibleColumns.total && <col />}
+                                {analyticsVisibleColumns.qualified && <col />}
+                                {analyticsVisibleColumns.unqualified && <col />}
+                                {analyticsVisibleColumns.siteVisits && <col />}
+                                {analyticsVisibleColumns.qlPct && <col />}
+                                {analyticsVisibleColumns.ql2svPct && <col />}
+                              </colgroup>
+                              <thead>
+                                <tr className="border-b border-slate-200 text-left text-xs font-bold text-slate-800">
+                                  <th className="px-4 py-3 whitespace-nowrap">Team Member</th>
+                                  {analyticsVisibleColumns.total && <th className="px-4 py-3 whitespace-nowrap">Total Leads Assigned</th>}
+                                  {analyticsVisibleColumns.qualified && <th className="px-4 py-3 whitespace-nowrap">Qualified Leads</th>}
+                                  {analyticsVisibleColumns.unqualified && <th className="px-4 py-3 whitespace-nowrap">Unqualified Leads</th>}
+                                  {analyticsVisibleColumns.siteVisits && <th className="px-4 py-3 whitespace-nowrap">Site Visit Leads</th>}
+                                  {analyticsVisibleColumns.qlPct && <th className="px-4 py-3 whitespace-nowrap">QL&apos;s %age</th>}
+                                  {analyticsVisibleColumns.ql2svPct && <th className="px-4 py-3 whitespace-nowrap">QL2SV %age</th>}
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100 text-slate-700">
+                                {pageRows.map(member => (
+                                  <tr key={member.name}>
+                                    <td className="px-4 py-3 font-semibold">
+                                      <StatCell value={member.name} onClick={() => openAnalyticsDrilldown([member.name], null, `${member.name} — All Leads`)} />
+                                    </td>
+                                    {analyticsVisibleColumns.total && (
+                                      <td className="px-4 py-3">
+                                        <StatCell value={member.total} onClick={() => openAnalyticsDrilldown([member.name], null, `${member.name} — All Leads`)} />
+                                      </td>
+                                    )}
+                                    {analyticsVisibleColumns.qualified && (
+                                      <td className="px-4 py-3">
+                                        <StatCell value={member.qualified} onClick={() => openAnalyticsDrilldown([member.name], QUALIFIED_STATUS_OPTIONS, `${member.name} — Qualified Leads`)} />
+                                      </td>
+                                    )}
+                                    {analyticsVisibleColumns.unqualified && (
+                                      <td className="px-4 py-3">
+                                        <StatCell value={member.unqualified} onClick={() => openAnalyticsDrilldown([member.name], UNQUALIFIED_STATUSES, `${member.name} — Unqualified Leads`)} />
+                                      </td>
+                                    )}
+                                    {analyticsVisibleColumns.siteVisits && (
+                                      <td className="px-4 py-3">
+                                        <StatCell value={member.siteVisits} onClick={() => openAnalyticsDrilldown([member.name], SITE_VISIT_STATUSES, `${member.name} — Site Visit Leads`)} />
+                                      </td>
+                                    )}
+                                    {analyticsVisibleColumns.qlPct && (
+                                      <td className="px-4 py-3">
+                                        <StatCell value={`${member.qlPct.toFixed(2)}%`} onClick={() => openAnalyticsDrilldown([member.name], QUALIFIED_STATUS_OPTIONS, `${member.name} — Qualified Leads`)} />
+                                      </td>
+                                    )}
+                                    {analyticsVisibleColumns.ql2svPct && (
+                                      <td className="px-4 py-3">
+                                        <StatCell value={`${member.ql2svPct.toFixed(2)}%`} onClick={() => openAnalyticsDrilldown([member.name], SITE_VISIT_STATUSES, `${member.name} — Site Visit Leads`)} />
+                                      </td>
+                                    )}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          )}
+                        </PaginatedSubList>
+                      </div>
+                    );
+                  })()
+                )}
+              </>
+            </div>
+
+            {/* Property card — the same numbers per property (same filters). */}
+            <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden">
+              <div className="overflow-x-auto">
+                <table
+                  className="w-full text-left text-xs border-collapse table-fixed"
+                  style={{ minWidth: (1 + PROPERTY_COLUMN_KEYS.filter(k => analyticsVisibleColumns[k]).length) * 150 }}
+                >
+                  <colgroup>
+                    <col className="w-[220px]" />
+                    {PROPERTY_COLUMN_KEYS.filter(k => analyticsVisibleColumns[k]).map(k => <col key={k} />)}
+                  </colgroup>
+                  <thead>
+                    <tr className="border-b border-slate-200 text-left text-xs font-bold text-slate-800">
+                      <th className="px-4 py-3 whitespace-nowrap">
+                        {propertySearchOpen ? (
+                          <div className="flex items-center gap-1">
+                            <input
+                              autoFocus
+                              value={propertySearch}
+                              onChange={(e) => { setPropertySearch(e.target.value); setPropertyPage(1); }}
+                              onBlur={() => { if (!propertySearch) setPropertySearchOpen(false); }}
+                              placeholder="Search property..."
+                              className="min-w-0 flex-1 bg-white border border-brand-400 rounded-md px-1.5 py-1 text-[11px] font-normal focus:outline-none"
+                            />
+                            <button
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => { setPropertySearch(""); setPropertySearchOpen(false); }}
+                              className="text-slate-400 hover:text-slate-700 shrink-0"
+                              title="Close search"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1.5">
+                            Property Name
+                            <button onClick={() => setPropertySearchOpen(true)} className="text-slate-400 hover:text-brand-700" title="Search">
+                              <Search className="h-3 w-3" />
+                            </button>
+                          </div>
+                        )}
+                      </th>
+                      {analyticsVisibleColumns.total && <th className="px-4 py-3 whitespace-nowrap">Total Leads Assigned</th>}
+                      {analyticsVisibleColumns.qualified && <th className="px-4 py-3 whitespace-nowrap">Qualified Leads</th>}
+                      {analyticsVisibleColumns.unqualified && <th className="px-4 py-3 whitespace-nowrap">Unqualified Leads</th>}
+                      {analyticsVisibleColumns.siteVisits && <th className="px-4 py-3 whitespace-nowrap">Site Visit Leads</th>}
+                      {analyticsVisibleColumns.qlPct && <th className="px-4 py-3 whitespace-nowrap">QL&apos;s %age</th>}
+                      {analyticsVisibleColumns.ql2svPct && <th className="px-4 py-3 whitespace-nowrap">QL2SV %age</th>}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-slate-700">
+                    {propertyPageRows.length === 0 ? (
+                      <tr>
+                        <td colSpan={1 + PROPERTY_COLUMN_KEYS.filter(k => analyticsVisibleColumns[k]).length} className="px-4 py-10 text-center">
+                          <p className="text-sm font-semibold text-slate-600">No leads in this date range</p>
+                          <p className="text-[11px] text-slate-400 mt-1">Try a wider date range or clear the filters above.</p>
+                        </td>
+                      </tr>
+                    ) : propertyPageRows.map(r => (
+                      <tr key={r.propertyId ?? "none"} className="hover:bg-slate-50/60 transition-colors">
+                        <td className="px-4 py-3 font-bold text-slate-800 truncate" title={r.name}>{r.name}</td>
+                        {analyticsVisibleColumns.total && (
+                          <td className="px-4 py-3 font-semibold">
+                            <StatCell value={r.total} onClick={() => openAnalyticsDrilldown(null, null, `${r.name} — All Leads`, r.propertyId)} />
+                          </td>
+                        )}
+                        {analyticsVisibleColumns.qualified && (
+                          <td className="px-4 py-3 font-semibold">
+                            <StatCell value={r.qualified} onClick={() => openAnalyticsDrilldown(null, QUALIFIED_STATUS_OPTIONS, `${r.name} — Qualified Leads`, r.propertyId)} />
+                          </td>
+                        )}
+                        {analyticsVisibleColumns.unqualified && (
+                          <td className="px-4 py-3 font-semibold">
+                            <StatCell value={r.unqualified} onClick={() => openAnalyticsDrilldown(null, UNQUALIFIED_STATUSES, `${r.name} — Unqualified Leads`, r.propertyId)} />
+                          </td>
+                        )}
+                        {analyticsVisibleColumns.siteVisits && (
+                          <td className="px-4 py-3 font-semibold">
+                            <StatCell value={r.siteVisits} onClick={() => openAnalyticsDrilldown(null, SITE_VISIT_STATUSES, `${r.name} — Site Visit Leads`, r.propertyId)} />
+                          </td>
+                        )}
+                        {analyticsVisibleColumns.qlPct && (
+                          <td className="px-4 py-3 font-semibold">
+                            <StatCell value={`${r.qlPct.toFixed(2)}%`} onClick={() => openAnalyticsDrilldown(null, QUALIFIED_STATUS_OPTIONS, `${r.name} — Qualified Leads`, r.propertyId)} />
+                          </td>
+                        )}
+                        {analyticsVisibleColumns.ql2svPct && (
+                          <td className="px-4 py-3 font-semibold">
+                            <StatCell value={`${r.ql2svPct.toFixed(2)}%`} onClick={() => openAnalyticsDrilldown(null, SITE_VISIT_STATUSES, `${r.name} — Site Visit Leads`, r.propertyId)} />
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <TablePagination
+                totalRows={propertyRows.length}
+                page={propertyCurrentPage}
+                rowsPerPage={propertyRowsPerPage}
+                onPageChange={setPropertyPage}
+                onRowsPerPageChange={(n) => { setPropertyRowsPerPage(n); setPropertyPage(1); }}
+              />
+            </div>
+
             {/* RNR Analysis — Total Leads and Date are real; the two call-attempt
                 averages and AI Notes have no data source anywhere in this app
                 yet (see comment on rnrLeads above), so they honestly show "—". */}
             <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden p-6">
               <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
                 <h3 className="ui-section-title">RNR Analysis</h3>
-                <div className="relative">
-                  <Search className="h-3.5 w-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                  <input
-                    value={rnrSearch}
-                    onChange={(e) => setRnrSearch(e.target.value)}
-                    placeholder="Lead Name"
-                    className="pl-8 pr-3 py-1.5 text-xs font-semibold bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-[#0B1E6E] w-40"
-                  />
-                </div>
+                {rnrSearchOpen ? (
+                  <div className="flex items-center gap-1">
+                    <input
+                      autoFocus
+                      value={rnrSearch}
+                      onChange={(e) => setRnrSearch(e.target.value)}
+                      onBlur={() => { if (!rnrSearch) setRnrSearchOpen(false); }}
+                      placeholder="Search lead name..."
+                      className="w-40 bg-white border border-brand-400 rounded-md px-1.5 py-1 text-[11px] font-normal focus:outline-none"
+                    />
+                    <button
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => { setRnrSearch(""); setRnrSearchOpen(false); }}
+                      className="text-slate-400 hover:text-slate-700 shrink-0"
+                      title="Close search"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <button type="button" onClick={() => setRnrSearchOpen(true)} className="flex items-center gap-1.5 text-xs font-bold text-slate-800 hover:text-brand-700" title="Search">
+                    Lead Name <Search className="h-3.5 w-3.5 text-slate-400" />
+                  </button>
+                )}
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs border-collapse table-fixed min-w-[750px]">
@@ -2694,8 +2910,8 @@ export default function LeadDashboard() {
                   <tbody className="divide-y divide-slate-100 text-slate-700">
                     <tr>
                       <td className="px-4 py-3 font-bold">{isDataLoading ? <LineSkeleton width={24} height={14} /> : rnrLeads.length}</td>
-                      <td className="px-4 py-3 text-slate-400 italic" title="Needs a per-call attempt log (timestamped per call, per lead) — not tracked yet">—</td>
-                      <td className="px-4 py-3 text-slate-400 italic" title="Needs a per-call attempt log tied to when a lead is marked Dead — not tracked yet">—</td>
+                      <td className="px-4 py-3" title="Calls made with the Call button per RNR lead, per day it was called">{rnrAverages.callsPerLeadPerDay == null ? "—" : formatAverage(rnrAverages.callsPerLeadPerDay)}</td>
+                      <td className="px-4 py-3" title="Calls made with the Call button per Dead Lead, before it was marked dead">{rnrAverages.callsBeforeDead == null ? "—" : formatAverage(rnrAverages.callsBeforeDead)}</td>
                       <td className="px-4 py-3">{rnrMostRecentActivity ? adminFormatDateTime(rnrMostRecentActivity) : "—"}</td>
                       <td className="px-4 py-3 text-slate-400 italic" title="Needs an AI-analysis pipeline — not built yet">—</td>
                     </tr>
@@ -2703,6 +2919,8 @@ export default function LeadDashboard() {
                 </table>
               </div>
             </div>
+            </>
+            )}
           </div>
         )}
 

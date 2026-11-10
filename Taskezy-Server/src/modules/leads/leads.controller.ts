@@ -53,6 +53,21 @@ export async function getLeadAnalyticsStatsHandler(req: Request, res: Response):
   sendOk(res, stats);
 }
 
+// Leads Analytics' property card and RNR Analysis averages.
+export async function getLeadAnalyticsPropertyStatsHandler(req: Request, res: Response): Promise<void> {
+  const { propertyId, campaign, dateFrom, dateTo, assignedAgentId } = req.query as unknown as {
+    propertyId?: string[]; campaign?: string[]; dateFrom?: string; dateTo?: string; assignedAgentId?: string[];
+  };
+  sendOk(res, await leadsService.getLeadAnalyticsStatsByProperty(req.user!, { propertyId, campaign, dateFrom, dateTo, assignedAgentId }));
+}
+
+export async function getRnrCallAveragesHandler(req: Request, res: Response): Promise<void> {
+  const { propertyId, campaign, dateFrom, dateTo, assignedAgentId } = req.query as unknown as {
+    propertyId?: string[]; campaign?: string[]; dateFrom?: string; dateTo?: string; assignedAgentId?: string[];
+  };
+  sendOk(res, await leadsService.getRnrCallAverages(req.user!, { propertyId, campaign, dateFrom, dateTo, assignedAgentId }));
+}
+
 export async function getAgentReportStatsHandler(req: Request, res: Response): Promise<void> {
   const { assignedAgentId, dateFrom, dateTo } = req.query as unknown as {
     assignedAgentId?: string[]; dateFrom?: string; dateTo?: string;

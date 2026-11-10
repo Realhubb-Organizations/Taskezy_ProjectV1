@@ -12,7 +12,7 @@ import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/Searcha
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
 import DateRangePicker, { DateRangeValue, toIsoDate } from "@/components/ui/DateRangePicker";
 import DateRangeSelect from "@/components/ui/DateRangeSelect";
-import { canChangeLeadStatus, canReassignThisLead, canUploadLeads, splitEvenly, uploadAssignableUsers, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
+import { canChangeLeadStatus, canReassignThisLead, canUploadLeads, otherManagers, splitEvenly, uploadAssignableUsers, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
 import { nextCallFor } from "@/lib/followups";
 import NextCallCell from "@/components/crm/NextCallCell";
 import { useDialog } from "@/components/ui/DialogProvider";
@@ -689,6 +689,14 @@ export default function DataCallingPage() {
     }
     return Array.from(new Set(leads.map(l => l.assignedAgent).filter(Boolean))).sort();
   }, [leads, isTeamManager, currentUser, users]);
+  // Per-row reassign picker: a manager can also hand a lead to any other
+  // manager (they look after different locations) — the filter above stays team-only.
+  const reassignOptions = useMemo(
+    () => isTeamManager && currentUser
+      ? Array.from(new Set([...assignedOptions, ...otherManagers(users, currentUser.id).map(u => u.name)])).sort()
+      : assignedOptions,
+    [assignedOptions, isTeamManager, currentUser, users]
+  );
 
   // Data Call Source filter — bulk upload's per-batch sub-source (e.g.
   // "Kashmiri Data") when set, else the ingestion source (Meta, Google Ads
@@ -2131,7 +2139,7 @@ export default function DataCallingPage() {
                                     variant="inline"
                                     value={l.assignedAgent || ""}
                                     onChange={(v) => reassignWithNote(l, v)}
-                                    options={assignedOptions}
+                                    options={reassignOptions}
                                     placeholder="—"
                                     searchPlaceholder="Search agents..."
                                     panelWidth={176}

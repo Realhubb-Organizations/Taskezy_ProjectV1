@@ -44,6 +44,8 @@ import {
   getBulkSetPropertyStatusHandler,
   getDistinctCampaignsHandler,
   getLeadAnalyticsStatsHandler,
+  getLeadAnalyticsPropertyStatsHandler,
+  getRnrCallAveragesHandler,
   getLeadHandler,
   getLeadStatsHandler,
   getManagerReportStatsHandler,
@@ -74,6 +76,8 @@ leadsRouter.get("/stats", validate({ query: leadStatsQuerySchema }), asyncHandle
 // no-extra-role-gate reasoning as /stats above; a Member calling this
 // directly just gets their own single-row self-scoped result.
 leadsRouter.get("/analytics-stats", validate({ query: leadAnalyticsStatsQuerySchema }), asyncHandler(getLeadAnalyticsStatsHandler));
+leadsRouter.get("/analytics-stats-by-property", validate({ query: leadAnalyticsStatsQuerySchema }), asyncHandler(getLeadAnalyticsPropertyStatsHandler));
+leadsRouter.get("/rnr-call-averages", validate({ query: leadAnalyticsStatsQuerySchema }), asyncHandler(getRnrCallAveragesHandler));
 // Agent report's 4 funnel KPI cards + booking value/count (AgentReports.tsx)
 // for the one agent named in ?assignedAgentId — reuses leadStatsQuerySchema
 // (same filter shape as /stats) since this only ever needs assignedAgentId/

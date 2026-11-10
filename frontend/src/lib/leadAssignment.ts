@@ -13,6 +13,14 @@ interface AssignableUser {
   name: string;
   role: string;
   managerId?: string;
+  role_type?: "Manager" | "Member";
+  status?: string;
+  department?: string;
+}
+
+/** Every other active sales manager — a manager may hand a lead to any of them (whatever location they look after). Same rule as the server. */
+export function otherManagers<U extends AssignableUser>(users: U[], callerId: string): U[] {
+  return users.filter(u => u.id !== callerId && u.role_type === "Manager" && isLeadAssignableUser(u));
 }
 
 /**
@@ -78,7 +86,10 @@ export function eligibleAssignees<U extends AssignableUser>({
   let pool = anyAllMembers ? users.filter(u => u.role === "AGENT") : users.filter(u => teamIds.has(u.id));
 
   if (caller.role !== "ADMIN") {
-    pool = pool.filter(u => u.managerId === caller.id);
+    // Own direct reports (for these properties), plus every other manager
+    // whatever properties they look after.
+    const ownTeam = pool.filter(u => u.managerId === caller.id);
+    pool = [...ownTeam, ...otherManagers(users, caller.id).filter(m => !ownTeam.some(u => u.id === m.id))];
   }
 
   const currentHolders = new Set(targetLeads.map(l => l.assignedAgent?.trim().toLowerCase()));
