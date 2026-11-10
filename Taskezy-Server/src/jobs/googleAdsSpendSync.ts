@@ -2,6 +2,7 @@ import { logger } from "../utils/logger";
 import { listLinkedAccounts, listCampaigns, getAccountDailyStats, listAdGroups, listAds, getAdDailyStats } from "../modules/google-ads/google-ads-client";
 import * as googleAdsRepo from "../modules/google-ads/google-ads.repository";
 import { businessDateOffset } from "../utils/businessDate";
+import { broadcastDataChanged } from "../utils/dataChanged";
 
 const POLL_INTERVAL_MS = 6 * 60 * 60 * 1000; // matches metaAdSpendSync.ts — spend doesn't need per-minute freshness
 const LOOKBACK_DAYS = 35; // covers the Reports page's "Last 30 Days" preset with buffer for late-arriving data
@@ -10,6 +11,14 @@ const LOOKBACK_DAYS = 35; // covers the Reports page's "Last 30 Days" preset wit
 // per-ad version, done at the account level here since Google's ad-level
 // call is account-wide, not per-ad.
 const FIRST_SYNC_LOOKBACK_DAYS = 365;
+
+// Mirrors metaAdSpendSync.ts's own cap — caps how many accounts can trigger
+// the one-time 365-day campaign-level backfill per 6h cycle, so a large
+// backlog of un-backfilled accounts can't all fire at once and risk Google
+// Ads' rate limit or delay fresh data for the rest. An MCC typically has far
+// fewer linked accounts than Meta has campaigns, so this is less likely to
+// bind here, but kept for the same safety reasoning.
+const MAX_WIDE_BACKFILLS_PER_CYCLE = 5;
 
 function isoDateNDaysAgo(n: number): string {
   return businessDateOffset(-n);
@@ -67,6 +76,7 @@ async function runSync(): Promise<void> {
 
   const since = isoDateNDaysAgo(LOOKBACK_DAYS);
   const until = isoDateNDaysAgo(0);
+  let wideBackfillsThisCycle = 0;
 
   for (const account of accounts) {
     await googleAdsRepo.upsertAccount({ id: account.id, name: account.name });
@@ -89,7 +99,17 @@ async function runSync(): Promise<void> {
     }
 
     try {
-      const dailyStats = await getAccountDailyStats(account.id, since, until);
+      // One-time wide backfill, same reasoning as the per-ad version below —
+      // see hasOlderSpendHistoryForAccount's comment — capped per cycle so a
+      // large backlog of un-backfilled accounts can't all fire at once. Kept
+      // inside this try so a failed check just skips this account's
+      // campaign-level sync for the cycle, same as every other failure here.
+      const hasOlderHistory = await googleAdsRepo.hasOlderSpendHistoryForAccount(account.id, since);
+      const needsWideBackfill = !hasOlderHistory && wideBackfillsThisCycle < MAX_WIDE_BACKFILLS_PER_CYCLE;
+      if (needsWideBackfill) wideBackfillsThisCycle++;
+      const campaignLevelSince = needsWideBackfill ? isoDateNDaysAgo(FIRST_SYNC_LOOKBACK_DAYS) : since;
+
+      const dailyStats = await getAccountDailyStats(account.id, campaignLevelSince, until);
       for (const stat of dailyStats) {
         const campaign = campaignById.get(stat.campaignId);
         if (!campaign) continue; // stats for a campaign outside today's campaign list (e.g. removed) — skip rather than guess a name
@@ -145,6 +165,9 @@ async function runSync(): Promise<void> {
     }
   }
 
+  // Same reasoning as metaAdSpendSync.ts's own broadcast — lets a Campaigns
+  // page already open live-refresh instead of needing a manual reload.
+  broadcastDataChanged("adspend");
   logger.info({ accounts: accounts.length }, "Google Ads spend sync cycle complete");
 }
 

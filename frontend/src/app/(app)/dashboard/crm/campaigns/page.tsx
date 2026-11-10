@@ -383,8 +383,11 @@ export default function AdminCampaignsPage() {
   // Two independent fetches, matching the two buildCampaignsList call sites
   // below: one scoped to the current Date Range, one always all-time.
   const [scopedLeadStats, setScopedLeadStats] = useState<CampaignLeadStats[]>([]);
-  // Live: other people's lead / follow-up changes refresh this page's numbers.
-  const { liveVersion: leadsLive } = useLiveRefresh("leads");
+  // Live: other people's lead changes AND a completed Meta/Google ad-spend
+  // sync cycle (background 6h or manual Sync Now) both refresh this page's
+  // numbers — without "adspend", a completed sync only showed up on a
+  // manual reload.
+  const { liveVersion: leadsLive } = useLiveRefresh("leads", "adspend");
   const breakdownLiveRefresh = useBackgroundRefresh(leadsLive);
   useEffect(() => {
     let cancelled = false;

@@ -6,11 +6,11 @@ import { useEffect, useRef } from "react";
 // ({ topics }) whenever something in one of these areas changes
 // (Taskezy-Server/src/utils/dataChanged.ts); AppContext turns each into a
 // version bump, and every page lists the areas it shows in its fetch deps.
-export type DataTopic = "leads" | "followups" | "tasks" | "calllog" | "properties" | "users" | "calendar";
+export type DataTopic = "leads" | "followups" | "tasks" | "calllog" | "properties" | "users" | "calendar" | "adspend";
 export type DataVersion = Record<DataTopic, number>;
 
-export const ALL_DATA_TOPICS: DataTopic[] = ["leads", "followups", "tasks", "calllog", "properties", "users", "calendar"];
-export const EMPTY_DATA_VERSION: DataVersion = { leads: 0, followups: 0, tasks: 0, calllog: 0, properties: 0, users: 0, calendar: 0 };
+export const ALL_DATA_TOPICS: DataTopic[] = ["leads", "followups", "tasks", "calllog", "properties", "users", "calendar", "adspend"];
+export const EMPTY_DATA_VERSION: DataVersion = { leads: 0, followups: 0, tasks: 0, calllog: 0, properties: 0, users: 0, calendar: 0, adspend: 0 };
 
 /** Sum of the given areas' versions — one number to put in a fetch effect's deps. */
 export function liveVersionOf(version: DataVersion, topics: DataTopic[]): number {
