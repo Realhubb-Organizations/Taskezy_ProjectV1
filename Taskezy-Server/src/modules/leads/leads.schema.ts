@@ -110,15 +110,21 @@ export const distinctCampaignsQuerySchema = leadStatsQuerySchema.omit({ search: 
 
 // Leads Analytics tab's own filter set (Property/Campaign/Date Range) —
 // deliberately NOT listLeadsQuerySchema.omit(...) like leadStatsQuerySchema
-// above, since this tab has no status/search/excludeBulkUpload filters but
-// does have a Property one the plain Leads tab doesn't.
+// above, since this tab has no status/search filters but does have a
+// Property one the plain Leads tab doesn't. excludeBulkUpload was missing
+// here entirely (unlike every other admin stats endpoint) — this tab used
+// to scan the bulk-loaded `leads` array client-side, which was already
+// Bulk-Upload-excluded for free; moving the computation server-side never
+// rebuilt that exclusion, so Data Calling leads were silently counted
+// alongside real pipeline leads until this field was added.
 export const leadAnalyticsStatsQuerySchema = z.object({
   propertyId: uuidToArray,
   // Member filter — used by the property card and RNR averages.
   assignedAgentId: uuidToArray,
   campaign: stringToArray,
   dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateFrom must be YYYY-MM-DD").optional(),
-  dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateTo must be YYYY-MM-DD").optional()
+  dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateTo must be YYYY-MM-DD").optional(),
+  excludeBulkUpload: z.enum(["true", "false"]).optional().transform(v => v === "true")
 });
 
 // Manager report's per-agent rollup (ManagerReports.tsx) — just a date

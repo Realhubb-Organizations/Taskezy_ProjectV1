@@ -320,6 +320,7 @@ export async function getLeadAnalyticsStats(caller: AccessTokenPayload, filter: 
   campaign?: string[];
   dateFrom?: string;
   dateTo?: string;
+  excludeBulkUpload?: boolean;
 }): Promise<AgentAnalyticsStats[]> {
   const scopedToAgentIds = await scopeForCaller(caller);
   const rows = await repo.getAnalyticsStatsByAgent(
@@ -328,6 +329,7 @@ export async function getLeadAnalyticsStats(caller: AccessTokenPayload, filter: 
       campaign: filter.campaign,
       dateFrom: filter.dateFrom,
       dateTo: filter.dateTo,
+      excludeBulkUpload: filter.excludeBulkUpload,
       scopedToAgentIds
     },
     SITE_VISIT_CODES
@@ -353,7 +355,7 @@ export interface PropertyAnalyticsStats {
   siteVisits: number;
 }
 
-type AnalyticsFilter = { propertyId?: string[]; campaign?: string[]; dateFrom?: string; dateTo?: string; assignedAgentId?: string[] };
+type AnalyticsFilter = { propertyId?: string[]; campaign?: string[]; dateFrom?: string; dateTo?: string; assignedAgentId?: string[]; excludeBulkUpload?: boolean };
 
 /** Leads Analytics' property card — same filters as getLeadAnalyticsStats, plus the Member filter. */
 export async function getLeadAnalyticsStatsByProperty(caller: AccessTokenPayload, filter: AnalyticsFilter): Promise<PropertyAnalyticsStats[]> {

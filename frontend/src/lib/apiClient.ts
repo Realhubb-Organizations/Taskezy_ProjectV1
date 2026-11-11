@@ -536,13 +536,17 @@ export function apiGetDistinctCampaigns(filters: LeadListFilters = {}): Promise<
 }
 
 // Leads Analytics tab's own filter set (LeadDashboard.tsx) — Property
-// instead of status/assignedAgentId/search/excludeBulkUpload, since this
-// tab filters per-agent, not per-status.
+// instead of status/assignedAgentId/search, since this tab filters
+// per-agent, not per-status. excludeBulkUpload is kept to make this tab
+// count Meta/Google/qualified-Data-Calling leads only, same as the plain
+// Leads tab — a Data Calling lead still sitting unqualified (source
+// "Bulk Upload") has no business in these numbers.
 export interface LeadAnalyticsStatsFilters {
   propertyId?: string[];
   campaign?: string[];
   dateFrom?: string;
   dateTo?: string;
+  excludeBulkUpload?: boolean;
 }
 export interface AgentAnalyticsStats {
   assignedAgentId: string;
@@ -562,6 +566,7 @@ export function apiGetLeadAnalyticsStats(filters: LeadAnalyticsStatsFilters = {}
   filters.campaign?.forEach(c => params.append("campaign", c));
   if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
   if (filters.dateTo) params.set("dateTo", filters.dateTo);
+  if (filters.excludeBulkUpload) params.set("excludeBulkUpload", "true");
   const qs = params.toString();
   return request<AgentAnalyticsStats[]>(`/api/v1/leads/analytics-stats${qs ? `?${qs}` : ""}`);
 }
@@ -583,6 +588,7 @@ function analyticsParams(filters: LeadAnalyticsStatsFilters & { assignedAgentId?
   filters.assignedAgentId?.forEach(a => params.append("assignedAgentId", a));
   if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
   if (filters.dateTo) params.set("dateTo", filters.dateTo);
+  if (filters.excludeBulkUpload) params.set("excludeBulkUpload", "true");
   const qs = params.toString();
   return qs ? `?${qs}` : "";
 }
