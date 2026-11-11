@@ -1277,6 +1277,17 @@ export async function reassignLead(caller: AccessTokenPayload, leadId: string, n
     throw err;
   }
 
+  // A lead still on the internal UNASSIGNED sentinel (no real owner yet)
+  // graduates to NEW_LEAD now that it has one — the one place this must
+  // happen for every reassignment path, not a follow-up step each caller
+  // has to remember separately (reassignUnassignedSheetLeads below used to
+  // be the only caller that did; the manual single-lead reassign route
+  // never did, which is how a lead could end up with a real agent and
+  // property assigned while still showing under the "Unassigned" filter —
+  // UNASSIGNED's own display fallback shows it as "New Lead" everywhere
+  // else, masking the real status underneath).
+  await repo.markLeadNewIfUnassigned(leadId);
+
   const updated = await repo.findById(leadId);
   if (updated) {
     await createNotification({
@@ -1440,8 +1451,8 @@ export async function reassignUnassignedSheetLeads(caller: AccessTokenPayload): 
       continue;
     }
 
+    // reassignLead now promotes UNASSIGNED -> NEW_LEAD itself.
     await reassignLead(caller, lead.id, newAgentId);
-    await repo.markLeadNewIfUnassigned(lead.id);
     reassigned++;
   }
 
