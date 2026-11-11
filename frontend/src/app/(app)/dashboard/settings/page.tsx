@@ -136,6 +136,11 @@ export default function SettingsPage() {
   // The one informal "Super Admin" account — only this admin may delete
   // another admin (mirrors the same check enforced server-side).
   const isSuperAdmin = isSuperAdminUser(currentUser?.email);
+  // Mirrors the server's assertSuperAdminForAdminTarget (users.routes.ts):
+  // only the Super Admin edits, resets, deactivates or deletes another
+  // admin account — so other admins don't see controls that would 403.
+  const canManageUser = (u: { id: string; role: string }) =>
+    u.role !== "ADMIN" || isSuperAdmin || u.id === currentUser?.id;
   const { toast, confirm: confirmDialog } = useDialog();
 
   const initialTabParam = searchParams.get("tab");
@@ -1790,7 +1795,7 @@ export default function SettingsPage() {
                             <Smartphone className="h-4 w-4" />
                           </button>
                         )}
-                        {user.role !== "ADMIN" || activeRole === "ADMIN" ? (
+                        {canManageUser(user) ? (
                           <button
                             onClick={() => handleEditClick(user)}
                             className="p-2 rounded-lg text-slate-500 hover:text-brand-700 hover:bg-slate-50 border border-slate-200 transition-colors"
@@ -2084,7 +2089,7 @@ export default function SettingsPage() {
             <div>
               <label className="block text-[10px] font-bold text-slate-500 mb-1.5 uppercase">User</label>
               <SearchableSelect
-                options={users.map(u => ({ value: u.id, label: `${u.name} (${u.email})` }))}
+                options={users.filter(canManageUser).map(u => ({ value: u.id, label: `${u.name} (${u.email})` }))}
                 value={quickResetUserId}
                 onChange={(v) => { setQuickResetUserId(v); setQuickResetResult(null); }}
                 placeholder="Search for a user..."
@@ -2477,7 +2482,7 @@ export default function SettingsPage() {
                 )}
               </div>
 
-              {(selectedUser.role !== "ADMIN" || isSuperAdmin) && (
+              {canManageUser(selectedUser) && selectedUser.id !== currentUser?.id && (
                 <button
                   type="button"
                   onClick={() => setDeletingUser({ id: selectedUser.id, name: selectedUser.name })}

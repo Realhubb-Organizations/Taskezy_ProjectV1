@@ -177,6 +177,28 @@ usersRouter.post(
   })
 );
 
+/**
+ * Only the Super Admin may edit, reset the password of, deactivate or
+ * delete ANOTHER admin account. Every route that acts on a user account
+ * calls this — it used to be checked on DELETE alone, which left the same
+ * outcome reachable through the other three: any admin could reset the
+ * Super Admin's password (account takeover), or move the Super Admin's
+ * email off SUPER_ADMIN_EMAIL and then onto their own (Super Admin status
+ * is decided by email). Your own account and non-admin accounts are
+ * unaffected.
+ */
+async function assertSuperAdminForAdminTarget(
+  callerId: string,
+  target: { id: string; role: string },
+  action: string
+): Promise<void> {
+  if (target.role !== "ADMIN" || target.id === callerId) return;
+  const caller = await repo.findById(callerId);
+  if (caller?.email !== SUPER_ADMIN_EMAIL) {
+    throw ApiError.forbidden(`Only the Super Admin can ${action} another admin account.`);
+  }
+}
+
 usersRouter.patch(
   "/:id",
   requireRole("ADMIN"),
@@ -184,6 +206,7 @@ usersRouter.patch(
   asyncHandler(async (req, res) => {
     const existing = await repo.findById(req.params.id);
     if (!existing) throw ApiError.notFound("User not found");
+    await assertSuperAdminForAdminTarget(req.user!.sub, existing, "edit");
 
     // Access Control toggles are Super-Admin-only — every other admin can
     // still edit everything else about a user, just not these fields.
@@ -238,6 +261,7 @@ usersRouter.patch(
   asyncHandler(async (req, res) => {
     const existing = await repo.findById(req.params.id);
     if (!existing) throw ApiError.notFound("User not found");
+    await assertSuperAdminForAdminTarget(req.user!.sub, existing, "reset the password of");
     const passwordHash = await hashPassword(req.body.newPassword);
     await repo.updatePasswordHash(req.params.id, passwordHash);
     sendOk(res, { passwordReset: true });
@@ -311,10 +335,7 @@ usersRouter.delete(
       throw ApiError.badRequest("You cannot delete your own account.");
     }
     if (existing.role === "ADMIN") {
-      const caller = await repo.findById(req.user!.sub);
-      if (caller?.email !== SUPER_ADMIN_EMAIL) {
-        throw ApiError.forbidden("Only the Super Admin can delete another admin account.");
-      }
+      await assertSuperAdminForAdminTarget(req.user!.sub, existing, "delete");
       const remainingAdmins = await repo.countAdmins(existing.id);
       if (remainingAdmins === 0) {
         throw ApiError.badRequest("Cannot delete the last active administrator account.");
@@ -369,6 +390,7 @@ usersRouter.post(
     if (!existing) throw ApiError.notFound("User not found");
     if (existing.status === "INACTIVE") throw ApiError.badRequest("This user is already inactive.");
     if (req.params.id === req.user!.sub) throw ApiError.badRequest("You cannot make your own account inactive.");
+    await assertSuperAdminForAdminTarget(req.user!.sub, existing, "deactivate");
     if (existing.role === "ADMIN" && (await repo.countAdmins(existing.id)) === 0) {
       throw ApiError.badRequest("Cannot deactivate the last active administrator account.");
     }
