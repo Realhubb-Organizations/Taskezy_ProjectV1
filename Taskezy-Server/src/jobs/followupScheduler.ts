@@ -106,28 +106,22 @@ async function notifySlaViolations(): Promise<void> {
   const adminIds = await listActiveAdminIds();
   if (adminIds.length === 0) return;
 
-  // One notification per admin per poll cycle, not one per (overdue call x
-  // admin) pair — without this, 3 overdue calls meant 3 separate
-  // notifications/pushes to every admin in the same ~60s cycle. Same fix
-  // already applied to the identical pattern in missedLeadScheduler.ts.
-  const title = rows.length === 1 ? "Follow-up SLA Violation" : `${rows.length} Follow-up SLA Violations`;
-  const message = rows
-    .map((row) => `${row.agent_name} hasn't followed up on "${row.lead_name}"`)
-    .join("; ") + " within 10 minutes of the reminder.";
-  // A click opens the frozen record(s) — the lead(s) as they were when the call was missed.
-  const link = missedRecordsLink(title, { recordIds: rows.map((row) => row.record_id) });
-  const singleLeadId = rows.length === 1 ? rows[0].lead_id ?? undefined : undefined;
-
-  for (const adminId of adminIds) {
-    await createNotification({
-      system: "CRM",
-      category: "GENERAL",
-      title,
-      message,
-      recipientUserId: adminId,
-      leadId: singleLeadId,
-      link
-    });
+  // One alert per missed call, on purpose — do NOT group these. The bell
+  // cuts a message after two lines, so a combined "3 Follow-up SLA
+  // Violations" alert hides the names, and each alert must open its own lead.
+  for (const row of rows) {
+    for (const adminId of adminIds) {
+      await createNotification({
+        system: "CRM",
+        category: "GENERAL",
+        title: "Follow-up SLA Violation",
+        message: `${row.agent_name} has not followed up on "${row.lead_name}" within 10 minutes of the reminder.`,
+        recipientUserId: adminId,
+        leadId: row.lead_id ?? undefined,
+        // A click opens the frozen record — the lead as it was when the call was missed.
+        link: missedRecordsLink("Follow-up SLA Violation", { recordIds: [row.record_id] })
+      });
+    }
   }
 }
 
