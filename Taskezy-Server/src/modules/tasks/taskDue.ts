@@ -9,7 +9,9 @@ import { FEEDBACK_PENDING_LOG_PREFIX } from "../call-attempts/feedbackLock";
 //     upcoming one — and only that one becomes a task.
 //  2. No open call:
 //       last action was a WhatsApp message → no task (NULL)
-//       New Lead                   → when it was assigned (or created)
+//       New Lead                   → when it was assigned (or created);
+//                                    a Data Calling upload never is (no task
+//                                    until a call is booked for it)
 //       RNR / Call Back / Followup → its last activity
 //       anything else              → no task (NULL)
 
@@ -33,7 +35,7 @@ export const TASK_DUE_AT_SQL = `COALESCE(
     LIMIT 1),
   CASE
     WHEN COALESCE(${LATEST_LOG_SQL("message")}, '') LIKE 'WhatsApp message outcome:%' THEN NULL
-    WHEN l.status_code = 'NEW_LEAD' THEN COALESCE(l.assigned_at, l.created_at)
+    WHEN l.status_code = 'NEW_LEAD' AND l.source IS DISTINCT FROM 'Bulk Upload' THEN COALESCE(l.assigned_at, l.created_at)
     WHEN l.status_code IN ('RNR', 'CALL_BACK', 'FOLLOWUP') THEN COALESCE(${LATEST_LOG_SQL("created_at")}, l.created_at)
   END
 )`;
