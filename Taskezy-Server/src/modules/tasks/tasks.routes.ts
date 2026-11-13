@@ -189,6 +189,8 @@ tasksRouter.get(
        ) ll ON true
        WHERE l.status_code = ANY($1::text[])
          AND u.status = 'ACTIVE'
+         -- An uploaded Data Calling lead isn't due on its own — only once a call is booked for it (above).
+         AND l.source IS DISTINCT FROM 'Bulk Upload'
          -- Connected + Unqualified Data Calling leads are out of the follow-up workflow.
          AND NOT (l.call_status IS NOT DISTINCT FROM 'Connected' AND l.call_sub_status IS NOT DISTINCT FROM 'Unqualified')
          -- The agent's latest action was a WhatsApp message: no next call is
