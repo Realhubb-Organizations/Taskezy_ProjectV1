@@ -46,26 +46,26 @@ export async function getDistinctCampaignsHandler(req: Request, res: Response): 
 }
 
 export async function getLeadAnalyticsStatsHandler(req: Request, res: Response): Promise<void> {
-  const { propertyId, campaign, dateFrom, dateTo } = req.query as unknown as {
-    propertyId?: string[]; campaign?: string[]; dateFrom?: string; dateTo?: string;
+  const { propertyId, campaign, dateFrom, dateTo, excludeBulkUpload } = req.query as unknown as {
+    propertyId?: string[]; campaign?: string[]; dateFrom?: string; dateTo?: string; excludeBulkUpload?: boolean;
   };
-  const stats = await leadsService.getLeadAnalyticsStats(req.user!, { propertyId, campaign, dateFrom, dateTo });
+  const stats = await leadsService.getLeadAnalyticsStats(req.user!, { propertyId, campaign, dateFrom, dateTo, excludeBulkUpload });
   sendOk(res, stats);
 }
 
 // Leads Analytics' property card and RNR Analysis averages.
 export async function getLeadAnalyticsPropertyStatsHandler(req: Request, res: Response): Promise<void> {
-  const { propertyId, campaign, dateFrom, dateTo, assignedAgentId } = req.query as unknown as {
-    propertyId?: string[]; campaign?: string[]; dateFrom?: string; dateTo?: string; assignedAgentId?: string[];
+  const { propertyId, campaign, dateFrom, dateTo, assignedAgentId, excludeBulkUpload } = req.query as unknown as {
+    propertyId?: string[]; campaign?: string[]; dateFrom?: string; dateTo?: string; assignedAgentId?: string[]; excludeBulkUpload?: boolean;
   };
-  sendOk(res, await leadsService.getLeadAnalyticsStatsByProperty(req.user!, { propertyId, campaign, dateFrom, dateTo, assignedAgentId }));
+  sendOk(res, await leadsService.getLeadAnalyticsStatsByProperty(req.user!, { propertyId, campaign, dateFrom, dateTo, assignedAgentId, excludeBulkUpload }));
 }
 
 export async function getRnrCallAveragesHandler(req: Request, res: Response): Promise<void> {
-  const { propertyId, campaign, dateFrom, dateTo, assignedAgentId } = req.query as unknown as {
-    propertyId?: string[]; campaign?: string[]; dateFrom?: string; dateTo?: string; assignedAgentId?: string[];
+  const { propertyId, campaign, dateFrom, dateTo, assignedAgentId, excludeBulkUpload } = req.query as unknown as {
+    propertyId?: string[]; campaign?: string[]; dateFrom?: string; dateTo?: string; assignedAgentId?: string[]; excludeBulkUpload?: boolean;
   };
-  sendOk(res, await leadsService.getRnrCallAverages(req.user!, { propertyId, campaign, dateFrom, dateTo, assignedAgentId }));
+  sendOk(res, await leadsService.getRnrCallAverages(req.user!, { propertyId, campaign, dateFrom, dateTo, assignedAgentId, excludeBulkUpload }));
 }
 
 export async function getAgentReportStatsHandler(req: Request, res: Response): Promise<void> {

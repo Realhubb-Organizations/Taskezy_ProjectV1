@@ -1342,7 +1342,10 @@ export default function LeadDashboard() {
     apiGetLeadAnalyticsStats({
       propertyId: propertyIds.length > 0 ? propertyIds : undefined,
       campaign: analyticsCampaignFilter.length > 0 ? analyticsCampaignFilter : undefined,
-      ...dateRangeToServerBounds(analyticsDateRange, analyticsCustomRange, today)
+      ...dateRangeToServerBounds(analyticsDateRange, analyticsCustomRange, today),
+      // Meta/Google/qualified-Data-Calling leads only — a Data Calling lead
+      // still sitting unqualified (source "Bulk Upload") has no business here.
+      excludeBulkUpload: true
     })
       .then(result => { if (!cancelled) setAnalyticsStats(result); })
       .catch(() => { /* leave the previous numbers showing on a transient failure */ });
@@ -1366,7 +1369,9 @@ export default function LeadDashboard() {
       propertyId: propertyIds.length > 0 ? propertyIds : undefined,
       campaign: analyticsCampaignFilter.length > 0 ? analyticsCampaignFilter : undefined,
       assignedAgentId: memberIds.length > 0 ? memberIds : undefined,
-      ...dateRangeToServerBounds(analyticsDateRange, analyticsCustomRange, today)
+      ...dateRangeToServerBounds(analyticsDateRange, analyticsCustomRange, today),
+      // Same reasoning as apiGetLeadAnalyticsStats above.
+      excludeBulkUpload: true
     };
     apiGetLeadAnalyticsPropertyStats(filters)
       .then(result => { if (!cancelled) setPropertyStats(result); })

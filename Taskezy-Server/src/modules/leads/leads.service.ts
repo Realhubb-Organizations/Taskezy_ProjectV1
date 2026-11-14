@@ -7,6 +7,7 @@ import * as repo from "./leads.repository";
 import { CreateLeadInput } from "./leads.repository";
 import * as usersRepo from "../users/users.repository";
 import { createNotification, deleteLeadActivityNotifications } from "../notifications/notifications.service";
+import { leadIdsLink } from "../notifications/notificationLinks";
 import { findPropertyIdBySheetSource, findById as findPropertyById } from "../properties/properties.repository";
 import { pickAgentForProperty, createPropertyAgentPicker } from "../properties/properties.assignment";
 import { broadcastLeadChanged, broadcastManyLeadsChanged } from "./leads.realtime";
@@ -320,6 +321,7 @@ export async function getLeadAnalyticsStats(caller: AccessTokenPayload, filter: 
   campaign?: string[];
   dateFrom?: string;
   dateTo?: string;
+  excludeBulkUpload?: boolean;
 }): Promise<AgentAnalyticsStats[]> {
   const scopedToAgentIds = await scopeForCaller(caller);
   const rows = await repo.getAnalyticsStatsByAgent(
@@ -328,6 +330,7 @@ export async function getLeadAnalyticsStats(caller: AccessTokenPayload, filter: 
       campaign: filter.campaign,
       dateFrom: filter.dateFrom,
       dateTo: filter.dateTo,
+      excludeBulkUpload: filter.excludeBulkUpload,
       scopedToAgentIds
     },
     SITE_VISIT_CODES
@@ -353,7 +356,7 @@ export interface PropertyAnalyticsStats {
   siteVisits: number;
 }
 
-type AnalyticsFilter = { propertyId?: string[]; campaign?: string[]; dateFrom?: string; dateTo?: string; assignedAgentId?: string[] };
+type AnalyticsFilter = { propertyId?: string[]; campaign?: string[]; dateFrom?: string; dateTo?: string; assignedAgentId?: string[]; excludeBulkUpload?: boolean };
 
 /** Leads Analytics' property card — same filters as getLeadAnalyticsStats, plus the Member filter. */
 export async function getLeadAnalyticsStatsByProperty(caller: AccessTokenPayload, filter: AnalyticsFilter): Promise<PropertyAnalyticsStats[]> {
@@ -1275,6 +1278,17 @@ export async function reassignLead(caller: AccessTokenPayload, leadId: string, n
     throw err;
   }
 
+  // A lead still on the internal UNASSIGNED sentinel (no real owner yet)
+  // graduates to NEW_LEAD now that it has one — the one place this must
+  // happen for every reassignment path, not a follow-up step each caller
+  // has to remember separately (reassignUnassignedSheetLeads below used to
+  // be the only caller that did; the manual single-lead reassign route
+  // never did, which is how a lead could end up with a real agent and
+  // property assigned while still showing under the "Unassigned" filter —
+  // UNASSIGNED's own display fallback shows it as "New Lead" everywhere
+  // else, masking the real status underneath).
+  await repo.markLeadNewIfUnassigned(leadId);
+
   const updated = await repo.findById(leadId);
   if (updated) {
     await createNotification({
@@ -1332,33 +1346,42 @@ export async function bulkReassignLeads(
   const newAgentName = `${newAgent.first_name}${newAgent.last_name ? " " + newAgent.last_name : ""}`;
   const scopedToAgentIds = await scopeForCaller(caller);
 
-  let moved = 0;
+  const movedIds: string[] = [];
   let skipped = 0;
   const failed: { id: string; reason: string }[] = [];
 
   for (let i = 0; i < ids.length; i += BULK_REASSIGN_CHUNK_SIZE) {
     const chunk = ids.slice(i, i + BULK_REASSIGN_CHUNK_SIZE);
     const result = await repo.reassignLeadsChunk(chunk, newAgentId, newAgentName, scopedToAgentIds, note, { userId: caller.sub, name: caller.name });
-    moved += result.moved.length;
+    movedIds.push(...result.moved);
     skipped += result.skipped.length;
     result.notFound.forEach((id) => failed.push({ id, reason: "Lead not found" }));
     result.outOfScope.forEach((id) => failed.push({ id, reason: "You can only reassign your own team's leads." }));
   }
+  const moved = movedIds.length;
 
   // One notification summarizing the whole batch, not one per lead — a
   // 300-lead reassignment used to mean 300 separate notifications/pushes to
   // the same new agent in a few seconds (the exact flood class
-  // missedLeadScheduler.ts already guards against elsewhere).
+  // missedLeadScheduler.ts already guards against elsewhere). Clicking it
+  // still opens the leads themselves: one lead keeps the single-lead shape
+  // (leadId -> opens its drawer, same as reassignLead's own notification);
+  // several open a list of exactly those leads, same link the users-module
+  // handover uses for "Leads Reassigned To You".
   if (moved > 0) {
+    const title = moved === 1 ? "Lead Reassigned To You" : `${moved} Leads Reassigned To You`;
     await createNotification({
       system: "CRM",
       category: "REASSIGNMENT",
-      title: moved === 1 ? "Lead Reassigned To You" : `${moved} Leads Reassigned To You`,
+      title,
       message: moved === 1
         ? `1 lead was reassigned to you by ${caller.name}.`
         : `${moved} leads were reassigned to you by ${caller.name}.`,
       recipientUserId: newAgentId,
-      link: "/dashboard/crm"
+      leadId: moved === 1 ? movedIds[0] : undefined,
+      link: moved === 1
+        ? "/dashboard/crm"
+        : leadIdsLink(title, movedIds, "/dashboard/crm", { assignedAgentId: [newAgentId] })
     });
     broadcastManyLeadsChanged();
   }
@@ -1438,8 +1461,8 @@ export async function reassignUnassignedSheetLeads(caller: AccessTokenPayload): 
       continue;
     }
 
+    // reassignLead now promotes UNASSIGNED -> NEW_LEAD itself.
     await reassignLead(caller, lead.id, newAgentId);
-    await repo.markLeadNewIfUnassigned(lead.id);
     reassigned++;
   }
 

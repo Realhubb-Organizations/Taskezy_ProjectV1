@@ -2,9 +2,8 @@ import { pool } from "../db/pool";
 import { logger } from "../utils/logger";
 import { createNotification } from "../modules/notifications/notifications.service";
 import { listActiveAdminIds } from "../modules/users/users.repository";
-import { BUSINESS_TIMEZONE, toBusinessDate } from "../utils/businessDate";
 import { broadcastDataChanged } from "../utils/dataChanged";
-import { missedRecordIdsLink, missedRecordsLink } from "../modules/notifications/notificationLinks";
+import { missedRecordIdsLink } from "../modules/notifications/notificationLinks";
 import { INSERT_LEAD_MISS_RECORDS_SQL } from "../modules/missed-records/missedRecords.sql";
 
 const POLL_INTERVAL_MS = 60_000;
@@ -144,61 +143,15 @@ async function notifyMissedLeads(): Promise<void> {
       link: missedRecordIdsLink(title, agentGroups.flat().map(l => l.record_id), "LEAD", agentGroups[0][0].missed_at, singleAgentId)
     });
   }
-
-  // Admin also gets a running same-day total whenever it changes — a
-  // per-lead ping tells them *that* something was missed, this tells them
-  // *how much* has piled up today across the whole team, which per-lead
-  // pings alone don't answer. Fires once per poll cycle that actually found
-  // new misses (not every cycle), so it updates live through the day without
-  // spamming a fresh notification every 60s when nothing's changed.
-  await notifyAdminDailyDigest(adminIds);
-}
-
-interface DailyMissedRow {
-  agent_name: string;
-  manager_name: string | null;
-  missed_count: string;
-}
-
-async function notifyAdminDailyDigest(adminIds: string[]): Promise<void> {
-  const { rows } = await pool.query<DailyMissedRow>(
-    `SELECT u.first_name || COALESCE(' ' || u.last_name, '') AS agent_name,
-            m.first_name || COALESCE(' ' || m.last_name, '') AS manager_name,
-            count(*) AS missed_count
-     FROM leads l
-     JOIN users u ON u.id = l.assigned_agent_id
-     LEFT JOIN users m ON m.id = u.manager_id
-     WHERE (l.missed_notified_at AT TIME ZONE $1)::date = (now() AT TIME ZONE $1)::date
-     GROUP BY u.id, u.first_name, u.last_name, m.first_name, m.last_name
-     ORDER BY count(*) DESC`,
-    [BUSINESS_TIMEZONE]
-  );
-  if (rows.length === 0) return;
-
-  const total = rows.reduce((sum, r) => sum + Number(r.missed_count), 0);
-  const breakdown = rows
-    .map(r => `${r.agent_name}: ${r.missed_count}${r.manager_name ? ` (${r.manager_name}'s team)` : ""}`)
-    .join(" · ");
-  // Opens the frozen records of the leads this digest counts — missed today,
-  // up to now — on the CRM Dashboard's alert leads page (frontend
-  // lib/reportDetail.ts), so the list matches the number. The upper bound
-  // keeps an older digest showing its own misses, not the ones after it.
-  const now = new Date();
-  const link = missedRecordsLink(
-    `Missed Leads on ${toBusinessDate(now)}`,
-    { type: "LEAD", missedOn: toBusinessDate(now), missedUntil: now.toISOString() }
-  );
-
-  for (const adminId of adminIds) {
-    await createNotification({
-      system: "CRM",
-      category: "REMINDER",
-      title: `Missed Leads Today: ${total}`,
-      message: `${total} missed lead${total === 1 ? "" : "s"} today across ${rows.length} agent${rows.length === 1 ? "" : "s"} — ${breakdown}`,
-      recipientUserId: adminId,
-      link
-    });
-  }
+  // Admins are already covered above: they're in escalationRecipients for
+  // every agent's misses, so they get a real-time notification naming the
+  // specific lead(s) the moment each one crosses the threshold. A separate
+  // "Missed Leads Today: N" running-total digest used to fire here too, on
+  // every cycle that found a new miss — a growing pile of near-duplicate
+  // notifications restating an incrementing count with no lead names,
+  // directly on top of the specific ones above. Moved to
+  // eodReportScheduler.ts's notifyAdminMissedLeadsDigest — same query and
+  // message, fired once at each admin's own EOD time instead of live.
 }
 
 /**
