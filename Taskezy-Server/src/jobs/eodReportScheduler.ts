@@ -213,9 +213,12 @@ async function notifyAdminCompanyDigest(adminId: string): Promise<void> {
   const parts = managerTotals.map(r => `${r.manager_name}'s team: ${r.call_count}`);
   if (unassignedCount > 0) parts.push(`Unassigned: ${unassignedCount}`);
 
+  // REMINDER, not GENERAL: Admin's two EOD digests (this one and
+  // notifyAdminMissedLeadsDigest) both belong in the bell's Reminder Alerts
+  // tab. Agent/Manager EOD summaries stay GENERAL (Activity tab).
   await createNotification({
     system: "CRM",
-    category: "GENERAL",
+    category: "REMINDER",
     title: `Company End of Day Summary: ${grandTotal} call${grandTotal === 1 ? "" : "s"}`,
     message: parts.join(" · "),
     recipientUserId: adminId,
