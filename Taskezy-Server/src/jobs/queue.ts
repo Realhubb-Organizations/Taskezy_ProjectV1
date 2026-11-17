@@ -3,6 +3,7 @@ import { env } from "../config/env";
 import { logger } from "../utils/logger";
 import { AccessTokenPayload } from "../utils/tokens";
 import { bulkImportLeads, BulkImportLeadsInput, bulkDeleteLeads, bulkReassignLeads, bulkSetLeadProperty } from "../modules/leads/leads.service";
+import type { LeadPropertyKind } from "../modules/leads/leads.repository";
 import { processScheduleFollowup, ScheduleFollowupJobData } from "./scheduleFollowupJob";
 
 // Postgres-backed job queue (same RDS instance, its own `pgboss` schema —
@@ -59,6 +60,8 @@ interface BulkSetPropertyJobData {
   leadIds: string[];
   propertyId: string | null;
   note?: string;
+  /** Missing on jobs queued before Data Calling properties existed — treated as MAIN. */
+  kind?: LeadPropertyKind;
 }
 
 // CallFeedbackGate's Save & Continue (call-attempts.routes.ts's PATCH /:id)
@@ -116,7 +119,7 @@ export async function startQueue(): Promise<void> {
   await boss.createQueue(BULK_SET_PROPERTY_QUEUE);
   await boss.work<BulkSetPropertyJobData>(BULK_SET_PROPERTY_QUEUE, async ([job]) => {
     logger.info({ jobId: job.id }, "Processing queued bulk lead property change");
-    return bulkSetLeadProperty(job.data.caller, job.data.leadIds, job.data.propertyId, job.data.note);
+    return bulkSetLeadProperty(job.data.caller, job.data.leadIds, job.data.propertyId, job.data.note, job.data.kind ?? "MAIN");
   });
 
   await boss.createQueue(SCHEDULE_FOLLOWUP_QUEUE);

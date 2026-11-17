@@ -33,6 +33,8 @@ interface AddPropertyModalProps {
   onSuccess: (name: string) => void;
   /** Prefills the form from an existing property (used by the properties table's Duplicate action) — always creates a new property, never edits the source. */
   duplicateFrom?: Property | null;
+  /** Which list the new property joins (Leads or Data Calling). */
+  kind?: "LEADS" | "DATA_CALLING";
 }
 
 export const PROPERTY_TYPES = ["Apartment", "Villa", "Plot", "Commercial", "Residential", "Mixed-Use"];
@@ -77,7 +79,8 @@ function Field({
   );
 }
 
-export default function AddPropertyModal({ isOpen, onClose, onSuccess, duplicateFrom }: AddPropertyModalProps) {
+export default function AddPropertyModal({ isOpen, onClose, onSuccess, duplicateFrom, kind = "LEADS" }: AddPropertyModalProps) {
+  const isDataCalling = kind === "DATA_CALLING";
   const { toast, confirm: confirmDialog } = useDialog();
   const { users, addProperty, isDataLoading } = useApp();
 
@@ -222,7 +225,8 @@ export default function AddPropertyModal({ isOpen, onClose, onSuccess, duplicate
       leadRegistrationUrl: leadRegistrationUrl.trim() || undefined,
       teamAssignmentMode,
       leadAssignmentMode: teamAssignmentMode === "CUSTOM_MEMBERS" ? leadAssignmentMode : undefined,
-      assignedTeam
+      assignedTeam,
+      kind
     };
 
     setIsSubmitting(true);
@@ -246,7 +250,7 @@ export default function AddPropertyModal({ isOpen, onClose, onSuccess, duplicate
         <div className="w-full sm:max-w-3xl h-[95vh] sm:h-auto sm:max-h-[90vh] bg-white border-0 sm:border border-slate-200 rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden">
           {/* Header */}
           <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 shrink-0">
-            <h3 className="ui-title">Add Property details</h3>
+            <h3 className="ui-title">{isDataCalling ? "Add Data Calling Property" : "Add Property details"}</h3>
             <button onClick={handleClose} className="text-slate-400 hover:text-slate-600">
               <X className="h-5 w-5" />
             </button>

@@ -17,6 +17,7 @@ import LeadScheduleModal from "./LeadScheduleModal";
 import NextCallDropdown from "./NextCallDropdown";
 import MissedCountBadge from "@/components/crm/MissedCountBadge";
 import { formatFollowupDate, formatFollowupTime, nextCallFor } from "@/lib/followups";
+import { useDataCallingProperties } from "@/lib/useDataCallingProperties";
 
 interface LeadDetailDrawerProps {
   lead: Lead | null;
@@ -49,6 +50,12 @@ export default function LeadDetailDrawer({
   // every other admin is blocked. Kept in sync here so this drawer and the
   // table never disagree on who can edit it.
   const canEditProperty = isSuperAdminUser(currentUser?.email) || currentUser?.role_type === "Manager";
+  // A Data Calling lead not yet qualified uses Data Calling's own property
+  // list (never linked to agents); every other lead uses the main one.
+  const isDataCallingLead = lead?.source === "Bulk Upload";
+  const dataCallingProperties = useDataCallingProperties(isOpen && isDataCallingLead && canEditProperty);
+  const propertyOptions = isDataCallingLead ? dataCallingProperties : properties;
+  const shownProperty = isDataCallingLead ? lead?.dataCallingProperty || lead?.property : lead?.property;
   const [savingProperty, setSavingProperty] = useState(false);
   // RNR/Call Back/Followup/Site Visit Scheduled are gated behind a blocking
   // popup (LeadScheduleModal below) that collects the next-call date/time +
@@ -208,11 +215,11 @@ export default function LeadDetailDrawer({
   // places now, not just the table.
   const NO_PROPERTY = "Not set";
   const handlePropertyChange = async (name: string) => {
-    if (savingProperty || name === (lead.property || NO_PROPERTY)) return;
-    const propertyId = name === NO_PROPERTY ? null : properties.find(p => p.name === name)?.id ?? null;
+    if (savingProperty || name === (shownProperty || NO_PROPERTY)) return;
+    const propertyId = name === NO_PROPERTY ? null : propertyOptions.find(p => p.name === name)?.id ?? null;
     setSavingProperty(true);
     try {
-      const updated = mapApiLeadToFrontendLead(await apiSetLeadProperty(lead.id, propertyId));
+      const updated = mapApiLeadToFrontendLead(await apiSetLeadProperty(lead.id, propertyId, isDataCallingLead ? "DATA_CALLING" : "MAIN"));
       onPropertySaved?.(lead.id, updated);
       toast(propertyId ? `Property set to ${name}.` : "Property removed.", "success");
     } catch (err) {
@@ -279,18 +286,18 @@ export default function LeadDetailDrawer({
       label: "Property",
       labelExtra: (
         <span
-          className={`shrink-0 border rounded-lg px-1.5 py-0.5 text-[10px] font-semibold ${lead.property ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-slate-50 text-slate-500 border-slate-200"}`}
-          title={lead.property ? "This lead has a property linked" : "No property linked yet"}
+          className={`shrink-0 border rounded-lg px-1.5 py-0.5 text-[10px] font-semibold ${shownProperty ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-slate-50 text-slate-500 border-slate-200"}`}
+          title={shownProperty ? "This lead has a property linked" : "No property linked yet"}
         >
-          {lead.property ? "Assigned" : "Unassigned"}
+          {shownProperty ? "Assigned" : "Unassigned"}
         </span>
       ),
       value: canEditProperty ? (
         <SearchableSelect
           variant="inline"
-          value={lead.property || NO_PROPERTY}
+          value={shownProperty || NO_PROPERTY}
           onChange={handlePropertyChange}
-          options={[NO_PROPERTY, ...properties.map(p => p.name)]}
+          options={[NO_PROPERTY, ...propertyOptions.map(p => p.name)]}
           placeholder={savingProperty ? "Saving..." : undefined}
           searchPlaceholder="Search property..."
           panelWidth={220}
@@ -298,7 +305,7 @@ export default function LeadDetailDrawer({
           className="max-w-full text-xs font-semibold text-slate-800"
         />
       ) : (
-        <span title={lead.property || undefined}>{lead.property || "Not set"}</span>
+        <span title={shownProperty || undefined}>{shownProperty || "Not set"}</span>
       )
     },
     {

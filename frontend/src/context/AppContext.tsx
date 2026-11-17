@@ -81,6 +81,7 @@ import {
   ApiLeadRow,
   ApiUserDirectoryEntry,
   ApiPropertyRow,
+  type PropertyKind,
   ApiResaleUnitRow,
   ApiFollowupRow,
   ApiAttendanceRow,
@@ -255,7 +256,12 @@ export interface Lead {
   metaPageName?: string; // which connected Meta Page this lead came in through
   metaFormId?: string; // which Lead Ad Form on that Page
   metaAdId?: string; // which real Meta ad this lead's submission came from — matches AdLevelSpendRecord.adId for a "platform": "META" row. Google leads have no per-lead ad attribution at all (Sheets-import pipeline, not a webhook), so this stays undefined for them — a real gap, not a bug.
+  // Main property, or — when none is set — the Data Calling property, so a
+  // qualified Data Calling lead keeps showing the property it was called for.
   property?: string;
+  // Data Calling's own property tag (separate list, never picks an agent).
+  dataCallingPropertyId?: string;
+  dataCallingProperty?: string;
   leadScore?: number;
 
   // SLA / missed-lead tracking (report parameter: missed = no status update within 20 min of assignment)
@@ -369,6 +375,8 @@ export interface Property {
   teamAssignmentMode?: PropertyTeamAssignmentMode;
   leadAssignmentMode?: LeadAssignmentMode;
   assignedTeam?: PropertyTeamMember[];
+  // "LEADS" (main list) or "DATA_CALLING" (Data Calling's own list — no team, campaigns or sheets).
+  kind?: PropertyKind;
   createdAt?: string;
 }
 
@@ -802,7 +810,9 @@ export function mapApiLeadToFrontendLead(row: ApiLeadRow): Lead {
     metaPageName: row.meta_page_name || undefined,
     metaFormId: row.meta_form_id || undefined,
     metaAdId: row.meta_ad_id || undefined,
-    property: row.property_name || undefined,
+    property: row.property_name || row.data_calling_property_name || undefined,
+    dataCallingPropertyId: row.data_calling_property_id || undefined,
+    dataCallingProperty: row.data_calling_property_name || undefined,
     leadScore: row.lead_score ?? undefined,
     assignedAt: row.assigned_at || undefined,
     firstResponseAt: row.first_response_at || undefined,
@@ -882,7 +892,8 @@ export function mapApiPropertyToFrontend(row: ApiPropertyRow): Property {
     tags: row.tags || undefined,
     mediaFileNames: row.media_file_names || undefined,
     teamAssignmentMode: row.team_assignment_mode,
-    leadAssignmentMode: row.lead_assignment_mode || undefined
+    leadAssignmentMode: row.lead_assignment_mode || undefined,
+    kind: row.kind
   };
 }
 
@@ -2418,7 +2429,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       membersCount: 0,
       createdAt: new Date().toISOString()
     };
-    setProperties(prev => [...prev, newProp]);
+    // `properties` is the main (Leads) list every picker reads — Data
+    // Calling properties are fetched separately, so they never land here.
+    const isDataCalling = newProp.kind === "DATA_CALLING";
+    if (!isDataCalling) setProperties(prev => [...prev, newProp]);
 
     if (!isApiSessionActive()) {
       return { success: true }; // no session (offline/dev) — local-only, same as before
@@ -2449,7 +2463,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         tags: newProp.tags,
         mediaFileNames: newProp.mediaFileNames,
         teamAssignmentMode: newProp.teamAssignmentMode,
-        leadAssignmentMode: newProp.leadAssignmentMode
+        leadAssignmentMode: newProp.leadAssignmentMode,
+        kind: newProp.kind
       });
       if (newProp.teamAssignmentMode === "CUSTOM_MEMBERS" && newProp.assignedTeam && newProp.assignedTeam.length > 0) {
         finalRow = await apiSetPropertyTeamMembers(
@@ -2457,10 +2472,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           newProp.assignedTeam.map(m => ({ userId: m.userId, percentage: m.percentage }))
         );
       }
-      setProperties(prev => prev.map(p => (p.id === newProp.id ? mapApiPropertyToFrontend(finalRow) : p)));
+      if (!isDataCalling) setProperties(prev => prev.map(p => (p.id === newProp.id ? mapApiPropertyToFrontend(finalRow) : p)));
       return { success: true };
     } catch (err) {
-      setProperties(prev => prev.filter(p => p.id !== newProp.id)); // roll back — it was never actually saved
+      if (!isDataCalling) setProperties(prev => prev.filter(p => p.id !== newProp.id)); // roll back — it was never actually saved
       return { success: false, error: err instanceof Error ? err.message : "Could not create the property. Please try again." };
     }
   };
