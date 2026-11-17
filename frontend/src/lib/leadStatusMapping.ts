@@ -11,6 +11,7 @@ import { DropdownOption } from "@/components/ui/SearchableDropdown";
 // the old->new mapping every existing lead was migrated through.
 export const FRONTEND_STATUS_TO_DB_CODE: Record<LeadStatus, string> = {
   "New Lead": "NEW_LEAD",
+  "Revived Lead": "REVIVED",
   "RNR": "RNR",
   "Call Back": "CALL_BACK",
   "Dead Lead": "DEAD_LEAD",
@@ -29,6 +30,7 @@ export const FRONTEND_STATUS_TO_DB_CODE: Record<LeadStatus, string> = {
 
 export const DB_CODE_TO_FRONTEND_STATUS: Record<string, LeadStatus> = {
   NEW_LEAD: "New Lead",
+  REVIVED: "Revived Lead",
   RNR: "RNR",
   CALL_BACK: "Call Back",
   DEAD_LEAD: "Dead Lead",
@@ -53,10 +55,14 @@ export const DB_CODE_TO_FRONTEND_STATUS: Record<string, LeadStatus> = {
 // Full set of selectable statuses, in canonical pipeline order — shared by
 // every status dropdown in the app so they all list the same options.
 export const STATUS_OPTIONS: LeadStatus[] = [
-  "New Lead", "RNR", "Call Back", "Followup", "EOI", "Site Visit Scheduled",
+  "New Lead", "Revived Lead", "RNR", "Call Back", "Followup", "EOI", "Site Visit Scheduled",
   "Site Visit Done", "Low Budget", "Other requirement", "Broker", "Booked",
   "Dead Lead", "Cancelled", "Different Location", "Not Interested"
 ];
+
+// Statuses only the system sets — listed in status filters, never offered in
+// a status picker (the server rejects them too, see leadStatusTransitions.ts).
+export const SYSTEM_ONLY_STATUSES: LeadStatus[] = ["Revived Lead"];
 
 // Kept as an alias (not a separate list) for callers that pre-date
 // migration 030 — "Assigned"/"Unassigned" used to be pickable statuses
@@ -118,6 +124,8 @@ export function statusBadgeClasses(status: LeadStatus): string {
       return "bg-emerald-50 text-emerald-700 border-emerald-200";
     case "New Lead":
       return "bg-blue-50 text-blue-700 border-blue-200";
+    case "Revived Lead":
+      return "bg-violet-50 text-violet-700 border-violet-200";
     case "Dead Lead":
     case "Cancelled":
     case "Not Interested":
@@ -158,6 +166,11 @@ export function dbCodeToFrontendStatus(code: string): LeadStatus {
 // have to attempt a transition just to find out it's blocked.
 export const LEAD_STATUS_TRANSITIONS: Record<LeadStatus, { allowed: LeadStatus[]; optional: LeadStatus[] }> = {
   "New Lead": {
+    allowed: ["RNR", "Call Back", "Dead Lead", "Not Interested", "Followup", "Site Visit Scheduled", "Low Budget", "Other requirement", "Broker"],
+    optional: ["Cancelled", "Different Location"]
+  },
+  // Same onward moves as a New Lead — a revived lead is worked afresh.
+  "Revived Lead": {
     allowed: ["RNR", "Call Back", "Dead Lead", "Not Interested", "Followup", "Site Visit Scheduled", "Low Budget", "Other requirement", "Broker"],
     optional: ["Cancelled", "Different Location"]
   },
@@ -213,11 +226,13 @@ export const LEAD_STATUS_TRANSITIONS: Record<LeadStatus, { allowed: LeadStatus[]
 /** Every status a lead currently on `current` may move to, each tagged with whether it needs a confirm step. Admins may pick any status. */
 export function nextStatusOptions(current: LeadStatus, isAdmin = false): { status: LeadStatus; needsConfirm: boolean }[] {
   const rule = LEAD_STATUS_TRANSITIONS[current];
+  // Revived Lead is set by the system only — never offered, even to Admin.
+  const pickable = STATUS_OPTIONS.filter(status => !SYSTEM_ONLY_STATUSES.includes(status));
   if (isAdmin) {
-    return STATUS_OPTIONS.filter(status => status !== current)
+    return pickable.filter(status => status !== current)
       .map(status => ({ status, needsConfirm: rule?.optional.includes(status) ?? false }));
   }
-  if (!rule) return STATUS_OPTIONS.map(status => ({ status, needsConfirm: false }));
+  if (!rule) return pickable.map(status => ({ status, needsConfirm: false }));
   return [
     ...rule.allowed.map(status => ({ status, needsConfirm: false })),
     ...rule.optional.map(status => ({ status, needsConfirm: true }))

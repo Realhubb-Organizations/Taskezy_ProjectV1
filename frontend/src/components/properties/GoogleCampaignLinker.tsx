@@ -12,6 +12,7 @@ import {
 import { SearchableSelect } from "@/components/ui/SearchableDropdown";
 import FieldError, { fieldErrorClass } from "@/components/ui/FieldError";
 import { validateText } from "@/lib/validation";
+import RefreshCampaignsButton from "./RefreshCampaignsButton";
 
 interface GoogleCampaignLinkerProps {
   propertyId: string;
@@ -21,10 +22,11 @@ interface GoogleCampaignLinkerProps {
 }
 
 /**
- * Mirrors MetaCampaignLinker.tsx, but for Google Ads spend attribution —
- * ad_spend_records.google_campaign_id is stamped by the sync job by matching
- * a synced campaign's name against what's linked here (see
- * jobs/googleAdsSpendSync.ts -> google-ads.repository.ts upsertCampaign).
+ * Mirrors MetaCampaignLinker.tsx for Google Ads. A linked name routes new
+ * Google sheet leads with that campaign to this property's team
+ * (sheet-import.lead-ingest.ts, before the sheet-tab fallback), and the spend
+ * sync attributes the campaign's ad spend here (google-ads.repository.ts
+ * upsertCampaign).
  */
 // Add / remove only change the list on screen; the property popup's Save
 // button calls save() through the ref to persist it (one call per linker).
@@ -139,7 +141,7 @@ const GoogleCampaignLinker = forwardRef<LinkerHandle, GoogleCampaignLinkerProps>
         Connected Google Campaigns
       </span>
       <p className="text-[10px] text-slate-500 leading-relaxed">
-        Ad spend from a synced Google campaign whose name matches one below is attributed to this property automatically.
+        New Google sheet leads whose campaign name matches one below are filed under this property and go to its team. Ad spend from these campaigns is counted here too.
       </p>
 
       {campaigns.length === 0 && !isAdmin && (
@@ -183,6 +185,10 @@ const GoogleCampaignLinker = forwardRef<LinkerHandle, GoogleCampaignLinkerProps>
               {saving ? "…" : "Add"}
             </button>
           </div>
+          <RefreshCampaignsButton
+            disabled={saving}
+            onRefreshed={async () => setSuggestions(await apiGetGoogleCampaignSuggestions())}
+          />
 
           {/* Fallback for a campaign the sync job hasn't picked up yet, so it can't be in the dropdown above */}
           {showCustomInput ? (

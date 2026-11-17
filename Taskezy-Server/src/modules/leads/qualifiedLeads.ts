@@ -5,7 +5,8 @@
 //                 only when the customer picked up at least once (a call
 //                 from the app whose feedback was "Connected").
 //   Unqualified = Dead Lead, Not Interested, and RNR never picked up.
-// Everything else (New Lead, Call Back, Broker, Cancelled, ...) is neither.
+// Everything else (New Lead, Revived Lead, Call Back, Broker, Cancelled, ...)
+// is neither — a Revived Lead waits for a fresh first call, like a New Lead.
 // Data Calling has its own rule (Connected + Qualified sub-status).
 
 /** Statuses that are always qualified (RNR is qualified only when picked up). */

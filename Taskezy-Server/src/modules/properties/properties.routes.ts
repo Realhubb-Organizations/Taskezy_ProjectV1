@@ -6,6 +6,8 @@ import { asyncHandler } from "../../utils/asyncHandler";
 import { sendOk, sendPaginated } from "../../utils/apiResponse";
 import { ApiError } from "../../utils/ApiError";
 import { AccessTokenPayload } from "../../utils/tokens";
+import { refreshCampaignListsNow } from "../../jobs/campaignListSync";
+import { listLeadsWaitingForProperty, assignLeadsWaitingForProperty, autoAssignLeadsWaitingForProperty } from "../leads/leads.service";
 import { findDirectReportIds } from "../users/users.repository";
 import { createPropertySchema, editPropertySchema, listPropertiesQuerySchema, propertyIdParamSchema } from "./properties.schema";
 import * as repo from "./properties.repository";
@@ -56,6 +58,15 @@ propertiesRouter.get(
   "/google-campaign-suggestions",
   requireRole("ADMIN"),
   asyncHandler(async (_req, res) => sendOk(res, await repo.listDistinctGoogleCampaignNames()))
+);
+
+// The campaign pickers' Refresh button: pulls the latest Meta + Google
+// campaign lists now instead of waiting for the 15-minute refresh
+// (jobs/campaignListSync.ts). Names/status only; at most one run a minute.
+propertiesRouter.post(
+  "/campaigns/refresh",
+  requireRole("ADMIN"),
+  asyncHandler(async (_req, res) => sendOk(res, await refreshCampaignListsNow()))
 );
 
 propertiesRouter.get(
@@ -212,6 +223,14 @@ propertiesRouter.put(
       );
     }
 
+    // A team just set up (or changed) can now take leads that were waiting
+    // for this property's campaign / sheet links. Runs in the background;
+    // each lead is claimed atomically, so it can't clash with the popup's own
+    // post-save auto-assign.
+    autoAssignLeadsWaitingForProperty(req.user!, req.params.id).catch(err =>
+      logger.error({ err, propertyId: req.params.id }, "Auto-assigning waiting leads after a team change failed")
+    );
+
     sendOk(res, updated);
   })
 );
@@ -239,6 +258,47 @@ propertiesRouter.get(
 const setMetaCampaignsSchema = z.object({
   campaignNames: z.array(z.string().trim().min(1)).max(50)
 });
+
+// Leads that landed on an admin before this property's Meta campaign /
+// sheet tab was linked. GET only previews them; nothing moves until an admin
+// confirms the exact ids with POST (leads.service.ts for the safeguards).
+propertiesRouter.get(
+  "/:id/waiting-leads",
+  requireRole("ADMIN"),
+  validate({ params: propertyIdParamSchema }),
+  asyncHandler(async (req, res) => {
+    if (!(await repo.findById(req.params.id))) throw ApiError.notFound("Property not found");
+    sendOk(res, await listLeadsWaitingForProperty(req.params.id));
+  })
+);
+
+const assignWaitingLeadsSchema = z.object({
+  leadIds: z.array(z.string().uuid()).min(1).max(500)
+});
+
+// Called once by the property popup right after it saves its campaign /
+// sheet links: moves every lead that was waiting for those links to the
+// property's team (last 30 days, same safeguards). One call per save, after
+// all links are written, and each lead is claimed atomically, so parallel
+// saves can't move a lead twice.
+propertiesRouter.post(
+  "/:id/waiting-leads/auto-assign",
+  requireRole("ADMIN"),
+  validate({ params: propertyIdParamSchema }),
+  asyncHandler(async (req, res) => {
+    if (!(await repo.findById(req.params.id))) throw ApiError.notFound("Property not found");
+    sendOk(res, await autoAssignLeadsWaitingForProperty(req.user!, req.params.id));
+  })
+);
+
+propertiesRouter.post(
+  "/:id/waiting-leads/assign",
+  requireRole("ADMIN"),
+  validate({ params: propertyIdParamSchema, body: assignWaitingLeadsSchema }),
+  asyncHandler(async (req, res) => {
+    sendOk(res, await assignLeadsWaitingForProperty(req.user!, req.params.id, req.body.leadIds));
+  })
+);
 
 propertiesRouter.put(
   "/:id/meta-campaigns",

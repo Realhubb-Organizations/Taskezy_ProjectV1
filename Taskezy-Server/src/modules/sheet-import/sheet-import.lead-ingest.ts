@@ -2,11 +2,12 @@ import { pool, withTransaction } from "../../db/pool";
 import { logger } from "../../utils/logger";
 import { insertLeadLog, normalizeLeadPhone } from "../leads/leads.repository";
 import { findLeadForRevival, markLeadRevived } from "../leads/leadRevival";
-import { isUniqueViolation, listActiveAdminIds } from "../users/users.repository";
+import { isUniqueViolation, findFallbackAdminId } from "../users/users.repository";
 import { createNotification } from "../notifications/notifications.service";
-import { findPropertyIdBySheetSource, recordSheetSourceSeen } from "../properties/properties.repository";
+import { findPropertyIdBySheetSource, findPropertyIdByGoogleCampaignName, recordSheetSourceSeen } from "../properties/properties.repository";
 import { pickAgentForProperty } from "../properties/properties.assignment";
 import { broadcastLeadChanged } from "../leads/leads.realtime";
+import { alertUnlinkedSource } from "../notifications/unlinkedSourceAlert";
 
 export interface SheetLeadRow {
   leadKey: string;
@@ -58,7 +59,12 @@ export async function ingestSheetLead(row: SheetLeadRow): Promise<SheetLeadInges
   // Resolved up front (not just in the fresh-lead path below) so a revival
   // can name the property this specific submission is actually about, even
   // though revival never changes the lead's own stored property.
-  const propertyId = row.sourceSheet ? await findPropertyIdBySheetSource(row.sourceSheet) : undefined;
+  // Routed by the lead's Google campaign first (linked under the property's
+  // Connected Google Campaigns), then by sheet tab name. Only the sheet's raw
+  // campaign field is matched, never the form-name fallback stored below.
+  const propertyId =
+    (row.campaign ? await findPropertyIdByGoogleCampaignName(row.campaign) : undefined) ??
+    (row.sourceSheet ? await findPropertyIdBySheetSource(row.sourceSheet) : undefined);
 
   // Same prospect submitting another lead form — matched by phone, or by
   // email when given (name is never matched on, too many false-positive
@@ -80,7 +86,9 @@ export async function ingestSheetLead(row: SheetLeadRow): Promise<SheetLeadInges
   }
   const autoAssignedAgentId = propertyId ? await pickAgentForProperty(propertyId) : undefined;
 
-  const assignedAgentId = autoAssignedAgentId ?? (await listActiveAdminIds())[0];
+  // Unrouted leads always wait on the Tech Admin (findFallbackAdminId), not
+  // whichever admin the database happened to return first.
+  const assignedAgentId = autoAssignedAgentId ?? (await findFallbackAdminId());
   if (!assignedAgentId) {
     return { outcome: "skipped", reason: "no assignable agent for the property and no active admin to fall back to" };
   }
@@ -147,6 +155,11 @@ export async function ingestSheetLead(row: SheetLeadRow): Promise<SheetLeadInges
       link: "/dashboard/crm"
     });
     broadcastLeadChanged(leadId);
+    // Unrouted because its sheet tab isn't linked to any property yet: tell
+    // admins (once a day per tab, Reminder Alerts).
+    if (!propertyId && row.sourceSheet) {
+      await alertUnlinkedSource("sheet-tab", row.sourceSheet);
+    }
 
     return { outcome: "created", leadId };
   } catch (err) {

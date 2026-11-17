@@ -12,6 +12,7 @@ import {
 import { SearchableSelect } from "@/components/ui/SearchableDropdown";
 import FieldError, { fieldErrorClass } from "@/components/ui/FieldError";
 import { validateText } from "@/lib/validation";
+import RefreshCampaignsButton from "./RefreshCampaignsButton";
 
 interface MetaCampaignLinkerProps {
   propertyId: string;
@@ -162,14 +163,14 @@ const MetaCampaignLinker = forwardRef<LinkerHandle, MetaCampaignLinkerProps>(fun
 
       {isAdmin && (
         <div className="space-y-2">
-          {/* Visible dropdown of campaign names seen on real incoming Meta leads */}
+          {/* Active campaigns synced from Meta, plus any campaign name seen on a real Meta lead */}
           <div className="flex gap-2">
             <SearchableSelect
               options={availableSuggestions}
               value={selected}
               onChange={setSelected}
               disabled={saving}
-              placeholder={availableSuggestions.length === 0 ? "No campaigns seen on leads yet" : "Select a campaign that has sent leads…"}
+              placeholder={availableSuggestions.length === 0 ? "No active Meta campaigns yet" : "Select a Meta campaign…"}
               searchPlaceholder="Search campaigns..."
               panelWidth={260}
             />
@@ -182,8 +183,12 @@ const MetaCampaignLinker = forwardRef<LinkerHandle, MetaCampaignLinkerProps>(fun
               {saving ? "…" : "Add"}
             </button>
           </div>
+          <RefreshCampaignsButton
+            disabled={saving}
+            onRefreshed={async () => setSuggestions(await apiGetMetaCampaignSuggestions())}
+          />
 
-          {/* Fallback for a campaign that hasn't produced a lead yet, so it can't be in the dropdown above */}
+          {/* Fallback for a campaign Taskezy hasn't synced yet, so it can't be in the dropdown above */}
           {showCustomInput ? (
             <div>
               <div className="flex gap-2">
@@ -221,7 +226,7 @@ const MetaCampaignLinker = forwardRef<LinkerHandle, MetaCampaignLinkerProps>(fun
               onClick={() => setShowCustomInput(true)}
               className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-500 hover:text-brand-600"
             >
-              <Plus className="h-3 w-3" /> Add a campaign that hasn&apos;t sent a lead yet
+              <Plus className="h-3 w-3" /> Type a campaign name that isn&apos;t listed yet
             </button>
           )}
         </div>

@@ -7,6 +7,15 @@ import { BUSINESS_TIMEZONE } from "../../utils/businessDate";
 import { normalizeForeignPhone } from "../../utils/validation";
 import { FOLLOWUP_EVER_MISSED_SQL, MISSED_BY_JOIN_SQL } from "../reports/siteVisitSql";
 
+/**
+ * Lead `l` is waiting Unassigned on an admin because its campaign/sheet isn't
+ * linked to a property yet. Such a lead is nobody's miss: the 20-minute
+ * missed-lead rule skips it until it's given to an agent (same rule as
+ * jobs/missedLeadScheduler.ts). An Unassigned lead an agent holds still counts.
+ */
+const WAITING_ON_ADMIN_SQL = `(l.status_code = 'UNASSIGNED' AND EXISTS (
+  SELECT 1 FROM users wa WHERE wa.id = l.assigned_agent_id AND wa.role = 'ADMIN'))`;
+
 /** leads.phone is CHECK'd to a bare 10-digit Indian mobile or a "+<country code>" foreign number — strip formatting/country code before insert. Shared by every external lead-ingest source (Meta webhook, sheet import). */
 /**
  * A lead's marketing source group, from leads.source — the same Meta /
@@ -102,6 +111,10 @@ export interface LeadListRow {
   // superseded/completed, unlike reading status='MISSED' live. The
   // controller strips this for Agent/Member callers (manager/admin-only).
   missed_task_count: number;
+  /** When a repeat enquiry last revived this lead (migration 054). NULL = never. */
+  revived_at: string | null;
+  /** How many times the lead has been revived (migration 054). */
+  revival_count: number;
   /** Task time — see tasks/taskDue.ts. NULL = no task. */
   task_due_at: string | null;
   logs: { message: string; timestamp: string; user: string }[];
@@ -285,7 +298,7 @@ function buildLeadWhereClause(filter: LeadFilterConditions): { whereClause: stri
   if (filter.missedOnly) {
     params.push(filter.slaMinutes);
     const slaParam = params.length;
-    conditions.push(`l.source <> 'Bulk Upload' AND l.assigned_at IS NOT NULL AND (
+    conditions.push(`l.source <> 'Bulk Upload' AND NOT ${WAITING_ON_ADMIN_SQL} AND l.assigned_at IS NOT NULL AND (
       (l.first_response_at IS NOT NULL AND EXTRACT(EPOCH FROM (l.first_response_at - l.assigned_at)) / 60 > $${slaParam}::numeric)
       OR (l.first_response_at IS NULL AND EXTRACT(EPOCH FROM (now() - l.assigned_at)) / 60 > $${slaParam}::numeric)
     )`);
@@ -335,6 +348,7 @@ const LIST_SELECT = `
      FROM call_attempts ca WHERE ca.lead_id = l.id AND ca.channel = 'CALL') AS dead_lead_call_days,
     ${REACHED_FOLLOWUP_OR_SITE_VISIT_SQL("l")} AS reached_followup_or_site_visit,
     l.missed_task_count,
+    l.revived_at, l.revival_count,
     -- The lead's task time: Pending Tasks' date and the Next Call Date column (tasks/taskDue.ts)
     ${TASK_DUE_AT_SQL} AS task_due_at,
     COALESCE(
@@ -578,14 +592,15 @@ export async function getAgentReportStats(
        GROUP BY account_name
      )
      SELECT count(*) AS assigned,
-            count(*) FILTER (WHERE l.status_code != 'NEW_LEAD') AS contacted,
+            -- A Revived Lead (migration 054) is waiting for a fresh first call, like a New Lead.
+            count(*) FILTER (WHERE l.status_code NOT IN ('NEW_LEAD', 'REVIVED')) AS contacted,
             count(*) FILTER (WHERE l.status_code = ANY($${qualifiedParam}::text[]) OR ${RNR_PICKED_UP_SQL("l")}) AS qualified,
             count(*) FILTER (WHERE l.status_code = ANY($${siteVisitParam}::text[])) AS site_visits,
             COALESCE(SUM(l.deal_value) FILTER (WHERE l.status_code = 'BOOKED'), 0) AS booking_value,
             count(*) FILTER (WHERE l.status_code = 'BOOKED') AS booking_count,
             COALESCE(SUM(c.spend_per_lead), 0) AS allocated_spend,
             count(*) FILTER (
-              WHERE l.source <> 'Bulk Upload' AND l.assigned_at IS NOT NULL AND (
+              WHERE l.source <> 'Bulk Upload' AND NOT ${WAITING_ON_ADMIN_SQL} AND l.assigned_at IS NOT NULL AND (
                 (l.first_response_at IS NOT NULL AND EXTRACT(EPOCH FROM (l.first_response_at - l.assigned_at)) / 60 > $${slaParam}::numeric)
                 OR (l.first_response_at IS NULL AND EXTRACT(EPOCH FROM (now() - l.assigned_at)) / 60 > $${slaParam}::numeric)
               )
@@ -718,7 +733,7 @@ export async function getManagerReportStatsByAgent(
             COALESCE(SUM(c.spend_per_lead), 0) AS spend,
             COALESCE(SUM(l.deal_value) FILTER (WHERE l.status_code = 'BOOKED'), 0) AS booking_value,
             count(*) FILTER (
-              WHERE l.source <> 'Bulk Upload' AND l.assigned_at IS NOT NULL AND (
+              WHERE l.source <> 'Bulk Upload' AND NOT ${WAITING_ON_ADMIN_SQL} AND l.assigned_at IS NOT NULL AND (
                 (l.first_response_at IS NOT NULL AND EXTRACT(EPOCH FROM (l.first_response_at - l.assigned_at)) / 60 > $${slaParam}::numeric)
                 OR (l.first_response_at IS NULL AND EXTRACT(EPOCH FROM (now() - l.assigned_at)) / 60 > $${slaParam}::numeric)
               )
@@ -1103,17 +1118,97 @@ export interface UnassignedSheetLead {
   id: string;
   property_id: string | null;
   assigned_agent_id: string;
+  campaign: string | null;
 }
 
 /** Sheet-imported leads that fell back to an admin at ingest time — see modules/sheet-import — because no property match and/or no configured team pool was found yet. Re-checked by reassignUnassignedSheetLeads once that's fixed. */
 export async function findUnassignedSheetLeads(): Promise<UnassignedSheetLead[]> {
   const { rows } = await query<UnassignedSheetLead>(
-    `SELECT id, property_id, assigned_agent_id FROM leads WHERE sheet_lead_key IS NOT NULL AND status_code = 'UNASSIGNED'`
+    `SELECT id, property_id, assigned_agent_id, campaign FROM leads WHERE sheet_lead_key IS NOT NULL AND status_code = 'UNASSIGNED'`
   );
   return rows;
 }
 
 const IMPORTED_SHEET_NAME_RE = /^Imported from Google Ads lead-form sheet \(([^)]+)\)/;
+
+/**
+ * Atomically claims a lead waiting Unassigned on an admin (flips it to
+ * NEW_LEAD in one statement), so two assign runs at the same moment can
+ * never both move it: only the run whose UPDATE matched continues.
+ */
+export async function claimWaitingLead(leadId: string): Promise<boolean> {
+  const { rowCount } = await pool.query(
+    `UPDATE leads l SET status_code = 'NEW_LEAD'
+     FROM users u
+     WHERE l.id = $1 AND u.id = l.assigned_agent_id AND u.role = 'ADMIN' AND l.status_code = 'UNASSIGNED'`,
+    [leadId]
+  );
+  return (rowCount ?? 0) > 0;
+}
+
+/** Undoes claimWaitingLead when the lead couldn't be handed to an agent after all, so it stays waiting. */
+export async function releaseWaitingLead(leadId: string): Promise<void> {
+  await pool.query(
+    `UPDATE leads l SET status_code = 'UNASSIGNED'
+     FROM users u
+     WHERE l.id = $1 AND u.id = l.assigned_agent_id AND u.role = 'ADMIN' AND l.status_code = 'NEW_LEAD'`,
+    [leadId]
+  );
+}
+
+export interface WaitingLeadRow {
+  id: string;
+  name: string;
+  phone: string;
+  campaign: string | null;
+  created_at: string;
+  from_sheet: boolean;
+  held_by: string;
+}
+
+/**
+ * Leads that landed on an admin only because their Meta campaign or Google
+ * sheet tab wasn't linked to this property yet — offered to the admin as a
+ * preview to assign (never moved automatically). Every condition is a
+ * safeguard:
+ *  - still UNASSIGNED and held by an admin, so nobody has reassigned or
+ *    worked it yet;
+ *  - its Meta campaign / Google campaign / sheet tab is linked to THIS
+ *    property, by exact name (the same match a new lead gets);
+ *  - Meta campaigns only pick Meta leads; Google campaigns and sheet tabs
+ *    only pick Google sheet leads;
+ *  - created in the last 30 days, so old history is left alone;
+ *  - not already filed under a different property.
+ */
+export async function findLeadsWaitingForProperty(propertyId: string): Promise<WaitingLeadRow[]> {
+  const { rows } = await query<WaitingLeadRow>(
+    `SELECT l.id, l.name, l.phone, l.campaign, l.created_at, (l.sheet_lead_key IS NOT NULL) AS from_sheet,
+            u.first_name || COALESCE(' ' || u.last_name, '') AS held_by
+     FROM leads l
+     JOIN users u ON u.id = l.assigned_agent_id
+     WHERE l.status_code = 'UNASSIGNED'
+       AND u.role = 'ADMIN'
+       AND l.created_at > now() - interval '30 days'
+       AND (l.property_id IS NULL OR l.property_id = $1)
+       AND (
+         (l.source = 'Meta Ads' AND l.sheet_lead_key IS NULL
+          AND l.campaign IN (SELECT campaign_name FROM property_meta_campaigns WHERE property_id = $1))
+         OR
+         (l.sheet_lead_key IS NOT NULL
+          AND l.campaign IN (SELECT campaign_name FROM property_google_campaigns WHERE property_id = $1))
+         OR
+         (l.sheet_lead_key IS NOT NULL
+          AND (SELECT substring(g.message from $2) FROM lead_logs g
+               WHERE g.lead_id = l.id AND g.message LIKE 'Imported from Google Ads lead-form sheet (%'
+               ORDER BY g.created_at ASC LIMIT 1)
+              IN (SELECT sheet_source_name FROM property_sheet_sources WHERE property_id = $1))
+       )
+     ORDER BY l.created_at
+     LIMIT 500`,
+    [propertyId, IMPORTED_SHEET_NAME_RE.source]
+  );
+  return rows;
+}
 
 /** Recovers the sheet's per-project tab name from a lead's own first import log entry, for leads that had no property_id set at ingest time (name didn't match a property yet). */
 export async function findImportedSourceSheetName(leadId: string): Promise<string | undefined> {

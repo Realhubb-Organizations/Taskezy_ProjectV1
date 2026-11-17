@@ -3,6 +3,7 @@ import { logger } from "../utils/logger";
 import { createNotification } from "../modules/notifications/notifications.service";
 import { BUSINESS_TIMEZONE, toBusinessDate } from "../utils/businessDate";
 import { missedRecordsLink } from "../modules/notifications/notificationLinks";
+import { sendWaitingLeadsReminder } from "../modules/notifications/waitingLeadsReminder";
 
 const POLL_INTERVAL_MS = 5 * 60_000; // 5min — EOD doesn't need missedLeadScheduler's 60s granularity
 
@@ -56,6 +57,11 @@ async function notifyEodReports(): Promise<void> {
       // users' EOD summaries (Activity Alerts) until tomorrow.
       await notifyAdminMissedLeadsDigest(user.id).catch((err) =>
         logger.error({ err, adminId: user.id }, "EOD missed-leads digest failed")
+      );
+      // "N leads waiting to be assigned" (Reminder Alerts), only when some are
+      // waiting; the morning half is jobs/waitingLeadsMorningReminder.ts.
+      await sendWaitingLeadsReminder(user.id, "evening").catch((err) =>
+        logger.error({ err, adminId: user.id }, "EOD waiting-leads reminder failed")
       );
     }
     else if (user.role_type === "MANAGER") await notifyManagerTeamDigest(user.id);

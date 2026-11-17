@@ -72,7 +72,8 @@ export function computeVisitConversion(leads: Lead[]): { conversionPercent: numb
 export function agentFunnelLeads(leads: Lead[]): { assigned: Lead[]; contacted: Lead[]; qualified: Lead[]; siteVisits: Lead[] } {
   return {
     assigned: leads,
-    contacted: leads.filter(l => l.status !== "New Lead"),
+    // A Revived Lead waits for a fresh first call, like a New Lead (server: leads.repository.ts).
+    contacted: leads.filter(l => l.status !== "New Lead" && l.status !== "Revived Lead"),
     qualified: leads.filter(l => BUYER_STATUSES.has(l.status)),
     siteVisits: leads.filter(l => VISIT_OR_MEETING_STATUSES.has(l.status))
   };

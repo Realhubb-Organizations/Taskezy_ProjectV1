@@ -8,12 +8,13 @@ import { CreateLeadInput } from "./leads.repository";
 import * as usersRepo from "../users/users.repository";
 import { createNotification, deleteLeadActivityNotifications } from "../notifications/notifications.service";
 import { leadIdsLink } from "../notifications/notificationLinks";
-import { findPropertyIdBySheetSource, findById as findPropertyById } from "../properties/properties.repository";
+import { findPropertyIdBySheetSource, findPropertyIdByGoogleCampaignName, findById as findPropertyById, getAssignmentPool } from "../properties/properties.repository";
 import { pickAgentForProperty, createPropertyAgentPicker } from "../properties/properties.assignment";
 import { broadcastLeadChanged, broadcastManyLeadsChanged } from "./leads.realtime";
 import { HANDOVER_NOTE_PREFIX } from "./leads.handover";
 import { normalizeTypedLeadPhone } from "../../utils/validation";
-import { assertTransitionAllowed, LeadStatusCode } from "./leadStatusTransitions";
+import { logger } from "../../utils/logger";
+import { assertTransitionAllowed, LeadStatusCode, REVIVED_CODE } from "./leadStatusTransitions";
 
 /**
  * Mirrors the frontend's role-based lead-scoping convention (see the
@@ -939,7 +940,9 @@ export async function updateLeadStatus(
   // of which is a user-initiated transition.
   await assertTransitionAllowed(existing.status_code, statusCode, leadId, caller.role === "ADMIN");
 
-  const stampFirstResponse = existing.status_code === "NEW_LEAD"; // first-ever status change
+  // First status change since the lead arrived — or since it was revived,
+  // which restarts the response clock (leadRevival.ts).
+  const stampFirstResponse = existing.status_code === "NEW_LEAD" || existing.status_code === REVIVED_CODE;
 
   try {
     await withTransaction(async (client) => {
@@ -1025,8 +1028,10 @@ export async function updateCallStatus(
   // Only Connected + Qualified belongs in the main Leads pipeline. A lead
   // promoted earlier (source "Data", still carrying its Data Calling
   // sub_source) that's now marked anything else goes back to Data Calling.
+  // A revived lead (migration 054) came back through a real ad enquiry, so
+  // it stays on the Leads page whatever its Data Calling result.
   const demote =
-    !!existing.sub_source && existing.source === "Data" &&
+    !!existing.sub_source && existing.source === "Data" && !existing.revived_at &&
     !(callStatus === "Connected" && nextSubStatus === "Qualified");
   const statusChanged = existing.call_status !== callStatus;
   const subStatusChanged = (existing.call_sub_status ?? null) !== nextSubStatus;
@@ -1449,6 +1454,83 @@ export async function handOverLeadsInTransaction(
 }
 
 /**
+ * Preview for the property popup: leads that fell back to an admin only
+ * because this property's Meta campaign / sheet tab wasn't linked yet (see
+ * repo.findLeadsWaitingForProperty for every safeguard). Nothing moves here;
+ * `canAssign` is false when the property has no active team to hand them to.
+ */
+export async function listLeadsWaitingForProperty(propertyId: string): Promise<{ leads: repo.WaitingLeadRow[]; canAssign: boolean }> {
+  const [leads, assignment] = await Promise.all([repo.findLeadsWaitingForProperty(propertyId), getAssignmentPool(propertyId)]);
+  return { leads, canAssign: !!assignment && assignment.pool.length > 0 };
+}
+
+/**
+ * Assigns the waiting leads the admin confirmed in the preview. Each id is
+ * re-checked against the same safeguards right now (a lead someone has
+ * reassigned since the preview opened is skipped), then routed with the
+ * property's own Round Robin / Percentage rule through reassignLead — same
+ * history entry, notification, Unassigned -> New Lead and fresh 20-minute
+ * clock as any reassignment. The lead's own Notes field is never touched.
+ */
+export async function assignLeadsWaitingForProperty(
+  caller: AccessTokenPayload,
+  propertyId: string,
+  leadIds: string[]
+): Promise<{ assigned: number; skipped: number }> {
+  const property = await findPropertyById(propertyId);
+  if (!property) throw ApiError.notFound("Property not found");
+  const assignment = await getAssignmentPool(propertyId);
+  if (!assignment || assignment.pool.length === 0) {
+    throw ApiError.badRequest(`"${property.name}" has no active sales team to assign leads to yet.`);
+  }
+
+  const stillWaiting = new Set((await repo.findLeadsWaitingForProperty(propertyId)).map(l => l.id));
+  let assigned = 0;
+  let skipped = 0;
+  for (const leadId of new Set(leadIds)) {
+    if (!stillWaiting.has(leadId)) { skipped++; continue; }
+    // Atomic claim: if another assign run (e.g. a second save a moment
+    // earlier) already took this lead, skip it instead of moving it twice.
+    if (!(await repo.claimWaitingLead(leadId))) { skipped++; continue; }
+    // Filed under the property first, so Round Robin counts it for the right property.
+    await repo.setLeadPropertyId(leadId, propertyId);
+    const agentId = await pickAgentForProperty(propertyId);
+    try {
+      if (!agentId) throw new Error("No eligible agent on the property's team");
+      await reassignLead(caller, leadId, agentId);
+      await withTransaction(client => repo.insertLeadLog(client, leadId, caller.sub, caller.name,
+        `Assigned from the waiting list after its campaign was linked to "${property.name}".`));
+      assigned++;
+    } catch (err) {
+      // e.g. a team member who isn't an active sales agent — the lead goes
+      // back to waiting Unassigned on the admin.
+      await repo.releaseWaitingLead(leadId);
+      logger.warn({ err, leadId, propertyId, agentId }, "Waiting lead not assigned — left on the admin");
+      skipped++;
+    }
+  }
+  return { assigned, skipped };
+}
+
+/**
+ * Runs right after an admin saves a property's campaign / sheet links: every
+ * lead that was waiting on an admin because those links didn't exist yet
+ * (last 30 days, same safeguards as the waiting list) is handed to the
+ * property's team automatically. `noTeam` tells the caller the leads are
+ * still waiting because the property has no active team yet.
+ */
+export async function autoAssignLeadsWaitingForProperty(
+  caller: AccessTokenPayload,
+  propertyId: string
+): Promise<{ assigned: number; skipped: number; noTeam: boolean }> {
+  const { leads, canAssign } = await listLeadsWaitingForProperty(propertyId);
+  if (leads.length === 0) return { assigned: 0, skipped: 0, noTeam: false };
+  if (!canAssign) return { assigned: 0, skipped: leads.length, noTeam: true };
+  const result = await assignLeadsWaitingForProperty(caller, propertyId, leads.map(l => l.id));
+  return { ...result, noTeam: false };
+}
+
+/**
  * One-time (but safe to re-run anytime) maintenance action: re-checks every
  * sheet-imported lead currently sitting UNASSIGNED — i.e. one that fell back
  * to an admin at ingest time because its sheet source wasn't linked to a
@@ -1467,7 +1549,13 @@ export async function reassignUnassignedSheetLeads(caller: AccessTokenPayload): 
   for (const lead of candidates) {
     let propertyId = lead.property_id ?? undefined;
 
-    // No property matched at ingest time — recover the sheet's project name
+    // Same order as a new sheet lead: its Google campaign first...
+    if (!propertyId && lead.campaign) {
+      propertyId = await findPropertyIdByGoogleCampaignName(lead.campaign);
+      if (propertyId) await repo.setLeadPropertyId(lead.id, propertyId);
+    }
+
+    // ...then, if still no property, recover the sheet's project name
     // from the lead's own first log entry and try the link again now that an
     // admin may have connected that sheet source to a property (Property
     // editor -> Connected Lead-Form Sheets).
