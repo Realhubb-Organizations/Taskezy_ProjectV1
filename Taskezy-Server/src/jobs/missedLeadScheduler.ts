@@ -53,6 +53,11 @@ async function notifyMissedLeads(): Promise<void> {
        AND l.assigned_at <= now() - interval '${SLA_MINUTES} minutes'
        AND l.missed_notified_at IS NULL
        AND l.source <> 'Bulk Upload'
+       -- Waiting Unassigned on an admin because its campaign/sheet isn't
+       -- linked yet: not anyone's miss. The 20-minute clock starts when it's
+       -- given to an agent (reassignment resets assigned_at and
+       -- first_response_at). An Unassigned lead an agent holds still counts.
+       AND NOT (l.status_code = 'UNASSIGNED' AND u.role = 'ADMIN')
      RETURNING l.id, l.name, l.assigned_agent_id,
                u.first_name || COALESCE(' ' || u.last_name, '') AS agent_name,
                u.manager_id

@@ -150,6 +150,23 @@ export async function isBulkChangeLeadPropertyEnabled(id: string): Promise<boole
   return rows[0]?.can_bulk_change_lead_property ?? false;
 }
 
+/**
+ * The one admin who holds leads that can't be routed yet (campaign / sheet
+ * not linked to a property), for Meta and Google alike: the Tech Admin
+ * (SUPER_ADMIN_EMAIL). If that account isn't an active admin, falls back to
+ * `preferredAdminId` (e.g. the admin who connected the Meta page), then to the
+ * oldest active admin, so the choice is always predictable.
+ */
+export async function findFallbackAdminId(preferredAdminId?: string): Promise<string | undefined> {
+  const { rows } = await query<{ id: string }>(
+    `SELECT id FROM users WHERE role = 'ADMIN' AND status = 'ACTIVE'
+     ORDER BY (lower(email) = lower($1)) DESC, COALESCE(id = $2::uuid, false) DESC, created_at ASC, id ASC
+     LIMIT 1`,
+    [SUPER_ADMIN_EMAIL, preferredAdminId ?? null]
+  );
+  return rows[0]?.id;
+}
+
 /** Every active admin — the follow-up SLA scheduler escalates a missed reminder to all of them. */
 export async function listActiveAdminIds(): Promise<string[]> {
   const { rows } = await query<{ id: string }>(`SELECT id FROM users WHERE role = 'ADMIN' AND status = 'ACTIVE'`);

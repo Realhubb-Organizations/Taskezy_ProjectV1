@@ -8,6 +8,8 @@ import { startEodReportScheduler } from "./jobs/eodReportScheduler";
 import { startNotificationCleanupScheduler } from "./jobs/notificationCleanupScheduler";
 import { startMetaAdSpendSync } from "./jobs/metaAdSpendSync";
 import { startGoogleAdsSpendSync } from "./jobs/googleAdsSpendSync";
+import { startCampaignListSync } from "./jobs/campaignListSync";
+import { startWaitingLeadsMorningReminder } from "./jobs/waitingLeadsMorningReminder";
 import { startDataRetentionJob } from "./jobs/dataRetentionJob";
 import { startStuckCallScheduler } from "./jobs/stuckCallScheduler";
 import { startQueue, stopQueue } from "./jobs/queue";
@@ -30,6 +32,8 @@ async function main(): Promise<void> {
   startNotificationCleanupScheduler();
   startMetaAdSpendSync();
   startGoogleAdsSpendSync();
+  startCampaignListSync();
+  startWaitingLeadsMorningReminder();
   startDataRetentionJob();
   startStuckCallScheduler();
   // The pgboss schema must already exist (migrations-archive/031_pgboss_grants.sql's

@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useApp, mapApiPropertyToFrontend, Property, PropertyTeamAssignmentMode, LeadAssignmentMode, PropertyTeamMember } from "@/context/AppContext";
-import { apiListPropertiesPage, type PropertyListFilters } from "@/lib/apiClient";
+import { apiListPropertiesPage, apiAutoAssignLeadsWaitingForProperty, type PropertyListFilters } from "@/lib/apiClient";
 import {
   Search,
   ArrowUp,
@@ -29,6 +29,7 @@ import AddPropertyModal, {
 import MetaCampaignLinker from "@/components/properties/MetaCampaignLinker";
 import GoogleCampaignLinker from "@/components/properties/GoogleCampaignLinker";
 import SheetSourceLinker from "@/components/properties/SheetSourceLinker";
+import WaitingLeadsPanel from "@/components/properties/WaitingLeadsPanel";
 import type { LinkerHandle } from "@/components/properties/linkerHandle";
 import { useDialog } from "@/components/ui/DialogProvider";
 import FieldError, { fieldErrorClass } from "@/components/ui/FieldError";
@@ -255,16 +256,36 @@ export default function PropertiesPage() {
   const onMetaDirty = useCallback((d: boolean) => setLinkerDirty(x => (x.meta === d ? x : { ...x, meta: d })), []);
   const onGoogleDirty = useCallback((d: boolean) => setLinkerDirty(x => (x.google === d ? x : { ...x, google: d })), []);
   const onSheetDirty = useCallback((d: boolean) => setLinkerDirty(x => (x.sheet === d ? x : { ...x, sheet: d })), []);
+  // Bumped after links are saved so the "Leads waiting for this property" panel re-checks.
+  const [waitingLeadsReloadKey, setWaitingLeadsReloadKey] = useState(0);
   const saveLinkers = async (): Promise<boolean> => {
     setSavingLinkers(true);
     const results = await Promise.all([metaLinkerRef, googleLinkerRef, sheetLinkerRef].map(r => r.current?.save() ?? Promise.resolve(true)));
     setSavingLinkers(false);
+    setWaitingLeadsReloadKey(k => k + 1);
     return results.every(Boolean);
   };
 
+  // After a property's campaign / sheet links are saved, leads that were
+  // waiting on an admin for those links go to the property's team.
+  const autoAssignWaitingLeads = async (propertyId: string, propertyName: string) => {
+    try {
+      const { assigned, skipped, noTeam } = await apiAutoAssignLeadsWaitingForProperty(propertyId);
+      if (assigned > 0) toast(`${assigned} waiting lead${assigned === 1 ? "" : "s"} assigned to ${propertyName}'s team.`, "success");
+      if (noTeam) toast(`${skipped} lead${skipped === 1 ? " is" : "s are"} waiting for ${propertyName}, but it has no active sales team yet.`, "error");
+    } catch {
+      toast("Links saved, but waiting leads couldn't be assigned. Use \"Leads waiting for this property\" to assign them.", "error");
+    } finally {
+      setWaitingLeadsReloadKey(k => k + 1);
+    }
+  };
+
   const handleSavePopup = async () => {
-    if (await saveLinkers()) toast("Changes saved.", "success");
-    else toast("Some changes couldn't be saved. Please check and try again.", "error");
+    const hadLinkChanges = popupDirty;
+    if (await saveLinkers()) {
+      toast("Changes saved.", "success");
+      if (hadLinkChanges && selectedProperty) await autoAssignWaitingLeads(selectedProperty.id, selectedProperty.name);
+    } else toast("Some changes couldn't be saved. Please check and try again.", "error");
   };
 
   // X / outside click: don't silently drop unsaved changes.
@@ -497,10 +518,15 @@ export default function PropertiesPage() {
           })
         : [];
 
+    const hadLinkChanges = popupDirty;
     if (popupDirty && !(await saveLinkers())) {
       toast("Couldn't save the connected campaigns / sheets. Please check and try again.", "error");
       return;
     }
+    // The team itself is saved in the background by editProperty; the server
+    // also auto-assigns once the team is saved, so a team added in this same
+    // edit is covered too.
+    if (hadLinkChanges) autoAssignWaitingLeads(selectedProperty.id, editName.trim() || selectedProperty.name);
 
     editProperty(selectedProperty.id, {
       name: editName.trim(),
@@ -895,6 +921,9 @@ export default function PropertiesPage() {
                   <div className="border-t border-slate-200 pt-4">
                     <SheetSourceLinker ref={sheetLinkerRef} onDirtyChange={onSheetDirty} propertyId={selectedProperty.id} isAdmin={isAdmin} />
                   </div>
+                  {isAdmin && (
+                    <WaitingLeadsPanel propertyId={selectedProperty.id} propertyName={selectedProperty.name} reloadKey={waitingLeadsReloadKey} />
+                  )}
 
                   <div className="flex gap-2 pt-2">
                     <button type="submit" className="ui-btn ui-btn-primary flex-1">
@@ -1002,6 +1031,7 @@ export default function PropertiesPage() {
                       <div className="border-t border-slate-200 pt-6">
                         <SheetSourceLinker ref={sheetLinkerRef} onDirtyChange={onSheetDirty} propertyId={selectedProperty.id} isAdmin={isAdmin} />
                       </div>
+                      <WaitingLeadsPanel propertyId={selectedProperty.id} propertyName={selectedProperty.name} reloadKey={waitingLeadsReloadKey} />
                     </>
                   )}
 

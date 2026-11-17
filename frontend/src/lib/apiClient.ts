@@ -1184,6 +1184,45 @@ export function apiGetMetaCampaignSuggestions(): Promise<string[]> {
   return request<string[]>("/api/v1/properties/meta-campaign-suggestions");
 }
 
+export type ApiCampaignListRefreshResult =
+  | { refreshed: true; meta: number; google: number }
+  | { refreshed: false; reason: "in-progress" | "cooldown" };
+
+export interface ApiWaitingLead {
+  id: string;
+  name: string;
+  phone: string;
+  campaign: string | null;
+  created_at: string;
+  from_sheet: boolean;
+  held_by: string;
+}
+
+/** Leads waiting on an admin because this property's campaign / sheet tab wasn't linked yet. Preview only. Admin only. */
+export function apiGetLeadsWaitingForProperty(propertyId: string): Promise<{ leads: ApiWaitingLead[]; canAssign: boolean }> {
+  return request<{ leads: ApiWaitingLead[]; canAssign: boolean }>(`/api/v1/properties/${propertyId}/waiting-leads`);
+}
+
+/** Right after saving a property's links: moves every lead that was waiting for them to the property's team. Admin only. */
+export function apiAutoAssignLeadsWaitingForProperty(propertyId: string): Promise<{ assigned: number; skipped: number; noTeam: boolean }> {
+  return request<{ assigned: number; skipped: number; noTeam: boolean }>(`/api/v1/properties/${propertyId}/waiting-leads/auto-assign`, {
+    method: "POST"
+  });
+}
+
+/** Assigns the confirmed waiting leads to the property's team. Admin only. */
+export function apiAssignLeadsWaitingForProperty(propertyId: string, leadIds: string[]): Promise<{ assigned: number; skipped: number }> {
+  return request<{ assigned: number; skipped: number }>(`/api/v1/properties/${propertyId}/waiting-leads/assign`, {
+    method: "POST",
+    body: JSON.stringify({ leadIds })
+  });
+}
+
+/** Pulls the latest Meta + Google campaign lists now (campaign pickers' Refresh button). Admin only. */
+export function apiRefreshCampaignLists(): Promise<ApiCampaignListRefreshResult> {
+  return request<ApiCampaignListRefreshResult>("/api/v1/properties/campaigns/refresh", { method: "POST" });
+}
+
 export function apiGetPropertyMetaCampaigns(propertyId: string): Promise<string[]> {
   return request<string[]>(`/api/v1/properties/${propertyId}/meta-campaigns`);
 }

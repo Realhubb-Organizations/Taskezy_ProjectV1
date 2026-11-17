@@ -2,11 +2,12 @@ import { pool } from "../../db/pool";
 import { logger } from "../../utils/logger";
 import { normalizeLeadPhone } from "../leads/leads.repository";
 import { findLeadForRevival, markLeadRevived } from "../leads/leadRevival";
-import { isUniqueViolation } from "../users/users.repository";
+import { isUniqueViolation, findFallbackAdminId } from "../users/users.repository";
 import { createNotification } from "../notifications/notifications.service";
 import { findPropertyIdByCampaignName } from "../properties/properties.repository";
 import { pickAgentForProperty } from "../properties/properties.assignment";
 import { broadcastLeadChanged } from "../leads/leads.realtime";
+import { alertUnlinkedSource } from "../notifications/unlinkedSourceAlert";
 import { MetaLeadData } from "./meta-client";
 
 function firstFieldValue(fieldData: MetaLeadData["field_data"], keys: string[]): string | undefined {
@@ -66,7 +67,9 @@ export async function ingestMetaLead(leadData: MetaLeadData, connectingAdminId: 
   const name = rawName || "Meta Lead";
   const campaign = leadData.campaign_name || leadData.form_id || "Meta Lead Ads";
   const autoAssignedAgentId = propertyId ? await pickAgentForProperty(propertyId) : undefined;
-  const assignedAgentId = autoAssignedAgentId ?? connectingAdminId;
+  // Unrouted leads always wait on the Tech Admin (findFallbackAdminId); the
+  // admin who connected the page is only the backup if that account isn't active.
+  const assignedAgentId = autoAssignedAgentId ?? (await findFallbackAdminId(connectingAdminId)) ?? connectingAdminId;
   const statusCode = autoAssignedAgentId ? "NEW_LEAD" : "UNASSIGNED";
 
   try {
@@ -95,6 +98,11 @@ export async function ingestMetaLead(leadData: MetaLeadData, connectingAdminId: 
         link: "/dashboard/crm"
       });
       broadcastLeadChanged(rows[0].id);
+      // Unrouted because its campaign isn't linked to any property yet: tell
+      // admins (once a day per campaign, Reminder Alerts).
+      if (!propertyId && leadData.campaign_name) {
+        await alertUnlinkedSource("meta-campaign", leadData.campaign_name);
+      }
     }
   } catch (err) {
     // The only remaining unique constraint this insert can hit is leads.phone
