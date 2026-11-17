@@ -980,17 +980,23 @@ export default function LeadDashboard() {
     { key: "sitevisit_done", label: "Site Visit Done", value: adminStats.siteVisitDone, color: "text-[#015814]" }
   ];
 
-  // Admin drill-down panel's own filters — same status codes/date-range/
-  // campaign the server-side stats above are grouped from (ADMIN_METRIC_TO_
-  // STATUS, already used for the non-admin quick-filter), so the panel
-  // always matches whichever card was clicked.
-  const adminDrillBaseFilters: LeadListFilters = {
-    ...adminServerDateBounds(),
-    status: adminDrillMetric && adminDrillMetric !== "total"
-      ? (() => { const code = frontendStatusToDbCode(ADMIN_METRIC_TO_STATUS[adminDrillMetric]); return code ? [code] : undefined; })()
-      : undefined,
-    campaign: adminCampaignFilter.length > 0 ? adminCampaignFilter : undefined
-  };
+  // Admin drill-down panel's own filters: exactly the filters the cards
+  // above are counted with (buildAdminServerFilters — Data Calling leads
+  // left out, plus the table's date/agent/property/campaign/source/search
+  // filters), narrowed to the clicked card's status. So the list always
+  // holds exactly the leads behind the card's number.
+  const adminDrillBaseFilters: LeadListFilters = (() => {
+    const filters = buildAdminServerFilters();
+    if (!adminDrillMetric || adminDrillMetric === "total") return filters;
+    const code = frontendStatusToDbCode(ADMIN_METRIC_TO_STATUS[adminDrillMetric]);
+    if (!code) return filters;
+    // The table's own Status filter already leaves this status out — the
+    // card reads 0, so the list must be empty too (no lead has the nil id).
+    if (filters.status && !filters.status.includes(code)) {
+      return { ...filters, status: [code], leadIds: ["00000000-0000-0000-0000-000000000000"] };
+    }
+    return { ...filters, status: [code] };
+  })();
 
   // "Unassigned" (leads nobody owns yet) lives here, not under Status.
   const UNASSIGNED_OPTION = "Unassigned";

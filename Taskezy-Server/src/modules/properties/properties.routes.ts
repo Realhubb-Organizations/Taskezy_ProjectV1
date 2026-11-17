@@ -74,11 +74,11 @@ propertiesRouter.get(
   "/",
   validate({ query: listPropertiesQuerySchema }),
   asyncHandler(async (req, res) => {
-    const { page, pageSize, search, propertyType, sortDir } = req.query as unknown as {
-      page: number; pageSize: number; search?: string; propertyType?: string[]; sortDir?: "asc" | "desc";
+    const { page, pageSize, search, propertyType, sortDir, kind } = req.query as unknown as {
+      page: number; pageSize: number; search?: string; propertyType?: string[]; sortDir?: "asc" | "desc"; kind: repo.PropertyKind;
     };
     const scopedToAgentIds = await scopedTeamAgentIdsForCaller(req.user!);
-    const { rows, totalCount } = await repo.findMany({ page, pageSize, search, propertyType, sortDir });
+    const { rows, totalCount } = await repo.findMany({ page, pageSize, search, propertyType, sortDir, kind });
     const scopedRows = rows.map(row => scopeTeamMembers(row, scopedToAgentIds));
     sendPaginated(res, scopedRows, { page, pageSize, totalCount, totalPages: Math.max(1, Math.ceil(totalCount / pageSize)) });
   })
@@ -128,6 +128,15 @@ propertiesRouter.delete(
     sendOk(res, { deleted: true });
   })
 );
+
+// Campaigns and sheets bring in ad leads — a Data Calling property (its
+// leads come only from Data Calling uploads) has none. It does keep a team
+// and round robin, used when a Data Calling upload assigns by property.
+function assertLeadsProperty(property: repo.PropertyRow): void {
+  if (property.kind === "DATA_CALLING") {
+    throw ApiError.badRequest("Data Calling properties have no campaigns or sheets.");
+  }
+}
 
 const setTeamMembersSchema = z.object({
   members: z.array(z.object({
@@ -238,6 +247,7 @@ propertiesRouter.put(
   asyncHandler(async (req, res) => {
     const existing = await repo.findById(req.params.id);
     if (!existing) throw ApiError.notFound("Property not found");
+    assertLeadsProperty(existing);
     try {
       await repo.replaceCampaignsForProperty(req.params.id, req.body.campaignNames);
     } catch (err) {
@@ -261,6 +271,7 @@ propertiesRouter.put(
   asyncHandler(async (req, res) => {
     const existing = await repo.findById(req.params.id);
     if (!existing) throw ApiError.notFound("Property not found");
+    assertLeadsProperty(existing);
     try {
       await repo.replaceGoogleCampaignsForProperty(req.params.id, req.body.campaignNames);
     } catch (err) {
@@ -294,6 +305,7 @@ propertiesRouter.put(
   asyncHandler(async (req, res) => {
     const existing = await repo.findById(req.params.id);
     if (!existing) throw ApiError.notFound("Property not found");
+    assertLeadsProperty(existing);
     try {
       await repo.replaceSheetSourcesForProperty(req.params.id, req.body.sheetSourceNames);
     } catch (err) {

@@ -145,9 +145,12 @@ export interface BulkImportSubmitResult {
 
 export interface BulkImportSubmitInput {
   subSource: string;
+  // PROPERTY: rows are shared among the Data Calling property's own team
+  // (its round robin / percentage). AGENT: rows go to the picked agents.
   assignmentMode: "PROPERTY" | "AGENT";
-  propertyId?: string;
   agentIds?: string[];
+  // A Data Calling property — required in PROPERTY mode, optional tag in AGENT mode.
+  dataCallingPropertyId?: string;
   leads: ParsedLeadRow[];
   // One batch-level choice from the archive-match precheck below — true
   // re-attaches a matched row's old notes/call history onto the new lead.
@@ -319,8 +322,8 @@ export default function UploadLeadsModal({ isOpen, onClose, onSubmit, properties
       const submitResult = await onSubmit({
         subSource: subSource.trim(),
         assignmentMode,
-        propertyId: assignmentMode === "PROPERTY" ? propertyId : undefined,
         agentIds: assignmentMode === "AGENT" ? agentIds : undefined,
+        dataCallingPropertyId: propertyId || undefined,
         leads,
         restoreArchivedMatches: false
       });
@@ -340,8 +343,8 @@ export default function UploadLeadsModal({ isOpen, onClose, onSubmit, properties
       const submitResult = await onSubmit({
         subSource: subSource.trim(),
         assignmentMode,
-        propertyId: assignmentMode === "PROPERTY" ? propertyId : undefined,
         agentIds: assignmentMode === "AGENT" ? agentIds : undefined,
+        dataCallingPropertyId: propertyId || undefined,
         leads: parsedLeads,
         restoreArchivedMatches
       });
@@ -411,9 +414,9 @@ export default function UploadLeadsModal({ isOpen, onClose, onSubmit, properties
           ) : (
             <div className="px-6 py-5 grid grid-cols-1 sm:grid-cols-[1fr_150px] gap-6">
               <div className="space-y-4">
-                {/* Assignment mode — Property-wise runs each row through that
-                    property's configured Round Robin/Percentage team; Agent
-                    puts the whole batch directly on one chosen person. */}
+                {/* Assignment mode — Property-wise shares the rows among that
+                    Data Calling property's own team (Round Robin/Percentage);
+                    Agent puts them directly on the chosen people. */}
                 <div className="ui-toggle flex w-full">
                   <button
                     type="button"
@@ -463,6 +466,23 @@ export default function UploadLeadsModal({ isOpen, onClose, onSubmit, properties
                     <SourceSearchSelect value={subSource} onChange={setSubSource} />
                   </div>
                 </div>
+
+                {/* Agent mode can still tag the file with a Data Calling property. */}
+                {assignmentMode === "AGENT" && (
+                  <div className="space-y-1">
+                    <label className="block text-xs font-bold text-slate-700">
+                      Property <span className="font-normal text-slate-400">(optional)</span>
+                    </label>
+                    <SearchableSelect
+                      value={propertyId}
+                      onChange={setPropertyId}
+                      options={propertiesList.map(p => ({ value: p.id, label: p.name }))}
+                      placeholder="Select property"
+                      searchPlaceholder="Search properties..."
+                      clearable
+                    />
+                  </div>
+                )}
 
                 <div
                   onDragOver={handleDragOver}

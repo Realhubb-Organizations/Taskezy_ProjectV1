@@ -3,10 +3,11 @@
 import React, { useState, useRef, useMemo, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useApp, Lead } from "@/context/AppContext";
-import { ChevronRight, ChevronDown, Search, Sliders, Minus, X, Copy, Users, Plus, Check, Trash2, AlertTriangle, GripVertical } from "lucide-react";
+import { ChevronRight, ChevronDown, Search, Sliders, Minus, X, Copy, Users, Plus, Check, Trash2, AlertTriangle, GripVertical, Building2 } from "lucide-react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine } from "recharts";
 import UploadLeadsModal from "@/components/crm/UploadLeadsModal";
 import LeadDetailDrawer from "@/components/crm/LeadDetailDrawer";
+import { useDataCallingProperties } from "@/lib/useDataCallingProperties";
 import { LineSkeleton, TableRowsSkeleton } from "@/components/ui/Skeletons";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
@@ -181,6 +182,9 @@ function analyticsLeadMatchesMetric(l: Lead, metric: AnalyticsChartMetric): bool
   }
 }
 
+// A lead's Data Calling property; older uploads only have a main one.
+const dcPropertyOf = (l: Lead) => l.dataCallingProperty || l.property;
+
 export default function DataCallingPage() {
   // Data Calling is the bulk-uploaded cold-outreach pipeline, kept separate
   // from the rest of the CRM's real, ad-driven leads — dataCallingLeads is
@@ -232,10 +236,10 @@ export default function DataCallingPage() {
   // a Member can never set activeTab to "Analytics" through the UI.
   const canViewDataCallingAnalytics = isAdmin || currentUser?.role_type === "Manager";
   const propertiesList = properties.map(p => p.name);
-  // Bulk upload's own property/agent pickers need real ids (they drive
-  // server-side assignment), unlike propertiesList above which only ever
-  // feeds display/filter UI.
-  const bulkUploadPropertiesList = useMemo(() => properties.map(p => ({ id: p.id, name: p.name })), [properties]);
+  // Data Calling's own property list (Properties page → Data Calling
+  // Properties) — the upload and Set Property pickers.
+  const dataCallingProperties = useDataCallingProperties();
+  const bulkUploadPropertiesList = useMemo(() => dataCallingProperties.map(p => ({ id: p.id, name: p.name })), [dataCallingProperties]);
   const bulkUploadAgentsList = useMemo(
     () => uploadAssignableUsers(users, currentUser).map(u => ({ id: u.id, name: u.name })),
     [users, currentUser]
@@ -708,8 +712,8 @@ export default function DataCallingPage() {
   // "Not set" picks leads with no property linked yet.
   const PROPERTY_NOT_SET = "Not set";
   const propertyFilterOptions = useMemo(() => {
-    const names = Array.from(new Set(leads.map(l => l.property).filter(Boolean) as string[])).sort();
-    return leads.some(l => !l.property) ? [PROPERTY_NOT_SET, ...names] : names;
+    const names = Array.from(new Set(leads.map(dcPropertyOf).filter(Boolean) as string[])).sort();
+    return leads.some(l => !dcPropertyOf(l)) ? [PROPERTY_NOT_SET, ...names] : names;
   }, [leads]);
   const dataCallSourceOptions = useMemo(
     () => Array.from(new Set(leads.map(l => l.subSource || l.source).filter(Boolean) as string[])).sort(),
@@ -901,62 +905,66 @@ export default function DataCallingPage() {
     [leads, selectedIds]
   );
 
-  // Assign/Reshuffle share one modal — same two-field, property-scopes-
-  // assignee mechanics either way. `assignFlowMode` picks which of the two
-  // button clicks opened it, which in turn picks the target lead set, the
-  // modal's copy, and whether confirming also clears "Unassigned" status.
-  // A property must be picked first (it scopes which agents are even
-  // eligible — an agent "connected" to a property is one on that
-  // property's assignedTeam, same restriction the Properties page's
-  // CUSTOM_MEMBERS mode enforces; ALL_MEMBERS properties open it to every
-  // agent), then the Assignee field unlocks. Both fields need a value
-  // before the modal's own confirm button goes live.
+  // Assign/Reshuffle share one modal. `assignFlowMode` picks which of the
+  // two button clicks opened it, which in turn picks the target lead set,
+  // the modal's copy, and whether confirming also clears "Unassigned"
+  // status. Data Calling never picks agents by property: any agent can be
+  // chosen directly. A Data Calling property is set separately (Set
+  // Property below), and never changes who has the lead.
   const [assignFlowMode, setAssignFlowMode] = useState<"assign" | "reshuffle" | null>(null);
   const flowTargetIds = assignFlowMode === "reshuffle" ? selectedAssignedIds : selectedUnassignedIds;
-  const [assignSelectedPropertyIds, setAssignSelectedPropertyIds] = useState<Set<string>>(new Set());
   const [assignSelectedAssigneeIds, setAssignSelectedAssigneeIds] = useState<string[]>([]);
 
-  // Admin's Reshuffle: every field is optional — Property alone, Assignee
-  // alone, or both; no note. A picked Property is applied to the leads only
-  // for the Super Admin (who may change properties); otherwise it just
-  // narrows the assignee list as before. Same as the Leads page.
+  // Admin's Reshuffle needs no note. Same as the Leads page.
   const adminReshuffle = isAdmin && assignFlowMode === "reshuffle";
-  const reshuffleSetsProperty = adminReshuffle && isSuperAdminUser(currentUser?.email);
-  const eligibleAssignees = useMemo(() => {
-    if (assignSelectedPropertyIds.size === 0) return adminReshuffle ? users.filter(u => u.role === "AGENT") : [];
-    const selectedProps = properties.filter(p => assignSelectedPropertyIds.has(p.id));
-    let anyAllMembers = false;
-    const restrictedIds = new Set<string>();
-    selectedProps.forEach(p => {
-      if (p.teamAssignmentMode === "CUSTOM_MEMBERS" && p.assignedTeam && p.assignedTeam.length > 0) {
-        p.assignedTeam.forEach(m => restrictedIds.add(m.userId));
-      } else {
-        anyAllMembers = true;
-      }
-    });
-    return anyAllMembers ? users.filter(u => u.role === "AGENT") : users.filter(u => restrictedIds.has(u.id));
-  }, [assignSelectedPropertyIds, properties, users, adminReshuffle]);
+  const eligibleAssignees = useMemo(() => users.filter(u => u.role === "AGENT"), [users]);
   const [assignNote, setAssignNote] = useState("");
-  const canConfirmAssign = adminReshuffle
-    ? assignSelectedAssigneeIds.length > 0 || (reshuffleSetsProperty && assignSelectedPropertyIds.size > 0)
-    : assignSelectedPropertyIds.size > 0 && assignSelectedAssigneeIds.length > 0 && assignNote.trim().length > 0;
+  const canConfirmAssign = assignSelectedAssigneeIds.length > 0 && (adminReshuffle || assignNote.trim().length > 0);
   const [assignSubmitting, setAssignSubmitting] = useState(false);
   const [assignError, setAssignError] = useState("");
 
   const openAssignFlow = (mode: "assign" | "reshuffle") => {
-    setAssignSelectedPropertyIds(new Set());
     setAssignSelectedAssigneeIds([]);
     setAssignNote("");
     setAssignError("");
     setAssignFlowMode(mode);
   };
   const closeAssignFlow = () => { if (!assignSubmitting) setAssignFlowMode(null); };
-  const changePropertySelection = (ids: string[]) => {
-    setAssignSelectedPropertyIds(new Set(ids));
-    // Property set changed — an assignee chosen under the old scope may no
-    // longer be eligible, so make the admin re-pick rather than silently
-    // keep a stale selection.
-    setAssignSelectedAssigneeIds([]);
+
+  // Set Property: tags the selected leads with one Data Calling property
+  // (or clears it). Same access as changing a lead's property on the Leads
+  // page — the Super Admin among admins; the server enforces it too.
+  const canSetDataCallingProperty = isAdmin && isSuperAdminUser(currentUser?.email);
+  const [setPropertyOpen, setSetPropertyOpen] = useState(false);
+  const [setPropertyId, setSetPropertyId] = useState("");
+  const [setPropertySubmitting, setSetPropertySubmitting] = useState(false);
+  const [setPropertyError, setSetPropertyError] = useState("");
+  const openSetProperty = () => { setSetPropertyId(""); setSetPropertyError(""); setSetPropertyOpen(true); };
+  const confirmSetProperty = async () => {
+    if (setPropertySubmitting) return;
+    const targetIds = Array.from(selectedIds);
+    const propertyId = setPropertyId === PROPERTY_NOT_SET ? null : setPropertyId;
+    setSetPropertySubmitting(true);
+    setSetPropertyError("");
+    try {
+      const r = await apiBulkSetLeadProperty(targetIds, propertyId, undefined, "DATA_CALLING");
+      if (r.failed.length > 0) {
+        setSetPropertyError(`${r.updated > 0 ? `Property set on ${r.updated} lead${r.updated === 1 ? "" : "s"}, but ` : ""}${r.failed.length} could not be changed: ${r.failed[0].reason}`);
+        return;
+      }
+      setSelectedIds(new Set());
+      setSetPropertyOpen(false);
+      const propertyName = dataCallingProperties.find(p => p.id === propertyId)?.name;
+      toast(
+        (propertyName ? `Property set to ${propertyName} on ` : "Property removed from ") +
+          `${r.updated} lead${r.updated === 1 ? "" : "s"}` + (r.skipped > 0 ? ` (${r.skipped} already had it)` : "") + ".",
+        "success"
+      );
+    } catch (err) {
+      setSetPropertyError(err instanceof Error ? err.message : "Could not set the property. Please try again.");
+    } finally {
+      setSetPropertySubmitting(false);
+    }
   };
   // Queued server-side (POST /leads/bulk-reassign — see jobs/queue.ts's
   // bulk-reassign-leads worker) instead of firing one reassignLead call per
@@ -975,32 +983,12 @@ export default function DataCallingPage() {
     const agentName = agentIds.length === 1 ? users.find(u => u.id === agentIds[0])?.name || "" : `${agentIds.length} members`;
     // Admin's Reshuffle sends no note: the lead's own note stays, history just says "Reassigned to <agent>".
     const note = adminReshuffle ? undefined : assignNote.trim();
-    const newPropertyId = reshuffleSetsProperty ? Array.from(assignSelectedPropertyIds)[0] : undefined;
     const targetIds = flowTargetIds;
     const mode = assignFlowMode;
 
     setAssignSubmitting(true);
     setAssignError("");
     try {
-      // Admin's Reshuffle with a Property: set it first, leaving every other field as it is.
-      if (newPropertyId) {
-        const r = await apiBulkSetLeadProperty(targetIds, newPropertyId);
-        if (r.failed.length > 0) {
-          setAssignError(`${r.updated > 0 ? `Property set on ${r.updated} lead${r.updated === 1 ? "" : "s"}, but ` : ""}${r.failed.length} could not be changed: ${r.failed[0].reason}`);
-          return;
-        }
-        if (agentIds.length === 0) {
-          setSelectedIds(prev => {
-            const next = new Set(prev);
-            targetIds.forEach(id => next.delete(id));
-            return next;
-          });
-          setAssignFlowMode(null);
-          const propertyName = properties.find(p => p.id === newPropertyId)?.name ?? "the property";
-          toast(`Property set to ${propertyName} on ${r.updated} lead${r.updated === 1 ? "" : "s"}` + (r.skipped > 0 ? ` (${r.skipped} already on it)` : "") + ".", "success");
-          return;
-        }
-      }
       const shares = splitEvenly(targetIds, agentIds.length);
       const result = { moved: 0, skipped: 0, failed: [] as { reason: string }[] };
       for (let i = 0; i < agentIds.length; i++) {
@@ -1073,7 +1061,7 @@ export default function DataCallingPage() {
       const matchesStatus = statusFilters.length === 0 || statusFilters.includes(l.callStatus || CALL_STATUS_NONE);
       const matchesAssigned = assignedFilters.length === 0 || assignedFilters.includes(l.assignedAgent);
       const matchesDataCallSource = dataCallSourceFilters.length === 0 || dataCallSourceFilters.includes(l.subSource || l.source || "");
-      const matchesProperty = propertyFilters.length === 0 || propertyFilters.includes(l.property || PROPERTY_NOT_SET);
+      const matchesProperty = propertyFilters.length === 0 || propertyFilters.includes(dcPropertyOf(l) || PROPERTY_NOT_SET);
       const matchesSubStatus = subStatusFilters.length === 0 || subStatusFilters.includes(qualificationStatusOf(l));
       const matchesDate = appliedCustomRange
         ? (() => {
@@ -1513,6 +1501,16 @@ export default function DataCallingPage() {
                 >
                   <Users className="h-4 w-4 text-blue-600" />
                   Reshuffle
+                </button>
+              )}
+              {activeTab === "DataCalling" && canSetDataCallingProperty && selectedIds.size > 0 && (
+                <button
+                  type="button"
+                  onClick={openSetProperty}
+                  className="ui-btn ui-btn-secondary border"
+                >
+                  <Building2 className="h-4 w-4 text-blue-600" />
+                  Set Property
                 </button>
               )}
               {activeTab === "DataCalling" && isAdmin && selectedIds.size > 0 && (
@@ -2154,7 +2152,7 @@ export default function DataCallingPage() {
                           visibleColumns.date && { key: "date" as const, node: <td className="px-4 py-3.5">{formatDateTime(l.createdAtStr)}</td> },
                           visibleColumns.notes && { key: "notes" as const, node: <td className="px-4 py-3.5"><LeadNoteCell lead={l} compact={phoneLayout} /></td> },
                           visibleColumns.nextCallDate && { key: "nextCallDate" as const, node: <td className="px-4 py-3.5"><NextCallCell next={nextCallFor(l)} /></td> },
-                          visibleColumns.property && { key: "property" as const, node: <td className="px-4 py-3.5 [overflow-wrap:anywhere]">{l.property || "—"}</td> },
+                          visibleColumns.property && { key: "property" as const, node: <td className="px-4 py-3.5 [overflow-wrap:anywhere]">{dcPropertyOf(l) || "—"}</td> },
                           visibleColumns.dataCallSource && {
                             key: "dataCallSource" as const,
                             node: (
@@ -2310,11 +2308,9 @@ export default function DataCallingPage() {
         document.body
       )}
 
-      {/* Assign/Reshuffle Leads modal — Property must be picked before
-          Assignee unlocks (it scopes the eligible agent list), and the
-          modal's own confirm button stays disabled until both fields hold
-          a value. Same modal for both flows; assignFlowMode picks the copy
-          and the target lead set. */}
+      {/* Assign/Reshuffle Leads modal — pick one or more agents directly
+          (Data Calling never assigns by property). Same modal for both
+          flows; assignFlowMode picks the copy and the target lead set. */}
       {isAdmin && assignFlowMode && createPortal(
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
           <div className="fixed inset-0 bg-slate-900/40" onClick={closeAssignFlow} />
@@ -2331,32 +2327,7 @@ export default function DataCallingPage() {
                   : `Assigning ${flowTargetIds.length} unassigned lead${flowTargetIds.length > 1 ? "s" : ""}.`}
               </p>
 
-              {/* Select Property */}
-              <div className="space-y-1.5">
-                <label className="block text-sm font-bold text-slate-800">Select Property</label>
-                {reshuffleSetsProperty ? (
-                  // One property — it's set on the leads.
-                  <SearchableSelect
-                    variant="field"
-                    value={Array.from(assignSelectedPropertyIds)[0] ?? ""}
-                    onChange={(id) => changePropertySelection(id ? [id] : [])}
-                    options={properties.map(p => ({ value: p.id, label: p.name }))}
-                    placeholder="Select property"
-                    searchPlaceholder="Search property..."
-                  />
-                ) : (
-                  <SearchableMultiSelect
-                    variant="field"
-                    selected={Array.from(assignSelectedPropertyIds)}
-                    onChange={changePropertySelection}
-                    options={properties.map(p => ({ value: p.id, label: p.name }))}
-                    placeholder="Select property"
-                    searchPlaceholder="Search property..."
-                  />
-                )}
-              </div>
-
-              {/* Select Assignee — locked until at least one property is picked */}
+              {/* Select Assignee */}
               <div className="space-y-1.5">
                 <label className="block text-sm font-bold text-slate-800">
                   {assignFlowMode === "reshuffle" ? "Select Reshuffle Assignee" : "Select Assignee"}
@@ -2366,7 +2337,6 @@ export default function DataCallingPage() {
                   selected={assignSelectedAssigneeIds}
                   onChange={setAssignSelectedAssigneeIds}
                   options={eligibleAssignees.map(u => ({ value: u.id, label: u.name }))}
-                  disabled={assignSelectedPropertyIds.size === 0 && !adminReshuffle}
                   placeholder="Select Member"
                   searchPlaceholder="Search assignee..."
                 />
@@ -2412,6 +2382,58 @@ export default function DataCallingPage() {
  }`}
               >
                 {assignSubmitting ? "Working…" : assignFlowMode === "reshuffle" ? "Reshuffle" : "Assign"}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Set Property modal — tags the selected leads with one Data Calling
+          property, or clears it. Never changes who has the lead. */}
+      {canSetDataCallingProperty && setPropertyOpen && createPortal(
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-slate-900/40" onClick={() => { if (!setPropertySubmitting) setSetPropertyOpen(false); }} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="px-6 pt-6 pb-4 border-b border-slate-100">
+              <h3 className="ui-title">Set Property</h3>
+            </div>
+            <div className="px-6 py-5 space-y-5">
+              <p className="text-xs text-slate-500">
+                Setting the Data Calling property on {selectedIds.size} lead{selectedIds.size === 1 ? "" : "s"}. Who the leads are assigned to stays the same.
+              </p>
+              <div className="space-y-1.5">
+                <label className="block text-sm font-bold text-slate-800">Data Calling Property</label>
+                <SearchableSelect
+                  variant="field"
+                  value={setPropertyId}
+                  onChange={setSetPropertyId}
+                  options={[
+                    ...dataCallingProperties.map(p => ({ value: p.id, label: p.name })),
+                    { value: PROPERTY_NOT_SET, label: "No property (remove)" }
+                  ]}
+                  placeholder="Select property"
+                  searchPlaceholder="Search property..."
+                />
+              </div>
+              {setPropertyError && <p className="text-[11px] text-red-600 font-semibold">{setPropertyError}</p>}
+            </div>
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100">
+              <button
+                type="button"
+                disabled={setPropertySubmitting}
+                onClick={() => setSetPropertyOpen(false)}
+                className="ui-btn ui-btn-secondary border disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={!setPropertyId || setPropertySubmitting}
+                onClick={confirmSetProperty}
+                className={`ui-btn ui-btn-primary ${setPropertyId && !setPropertySubmitting ? "" : "bg-slate-300 cursor-not-allowed"}`}
+              >
+                {setPropertySubmitting ? "Working…" : "Set Property"}
               </button>
             </div>
           </div>

@@ -577,6 +577,8 @@ export interface BulkImportLeadsInput {
   restoreArchivedMatches?: boolean;
   assignmentMode: "PROPERTY" | "AGENT";
   propertyId?: string;
+  /** Data Calling's own property tag for the batch — stored only, never drives assignment. */
+  dataCallingPropertyId?: string;
   agentIds?: string[];
   leads: BulkImportLeadRow[];
   actor: { userId: string; name: string };
@@ -659,11 +661,22 @@ export async function assertBulkImportAllowed(caller: AccessTokenPayload, input:
 export async function bulkImportLeads(input: BulkImportLeadsInput): Promise<BulkImportLeadsResult> {
   const fallbackAdminId = (await usersRepo.listActiveAdminIds())[0];
 
+  // Property mode: a Data Calling upload hands rows to its Data Calling
+  // property's team; any other upload to its main property's team.
+  const isDataCallingUpload = !!input.subSource;
+  const assignmentPropertyId = input.assignmentMode !== "PROPERTY"
+    ? undefined
+    : isDataCallingUpload ? input.dataCallingPropertyId : input.propertyId;
+  if (assignmentPropertyId && !(await findPropertyName(assignmentPropertyId, isDataCallingUpload ? "DATA_CALLING" : "MAIN"))) {
+    throw ApiError.badRequest("That property no longer exists.");
+  }
   // Set up once, outside the per-row loop — see createPropertyAgentPicker.
-  const pickPropertyAgent =
-    input.assignmentMode === "PROPERTY" ? await createPropertyAgentPicker(input.propertyId!) : undefined;
+  const pickPropertyAgent = assignmentPropertyId ? await createPropertyAgentPicker(assignmentPropertyId) : undefined;
   const agentIds = input.assignmentMode === "AGENT" ? input.agentIds ?? [] : [];
   await assertActiveAssignees(agentIds);
+  if (input.dataCallingPropertyId && !(await findPropertyName(input.dataCallingPropertyId, "DATA_CALLING"))) {
+    throw ApiError.badRequest("That Data Calling property no longer exists.");
+  }
 
   const skipped: BulkImportSkippedRow[] = [];
   let duplicates = 0;
@@ -742,6 +755,7 @@ export async function bulkImportLeads(input: BulkImportLeadsInput): Promise<Bulk
     // (e.g. the main CRM Leads page's "Property" field) — passed through
     // as-is rather than always nulled out.
     propertyId: input.propertyId ?? null,
+    dataCallingPropertyId: input.dataCallingPropertyId ?? null,
     uploadedByUserId: input.actor.userId
   };
 
@@ -1140,26 +1154,38 @@ export async function updateLeadNote(caller: AccessTokenPayload, leadId: string,
 // `note` is optional from the single-lead API (no schema field for it
 // today) but required from the bulk one below (bulkSetLeadPropertySchema)
 // — same shape as reassignLead's own optional/required split.
-export async function setLeadProperty(caller: AccessTokenPayload, leadId: string, propertyId: string | null, note?: string) {
+/** Name of the property `propertyId` points to, or undefined unless it exists in the matching list (Leads or Data Calling). */
+async function findPropertyName(propertyId: string, kind: repo.LeadPropertyKind): Promise<string | undefined> {
+  const row = await findPropertyById(propertyId);
+  return row && row.kind === (kind === "DATA_CALLING" ? "DATA_CALLING" : "LEADS") ? row.name : undefined;
+}
+
+// `kind` picks which of the lead's two property fields changes (see
+// repo.LEAD_PROPERTY_FIELDS). Same access rules for both.
+export async function setLeadProperty(caller: AccessTokenPayload, leadId: string, propertyId: string | null, note?: string, kind: repo.LeadPropertyKind = "MAIN") {
   if (caller.role === "ADMIN" && !(await usersRepo.isSuperAdmin(caller.sub))) {
     throw ApiError.forbidden("Only the Super Admin can change a lead's property.");
   }
   const scopedToAgentIds = await scopeForCaller(caller);
   const existing = await repo.findById(leadId, scopedToAgentIds);
   if (!existing) throw ApiError.notFound("Lead not found");
-  if ((existing.property_id ?? null) === propertyId) return existing;
+  const current = kind === "DATA_CALLING"
+    ? { id: existing.data_calling_property_id, name: existing.data_calling_property_name }
+    : { id: existing.property_id, name: existing.property_name };
+  if ((current.id ?? null) === propertyId) return existing;
 
-  const next = propertyId ? await findPropertyById(propertyId) : undefined;
-  if (propertyId && !next) throw ApiError.badRequest("That property no longer exists.");
-  const before = existing.property_name;
-  const message = !next
-    ? `Property removed (was "${before}")`
+  const nextName = propertyId ? await findPropertyName(propertyId, kind) : undefined;
+  if (propertyId && !nextName) throw ApiError.badRequest("That property no longer exists.");
+  const { label } = repo.LEAD_PROPERTY_FIELDS[kind];
+  const before = current.name;
+  const message = !nextName
+    ? `${label} removed (was "${before}")`
     : before
-      ? `Property changed from "${before}" to "${next.name}"`
-      : `Property set to "${next.name}"`;
+      ? `${label} changed from "${before}" to "${nextName}"`
+      : `${label} set to "${nextName}"`;
 
   await withTransaction(async (client) => {
-    await repo.setPropertyId(client, leadId, propertyId);
+    await repo.setPropertyId(client, leadId, propertyId, kind);
     if (note) await repo.setNote(client, leadId, note, caller.sub);
     await repo.insertLeadLog(client, leadId, caller.sub, caller.name, note ? `${message}. Note: ${note}` : message);
   });
@@ -1183,7 +1209,8 @@ export async function bulkSetLeadProperty(
   caller: AccessTokenPayload,
   leadIds: string[],
   propertyId: string | null,
-  note?: string
+  note?: string,
+  kind: repo.LeadPropertyKind = "MAIN"
 ): Promise<BulkSetLeadPropertyResult> {
   const ids = Array.from(new Set(leadIds));
 
@@ -1194,8 +1221,8 @@ export async function bulkSetLeadProperty(
   if (caller.role === "ADMIN" && !(await usersRepo.isSuperAdmin(caller.sub))) {
     throw ApiError.forbidden("Only the Super Admin can change a lead's property.");
   }
-  const next = propertyId ? await findPropertyById(propertyId) : undefined;
-  if (propertyId && !next) throw ApiError.badRequest("That property no longer exists.");
+  const nextName = propertyId ? await findPropertyName(propertyId, kind) : undefined;
+  if (propertyId && !nextName) throw ApiError.badRequest("That property no longer exists.");
   const scopedToAgentIds = await scopeForCaller(caller);
 
   let updated = 0;
@@ -1204,7 +1231,7 @@ export async function bulkSetLeadProperty(
 
   for (let i = 0; i < ids.length; i += BULK_SET_PROPERTY_CHUNK_SIZE) {
     const chunk = ids.slice(i, i + BULK_SET_PROPERTY_CHUNK_SIZE);
-    const result = await repo.setLeadPropertyChunk(chunk, propertyId, next?.name, scopedToAgentIds, note, { userId: caller.sub, name: caller.name });
+    const result = await repo.setLeadPropertyChunk(chunk, propertyId, nextName, scopedToAgentIds, note, { userId: caller.sub, name: caller.name }, kind);
     updated += result.updated.length;
     skipped += result.skipped.length;
     result.notFound.forEach((id) => failed.push({ id, reason: "Lead not found" }));

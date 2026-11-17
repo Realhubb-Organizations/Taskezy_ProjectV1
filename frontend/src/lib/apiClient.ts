@@ -281,6 +281,9 @@ export interface ApiLeadRow {
   reassigned_at: string | null;
   property_id: string | null;
   property_name: string | null;
+  // Data Calling's own property tag (migration 055) — separate from property_id.
+  data_calling_property_id: string | null;
+  data_calling_property_name: string | null;
   assigned_at: string | null;
   first_response_at: string | null;
   created_at: string;
@@ -690,6 +693,8 @@ export interface BulkImportLeadsApiInput {
   restoreArchivedMatches?: boolean;
   assignmentMode: "PROPERTY" | "AGENT";
   propertyId?: string;
+  // Data Calling's own property tag for the whole file — stored only, never picks agents.
+  dataCallingPropertyId?: string;
   agentIds?: string[];
   leads: { name: string; phone: string; email?: string }[];
 }
@@ -793,13 +798,17 @@ export function apiReassignLead(leadId: string, newAgentId: string, note: string
   });
 }
 
+/** Which of a lead's two property fields: the main Properties list, or Data Calling's own list. */
+export type LeadPropertyKind = "MAIN" | "DATA_CALLING";
+
 /** Admin / manager: link the lead to a property, change it, or clear it (null). Logged in Activity History. */
-export function apiSetLeadProperty(leadId: string, propertyId: string | null): Promise<ApiLeadRow> {
+export function apiSetLeadProperty(leadId: string, propertyId: string | null, kind: LeadPropertyKind = "MAIN"): Promise<ApiLeadRow> {
   return request<ApiLeadRow>(`/api/v1/leads/${leadId}/property`, {
     method: "PATCH",
-    body: JSON.stringify({ propertyId })
+    body: JSON.stringify({ propertyId, kind })
   });
 }
+
 
 export function apiUpdateLeadNote(leadId: string, note: string): Promise<ApiLeadRow> {
   return request<ApiLeadRow>(`/api/v1/leads/${leadId}/notes`, {
@@ -860,10 +869,10 @@ export interface BulkSetLeadPropertyApiResult {
 // "Change Property" toolbar action. Admin always allowed; a Manager needs
 // the Access Control toggle (Settings > Manage Users, Super Admin only) —
 // a 403 here means it's off for them.
-export async function apiBulkSetLeadProperty(leadIds: string[], propertyId: string | null, note?: string): Promise<BulkSetLeadPropertyApiResult> {
+export async function apiBulkSetLeadProperty(leadIds: string[], propertyId: string | null, note?: string, kind: LeadPropertyKind = "MAIN"): Promise<BulkSetLeadPropertyApiResult> {
   const { jobId } = await request<{ jobId: string }>("/api/v1/leads/bulk-set-property", {
     method: "POST",
-    body: JSON.stringify({ leadIds, propertyId, note })
+    body: JSON.stringify({ leadIds, propertyId, note, kind })
   });
   return pollJob<BulkSetLeadPropertyApiResult>(() =>
     request<JobStatus<BulkSetLeadPropertyApiResult>>(`/api/v1/leads/bulk-set-property/${jobId}/status`)
@@ -1075,6 +1084,8 @@ export interface ApiPropertyRow {
   media_file_names: string[] | null;
   team_assignment_mode: "ALL_MEMBERS" | "CUSTOM_MEMBERS";
   lead_assignment_mode: "ROUND_ROBIN" | "PERCENTAGE" | null;
+  // LEADS (main list) or DATA_CALLING (Data Calling's own list — no team, campaigns or sheets).
+  kind: PropertyKind;
   created_at: string;
   team_members: { userId: string; name: string; percentage: number | null }[];
 }
@@ -1107,10 +1118,14 @@ export async function apiListProperties(): Promise<ApiPropertyRow[]> {
 // apiListLeadsPage's shape. search matches name/developer/location;
 // propertyType is a repeated-query-param multi-select matching ANY of a
 // property's own (comma-joined) types; sortDir controls created_at order.
+export type PropertyKind = "LEADS" | "DATA_CALLING";
+
 export interface PropertyListFilters {
   search?: string;
   propertyType?: string[];
   sortDir?: "asc" | "desc";
+  /** Omitted = LEADS (server default). */
+  kind?: PropertyKind;
 }
 
 function buildPropertyFilterParams(filters: PropertyListFilters): URLSearchParams {
@@ -1118,6 +1133,7 @@ function buildPropertyFilterParams(filters: PropertyListFilters): URLSearchParam
   if (filters.search) params.set("search", filters.search);
   filters.propertyType?.forEach(t => params.append("propertyType", t));
   if (filters.sortDir) params.set("sortDir", filters.sortDir);
+  if (filters.kind) params.set("kind", filters.kind);
   return params;
 }
 
@@ -1172,6 +1188,8 @@ export interface PropertyApiInput {
   mediaFileNames?: string[];
   teamAssignmentMode?: "ALL_MEMBERS" | "CUSTOM_MEMBERS";
   leadAssignmentMode?: "ROUND_ROBIN" | "PERCENTAGE";
+  // Only on create — a property can't move between lists afterwards.
+  kind?: PropertyKind;
 }
 
 export function apiCreateProperty(input: PropertyApiInput): Promise<ApiPropertyRow> {

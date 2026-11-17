@@ -158,7 +158,7 @@ export async function updateLeadNoteHandler(req: Request, res: Response): Promis
 }
 
 export async function setLeadPropertyHandler(req: Request, res: Response): Promise<void> {
-  const lead = await leadsService.setLeadProperty(req.user!, req.params.id, req.body.propertyId);
+  const lead = await leadsService.setLeadProperty(req.user!, req.params.id, req.body.propertyId, undefined, req.body.kind);
   sendOk(res, leadForCaller(req.user!, lead));
 }
 
@@ -231,8 +231,8 @@ export async function bulkSetLeadPropertyHandler(req: Request, res: Response): P
   // Checked here, before queueing — the worker runs without a caller.
   await leadsService.assertBulkPropertyChangeAllowed(req.user!);
   assertNoteUnlessAdmin(req);
-  const { leadIds, propertyId, note } = req.body;
-  const jobId = await boss.send(BULK_SET_PROPERTY_QUEUE, { caller: req.user!, leadIds, propertyId, note });
+  const { leadIds, propertyId, note, kind } = req.body;
+  const jobId = await boss.send(BULK_SET_PROPERTY_QUEUE, { caller: req.user!, leadIds, propertyId, note, kind });
   if (!jobId) throw ApiError.internal("Could not queue the property change — try again.");
   sendOk(res, { jobId }, 202);
 }
