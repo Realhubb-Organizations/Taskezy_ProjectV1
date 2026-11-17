@@ -198,8 +198,13 @@ export const reassignLeadSchema = z.object({
   note: noteText
 });
 
+// Which of the lead's two property fields — the main Properties list, or
+// Data Calling's own list (migration 055). Defaults to the main one.
+const leadPropertyKind = z.enum(["MAIN", "DATA_CALLING"]).default("MAIN");
+
 export const setLeadPropertySchema = z.object({
-  propertyId: z.string().uuid().nullable()
+  propertyId: z.string().uuid().nullable(),
+  kind: leadPropertyKind
 });
 
 export const updateLeadNoteSchema = z.object({
@@ -234,6 +239,7 @@ export const bulkReassignJobIdParamSchema = z.object({
 export const bulkSetLeadPropertySchema = z.object({
   leadIds: z.array(z.string().uuid()).min(1).max(5000),
   propertyId: z.string().uuid().nullable(),
+  kind: leadPropertyKind,
   // Optional only for an Admin's Reshuffle (checked in the handler).
   note: noteText.optional()
 });
@@ -284,6 +290,9 @@ export const bulkImportLeadsSchema = z
     restoreArchivedMatches: z.boolean().optional(),
     assignmentMode: z.enum(["PROPERTY", "AGENT"]),
     propertyId: z.string().uuid().optional(),
+    // Data Calling's own property tag for the whole batch (migration 055) —
+    // only stored, never used to pick agents.
+    dataCallingPropertyId: z.string().uuid().optional(),
     // Agent mode round-robins rows evenly across every selected agent (see
     // leads.service.ts's bulkImportLeads) rather than dumping the whole
     // batch on one person.
@@ -303,13 +312,20 @@ export const bulkImportLeadsSchema = z
       // malformed/absurd request, not a real throughput limit.
       .max(200_000, "A single upload is limited to 200,000 rows")
   })
-  .refine(d => d.assignmentMode !== "PROPERTY" || !!d.propertyId, {
+  .refine(d => d.assignmentMode !== "PROPERTY" || !!d.propertyId || (!!d.subSource && !!d.dataCallingPropertyId), {
     message: "propertyId is required for Property assignment mode",
     path: ["propertyId"]
   })
   .refine(d => d.assignmentMode !== "AGENT" || (!!d.agentIds && d.agentIds.length > 0), {
     message: "At least one agentId is required for Agent assignment mode",
     path: ["agentIds"]
+  })
+  // A Data Calling upload (the only one with a subSource) only ever uses
+  // Data Calling properties — in Property mode its dataCallingPropertyId's
+  // own team takes the rows — never a main (Leads) property.
+  .refine(d => !d.subSource || !d.propertyId, {
+    message: "Data Calling uploads use a Data Calling property",
+    path: ["propertyId"]
   });
 
 // Run before the real bulk-import request — tells the caller how many rows

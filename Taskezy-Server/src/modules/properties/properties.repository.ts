@@ -26,9 +26,13 @@ export interface PropertyRow {
   media_file_names: string[] | null;
   team_assignment_mode: string;
   lead_assignment_mode: string | null;
+  /** LEADS (main list) or DATA_CALLING (Data Calling's own list — no team, campaigns or sheets). */
+  kind: PropertyKind;
   created_at: string;
   team_members: PropertyTeamMemberRow[];
 }
+
+export type PropertyKind = "LEADS" | "DATA_CALLING";
 
 export interface PropertyTeamMemberRow {
   userId: string;
@@ -40,7 +44,7 @@ const SELECT = `
   SELECT p.id, p.name, p.developer, p.location, p.locality, p.zone, p.price_value, p.price_type, p.property_type,
          p.property_status, p.description, p.possession_date, p.land_parcel, p.towers, p.structure, p.amenities,
          p.contact_number, p.map_url, p.website_url, p.brochure_url, p.lead_registration_url, p.tags,
-         p.media_file_names, p.team_assignment_mode, p.lead_assignment_mode, p.created_at,
+         p.media_file_names, p.team_assignment_mode, p.lead_assignment_mode, p.kind, p.created_at,
          COALESCE(
            (SELECT json_agg(json_build_object(
               'userId', ptm.user_id,
@@ -61,6 +65,8 @@ export interface PropertyFilterConditions {
   search?: string;
   /** Multi-select; matches if ANY selected type is one of a property's own (comma-joined) types. */
   propertyType?: string[];
+  /** Which list — LEADS or DATA_CALLING. */
+  kind: PropertyKind;
 }
 
 export interface PropertyListFilter extends PropertyFilterConditions {
@@ -71,8 +77,8 @@ export interface PropertyListFilter extends PropertyFilterConditions {
 }
 
 function buildPropertyWhereClause(filter: PropertyFilterConditions): { whereClause: string; params: unknown[] } {
-  const conditions: string[] = [];
-  const params: unknown[] = [];
+  const params: unknown[] = [filter.kind];
+  const conditions: string[] = [`p.kind = $1`];
 
   if (filter.search) {
     params.push(`%${filter.search}%`);
@@ -100,7 +106,7 @@ function buildPropertyWhereClause(filter: PropertyFilterConditions): { whereClau
     conditions.push(`(${orConditions.join(" OR ")})`);
   }
 
-  return { whereClause: conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "", params };
+  return { whereClause: `WHERE ${conditions.join(" AND ")}`, params };
 }
 
 export async function findMany(filter: PropertyListFilter): Promise<{ rows: PropertyRow[]; totalCount: number }> {
@@ -149,6 +155,7 @@ export interface PropertyInput {
   mediaFileNames?: string[];
   teamAssignmentMode?: string;
   leadAssignmentMode?: string;
+  kind?: PropertyKind;
 }
 
 export async function create(input: PropertyInput): Promise<string> {
@@ -156,8 +163,8 @@ export async function create(input: PropertyInput): Promise<string> {
     `INSERT INTO properties (
        name, developer, location, locality, zone, price_value, price_type, property_type, property_status,
        description, possession_date, land_parcel, towers, structure, amenities, contact_number, map_url,
-       website_url, brochure_url, lead_registration_url, tags, media_file_names, team_assignment_mode, lead_assignment_mode
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,COALESCE($23,'ALL_MEMBERS')::team_assignment_mode,$24)
+       website_url, brochure_url, lead_registration_url, tags, media_file_names, team_assignment_mode, lead_assignment_mode, kind
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,COALESCE($23,'ALL_MEMBERS')::team_assignment_mode,$24,$25)
      RETURNING id`,
     [
       input.name, input.developer, input.location, input.locality ?? null, input.zone ?? null,
@@ -165,7 +172,8 @@ export async function create(input: PropertyInput): Promise<string> {
       input.description ?? null, input.possessionDate ?? null, input.landParcel ?? null, input.towers ?? null,
       input.structure ?? null, input.amenities ?? null, input.contactNumber || null, input.mapUrl || null,
       input.websiteUrl || null, input.brochureUrl || null, input.leadRegistrationUrl || null,
-      input.tags ?? null, input.mediaFileNames ?? null, input.teamAssignmentMode ?? null, input.leadAssignmentMode ?? null
+      input.tags ?? null, input.mediaFileNames ?? null, input.teamAssignmentMode ?? null, input.leadAssignmentMode ?? null,
+      input.kind ?? "LEADS"
     ]
   );
   return rows[0].id;

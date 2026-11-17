@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useApp, mapApiPropertyToFrontend, Property, PropertyTeamAssignmentMode, LeadAssignmentMode, PropertyTeamMember } from "@/context/AppContext";
-import { apiListPropertiesPage, apiAutoAssignLeadsWaitingForProperty, type PropertyListFilters } from "@/lib/apiClient";
+import { apiListPropertiesPage, apiAutoAssignLeadsWaitingForProperty, type PropertyKind, type PropertyListFilters } from "@/lib/apiClient";
 import {
   Search,
   ArrowUp,
@@ -87,6 +87,11 @@ export default function PropertiesPage() {
 
   // Add / Duplicate modal
   const [isAddOpen, setIsAddOpen] = useState(false);
+  // Which list the page shows: the main Leads properties, or Data Calling's
+  // own (same team and round robin, but no campaigns, sheets or
+  // client-interest form — their leads come only from Data Calling uploads).
+  const [listKind, setListKind] = useState<PropertyKind>("LEADS");
+  const isDataCallingList = listKind === "DATA_CALLING";
   const [duplicateSource, setDuplicateSource] = useState<Property | null>(null);
 
   // Property interest form (drawer)
@@ -386,7 +391,8 @@ export default function PropertiesPage() {
   const propertyListFilters: PropertyListFilters = {
     search: debouncedSearchQuery || undefined,
     propertyType: selectedTypes.length > 0 ? selectedTypes : undefined,
-    sortDir
+    sortDir,
+    kind: listKind
   };
   const propertyFiltersKey = JSON.stringify(propertyListFilters);
   // Live: other people's property changes show up without a reload (quietly).
@@ -419,6 +425,10 @@ export default function PropertiesPage() {
     // needing every individual filter piece listed separately.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPage, rowsPerPage, propertyFiltersKey, propertiesRefreshNonce, manualRefreshSignal, propertiesLive.liveVersion]);
+
+  // Data Calling properties have no campaigns, so that column doesn't show.
+  const showCampaignsColumn = isAdmin && !isDataCallingList;
+  const tableColumnCount = 7 + (showCampaignsColumn ? 1 : 0);
 
   const totalRows = serverTotalCount;
   const totalPages = Math.max(1, Math.ceil(totalRows / rowsPerPage));
@@ -569,9 +579,21 @@ export default function PropertiesPage() {
 
   return (
     <div className="space-y-4">
-      {/* Header */}
-      {isAdmin && (
-        <div className="flex justify-end">
+      {/* Header — list toggle, plus Add Property for admins (adds to whichever list is shown) */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="ui-toggle flex">
+          {([["LEADS", "Leads Properties"], ["DATA_CALLING", "Data Calling Properties"]] as const).map(([kind, label]) => (
+            <button
+              key={kind}
+              type="button"
+              onClick={() => { if (kind !== listKind) { setListKind(kind); setCurrentPage(1); setSelectedTypes([]); setRowMenu(null); } }}
+              className={`ui-toggle-item ${listKind === kind ? "ui-toggle-item-active" : ""}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {isAdmin && (
           <button
             onClick={() => { setDuplicateSource(null); setIsAddOpen(true); }}
             className="ui-btn ui-btn-primary"
@@ -579,8 +601,8 @@ export default function PropertiesPage() {
             <Plus className="h-4 w-4" />
             Add Property
           </button>
-        </div>
-      )}
+        )}
+      </div>
 
       {successMsg && (
         <div className="p-3 bg-emerald-50 border border-emerald-100 rounded-xl text-xs text-emerald-700 font-bold flex items-center gap-2 animate-fade-in shadow-sm">
@@ -615,7 +637,7 @@ export default function PropertiesPage() {
               <col />
               <col />
               {/* Campaigns column — Admin-only, see below */}
-              {isAdmin && <col />}
+              {showCampaignsColumn && <col />}
               <col className="w-[56px]" />
             </colgroup>
             <thead>
@@ -646,14 +668,14 @@ export default function PropertiesPage() {
                     reasoning as the campaign linkers in the detail drawer) —
                     hidden entirely for Manager/Member, not just emptied out.
                     See project_crm_role_based_lead_scoping memory. */}
-                {isAdmin && <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Campaigns</th>}
+                {showCampaignsColumn && <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Campaigns</th>}
                 <th className="px-2 py-3" aria-label="Actions" />
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {propertiesLoadError ? (
                 <tr>
-                  <td colSpan={isAdmin ? 8 : 7} className="p-8">
+                  <td colSpan={tableColumnCount} className="p-8">
                     <div className="flex flex-col items-center gap-3 text-center">
                       <AlertTriangle className="h-5 w-5 text-amber-500" />
                       <p className="text-xs font-semibold text-slate-600">Couldn&apos;t load properties.</p>
@@ -668,10 +690,10 @@ export default function PropertiesPage() {
                   </td>
                 </tr>
               ) : serverPropertiesLoading && pageRows.length === 0 ? (
-                <TableRowsSkeleton rows={6} columns={isAdmin ? 8 : 7} />
+                <TableRowsSkeleton rows={6} columns={tableColumnCount} />
               ) : pageRows.length === 0 ? (
                 <tr>
-                  <td colSpan={isAdmin ? 8 : 7} className="p-8 text-center text-slate-400 font-semibold italic">
+                  <td colSpan={tableColumnCount} className="p-8 text-center text-slate-400 font-semibold italic">
                     No properties match the current filters.
                   </td>
                 </tr>
@@ -692,7 +714,7 @@ export default function PropertiesPage() {
                       {/* Just the label here; the names list is in the property popup. */}
                       <div className="[overflow-wrap:anywhere]">{teamLabelForProperty(p)}</div>
                     </td>
-                    {isAdmin && (
+                    {showCampaignsColumn && (
                       <td className="px-4 py-3 align-top">
                         {(() => {
                           const platforms = propertySourcePlatforms(p.name);
@@ -912,6 +934,8 @@ export default function PropertiesPage() {
                     )}
                   </div>
 
+                  {/* Data Calling properties have no campaigns or sheets. */}
+                  {selectedProperty.kind !== "DATA_CALLING" && (<>
                   <div className="border-t border-slate-200 pt-4">
                     <MetaCampaignLinker ref={metaLinkerRef} onDirtyChange={onMetaDirty} propertyId={selectedProperty.id} isAdmin={isAdmin} />
                   </div>
@@ -924,6 +948,7 @@ export default function PropertiesPage() {
                   {isAdmin && (
                     <WaitingLeadsPanel propertyId={selectedProperty.id} propertyName={selectedProperty.name} reloadKey={waitingLeadsReloadKey} />
                   )}
+                  </>)}
 
                   <div className="flex gap-2 pt-2">
                     <button type="submit" className="ui-btn ui-btn-primary flex-1">
@@ -1020,7 +1045,7 @@ export default function PropertiesPage() {
                       credentials, platform account linking) — hidden entirely for
                       Manager/Member, not just made read-only, per the 2026-10-09
                       instruction. See project_crm_role_based_lead_scoping memory. */}
-                  {isAdmin && (
+                  {isAdmin && selectedProperty.kind !== "DATA_CALLING" && (
                     <>
                       <div className="border-t border-slate-200 pt-6">
                         <MetaCampaignLinker ref={metaLinkerRef} onDirtyChange={onMetaDirty} propertyId={selectedProperty.id} isAdmin={isAdmin} />
@@ -1035,6 +1060,8 @@ export default function PropertiesPage() {
                     </>
                   )}
 
+                  {/* Data Calling properties never create leads here. */}
+                  {selectedProperty.kind !== "DATA_CALLING" && (
                   <div className="border-t border-slate-200 pt-6 space-y-4">
                     <div>
                       <h4 className="ui-subheading">Register client interest</h4>
@@ -1078,6 +1105,7 @@ export default function PropertiesPage() {
                       </div>
                     </form>
                   </div>
+                  )}
                 </>
               )}
             </div>
@@ -1137,6 +1165,7 @@ export default function PropertiesPage() {
         onClose={() => { setIsAddOpen(false); setDuplicateSource(null); }}
         onSuccess={handlePropertyCreated}
         duplicateFrom={duplicateSource}
+        kind={listKind}
       />
     </div>
   );

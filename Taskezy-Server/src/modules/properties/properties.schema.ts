@@ -28,7 +28,10 @@ export const listPropertiesQuerySchema = z.object({
   // property's own types, mirroring the frontend's splitPropertyTypes().some(...).
   propertyType: stringToArray,
   // Matches the admin table's Date column sort toggle.
-  sortDir: z.enum(["asc", "desc"]).optional()
+  sortDir: z.enum(["asc", "desc"]).optional(),
+  // Which list: the main Leads properties (default — every existing picker
+  // relies on that) or Data Calling's own (migration 055).
+  kind: z.enum(["LEADS", "DATA_CALLING"]).default("LEADS")
 });
 
 const basePropertyFields = {
@@ -59,7 +62,8 @@ const basePropertyFields = {
   leadAssignmentMode: z.enum(["ROUND_ROBIN", "PERCENTAGE"]).optional()
 };
 
-export const createPropertySchema = z.object(basePropertyFields);
+// kind is set once at creation; editing can't move a property between lists.
+export const createPropertySchema = z.object({ ...basePropertyFields, kind: z.enum(["LEADS", "DATA_CALLING"]).default("LEADS") });
 
 // Every field optional for edit — same PATCH semantics as leads.editLeadSchema.
 export const editPropertySchema = z.object(

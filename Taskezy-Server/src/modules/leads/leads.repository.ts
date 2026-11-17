@@ -63,6 +63,9 @@ export interface LeadListRow {
   notes_updated_by_name: string | null;
   property_id: string | null;
   property_name: string | null;
+  /** Data Calling's own property tag (migration 055) — separate from property_id. */
+  data_calling_property_id: string | null;
+  data_calling_property_name: string | null;
   assigned_at: string | null;
   first_response_at: string | null;
   created_at: string;
@@ -338,6 +341,7 @@ const LIST_SELECT = `
     nu.first_name || COALESCE(' ' || nu.last_name, '') AS notes_updated_by_name,
     bu.first_name || COALESCE(' ' || bu.last_name, '') AS uploaded_by_name,
     l.property_id, p.name AS property_name,
+    l.data_calling_property_id, dcp.name AS data_calling_property_name,
     l.assigned_at, l.first_response_at, l.created_at,
     l.source, l.sub_source, l.call_status, l.call_sub_status, l.campaign, l.meta_page_name, l.meta_form_id, l.meta_ad_id,
     (SELECT count(DISTINCT (ca.created_at AT TIME ZONE '${BUSINESS_TIMEZONE}')::date)
@@ -360,6 +364,7 @@ const LIST_SELECT = `
   LEFT JOIN users bu ON bu.id = l.uploaded_by_user_id
   JOIN lead_statuses ls ON ls.code = l.status_code
   LEFT JOIN properties p ON p.id = l.property_id
+  LEFT JOIN properties dcp ON dcp.id = l.data_calling_property_id
 `;
 
 export async function findMany(filter: LeadListFilter): Promise<{ rows: LeadListRow[]; totalCount: number }> {
@@ -819,7 +824,7 @@ export interface BulkCreateLeadRow {
  */
 export async function createBulkLeadsChunk(
   rows: BulkCreateLeadRow[],
-  common: { source: string; subSource: string | null; propertyId: string | null; uploadedByUserId: string }
+  common: { source: string; subSource: string | null; propertyId: string | null; dataCallingPropertyId: string | null; uploadedByUserId: string }
 ): Promise<Map<string, string>> {
   if (rows.length === 0) return new Map();
   const names = rows.map(r => r.name);
@@ -829,12 +834,12 @@ export async function createBulkLeadsChunk(
   const statusCodes = rows.map(r => r.statusCode);
 
   const { rows: inserted } = await pool.query<{ id: string; phone: string }>(
-    `INSERT INTO leads (name, phone, email, source, sub_source, property_id, assigned_agent_id, status_code, assigned_at, uploaded_by_user_id)
-     SELECT n, p, e, $1, $2, $3, a, s, now(), $9
+    `INSERT INTO leads (name, phone, email, source, sub_source, property_id, data_calling_property_id, assigned_agent_id, status_code, assigned_at, uploaded_by_user_id)
+     SELECT n, p, e, $1, $2, $3, $10, a, s, now(), $9
      FROM unnest($4::text[], $5::text[], $6::text[], $7::uuid[], $8::text[]) AS t(n, p, e, a, s)
      ON CONFLICT (phone) DO NOTHING
      RETURNING id, phone`,
-    [common.source, common.subSource, common.propertyId, names, phones, emails, agentIds, statusCodes, common.uploadedByUserId]
+    [common.source, common.subSource, common.propertyId, names, phones, emails, agentIds, statusCodes, common.uploadedByUserId, common.dataCallingPropertyId]
   );
   return new Map(inserted.map(r => [r.phone, r.id]));
 }
@@ -976,8 +981,20 @@ export async function setNote(client: PoolClient, leadId: string, note: string, 
   );
 }
 
-export async function setPropertyId(client: PoolClient, leadId: string, propertyId: string | null): Promise<void> {
-  await client.query(`UPDATE leads SET property_id = $1 WHERE id = $2`, [propertyId, leadId]);
+/**
+ * A lead carries two independent property fields: the main one (property_id,
+ * a "Leads" property with its team and campaigns) and Data Calling's own
+ * (data_calling_property_id, a "Data Calling" property — migration 055).
+ * The set-property paths below work on either; neither ever picks an agent.
+ */
+export type LeadPropertyKind = "MAIN" | "DATA_CALLING";
+export const LEAD_PROPERTY_FIELDS: Record<LeadPropertyKind, { column: string; table: string; label: string }> = {
+  MAIN: { column: "property_id", table: "properties", label: "Property" },
+  DATA_CALLING: { column: "data_calling_property_id", table: "properties", label: "Data Calling property" }
+};
+
+export async function setPropertyId(client: PoolClient, leadId: string, propertyId: string | null, kind: LeadPropertyKind = "MAIN"): Promise<void> {
+  await client.query(`UPDATE leads SET ${LEAD_PROPERTY_FIELDS[kind].column} = $1 WHERE id = $2`, [propertyId, leadId]);
 }
 
 export interface SetLeadPropertyChunkResult {
@@ -999,14 +1016,16 @@ export async function setLeadPropertyChunk(
   newPropertyName: string | undefined,
   scopedToAgentIds: string[] | undefined,
   note: string | undefined,
-  actor: { userId: string; name: string }
+  actor: { userId: string; name: string },
+  kind: LeadPropertyKind = "MAIN"
 ): Promise<SetLeadPropertyChunkResult> {
   if (ids.length === 0) return { updated: [], skipped: [], notFound: [] };
+  const { column, table, label } = LEAD_PROPERTY_FIELDS[kind];
 
   return withTransaction(async (client) => {
     const { rows: existingRows } = await client.query<{ id: string; assigned_agent_id: string; property_id: string | null; property_name: string | null }>(
-      `SELECT l.id, l.assigned_agent_id, l.property_id, p.name AS property_name
-       FROM leads l LEFT JOIN properties p ON p.id = l.property_id
+      `SELECT l.id, l.assigned_agent_id, l.${column} AS property_id, p.name AS property_name
+       FROM leads l LEFT JOIN ${table} p ON p.id = l.${column}
        WHERE l.id = ANY($1::uuid[]) FOR UPDATE OF l`,
       [ids]
     );
@@ -1025,7 +1044,7 @@ export async function setLeadPropertyChunk(
     if (candidates.length === 0) return { updated: [], skipped, notFound };
 
     const candidateIds = candidates.map(c => c.id);
-    await client.query(`UPDATE leads SET property_id = $1 WHERE id = ANY($2::uuid[])`, [propertyId, candidateIds]);
+    await client.query(`UPDATE leads SET ${column} = $1 WHERE id = ANY($2::uuid[])`, [propertyId, candidateIds]);
     if (note) {
       await client.query(
         `UPDATE leads SET notes = $1, notes_updated_at = now(), notes_updated_by = $2 WHERE id = ANY($3::uuid[])`,
@@ -1039,10 +1058,10 @@ export async function setLeadPropertyChunk(
     const logMessages: string[] = [];
     for (const c of candidates) {
       const message = !newPropertyName
-        ? `Property removed (was "${c.beforeName}")`
+        ? `${label} removed (was "${c.beforeName}")`
         : c.beforeName
-          ? `Property changed from "${c.beforeName}" to "${newPropertyName}"`
-          : `Property set to "${newPropertyName}"`;
+          ? `${label} changed from "${c.beforeName}" to "${newPropertyName}"`
+          : `${label} set to "${newPropertyName}"`;
       logLeadIds.push(c.id);
       logUserIds.push(actor.userId);
       logUserNames.push(actor.name);
