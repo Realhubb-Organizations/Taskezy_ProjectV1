@@ -99,6 +99,10 @@ export interface LeadListRow {
   // superseded/completed, unlike reading status='MISSED' live. The
   // controller strips this for Agent/Member callers (manager/admin-only).
   missed_task_count: number;
+  /** When a repeat enquiry last revived this lead (migration 054). NULL = never. */
+  revived_at: string | null;
+  /** How many times the lead has been revived (migration 054). */
+  revival_count: number;
   /** Task time — see tasks/taskDue.ts. NULL = no task. */
   task_due_at: string | null;
   logs: { message: string; timestamp: string; user: string }[];
@@ -331,6 +335,7 @@ const LIST_SELECT = `
      FROM call_attempts ca WHERE ca.lead_id = l.id AND ca.channel = 'CALL') AS dead_lead_call_days,
     ${REACHED_FOLLOWUP_OR_SITE_VISIT_SQL("l")} AS reached_followup_or_site_visit,
     l.missed_task_count,
+    l.revived_at, l.revival_count,
     -- The lead's task time: Pending Tasks' date and the Next Call Date column (tasks/taskDue.ts)
     ${TASK_DUE_AT_SQL} AS task_due_at,
     COALESCE(
@@ -573,7 +578,8 @@ export async function getAgentReportStats(
        GROUP BY account_name
      )
      SELECT count(*) AS assigned,
-            count(*) FILTER (WHERE l.status_code != 'NEW_LEAD') AS contacted,
+            -- A Revived Lead (migration 054) is waiting for a fresh first call, like a New Lead.
+            count(*) FILTER (WHERE l.status_code NOT IN ('NEW_LEAD', 'REVIVED')) AS contacted,
             count(*) FILTER (WHERE l.status_code = ANY($${qualifiedParam}::text[]) OR ${RNR_PICKED_UP_SQL("l")}) AS qualified,
             count(*) FILTER (WHERE l.status_code = ANY($${siteVisitParam}::text[])) AS site_visits,
             COALESCE(SUM(l.deal_value) FILTER (WHERE l.status_code = 'BOOKED'), 0) AS booking_value,

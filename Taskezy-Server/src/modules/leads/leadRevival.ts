@@ -1,7 +1,9 @@
+import { PoolClient } from "pg";
 import { query, withTransaction } from "../../db/pool";
-import { insertLeadLog } from "./leads.repository";
 import { createNotification } from "../notifications/notifications.service";
 import { listActiveAdminIds } from "../users/users.repository";
+import { REVIVABLE_STATUS_CODES, REVIVED_CODE } from "./leadStatusTransitions";
+import { broadcastLeadChanged } from "./leads.realtime";
 
 export interface RevivalMatch {
   id: string;
@@ -12,6 +14,55 @@ export interface RevivalMatch {
   matched_by: "phone" | "email";
   property_id: string | null;
   property_name: string | null;
+}
+
+/**
+ * Adds one Activity History entry for a revival. Uses the actual write time
+ * (clock_timestamp) rather than the transaction's start time, so the 2–3
+ * entries one revival writes always show in the order they were written —
+ * revival note, then status change, then "moved from Data Calling".
+ */
+async function insertRevivalLog(client: PoolClient, leadId: string, userId: string, userName: string, message: string): Promise<void> {
+  await client.query(
+    `INSERT INTO lead_logs (lead_id, user_id, user_name_snapshot, message, created_at) VALUES ($1, $2, $3, $4, clock_timestamp())`,
+    [leadId, userId, userName, message]
+  );
+}
+
+/** Data Calling leads are the ones still carrying the bulk-upload source. */
+const DATA_CALLING_SOURCE = "Bulk Upload";
+/** Same source a Connected + Qualified Data Calling promotion sets (leads.service.ts). */
+const PROMOTED_DATA_CALLING_SOURCE = "Data";
+
+/**
+ * Sets the lead to Revived Lead when it's cold/closed (REVIVABLE_STATUS_CODES)
+ * or still in Data Calling — in which case it also moves onto the Leads page,
+ * the same way a qualified promotion does. Restarts the response clock like a
+ * new lead (Pending Tasks, 20-minute missed-lead check, first response), and
+ * records when and how often it was revived. Leads already being worked are
+ * left exactly as they are. Nothing in the lead's history is changed or
+ * removed — the caller only adds entries. The row lock keeps two enquiries
+ * arriving together from reviving it twice.
+ */
+async function reviveLeadStatus(client: PoolClient, leadId: string): Promise<{ revived: boolean; movedFromDataCalling: boolean }> {
+  const { rows } = await client.query<{ old_status: string; old_source: string | null }>(
+    `WITH old AS (SELECT id, status_code, source FROM leads WHERE id = $1 FOR UPDATE)
+     UPDATE leads l
+     SET status_code = $2,
+         source = CASE WHEN old.source = $4 THEN $5 ELSE l.source END,
+         revived_at = now(),
+         revival_count = l.revival_count + 1,
+         assigned_at = now(),
+         first_response_at = NULL,
+         missed_notified_at = NULL
+     FROM old
+     WHERE l.id = old.id
+       AND (old.status_code = ANY($3::text[]) OR old.source = $4)
+     RETURNING old.status_code AS old_status, old.source AS old_source`,
+    [leadId, REVIVED_CODE, REVIVABLE_STATUS_CODES, DATA_CALLING_SOURCE, PROMOTED_DATA_CALLING_SOURCE]
+  );
+  const row = rows[0];
+  return { revived: !!row, movedFromDataCalling: row?.old_source === DATA_CALLING_SOURCE };
 }
 
 /**
@@ -71,9 +122,20 @@ export async function markLeadRevived(match: RevivalMatch, sourceLabel: string, 
     ? `Revived — a new ${sourceLabel} submission matched this lead by ${match.matched_by}, now enquiring about "${newPropertyName}"${match.property_name ? ` (previously "${match.property_name}")` : ""}; no duplicate lead was created.`
     : `Revived — a new ${sourceLabel} submission matched this lead by ${match.matched_by}; no duplicate lead was created.`;
 
+  // History only grows: the revival note, then (when the status changes) a
+  // standard status-change entry the Activity History timeline already
+  // understands, and a plain note when it left Data Calling.
   await withTransaction(async (client) => {
-    await insertLeadLog(client, match.id, match.assigned_agent_id, sourceLabel, noteMessage);
+    await insertRevivalLog(client, match.id, match.assigned_agent_id, sourceLabel, noteMessage);
+    const { revived, movedFromDataCalling } = await reviveLeadStatus(client, match.id);
+    if (revived) {
+      await insertRevivalLog(client, match.id, match.assigned_agent_id, sourceLabel, `Status changed to "${REVIVED_CODE}"`);
+    }
+    if (movedFromDataCalling) {
+      await insertRevivalLog(client, match.id, match.assigned_agent_id, sourceLabel, "Lead revived and moved from Data Calling to the main leads list.");
+    }
   });
+  broadcastLeadChanged(match.id);
 
   const recipients = new Set<string>(await listActiveAdminIds());
   if (match.manager_id) recipients.add(match.manager_id);
@@ -86,7 +148,8 @@ export async function markLeadRevived(match: RevivalMatch, sourceLabel: string, 
   for (const recipientId of recipients) {
     await createNotification({
       system: "CRM",
-      category: "GENERAL",
+      // New Leads tab: a revived lead is worked like a new one.
+      category: "NEW_LEAD",
       title: "Revived Lead",
       message: notificationMessage,
       recipientUserId: recipientId,

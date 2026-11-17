@@ -13,7 +13,7 @@ import { pickAgentForProperty, createPropertyAgentPicker } from "../properties/p
 import { broadcastLeadChanged, broadcastManyLeadsChanged } from "./leads.realtime";
 import { HANDOVER_NOTE_PREFIX } from "./leads.handover";
 import { normalizeTypedLeadPhone } from "../../utils/validation";
-import { assertTransitionAllowed, LeadStatusCode } from "./leadStatusTransitions";
+import { assertTransitionAllowed, LeadStatusCode, REVIVED_CODE } from "./leadStatusTransitions";
 
 /**
  * Mirrors the frontend's role-based lead-scoping convention (see the
@@ -925,7 +925,9 @@ export async function updateLeadStatus(
   // of which is a user-initiated transition.
   await assertTransitionAllowed(existing.status_code, statusCode, leadId, caller.role === "ADMIN");
 
-  const stampFirstResponse = existing.status_code === "NEW_LEAD"; // first-ever status change
+  // First status change since the lead arrived — or since it was revived,
+  // which restarts the response clock (leadRevival.ts).
+  const stampFirstResponse = existing.status_code === "NEW_LEAD" || existing.status_code === REVIVED_CODE;
 
   try {
     await withTransaction(async (client) => {
@@ -1011,8 +1013,10 @@ export async function updateCallStatus(
   // Only Connected + Qualified belongs in the main Leads pipeline. A lead
   // promoted earlier (source "Data", still carrying its Data Calling
   // sub_source) that's now marked anything else goes back to Data Calling.
+  // A revived lead (migration 054) came back through a real ad enquiry, so
+  // it stays on the Leads page whatever its Data Calling result.
   const demote =
-    !!existing.sub_source && existing.source === "Data" &&
+    !!existing.sub_source && existing.source === "Data" && !existing.revived_at &&
     !(callStatus === "Connected" && nextSubStatus === "Qualified");
   const statusChanged = existing.call_status !== callStatus;
   const subStatusChanged = (existing.call_sub_status ?? null) !== nextSubStatus;

@@ -6,7 +6,7 @@ import { BUSINESS_TIMEZONE } from "../../utils/businessDate";
 // its own, separate call_status, see leads.schema.ts). Matches
 // lead_statuses' codes after migration 030.
 export const LEAD_STATUS_CODES = [
-  "NEW_LEAD", "RNR", "CALL_BACK", "DEAD_LEAD", "FOLLOWUP", "EOI",
+  "NEW_LEAD", "REVIVED", "RNR", "CALL_BACK", "DEAD_LEAD", "FOLLOWUP", "EOI",
   "SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE", "LOW_BUDGET",
   "OTHER_REQUIREMENT", "BROKER", "BOOKED", "CANCELLED", "DIFFERENT_LOCATION",
   "NOT_INTERESTED"
@@ -14,8 +14,22 @@ export const LEAD_STATUS_CODES = [
 
 export type LeadStatusCode = (typeof LEAD_STATUS_CODES)[number];
 
+// Revived Lead (migration 054) is set only by the system, when a repeat
+// Meta / Google Ads Sheet enquiry matches a lead (leadRevival.ts). Nobody
+// can pick it by hand, admins included; from it a lead moves on exactly
+// like a New Lead.
+export const REVIVED_CODE = "REVIVED";
+
+// The cold/closed statuses a repeat enquiry revives. Leads already being
+// worked (New Lead, Call Back, Followup, EOI, Site Visit, Booked) keep their
+// status. Leads still in Data Calling are revived whatever their status.
+export const REVIVABLE_STATUS_CODES: LeadStatusCode[] = [
+  "DEAD_LEAD", "NOT_INTERESTED", "CANCELLED", "LOW_BUDGET",
+  "DIFFERENT_LOCATION", "OTHER_REQUIREMENT", "BROKER", "RNR"
+];
+
 const LABEL: Record<LeadStatusCode, string> = {
-  NEW_LEAD: "New Lead", RNR: "RNR", CALL_BACK: "Call Back", DEAD_LEAD: "Dead Lead",
+  NEW_LEAD: "New Lead", REVIVED: "Revived Lead", RNR: "RNR", CALL_BACK: "Call Back", DEAD_LEAD: "Dead Lead",
   FOLLOWUP: "Followup", EOI: "EOI", SITE_VISIT_SCHEDULED: "Site Visit Scheduled",
   SITE_VISIT_DONE: "Site Visit Done", LOW_BUDGET: "Low Budget",
   OTHER_REQUIREMENT: "Other requirement", BROKER: "Broker", BOOKED: "Booked",
@@ -30,6 +44,11 @@ const LABEL: Record<LeadStatusCode, string> = {
 // status) is out of scope for this round, not represented here.
 const TRANSITIONS: Record<LeadStatusCode, { allowed: LeadStatusCode[]; optional: LeadStatusCode[] }> = {
   NEW_LEAD: {
+    allowed: ["RNR", "CALL_BACK", "DEAD_LEAD", "NOT_INTERESTED", "FOLLOWUP", "SITE_VISIT_SCHEDULED", "LOW_BUDGET", "OTHER_REQUIREMENT", "BROKER"],
+    optional: ["CANCELLED", "DIFFERENT_LOCATION"]
+  },
+  // Same onward moves as a New Lead — a revived lead is worked afresh.
+  REVIVED: {
     allowed: ["RNR", "CALL_BACK", "DEAD_LEAD", "NOT_INTERESTED", "FOLLOWUP", "SITE_VISIT_SCHEDULED", "LOW_BUDGET", "OTHER_REQUIREMENT", "BROKER"],
     optional: ["CANCELLED", "DIFFERENT_LOCATION"]
   },
@@ -100,9 +119,15 @@ export const DEAD_LEAD_MIN_CALL_DAYS = 15;
 // is changing it, admins included (requested 2026-11-10).
 const NO_GOING_BACK_TO: LeadStatusCode[] = ["RNR", "DEAD_LEAD", "CALL_BACK"];
 
-/** Lead `alias` is on, or has ever been on, Followup / Site Visit Scheduled / Site Visit Done. */
+/**
+ * Lead `alias` is on, or has been on, Followup / Site Visit Scheduled / Site
+ * Visit Done since it was last revived (migration 054's revived_at). A
+ * revival is a fresh start, so history from before it doesn't block RNR /
+ * Call Back / Dead Lead. `alias` must be the leads table.
+ */
 export const REACHED_FOLLOWUP_OR_SITE_VISIT_SQL = (alias: string) => `(${alias}.status_code IN ('FOLLOWUP', 'SITE_VISIT_SCHEDULED', 'SITE_VISIT_DONE')
   OR EXISTS (SELECT 1 FROM lead_logs rl WHERE rl.lead_id = ${alias}.id
+             AND rl.created_at > COALESCE(${alias}.revived_at, '-infinity'::timestamptz)
              AND rl.message IN ('Status changed to "FOLLOWUP"', 'Status changed to "SITE_VISIT_SCHEDULED"', 'Status changed to "SITE_VISIT_DONE"')))`;
 
 async function assertNotGoingBack(toCode: LeadStatusCode, leadId: string): Promise<void> {
@@ -140,6 +165,9 @@ async function assertDeadLeadCallHistorySatisfied(leadId: string): Promise<void>
 /** Single enforcement point for every lead-status change — see updateLeadStatus in leads.service.ts. */
 export async function assertTransitionAllowed(fromCode: string, toCode: LeadStatusCode, leadId: string, isAdmin = false): Promise<void> {
   if (fromCode === toCode) return; // not a transition — e.g. editing dealValue without changing status
+  if (toCode === REVIVED_CODE) {
+    throw ApiError.badRequest(`"${LABEL.REVIVED}" is set automatically when a repeat enquiry comes in, and can't be chosen by hand.`);
+  }
   await assertNotGoingBack(toCode, leadId);
   // Admins can move a lead to any status (no matrix, no Dead Lead call-days rule).
   if (isAdmin) return;

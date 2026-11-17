@@ -31,8 +31,9 @@ async function scopedUserIdsForCaller(caller: AccessTokenPayload): Promise<strin
 // The only status that is a task without a scheduled call: a New Lead still
 // waiting for its first call. Every other task is a scheduled (or
 // rescheduled) call — a lead with no scheduled activity is never a task.
-const ACTIONABLE_LEAD_CODES = ["NEW_LEAD"];
-const NEW_LEAD_CODE = "NEW_LEAD";
+// A Revived Lead (migration 054) waits for a fresh first call exactly like a
+// New Lead; its revival resets assigned_at, so the same due time applies.
+const ACTIONABLE_LEAD_CODES = ["NEW_LEAD", "REVIVED"];
 
 // A lead's scheduled call is a task only while its current status can have
 // a call scheduled (frontend leadScheduler.ts SCHEDULER_REQUIRED_STATUSES +
@@ -40,7 +41,7 @@ const NEW_LEAD_CODE = "NEW_LEAD";
 // Not Interested, Dead Lead, Broker, Cancelled, Booked… are never a task,
 // even if an old call is still open on them.
 const SCHEDULED_TASK_STATUS_CODES = [
-  "NEW_LEAD", "RNR", "CALL_BACK", "FOLLOWUP", "EOI", "SITE_VISIT_SCHEDULED", "LOW_BUDGET", "OTHER_REQUIREMENT",
+  "NEW_LEAD", "REVIVED", "RNR", "CALL_BACK", "FOLLOWUP", "EOI", "SITE_VISIT_SCHEDULED", "LOW_BUDGET", "OTHER_REQUIREMENT",
   "SITE_VISIT_DONE", "DIFFERENT_LOCATION"
 ];
 
@@ -244,7 +245,7 @@ tasksRouter.get(
 
     for (const r of leadRows) {
       // Same rule as taskDue.ts TASK_DUE_AT_SQL (the Leads page's Next Call Date).
-      const dueAt = r.status_code === NEW_LEAD_CODE ? (r.assigned_at || r.created_at) : (r.latest_log_at || r.created_at);
+      const dueAt = ACTIONABLE_LEAD_CODES.includes(r.status_code) ? (r.assigned_at || r.created_at) : (r.latest_log_at || r.created_at);
       tasks.push({
         id: `lead-${r.id}`,
         leadId: r.id,

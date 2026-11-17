@@ -199,6 +199,9 @@ export interface User {
 // callStatusMapping.ts) — it is not one of these 14.
 export type LeadStatus =
   | "New Lead"
+  // Set only by the server when a repeat Meta / Google enquiry matches a
+  // cold or Data Calling lead (migration 054) — never picked by hand.
+  | "Revived Lead"
   | "RNR"
   | "Call Back"
   | "Dead Lead"
