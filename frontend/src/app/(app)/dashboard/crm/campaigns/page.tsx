@@ -472,7 +472,8 @@ export default function AdminCampaignsPage() {
   const [leadsStats, setLeadsStats] = useState<LeadSummaryStats>(ZERO_LEAD_SUMMARY);
   useEffect(() => {
     let cancelled = false;
-    const filters: LeadListFilters = { ...campaignServerDateBounds(), campaign: campaignFilterActive ? campaignFilters : undefined };
+    // campaignLeadsOnly: Data Calling leads never count here — they didn't come from a campaign.
+    const filters: LeadListFilters = { ...campaignServerDateBounds(), campaign: campaignFilterActive ? campaignFilters : undefined, campaignLeadsOnly: true };
     apiGetLeadStats(filters)
       .then(result => { if (!cancelled) setLeadsStats(result); })
       .catch(() => { /* leave the previous numbers showing on a transient failure */ });
@@ -524,7 +525,7 @@ export default function AdminCampaignsPage() {
   // (LeadDrillDownPanel-style baseFilters, see useServerLeadList below) —
   // "Active Campaigns" drills into campaigns instead (activeCampaignsDrill).
   const categoryBaseFilters: Record<string, LeadListFilters> = useMemo(() => {
-    const shared: LeadListFilters = { ...campaignServerDateBounds(), campaign: campaignFilterActive ? campaignFilters : undefined };
+    const shared: LeadListFilters = { ...campaignServerDateBounds(), campaign: campaignFilterActive ? campaignFilters : undefined, campaignLeadsOnly: true };
     const out: Record<string, LeadListFilters> = {};
     Object.entries(CATEGORY_STATUS_CODES).forEach(([key, status]) => { out[key] = { ...shared, status }; });
     return out;
@@ -960,7 +961,7 @@ export default function AdminCampaignsPage() {
   const QUALIFIED_DB_CODES = [QUALIFIED_STATUS_FILTER]; // the one qualified rule (lib/qualifiedLeads.ts)
   const isQualifiedLeadsDrillOpen = analyticsDrillView?.type === "qualifiedLeads";
   const qualifiedLeadsBaseFilters: LeadListFilters = isQualifiedLeadsDrillOpen
-    ? { campaign: [analyticsDrillView!.campaign.name], status: QUALIFIED_DB_CODES }
+    ? { campaign: [analyticsDrillView!.campaign.name], status: QUALIFIED_DB_CODES, campaignLeadsOnly: true }
     : {};
   const qualifiedLeadsList = useServerLeadList(qualifiedLeadsBaseFilters, 25, isQualifiedLeadsDrillOpen);
 

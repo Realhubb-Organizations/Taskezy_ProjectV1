@@ -42,6 +42,10 @@ export const listLeadsQuerySchema = z.object({
   // "true" leaves out Data Calling leads (source "Bulk Upload"), which only
   // show on the Data Calling page until they're qualified.
   excludeBulkUpload: z.enum(["true", "false"]).optional().transform(v => v === "true"),
+  // "true" leaves out every Data Calling lead, qualified or not — the
+  // Campaigns page counts campaign-generated leads only (revived ones came
+  // in through a real enquiry, so they stay).
+  campaignLeadsOnly: z.enum(["true", "false"]).optional().transform(v => v === "true"),
   // Date column sort on the lead tables (by created_at). Left out = the
   // default order (most recently assigned first).
   sortDir: z.enum(["asc", "desc"]).optional(),

@@ -295,6 +295,8 @@ export interface ApiLeadRow {
   // Free-text batch label set at bulk-upload time (e.g. "Kashmiri Data") —
   // null for every other ingestion path. See ApiBulkImportLeadsInput.
   sub_source: string | null;
+  /** When a fresh Meta/Google enquiry last revived this lead (migration 054_lead_status_revived). */
+  revived_at?: string | null;
   // Data Calling's own, independent field (migration 030) — Connected/
   // Called/Not Reachable/Wrong Number. null until the lead has been called
   // at least once.
@@ -361,6 +363,8 @@ export interface LeadListFilters {
   search?: string;
   /** Leave out Data Calling ("Bulk Upload") leads. */
   excludeBulkUpload?: boolean;
+  /** Campaigns page: leave out every Data Calling lead, qualified or not (server CAMPAIGN_LEAD_SQL). */
+  campaignLeadsOnly?: boolean;
   /** Live-clock SLA check — see leads.repository.ts's buildLeadWhereClause. */
   missedOnly?: boolean;
   /** Leads flagged missed on this business day (YYYY-MM-DD) — the "Missed Leads Today" alert's list. */
@@ -413,6 +417,7 @@ function buildLeadFilterParams(filters: LeadListFilters): URLSearchParams {
   if (filters.dateTo) params.set("dateTo", filters.dateTo);
   if (filters.search) params.set("search", filters.search);
   if (filters.excludeBulkUpload) params.set("excludeBulkUpload", "true");
+  if (filters.campaignLeadsOnly) params.set("campaignLeadsOnly", "true");
   if (filters.missedOnly) params.set("missedOnly", "true");
   if (filters.missedOn) params.set("missedOn", filters.missedOn);
   if (filters.missedUntil) params.set("missedUntil", filters.missedUntil);

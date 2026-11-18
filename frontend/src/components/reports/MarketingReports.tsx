@@ -191,7 +191,8 @@ export default function MarketingReports({ dateRange, onDateRangeChange }: { dat
     assignedAgentId: filters.assignedAgentId,
     sourceBucket: filters.source,
     // No source picked = leave out the Data Calling pool (as the numbers do).
-    excludeBulkUpload: filters.source ? undefined : true,
+    // Same as the counts: Data Calling leads only once Connected + Qualified, whatever source is picked.
+    excludeBulkUpload: true,
     status: selected?.status
   };
 

@@ -9,6 +9,7 @@ import { BUSINESS_TIMEZONE } from "../../utils/businessDate";
 import { AccessTokenPayload } from "../../utils/tokens";
 import { findDirectReportIds } from "../users/users.repository";
 import { LEAD_SOURCE_BUCKET_SQL } from "../leads/leads.repository";
+import { ON_LEADS_PAGE_SQL } from "../leads/qualifiedLeads";
 import { canSeeMissedTaskCount } from "../leads/leads.handover";
 import { MISSED_BY_JOIN_SQL } from "./siteVisitSql";
 import { QUALIFIED_LEAD_SQL } from "../leads/qualifiedLeads";
@@ -93,7 +94,8 @@ function leadConditions(
     c.push(`l.sub_source IS NOT NULL`);
     if (q.subSource?.length) c.push(`l.sub_source = ANY(${p(q.subSource)}::text[])`);
   } else {
-    c.push(`l.source IS DISTINCT FROM 'Bulk Upload'`);
+    // Same leads as the Leads page: Data Calling ones only once Connected + Qualified.
+    c.push(ON_LEADS_PAGE_SQL("l"));
     if (q.source?.length) c.push(`${LEAD_SOURCE_BUCKET_SQL} = ANY(${p(q.source)}::text[])`);
   }
   return c.join(" AND ");

@@ -50,6 +50,7 @@ export async function listLeads(caller: AccessTokenPayload, filter: {
   dateTo?: string;
   search?: string;
   excludeBulkUpload?: boolean;
+  campaignLeadsOnly?: boolean;
   missedOnly?: boolean;
   missedOn?: string;
   missedUntil?: string;
@@ -84,6 +85,7 @@ export async function listLeads(caller: AccessTokenPayload, filter: {
     dateTo: filter.dateTo,
     search: filter.search,
     excludeBulkUpload: filter.excludeBulkUpload,
+    campaignLeadsOnly: filter.campaignLeadsOnly,
     missedOnly: filter.missedOnly,
     slaMinutes: filter.missedOnly ? REPORT_SLA_MINUTES : undefined,
     missedOn: filter.missedOn,
@@ -210,6 +212,7 @@ export async function getLeadStats(caller: AccessTokenPayload, filter: {
   dateTo?: string;
   search?: string;
   excludeBulkUpload?: boolean;
+  campaignLeadsOnly?: boolean;
   missedOnly?: boolean;
   missedOn?: string;
   missedUntil?: string;
@@ -228,6 +231,7 @@ export async function getLeadStats(caller: AccessTokenPayload, filter: {
     dateTo: filter.dateTo,
     search: filter.search,
     excludeBulkUpload: filter.excludeBulkUpload,
+    campaignLeadsOnly: filter.campaignLeadsOnly,
     missedOnly: filter.missedOnly,
     slaMinutes: filter.missedOnly ? REPORT_SLA_MINUTES : undefined,
     missedOn: filter.missedOn,
@@ -267,6 +271,7 @@ export async function getDistinctCampaigns(caller: AccessTokenPayload, filter: {
   dateFrom?: string;
   dateTo?: string;
   excludeBulkUpload?: boolean;
+  campaignLeadsOnly?: boolean;
   missedOnly?: boolean;
   missedOn?: string;
   missedUntil?: string;
@@ -283,6 +288,7 @@ export async function getDistinctCampaigns(caller: AccessTokenPayload, filter: {
     dateFrom: filter.dateFrom,
     dateTo: filter.dateTo,
     excludeBulkUpload: filter.excludeBulkUpload,
+    campaignLeadsOnly: filter.campaignLeadsOnly,
     missedOnly: filter.missedOnly,
     slaMinutes: filter.missedOnly ? REPORT_SLA_MINUTES : undefined,
     missedOn: filter.missedOn,
@@ -479,7 +485,8 @@ export async function getManagerReportStats(caller: AccessTokenPayload, filter: 
 }): Promise<ManagerReportAgentStats[]> {
   const scopedToAgentIds = await scopeForCaller(caller);
   const rows = await repo.getManagerReportStatsByAgent(
-    { dateFrom: filter.dateFrom, dateTo: filter.dateTo, scopedToAgentIds },
+    // Leads count = the same leads as the Leads page (no Data Calling pool).
+    { dateFrom: filter.dateFrom, dateTo: filter.dateTo, scopedToAgentIds, excludeBulkUpload: true },
     REPORT_SLA_MINUTES
   );
   return rows.map(r => ({

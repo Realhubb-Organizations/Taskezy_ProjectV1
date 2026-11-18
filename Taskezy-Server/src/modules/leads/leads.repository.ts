@@ -1,7 +1,7 @@
 import { PoolClient } from "pg";
 import { TASK_DUE_AT_SQL, TASK_OVERDUE_SQL } from "../tasks/taskDue";
 import { REACHED_FOLLOWUP_OR_SITE_VISIT_SQL } from "./leadStatusTransitions";
-import { QUALIFIED_LEAD_SQL, RNR_PICKED_UP_SQL, UNQUALIFIED_LEAD_SQL } from "./qualifiedLeads";
+import { CAMPAIGN_LEAD_SQL, ON_LEADS_PAGE_SQL, QUALIFIED_LEAD_SQL, RNR_PICKED_UP_SQL, UNQUALIFIED_LEAD_SQL } from "./qualifiedLeads";
 import { pool, query, withTransaction } from "../../db/pool";
 import { BUSINESS_TIMEZONE } from "../../utils/businessDate";
 import { normalizeForeignPhone } from "../../utils/validation";
@@ -136,8 +136,10 @@ export interface LeadFilterConditions {
   dateFrom?: string;
   dateTo?: string;
   search?: string;
-  /** Leave out Data Calling leads (source "Bulk Upload"). */
+  /** Leave out Data Calling leads, except Connected + Qualified (or revived) ones — ON_LEADS_PAGE_SQL. */
   excludeBulkUpload?: boolean;
+  /** Leave out every Data Calling lead, qualified or not (Campaigns page) — CAMPAIGN_LEAD_SQL. */
+  campaignLeadsOnly?: boolean;
   /** Marketing source groups (Meta / Google / Data) — see LEAD_SOURCE_BUCKET_SQL. */
   sourceBucket?: string[];
   /** Match `campaign` case-insensitively (Marketing Reports — names also come from ad accounts). */
@@ -217,7 +219,10 @@ function buildLeadWhereClause(filter: LeadFilterConditions): { whereClause: stri
   }
 
   if (filter.excludeBulkUpload) {
-    conditions.push(`l.source IS DISTINCT FROM 'Bulk Upload'`);
+    conditions.push(ON_LEADS_PAGE_SQL("l"));
+  }
+  if (filter.campaignLeadsOnly) {
+    conditions.push(CAMPAIGN_LEAD_SQL("l"));
   }
 
   if (filter.campaign && filter.campaign.length > 0) {

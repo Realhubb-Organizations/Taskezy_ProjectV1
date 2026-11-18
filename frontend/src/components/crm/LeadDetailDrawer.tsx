@@ -571,6 +571,34 @@ export default function LeadDetailDrawer({
           ))}
         </div>
 
+        {/* Where a lead that came from Data Calling started — kept once it
+            moves to the Leads page (Connected + Qualified, or revived by a
+            fresh enquiry). Its calls and notes from then are in the
+            Activity History below. */}
+        {lead.subSource && (
+          <div className="px-6 py-4 border-b border-slate-200 text-xs">
+            <span className="text-slate-800 font-extrabold text-xs block mb-3">Data Calling History :</span>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+              {[
+                { label: "Batch", value: lead.subSource },
+                { label: "Uploaded by", value: lead.uploadedByName || "—" },
+                { label: "Uploaded on", value: lead.createdAtStr ? formatLogTimestamp(lead.createdAtStr) : "—" },
+                {
+                  label: "Call Result",
+                  value: lead.callStatus ? `${lead.callStatus}${lead.callSubStatus ? ` · ${lead.callSubStatus}` : ""}` : "Not called"
+                },
+                { label: "Data Calling Property", value: lead.dataCallingProperty || "—" },
+                ...(lead.revivedAt ? [{ label: "Revived on", value: formatLogTimestamp(lead.revivedAt) }] : [])
+              ].map(f => (
+                <div key={f.label} className="min-w-0">
+                  <span className="text-slate-800 font-extrabold text-xs block mb-1">{f.label} :</span>
+                  <span className="text-slate-700 font-medium block truncate" title={f.value}>{f.value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Activity History — a real vertical timeline (connecting line +
             node per entry, newest first) in a large bordered card that fills
             the rest of the drawer. Transition labels (e.g. "Call Back →
