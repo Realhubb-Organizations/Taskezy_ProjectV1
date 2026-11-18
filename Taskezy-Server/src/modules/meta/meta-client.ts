@@ -216,12 +216,17 @@ export async function getCampaignDailyInsights(campaignId: string, longLivedUser
   return data.data ?? [];
 }
 
-/** Sums every action Meta classifies as a lead (naming varies: "lead", "onsite_conversion.lead_grouped", "leadgen.other", etc). */
+/**
+ * The day's lead count. Meta reports the SAME leads under several action
+ * types at once ("lead", "onsite_conversion.lead_grouped", "leadgen_grouped"…),
+ * so they must never be added together (that counted every lead ~5 times).
+ * Uses Meta's own total "lead"; without it, the biggest lead-type value.
+ */
 export function extractLeadCount(insight: MetaDailyInsight): number {
-  if (!insight.actions) return 0;
-  return insight.actions
-    .filter(a => a.action_type.toLowerCase().includes("lead"))
-    .reduce((sum, a) => sum + (Number(a.value) || 0), 0);
+  const leadActions = (insight.actions ?? []).filter(a => a.action_type.toLowerCase().includes("lead"));
+  const total = leadActions.find(a => a.action_type === "lead");
+  if (total) return Number(total.value) || 0;
+  return leadActions.reduce((max, a) => Math.max(max, Number(a.value) || 0), 0);
 }
 
 export interface MetaAdSet {
