@@ -84,7 +84,9 @@ async function runSync(): Promise<void> {
 
   const since = isoDateNDaysAgo(LOOKBACK_DAYS);
   const until = isoDateNDaysAgo(0);
+  const wideSince = isoDateNDaysAgo(FIRST_SYNC_LOOKBACK_DAYS);
   let wideBackfillsThisCycle = 0;
+  let adRecountsThisCycle = 0;
 
   for (const account of adAccounts) {
     let campaigns;
@@ -103,10 +105,14 @@ async function runSync(): Promise<void> {
         // One-time wide backfill, same reasoning as the per-ad version below
         // — see hasOlderCampaignSpendHistory's comment — capped per cycle so
         // a large backlog of un-backfilled campaigns can't all fire at once.
+        // Also re-read the whole window once when rows saved before the
+        // lead-count fix (migration 056) still hold the old ~5x number —
+        // same per-cycle cap, so the correction spreads over a few cycles.
         const hasOlderHistory = await metaRepo.hasOlderCampaignSpendHistory(campaign.id, since);
-        const needsWideBackfill = !hasOlderHistory && wideBackfillsThisCycle < MAX_WIDE_BACKFILLS_PER_CYCLE;
+        const needsRecount = await metaRepo.hasUncorrectedCampaignLeadCounts(campaign.id, wideSince);
+        const needsWideBackfill = (!hasOlderHistory || needsRecount) && wideBackfillsThisCycle < MAX_WIDE_BACKFILLS_PER_CYCLE;
         if (needsWideBackfill) wideBackfillsThisCycle++;
-        const campaignSince = needsWideBackfill ? isoDateNDaysAgo(FIRST_SYNC_LOOKBACK_DAYS) : since;
+        const campaignSince = needsWideBackfill ? wideSince : since;
 
         const dailyInsights = await getCampaignDailyInsights(campaign.id, account.userToken, campaignSince, until);
         for (const day of dailyInsights) {
@@ -121,6 +127,7 @@ async function runSync(): Promise<void> {
             clicks: day.clicks !== undefined && day.clicks !== "" ? Number(day.clicks) || 0 : null
           });
         }
+        if (needsWideBackfill) await metaRepo.markCampaignLeadCountsCorrected(campaign.id, wideSince);
       } catch (err) {
         logger.error({ err, campaignId: campaign.id }, "Could not sync insights for campaign — skipping, will retry next cycle");
       }
@@ -146,9 +153,15 @@ async function runSync(): Promise<void> {
       // zero insights forever if that were the only check. Requiring real
       // insight rows too means a campaign stuck at zero keeps getting a
       // real chance (with the wide window) until it actually succeeds.
-      if (status === "INACTIVE" && (await metaRepo.hasAdSetsForCampaign(campaign.id)) && (await metaRepo.hasAdLevelSpendRecordsForCampaign(campaign.id))) {
+      // A finished campaign whose per-ad rows still hold the old ~5x lead
+      // count (migration 056) gets one more pass to correct them, capped
+      // per cycle like the campaign-level re-read above.
+      const adRecount = adRecountsThisCycle < MAX_WIDE_BACKFILLS_PER_CYCLE
+        && (await metaRepo.hasUncorrectedAdLeadCountsForCampaign(campaign.id, wideSince));
+      if (!adRecount && status === "INACTIVE" && (await metaRepo.hasAdSetsForCampaign(campaign.id)) && (await metaRepo.hasAdLevelSpendRecordsForCampaign(campaign.id))) {
         continue;
       }
+      if (adRecount) adRecountsThisCycle++;
 
       try {
         const adSets = await getAdSetsForCampaign(campaign.id, account.userToken);
@@ -178,7 +191,8 @@ async function runSync(): Promise<void> {
             // leaving it permanently blank with zero insight rows even
             // though Meta genuinely has the data.
             const everSynced = await metaRepo.hasAdLevelSpendRecordsForAd(ad.id);
-            const adSince = everSynced ? since : isoDateNDaysAgo(FIRST_SYNC_LOOKBACK_DAYS);
+            const adWide = !everSynced || (adRecount && (await metaRepo.hasUncorrectedAdLeadCounts(ad.id, wideSince)));
+            const adSince = adWide ? wideSince : since;
             const adInsights = await getAdDailyInsights(ad.id, account.userToken, adSince, until);
             for (const day of adInsights) {
               await metaRepo.upsertAdLevelSpendRecord({
@@ -188,6 +202,7 @@ async function runSync(): Promise<void> {
                 leadsGenerated: extractLeadCount(day)
               });
             }
+            if (adWide) await metaRepo.markAdLeadCountsCorrected(ad.id, wideSince);
           } catch (err) {
             logger.error({ err, adId: ad.id }, "Could not sync insights for ad — skipping this ad, will retry next cycle");
           }
