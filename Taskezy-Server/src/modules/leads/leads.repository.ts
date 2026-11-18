@@ -209,11 +209,17 @@ function buildLeadWhereClause(filter: LeadFilterConditions): { whereClause: stri
   }
 
   if (filter.statusCodes && filter.statusCodes.length > 0) {
-    if (filter.statusCodes.length === 1) {
-      params.push(filter.statusCodes[0]);
+    // A lead waiting UNASSIGNED (its campaign isn't linked yet) shows as "New
+    // Lead" everywhere, so a New Lead filter includes it too; keeps the New
+    // Leads card, its list and the table's Status filter in agreement.
+    const statusCodes = filter.statusCodes.includes("NEW_LEAD") && !filter.statusCodes.includes("UNASSIGNED")
+      ? [...filter.statusCodes, "UNASSIGNED"]
+      : filter.statusCodes;
+    if (statusCodes.length === 1) {
+      params.push(statusCodes[0]);
       conditions.push(`l.status_code = $${params.length}`);
     } else {
-      params.push(filter.statusCodes);
+      params.push(statusCodes);
       conditions.push(`l.status_code = ANY($${params.length}::text[])`);
     }
   }

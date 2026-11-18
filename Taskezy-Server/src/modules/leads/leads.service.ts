@@ -248,7 +248,8 @@ export async function getLeadStats(caller: AccessTokenPayload, filter: {
 
   return {
     totalLeads,
-    newLeads: countFor(NEW_LEADS_CODE),
+    // Waiting UNASSIGNED leads display as "New Lead", so the card counts them too.
+    newLeads: countFor(NEW_LEADS_CODE) + countFor("UNASSIGNED"),
     rnr: countFor(RNR_CODE),
     callBacks: countFor(CALL_BACKS_CODE),
     followUps: countFor(FOLLOW_UPS_CODE),

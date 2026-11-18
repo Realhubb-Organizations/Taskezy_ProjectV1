@@ -88,11 +88,9 @@ const SITE_VISIT_CODES = ["SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE"];
  * case-insensitive join the frontend always used) so a day with a synced
  * lead but no ad-spend row that day (or vice versa) is still counted, not
  * silently dropped by whichever side happens to be missing it.
- * Qualified/unqualified/siteVisit are an unfiltered-by-date pipeline
- * snapshot across every lead ever matched to a known campaign — same as
- * campaignBuilder.ts's own campaignLeads-based counts, which never applied
- * the date filter either (a lead qualified today still counts even if it
- * arrived last week).
+ * Qualified/unqualified/siteVisit count the same leads totalLeads does
+ * (created inside [dateFrom, dateTo]), by their current status. They used
+ * to ignore the date range, which let Qualified + Unqualified exceed Total.
  */
 adSpendRouter.get(
   "/campaign-lead-stats",
@@ -145,6 +143,9 @@ adSpendRouter.get(
                 count(*) FILTER (WHERE l.status_code = ANY($6::text[])) AS site_visits
          FROM leads l
          JOIN known_campaigns k ON LOWER(COALESCE(l.campaign, l.source)) = LOWER(k.campaign_name)
+         -- Same Date Range as total_leads, so Total >= Qualified + Unqualified.
+         WHERE ($1::date IS NULL OR (l.created_at AT TIME ZONE $3)::date >= $1::date)
+           AND ($2::date IS NULL OR (l.created_at AT TIME ZONE $3)::date <= $2::date)
          GROUP BY k.campaign_name
        )
        SELECT k.campaign_name,
@@ -298,7 +299,7 @@ adSpendRouter.get(
       eoi: string; booked: string; dead: string; rnr: string; low_budget: string;
     }>(
       `SELECT a.id, a.spend_date AS date, a.account_name AS campaign, a.platform, a.leads_generated AS total_leads,
-              count(*) FILTER (WHERE l.status_code = 'NEW_LEAD') AS new_lead,
+              count(*) FILTER (WHERE l.status_code IN ('NEW_LEAD', 'UNASSIGNED')) AS new_lead,
               count(*) FILTER (WHERE l.status_code = 'CALL_BACK') AS call_back,
               count(*) FILTER (WHERE l.status_code = 'FOLLOWUP') AS follow_ups,
               count(*) FILTER (WHERE l.status_code = ANY($${siteVisitParam}::text[])) AS site_visits,

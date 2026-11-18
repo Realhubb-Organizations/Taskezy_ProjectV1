@@ -153,15 +153,16 @@ export interface UpsertSpendInput {
 
 export async function upsertSpendRecord(input: UpsertSpendInput): Promise<void> {
   await pool.query(
-    `INSERT INTO ad_spend_records (platform, account_name, property_id, spend_date, spend, leads_generated, meta_campaign_id, impressions, clicks)
-     VALUES ('META', $1, $2, $3, $4, $5, $6, $7, $8)
+    `INSERT INTO ad_spend_records (platform, account_name, property_id, spend_date, spend, leads_generated, meta_campaign_id, impressions, clicks, lead_count_fixed)
+     VALUES ('META', $1, $2, $3, $4, $5, $6, $7, $8, true)
      ON CONFLICT (meta_campaign_id, spend_date) WHERE meta_campaign_id IS NOT NULL DO UPDATE SET
        account_name = EXCLUDED.account_name,
        property_id = EXCLUDED.property_id,
        spend = EXCLUDED.spend,
        leads_generated = EXCLUDED.leads_generated,
        impressions = EXCLUDED.impressions,
-       clicks = EXCLUDED.clicks`,
+       clicks = EXCLUDED.clicks,
+       lead_count_fixed = true`,
     [input.accountName, input.propertyId, input.spendDate, input.spend, input.leadsGenerated, input.campaignId, input.impressions, input.clicks]
   );
 }
@@ -284,12 +285,60 @@ export interface UpsertAdLevelSpendInput {
 
 export async function upsertAdLevelSpendRecord(input: UpsertAdLevelSpendInput): Promise<void> {
   await pool.query(
-    `INSERT INTO ad_level_spend_records (meta_ad_id, spend_date, spend, leads_generated)
-     VALUES ($1, $2, $3, $4)
+    `INSERT INTO ad_level_spend_records (meta_ad_id, spend_date, spend, leads_generated, lead_count_fixed)
+     VALUES ($1, $2, $3, $4, true)
      ON CONFLICT (meta_ad_id, spend_date) DO UPDATE SET
        spend = EXCLUDED.spend,
-       leads_generated = EXCLUDED.leads_generated`,
+       leads_generated = EXCLUDED.leads_generated,
+       lead_count_fixed = true`,
     [input.adId, input.spendDate, input.spend, input.leadsGenerated]
+  );
+}
+
+// --- One-time lead-count correction (migration 056) ---
+// Rows saved before the fix in meta-client.extractLeadCount hold a ~5x lead
+// count (lead_count_fixed = false). The sync re-reads those campaigns/ads from
+// Meta once, a few per cycle, and every row it writes is marked fixed. Checks
+// are limited to the re-read window so a row Meta can no longer return can't
+// keep re-triggering the re-read forever.
+
+export async function hasUncorrectedCampaignLeadCounts(campaignId: string, since: string): Promise<boolean> {
+  const result = await pool.query(
+    "SELECT 1 FROM ad_spend_records WHERE meta_campaign_id = $1 AND NOT lead_count_fixed AND spend_date >= $2 LIMIT 1",
+    [campaignId, since]
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+/** After a full re-read: days Meta didn't return (no delivery) are marked too, so they don't re-trigger it. */
+export async function markCampaignLeadCountsCorrected(campaignId: string, since: string): Promise<void> {
+  await pool.query(
+    "UPDATE ad_spend_records SET lead_count_fixed = true WHERE meta_campaign_id = $1 AND NOT lead_count_fixed AND spend_date >= $2",
+    [campaignId, since]
+  );
+}
+
+export async function hasUncorrectedAdLeadCountsForCampaign(campaignId: string, since: string): Promise<boolean> {
+  const result = await pool.query(
+    `SELECT 1 FROM ad_level_spend_records a JOIN meta_ads m ON m.id = a.meta_ad_id
+     WHERE m.campaign_id = $1 AND NOT a.lead_count_fixed AND a.spend_date >= $2 LIMIT 1`,
+    [campaignId, since]
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+export async function hasUncorrectedAdLeadCounts(adId: string, since: string): Promise<boolean> {
+  const result = await pool.query(
+    "SELECT 1 FROM ad_level_spend_records WHERE meta_ad_id = $1 AND NOT lead_count_fixed AND spend_date >= $2 LIMIT 1",
+    [adId, since]
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+export async function markAdLeadCountsCorrected(adId: string, since: string): Promise<void> {
+  await pool.query(
+    "UPDATE ad_level_spend_records SET lead_count_fixed = true WHERE meta_ad_id = $1 AND NOT lead_count_fixed AND spend_date >= $2",
+    [adId, since]
   );
 }
 

@@ -460,6 +460,11 @@ export default function AdminCampaignsPage() {
   const platformReportedLeadsTotal = campaignFilterActive
     ? campaignsList.filter(c => inSelectedCampaigns(c.name)).reduce((sum, c) => sum + c.platformReportedLeads, 0)
     : campaignsListResult.platformReportedTotal;
+  // The Total Leads card: each campaign row's own totalLeads summed, i.e. per
+  // (campaign, day) the bigger of Meta/Google's count and the real leads in
+  // Taskezy. So it never drops below either one, and never below Qualified +
+  // Unqualified (which only count real leads of these same campaigns).
+  const campaignLeadsTotal = campaignsList.filter(c => inSelectedCampaigns(c.name)).reduce((sum, c) => sum + c.totalLeads, 0);
 
   // The 7-bucket stat shape every other admin page's "Total Leads"/"Follow
   // Ups"/"Call Backs" cards already use (GET /leads/stats) — covers Total
@@ -1218,16 +1223,10 @@ export default function AdminCampaignsPage() {
             <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 bg-white divide-y sm:divide-y-0 sm:divide-x divide-slate-100">
               {([
                 { label: "Active Campaigns", value: summaryMetrics.activeCampaigns, color: "text-slate-900", subtitle: null as string | null },
-                // Real synced-lead count is the main number; the ad
-                // platforms' own self-reported total (Meta + Google +
-                // Other's leadsGenerated, same Date Range) is shown
-                // alongside it so both real numbers are visible together —
-                // they're genuinely different metrics and can legitimately
-                // differ, this isn't a mismatch to resolve. Platform-
-                // reported (Meta + Google + Other's own leadsGenerated) is
-                // the headline number here; the real synced-lead count
-                // sits underneath.
-                { label: "Total Leads", value: platformReportedLeadsTotal, color: "text-slate-900", subtitle: `${summaryMetrics.totalLeads.toLocaleString("en-IN")} synced` },
+                // Headline = sum of the campaign rows' totalLeads (per
+                // campaign-day max of platform-reported and real leads, see
+                // campaignLeadsTotal); Meta/Google's own figure underneath.
+                { label: "Total Leads", value: campaignLeadsTotal, color: "text-slate-900", subtitle: `${platformReportedLeadsTotal.toLocaleString("en-IN")} reported by Meta/Google` },
                 { label: "Qualified Leads", value: summaryMetrics.qualifiedLeads, color: "text-rose-600", subtitle: null },
                 { label: "Site Visits", value: summaryMetrics.siteVisits, color: "text-amber-500", subtitle: null },
                 { label: "Follow Ups", value: summaryMetrics.followUps, color: "text-blue-500", subtitle: null },
@@ -1249,7 +1248,7 @@ export default function AdminCampaignsPage() {
                         {isDataLoading ? <LineSkeleton width={36} height={18} /> : s.value}
                       </span>
                       {s.subtitle && (
-                        <span className="text-[10px] text-slate-400 block mt-0.5" title="Meta + Google + Other's own self-reported total for this Date Range">
+                        <span className="text-[10px] text-slate-400 block mt-0.5" title="What Meta + Google themselves report for this Date Range. Total Leads above takes, per campaign and day, the bigger of this and the real leads in Taskezy.">
                           {isDataLoading ? <LineSkeleton width={48} height={10} /> : s.subtitle}
                         </span>
                       )}
