@@ -20,7 +20,8 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function graphFetch<T>(path: string, params: Record<string, string>): Promise<T> {
+/** `retryOnRateLimit: false` = optional calls (the lead-loss checks) give up on a rate limit instead of waiting minutes. */
+async function graphFetch<T>(path: string, params: Record<string, string>, opts: { retryOnRateLimit?: boolean } = {}): Promise<T> {
   const url = new URL(`${GRAPH_BASE}${path}`);
   Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
 
@@ -29,14 +30,15 @@ async function graphFetch<T>(path: string, params: Record<string, string>): Prom
     const body = (await res.json()) as T & { error?: { message: string; type: string; code: number } };
     if (!res.ok || body.error) {
       const isRateLimit = body.error?.code === RATE_LIMIT_ERROR_CODE;
-      if (isRateLimit && attempt < RATE_LIMIT_BACKOFFS_MS.length) {
+      if (isRateLimit && opts.retryOnRateLimit !== false && attempt < RATE_LIMIT_BACKOFFS_MS.length) {
         const backoffMs = RATE_LIMIT_BACKOFFS_MS[attempt];
         logger.warn({ path, attempt, backoffMs }, "Meta Graph API rate limit hit — backing off and retrying");
         await sleep(backoffMs);
         continue;
       }
       logger.error({ path, metaError: body.error }, "Meta Graph API call failed");
-      throw new Error(body.error?.message ?? `Meta Graph API call to ${path} failed with status ${res.status}`);
+      // `code` lets optional callers tell a rate limit (17, try again later) from a permanent refusal.
+      throw Object.assign(new Error(body.error?.message ?? `Meta Graph API call to ${path} failed with status ${res.status}`), { code: body.error?.code });
     }
     await sleep(CALL_SPACING_MS);
     return body;
@@ -122,6 +124,45 @@ export async function getManagedPages(longLivedUserToken: string): Promise<MetaP
     fields: "id,name,access_token"
   });
   return data.data;
+}
+
+/** Every Page this login manages (id + name only, up to 200) — for the "Page not connected" check. */
+export async function getManagedPageList(longLivedUserToken: string): Promise<{ id: string; name: string }[]> {
+  const data = await graphFetch<{ data: { id: string; name: string }[] }>("/me/accounts", {
+    access_token: longLivedUserToken,
+    fields: "id,name",
+    limit: "200"
+  }, { retryOnRateLimit: false });
+  return data.data ?? [];
+}
+
+/** The campaign's objective, e.g. "OUTCOME_LEADS" — so the lead-loss checks skip website/traffic campaigns. */
+export async function getCampaignObjective(campaignId: string, longLivedUserToken: string): Promise<string | undefined> {
+  const data = await graphFetch<{ objective?: string }>(`/${campaignId}`, {
+    access_token: longLivedUserToken,
+    fields: "objective"
+  }, { retryOnRateLimit: false });
+  return data.objective;
+}
+
+/**
+ * The Facebook Page(s) a campaign's currently ACTIVE ads run under. Its own
+ * call (not part of getAdsForCampaign) so a Meta error here can only skip the
+ * lead-loss check, never the Deep Dive ad sync. Asks only for the Page id:
+ * creative.actor_id, or the part before "_" in effective_object_story_id
+ * ("<pageId>_<postId>").
+ */
+export async function getCampaignAdPageIds(campaignId: string, longLivedUserToken: string): Promise<string[]> {
+  const data = await graphFetch<{ data: { creative?: { actor_id?: string; effective_object_story_id?: string } }[] }>(`/${campaignId}/ads`, {
+    access_token: longLivedUserToken,
+    fields: "creative{actor_id,effective_object_story_id}",
+    effective_status: JSON.stringify(["ACTIVE"]),
+    limit: "200"
+  }, { retryOnRateLimit: false });
+  const ids = (data.data ?? [])
+    .map(ad => ad.creative?.actor_id ?? ad.creative?.effective_object_story_id?.split("_")[0])
+    .filter((id): id is string => !!id);
+  return [...new Set(ids)];
 }
 
 /** Subscribes this Page to receive `leadgen` webhook events for our app. */

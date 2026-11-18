@@ -9,6 +9,7 @@ import {
   getAdDailyInsights
 } from "../modules/meta/meta-client";
 import * as metaRepo from "../modules/meta/meta.repository";
+import { runDailyMetaHealthChecks } from "../modules/meta/metaHealthAlerts";
 import { businessDateOffset } from "../utils/businessDate";
 import { broadcastDataChanged } from "../utils/dataChanged";
 
@@ -219,6 +220,11 @@ async function runSync(): Promise<void> {
   // already uses, not a new polling path.
   broadcastDataChanged("adspend");
   logger.info({ adAccounts: adAccounts.length }, "Meta ad spend sync cycle complete");
+
+  // Once a day, after the sync is done and the page refreshed: alert admins
+  // when Meta leads can't reach Taskezy (modules/meta/metaHealthAlerts.ts).
+  // Never throws, and gives up on the first Meta rate limit instead of waiting.
+  await runDailyMetaHealthChecks(adAccounts);
 }
 
 export function startMetaAdSpendSync(): void {

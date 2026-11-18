@@ -48,6 +48,16 @@ export interface ActiveConnection {
   pageName: string;
 }
 
+/** Every Page ever connected, by its current state (ACTIVE = its leads arrive; DISCONNECTED = an admin turned it off). */
+export async function listPageConnectionStates(): Promise<Map<string, "ACTIVE" | "DISCONNECTED">> {
+  const { rows } = await query<{ page_id: string; status: "ACTIVE" | "DISCONNECTED" }>(
+    // A Page connected under two ad accounts counts as ACTIVE if either row is.
+    `SELECT page_id, CASE WHEN bool_or(status = 'ACTIVE') THEN 'ACTIVE' ELSE 'DISCONNECTED' END AS status
+     FROM meta_connections GROUP BY page_id`
+  );
+  return new Map(rows.map(r => [r.page_id, r.status]));
+}
+
 /** Looks up an ACTIVE connection by Page ID for webhook processing — decrypted token, the admin new leads should land on, and the Page name (for the lead's Meta footprint). */
 export async function getActiveConnectionByPageId(pageId: string): Promise<ActiveConnection | undefined> {
   const { rows } = await query<{ page_token_encrypted: string; page_token_iv: string; page_token_tag: string; connected_by: string; page_name: string }>(
