@@ -246,6 +246,8 @@ export interface Lead {
   callStatus?: "Connected" | "Called" | "Not Reachable" | "Wrong Number";
   /** Qualified / Unqualified — only set while callStatus is Connected (migration 033). */
   callSubStatus?: "Qualified" | "Unqualified";
+  /** When a fresh Meta/Google enquiry last revived this lead — a revived Data Calling lead belongs on the Leads page. */
+  revivedAt?: string;
   // True when this lead's backend status_code is the internal UNASSIGNED
   // sentinel (no real agent picked it up yet — see leads.service.ts) — it
   // always carries a fallback admin as assignedAgent/assignedAgentId (the
@@ -800,6 +802,7 @@ export function mapApiLeadToFrontendLead(row: ApiLeadRow): Lead {
     logs: row.logs.map(l => ({ message: l.message, timestamp: l.timestamp, user: l.user })),
     source: row.source || undefined,
     subSource: row.sub_source || undefined,
+    revivedAt: row.revived_at || undefined,
     uploadedByName: row.uploaded_by_name || undefined,
     callStatus:
       row.call_status === "Connected" || row.call_status === "Called" || row.call_status === "Not Reachable" || row.call_status === "Wrong Number"
@@ -2925,7 +2928,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // which is deliberately allowed to change. Every other page in the app
   // already just destructures `leads` from context, so this one split is
   // the only place that needs to know about any of this.
-  const leads = useMemo(() => allLeads.filter(l => l.source !== "Bulk Upload"), [allLeads]);
+  // Same rule as the server's ON_LEADS_PAGE_SQL (qualifiedLeads.ts): a Data
+  // Calling lead (has a subSource) shows here only once Connected + Qualified,
+  // or revived by a fresh enquiry — not just because its source changed.
+  const leads = useMemo(
+    () => allLeads.filter(l =>
+      l.source !== "Bulk Upload" &&
+      (!l.subSource || !!l.revivedAt || (l.callStatus === "Connected" && l.callSubStatus === "Qualified"))
+    ),
+    [allLeads]
+  );
   const dataCallingLeads = useMemo(() => allLeads.filter(l => !!l.subSource), [allLeads]);
 
   return (

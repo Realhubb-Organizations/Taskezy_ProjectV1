@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { QUALIFIED_LEAD_SQL, QUALIFIED_STATUS_CODES, RNR_NOT_PICKED_UP_SQL, RNR_PICKED_UP_SQL, UNQUALIFIED_LEAD_SQL, UNQUALIFIED_STATUS_CODES } from "../leads/qualifiedLeads";
+import { ON_LEADS_PAGE_SQL, QUALIFIED_LEAD_SQL, QUALIFIED_STATUS_CODES, RNR_NOT_PICKED_UP_SQL, RNR_PICKED_UP_SQL, UNQUALIFIED_LEAD_SQL, UNQUALIFIED_STATUS_CODES } from "../leads/qualifiedLeads";
 import { z } from "zod";
 import { requireAuth, requireRole } from "../../middleware/auth";
 import { validate } from "../../middleware/validate";
@@ -445,9 +445,10 @@ adSpendRouter.get(
           AND (${n(3)}::text[] IS NULL OR LOWER(COALESCE(l.campaign, l.source)) = ANY(${n(3)}::text[]))
           AND (NOT ${n(4)}::boolean OR l.property_id = ANY(COALESCE(${n(5)}::uuid[], '{}')) OR (${n(6)}::boolean AND l.property_id IS NULL))
           AND (${n(7)}::uuid[] IS NULL OR l.assigned_agent_id = ANY(${n(7)}::uuid[]))
-          AND (CASE WHEN ${n(8)}::text[] IS NULL
-                    THEN l.source IS DISTINCT FROM 'Bulk Upload' -- the Data Calling pool isn't marketing unless "Data" is picked
-                    ELSE ${LEAD_SOURCE_BUCKET_SQL} = ANY(${n(8)}::text[]) END)`
+          -- Same leads as the Leads page: Data Calling ones only once Connected + Qualified,
+          -- whichever source is picked ("Data" = those promoted ones).
+          AND ${ON_LEADS_PAGE_SQL("l")}
+          AND (${n(8)}::text[] IS NULL OR ${LEAD_SOURCE_BUCKET_SQL} = ANY(${n(8)}::text[]))`
       };
     };
     const spendFilters = (from: number) => {

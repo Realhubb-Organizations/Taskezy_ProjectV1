@@ -78,7 +78,8 @@ export default function HomePage() {
   const { liveVersion: leadsLive } = useLiveRefresh("leads");
   const { liveVersion: followupsLive } = useLiveRefresh("followups");
   useEffect(() => {
-    apiGetLeadStats({ assignedAgentId: scopedAgentIds, dateFrom: toIsoDate(sevenDaysAgo), dateTo: toIsoDate(now) })
+    // Same leads as the Leads page — not fresh Data Calling uploads.
+    apiGetLeadStats({ assignedAgentId: scopedAgentIds, dateFrom: toIsoDate(sevenDaysAgo), dateTo: toIsoDate(now), excludeBulkUpload: true })
       .then(stats => setLeadsLast7Days(stats.totalLeads))
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps

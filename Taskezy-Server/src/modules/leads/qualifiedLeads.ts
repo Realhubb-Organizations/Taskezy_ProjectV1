@@ -36,3 +36,22 @@ export const QUALIFIED_LEAD_SQL = (alias: string) =>
 /** Lead `alias` is unqualified. */
 export const UNQUALIFIED_LEAD_SQL = (alias: string) =>
   `(${alias}.status_code IN (${inList(UNQUALIFIED_STATUS_CODES)}) OR ${RNR_NOT_PICKED_UP_SQL(alias)})`;
+
+/**
+ * Leads that belong on the Leads page and in Leads Analytics: every lead
+ * except Data Calling ones — those only count once Connected + Qualified, or
+ * revived by a fresh Meta/Google enquiry (leadRevival.ts). Keyed on
+ * sub_source (the Data Calling batch label, never cleared), not on source,
+ * which isn't always switched back when a call result changes.
+ */
+export const ON_LEADS_PAGE_SQL = (alias: string) =>
+  `(${alias}.source IS DISTINCT FROM 'Bulk Upload' AND (${alias}.sub_source IS NULL OR ${alias}.revived_at IS NOT NULL
+     OR (${alias}.call_status = 'Connected' AND ${alias}.call_sub_status = 'Qualified')))`;
+
+/**
+ * Leads the Campaigns page counts: campaign-generated ones only. A Data
+ * Calling lead never counts there, even once qualified — it didn't come from
+ * a campaign — unless a fresh Meta/Google enquiry revived it.
+ */
+export const CAMPAIGN_LEAD_SQL = (alias: string) =>
+  `(${alias}.source IS DISTINCT FROM 'Bulk Upload' AND (${alias}.sub_source IS NULL OR ${alias}.revived_at IS NOT NULL))`;

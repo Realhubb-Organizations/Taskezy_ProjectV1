@@ -744,6 +744,11 @@ export default function LeadDashboard() {
     property?: string | null; // a Property card row: its id, or null = no property
   } | null>(null);
   const [drilldownSearchOpen, setDrilldownSearchOpen] = useState(false);
+  // Column dropdowns on that list (Status / Assigned To / Campaign) — they
+  // only narrow the clicked number's own leads, never widen them.
+  const [drilldownStatusPick, setDrilldownStatusPick] = useState<string[]>([]);
+  const [drilldownAssignedPick, setDrilldownAssignedPick] = useState<string[]>([]);
+  const [drilldownCampaignPick, setDrilldownCampaignPick] = useState<string[]>([]);
 
   // The lead list is its own page: opening it adds ?drill=1 to the address,
   // so the browser's Back button (or the page's Back link) returns here.
@@ -757,6 +762,9 @@ export default function LeadDashboard() {
   const openAnalyticsDrilldown = (assignedNames: string[] | null, statusScope: string[] | null, title: string, property?: string | null) => {
     setAnalyticsDrilldown({ title, names: assignedNames, statusScope, property });
     setDrilldownSearchOpen(false);
+    setDrilldownStatusPick([]);
+    setDrilldownAssignedPick([]);
+    setDrilldownCampaignPick([]);
     if (!searchParams.get("drill")) router.push(drillParams(true), { scroll: false });
     window.scrollTo({ top: 0 });
   };
@@ -780,22 +788,41 @@ export default function LeadDashboard() {
     const memberNames = names
       ? (analyticsMemberFilter.length > 0 ? names.filter(n => analyticsMemberFilter.includes(n)) : names)
       : (analyticsMemberFilter.length > 0 ? analyticsMemberFilter : null);
-    const memberIds = memberNames ? users.filter(u => memberNames.includes(u.name)).map(u => u.id) : undefined;
+    // An Assigned To pick narrows the clicked number's members (or everyone).
+    const pickedNames = drilldownAssignedPick.length > 0
+      ? (memberNames ? drilldownAssignedPick.filter(n => memberNames.includes(n)) : drilldownAssignedPick)
+      : memberNames;
+    const memberIds = pickedNames ? users.filter(u => pickedNames.includes(u.name)).map(u => u.id) : undefined;
     const propertyFilterIds = properties.filter(p => analyticsPropertyFilter.includes(p.name)).map(p => p.id);
     // Qualified / Unqualified markers pass through as they are (apiClient turns them into server flags).
-    const status = statusScope ? statusScope.map(s => (s.startsWith("@") ? s : frontendStatusToDbCode(s as LeadStatus))).filter((c): c is string => !!c) : undefined;
+    const scope = statusScope ? statusScope.map(s => (s.startsWith("@") ? s : frontendStatusToDbCode(s as LeadStatus))).filter((c): c is string => !!c) : [];
+    // A Status pick narrows the scope: Qualified/Unqualified markers stay (the
+    // server ANDs them), plain codes are intersected with the picked ones.
+    const picked = drilldownStatusPick.map(s => frontendStatusToDbCode(s as LeadStatus)).filter((c): c is string => !!c);
+    const markers = scope.filter(c => c.startsWith("@"));
+    const scopeCodes = scope.filter(c => !c.startsWith("@"));
+    const codes = picked.length === 0 ? scopeCodes : scopeCodes.length === 0 ? picked : picked.filter(c => scopeCodes.includes(c));
+    // Picked statuses that fall outside the scope match nothing, not everything.
+    const status = picked.length > 0 && codes.length === 0 ? ["__NONE__"] : [...markers, ...codes];
+    const campaign = drilldownCampaignPick.length > 0
+      ? (analyticsCampaignFilter.length > 0 ? drilldownCampaignPick.filter(c => analyticsCampaignFilter.includes(c)) : drilldownCampaignPick)
+      : analyticsCampaignFilter;
     return {
       // No matching member = an id matching nobody, so the list is empty rather than unfiltered.
       assignedAgentId: memberIds ? (memberIds.length > 0 ? memberIds : ["00000000-0000-0000-0000-000000000000"]) : undefined,
       ...(property !== undefined
         ? (property === null ? { noProperty: true } : { propertyId: [property] })
         : { propertyId: propertyFilterIds.length > 0 ? propertyFilterIds : undefined }),
-      campaign: analyticsCampaignFilter.length > 0 ? analyticsCampaignFilter : undefined,
-      status,
+      // A Campaign pick outside the toolbar's campaigns matches nothing.
+      campaign: drilldownCampaignPick.length > 0 && campaign.length === 0 ? ["__NONE__"] : campaign.length > 0 ? campaign : undefined,
+      status: status.length > 0 ? status : undefined,
+      // Same leads the Analytics counts are made of — no Data Calling leads
+      // unless Connected + Qualified.
+      excludeBulkUpload: true,
       ...dateRangeToServerBounds(analyticsDateRange, analyticsCustomRange, today)
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [analyticsDrilldown, analyticsMemberFilter, analyticsPropertyFilter, analyticsCampaignFilter, analyticsDateRange, analyticsCustomRange, users, properties]);
+  }, [analyticsDrilldown, analyticsMemberFilter, analyticsPropertyFilter, analyticsCampaignFilter, analyticsDateRange, analyticsCustomRange, users, properties, drilldownStatusPick, drilldownAssignedPick, drilldownCampaignPick]);
 
   const {
     rows: analyticsDrilldownRows,
@@ -2381,12 +2408,43 @@ export default function LeadDashboard() {
                                 )}
                               </th>
                               <th className="px-4 py-3 whitespace-nowrap">Email</th>
-                              <th className="px-4 py-3 whitespace-nowrap">Status</th>
-                              <th className="px-4 py-3 whitespace-nowrap">Assigned To</th>
+                              <th className="px-4 py-3 whitespace-nowrap">
+                                <SearchableMultiSelect
+                                  variant="inline"
+                                  label="Status"
+                                  options={PICKABLE_STATUS_OPTIONS}
+                                  selected={drilldownStatusPick}
+                                  onChange={setDrilldownStatusPick}
+                                  searchPlaceholder="Search status..."
+                                  panelWidth={208}
+                                />
+                              </th>
+                              <th className="px-4 py-3 whitespace-nowrap">
+                                <SearchableMultiSelect
+                                  variant="inline"
+                                  label="Assigned To"
+                                  options={agentsList}
+                                  selected={drilldownAssignedPick}
+                                  onChange={setDrilldownAssignedPick}
+                                  searchPlaceholder="Search agents..."
+                                  panelWidth={208}
+                                />
+                              </th>
                               <th className="px-4 py-3 whitespace-nowrap"><DateSortButton dir={drilldownSortDir} onChange={setDrilldownSortDir} /></th>
                               <th className="px-4 py-3 whitespace-nowrap">Notes</th>
                               <th className="px-4 py-3 whitespace-nowrap">Next Call Date</th>
-                              <th className="px-4 py-3 whitespace-nowrap">Campaign</th>
+                              <th className="px-4 py-3 whitespace-nowrap">
+                                <SearchableMultiSelect
+                                  variant="inline"
+                                  label="Campaign"
+                                  options={adminCampaignsList}
+                                  selected={drilldownCampaignPick}
+                                  onChange={setDrilldownCampaignPick}
+                                  searchPlaceholder="Search campaigns..."
+                                  align="right"
+                                  panelWidth={224}
+                                />
+                              </th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">

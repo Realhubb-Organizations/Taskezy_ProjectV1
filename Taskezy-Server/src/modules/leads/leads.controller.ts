@@ -7,14 +7,14 @@ import { assertNoPendingFeedback } from "../call-attempts/feedbackLock";
 import * as leadsService from "./leads.service";
 
 export async function listLeadsHandler(req: Request, res: Response): Promise<void> {
-  const { page, pageSize, status, assignedAgentId, campaign, propertyId, noProperty, dateFrom, dateTo, search, excludeBulkUpload, missedOnly, missedOn, missedUntil, missedFrom, overdueOnly, leadIds, sortDir, sortField, sourceBucket, campaignIgnoreCase, dataCallingOnly, assignedOnly, subSource, callStatus, callSubStatus, calledBy, calledFrom, calledTo, qualifiedOnly, unqualifiedOnly } = req.query as unknown as {
+  const { page, pageSize, status, assignedAgentId, campaign, propertyId, noProperty, dateFrom, dateTo, search, excludeBulkUpload, campaignLeadsOnly, missedOnly, missedOn, missedUntil, missedFrom, overdueOnly, leadIds, sortDir, sortField, sourceBucket, campaignIgnoreCase, dataCallingOnly, assignedOnly, subSource, callStatus, callSubStatus, calledBy, calledFrom, calledTo, qualifiedOnly, unqualifiedOnly } = req.query as unknown as {
     page: number; pageSize: number; status?: string[]; assignedAgentId?: string[]; campaign?: string[]; propertyId?: string[]; noProperty?: boolean;
-    dateFrom?: string; dateTo?: string; search?: string; excludeBulkUpload?: boolean; missedOnly?: boolean; missedOn?: string; missedUntil?: string; missedFrom?: string; overdueOnly?: boolean; leadIds?: string[]; sortDir?: "asc" | "desc"; sortField?: "created" | "assigned";
+    dateFrom?: string; dateTo?: string; search?: string; excludeBulkUpload?: boolean; campaignLeadsOnly?: boolean; missedOnly?: boolean; missedOn?: string; missedUntil?: string; missedFrom?: string; overdueOnly?: boolean; leadIds?: string[]; sortDir?: "asc" | "desc"; sortField?: "created" | "assigned";
     sourceBucket?: string[]; campaignIgnoreCase?: boolean; dataCallingOnly?: boolean; assignedOnly?: boolean; subSource?: string[]; callStatus?: string[]; callSubStatus?: string[];
     calledBy?: string[]; calledFrom?: string; calledTo?: string; qualifiedOnly?: boolean; unqualifiedOnly?: boolean;
   };
   const { rows, meta } = await leadsService.listLeads(req.user!, {
-    page, pageSize, status, assignedAgentId, campaign, propertyId, noProperty, dateFrom, dateTo, search, excludeBulkUpload, missedOnly, missedOn, missedUntil, missedFrom, overdueOnly, leadIds, sortDir, sortField,
+    page, pageSize, status, assignedAgentId, campaign, propertyId, noProperty, dateFrom, dateTo, search, excludeBulkUpload, campaignLeadsOnly, missedOnly, missedOn, missedUntil, missedFrom, overdueOnly, leadIds, sortDir, sortField,
     sourceBucket, campaignIgnoreCase, dataCallingOnly, assignedOnly, subSource, callStatus, callSubStatus, calledBy, calledFrom, calledTo, qualifiedOnly, unqualifiedOnly
   });
   sendPaginated(res, rows.map(r => leadForCaller(req.user!, r)), meta);
@@ -28,11 +28,11 @@ export async function searchLeadsByPhonesHandler(req: Request, res: Response): P
 }
 
 export async function getLeadStatsHandler(req: Request, res: Response): Promise<void> {
-  const { status, assignedAgentId, campaign, propertyId, noProperty, dateFrom, dateTo, search, excludeBulkUpload, missedOnly, missedOn, missedUntil, missedFrom, overdueOnly, leadIds } = req.query as unknown as {
+  const { status, assignedAgentId, campaign, propertyId, noProperty, dateFrom, dateTo, search, excludeBulkUpload, campaignLeadsOnly, missedOnly, missedOn, missedUntil, missedFrom, overdueOnly, leadIds } = req.query as unknown as {
     status?: string[]; assignedAgentId?: string[]; campaign?: string[]; propertyId?: string[]; noProperty?: boolean; dateFrom?: string; dateTo?: string; search?: string;
-    excludeBulkUpload?: boolean; missedOnly?: boolean; missedOn?: string; missedUntil?: string; missedFrom?: string; overdueOnly?: boolean; leadIds?: string[];
+    excludeBulkUpload?: boolean; campaignLeadsOnly?: boolean; missedOnly?: boolean; missedOn?: string; missedUntil?: string; missedFrom?: string; overdueOnly?: boolean; leadIds?: string[];
   };
-  const stats = await leadsService.getLeadStats(req.user!, { status, assignedAgentId, campaign, propertyId, noProperty, dateFrom, dateTo, search, excludeBulkUpload, missedOnly, missedOn, missedUntil, missedFrom, overdueOnly, leadIds });
+  const stats = await leadsService.getLeadStats(req.user!, { status, assignedAgentId, campaign, propertyId, noProperty, dateFrom, dateTo, search, excludeBulkUpload, campaignLeadsOnly, missedOnly, missedOn, missedUntil, missedFrom, overdueOnly, leadIds });
   sendOk(res, stats);
 }
 
