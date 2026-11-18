@@ -298,7 +298,7 @@ adSpendRouter.get(
       eoi: string; booked: string; dead: string; rnr: string; low_budget: string;
     }>(
       `SELECT a.id, a.spend_date AS date, a.account_name AS campaign, a.platform, a.leads_generated AS total_leads,
-              count(*) FILTER (WHERE l.status_code = 'NEW_LEAD') AS new_lead,
+              count(*) FILTER (WHERE l.status_code IN ('NEW_LEAD', 'UNASSIGNED')) AS new_lead,
               count(*) FILTER (WHERE l.status_code = 'CALL_BACK') AS call_back,
               count(*) FILTER (WHERE l.status_code = 'FOLLOWUP') AS follow_ups,
               count(*) FILTER (WHERE l.status_code = ANY($${siteVisitParam}::text[])) AS site_visits,
