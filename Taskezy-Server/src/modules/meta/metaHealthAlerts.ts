@@ -15,14 +15,18 @@ import { listPageConnectionStates, getActiveConnectionByPageId } from "./meta.re
  * day isn't marked done, so the next cycle runs it again. Every step is
  * isolated; nothing here can throw.
  *
- *  1. A Facebook Page the connected login manages isn't connected (weekly
- *     reminder; Pages someone disconnected on purpose are left alone).
+ *  1. A Facebook Page the connected login manages isn't connected (Pages
+ *     someone disconnected on purpose are left alone).
  *  2. An active lead campaign runs active ads on a Page that isn't
  *     connected, so its leads are being lost right now.
  *  3. Last 7 days: Meta reports 5+ leads for a lead campaign but Taskezy
  *     received less than half of them, whatever the cause.
  *  4. A connected Page whose saved connection Meta no longer accepts, so its
- *     leads are silently lost (weekly reminder).
+ *     leads are silently lost.
+ *
+ * Each problem alerts once, then reminds every 7 days while it lasts; once a
+ * check sees it fixed, its record is cleared so a new break alerts straight
+ * away (meta_alerts_sent, migration 057).
  *
  * "Lead campaign" = objective OUTCOME_LEADS / LEAD_GENERATION, so website or
  * traffic campaigns (whose pixel "leads" Meta also counts) never alert.
@@ -32,19 +36,12 @@ const INTEGRATIONS_LINK = "/dashboard/settings/integrations";
 const WINDOW_DAYS = 7;
 const MISSING_LEADS_MIN_META = 5;      // too few to judge below this
 const MISSING_LEADS_MAX_SHARE = 0.5;   // alert when Taskezy has less than half of Meta's leads
-const UNCONNECTED_PAGE_REMIND_DAYS = 7;
+const REMIND_DAYS = 7;                 // a problem that lasts is reminded about this often
 const LEAD_OBJECTIVES = new Set(["OUTCOME_LEADS", "LEAD_GENERATION"]);
 
 type Account = { id: string; userToken: string };
 
 let lastRunDay: string | null = null;
-// When each unconnected Page was last reminded about. Kept here, not read back
-// from notifications, because read notifications are deleted after 48h.
-// ponytail: in-memory, so a server restart allows one extra reminder; move to a
-// table if that ever matters.
-const pageLastReminded = new Map<string, string>();
-// Same, for connected Pages whose saved connection stopped working.
-const deadPageLastReminded = new Map<string, string>();
 // A campaign's objective never changes, so Meta is asked once per campaign.
 const objectiveByCampaign = new Map<string, string>();
 
@@ -88,22 +85,43 @@ export async function runDailyMetaHealthChecks(accounts: Account[]): Promise<voi
   if (pagesListed && deadChecked && campaignsChecked && missingChecked) lastRunDay = today;
 }
 
-/** Sends to every active admin unless an alert with this title went out within `withinDays` business days. */
-async function notifyAdmins(title: string, message: string, link: string, withinDays = 1): Promise<void> {
-  // ponytail: two overlapping runs could both pass this check; the sync never overlaps (isSyncing guard).
-  const { rows } = await query<{ n: string }>(
-    `SELECT count(*) AS n FROM notifications
-     WHERE category = 'REMINDER' AND title = $1
-       AND created_at >= (((now() AT TIME ZONE $2)::date - ($3::int - 1))::timestamp AT TIME ZONE $2)`,
-    [title, BUSINESS_TIMEZONE, withinDays]
+/**
+ * Sends to every active admin the first time `key` is reported, then again
+ * only once REMIND_DAYS days (business timezone) have passed since the last
+ * send. The row is claimed before sending, so two overlapping runs can't both
+ * send; if nobody actually received it, the claim is released so the next run
+ * tries again instead of staying quiet for a week.
+ */
+async function notifyAdmins(key: string, title: string, message: string, link: string): Promise<void> {
+  const { rowCount } = await query(
+    `INSERT INTO meta_alerts_sent (alert_key) VALUES ($1)
+     ON CONFLICT (alert_key) DO UPDATE SET sent_at = now()
+       WHERE (meta_alerts_sent.sent_at AT TIME ZONE $2)::date <= (now() AT TIME ZONE $2)::date - $3::int`,
+    [key, BUSINESS_TIMEZONE, REMIND_DAYS]
   );
-  if (Number(rows[0]?.n ?? 0) > 0) return;
-  for (const adminId of await listActiveAdminIds()) {
-    try {
-      await createNotification({ system: "CRM", category: "REMINDER", title, message, recipientUserId: adminId, link });
-    } catch (err) {
-      logger.error({ err, adminId, title }, "Could not send a Meta lead-loss alert to an admin");
+  if (!rowCount) return;
+  let delivered = 0;
+  try {
+    for (const adminId of await listActiveAdminIds()) {
+      try {
+        await createNotification({ system: "CRM", category: "REMINDER", title, message, recipientUserId: adminId, link });
+        delivered++;
+      } catch (err) {
+        logger.error({ err, adminId, title }, "Could not send a Meta lead-loss alert to an admin");
+      }
     }
+  } finally {
+    if (delivered === 0) await clearAlerts([key]);
+  }
+}
+
+/** Forgets problems a check just saw fixed, so if they come back they alert straight away. */
+async function clearAlerts(keys: string[]): Promise<void> {
+  if (!keys.length) return;
+  try {
+    await query(`DELETE FROM meta_alerts_sent WHERE alert_key = ANY($1)`, [keys]);
+  } catch (err) {
+    logger.warn({ err }, "Could not clear fixed Meta alerts; they'll only be reminded about weekly");
   }
 }
 
@@ -131,24 +149,26 @@ async function isLeadCampaign(campaignId: string, token: string | undefined): Pr
 export async function alertUnconnectedPages(
   pages: { id: string; name: string }[], connected: Set<string>, disconnected: Set<string> = new Set()
 ): Promise<void> {
-  const remindedSince = businessDateOffset(-(UNCONNECTED_PAGE_REMIND_DAYS - 1));
   for (const page of pages) {
     if (connected.has(page.id) || disconnected.has(page.id)) continue;
-    const last = pageLastReminded.get(page.id);
-    if (last && last >= remindedSince) continue;
     try {
       await notifyAdmins(
+        `page-unconnected:${page.id}`,
         `Facebook Page not connected: ${page.name}`,
         `Leads from the Facebook Page "${page.name}" don't reach Taskezy because it isn't connected. ` +
         `If this Page runs lead ads, go to Settings → Integrations → Meta, reconnect and tick it.`,
-        INTEGRATIONS_LINK,
-        UNCONNECTED_PAGE_REMIND_DAYS
+        INTEGRATIONS_LINK
       );
-      pageLastReminded.set(page.id, businessDateOffset(0));
     } catch (err) {
       logger.error({ err, pageId: page.id }, "Unconnected Page alert failed");
     }
   }
+  // Connected now, or disconnected on purpose: no longer a problem. A Page
+  // disconnected on purpose also stops counting as a dead connection.
+  await clearAlerts([
+    ...[...connected, ...disconnected].map(id => `page-unconnected:${id}`),
+    ...[...disconnected].map(id => `page-dead:${id}`)
+  ]);
 }
 
 /**
@@ -158,32 +178,33 @@ export async function alertUnconnectedPages(
  * load. Returns false on a rate limit so the next cycle finishes the check.
  */
 export async function alertDeadPageConnections(pageIds: Iterable<string>): Promise<boolean> {
-  const remindedSince = businessDateOffset(-(UNCONNECTED_PAGE_REMIND_DAYS - 1));
+  const working: string[] = [];
+  let complete = true;
   for (const pageId of pageIds) {
-    const last = deadPageLastReminded.get(pageId);
-    if (last && last >= remindedSince) continue;
     try {
       const conn = await getActiveConnectionByPageId(pageId);
-      if (!conn || (await isTokenValid(conn.pageToken))) continue;
+      if (!conn) continue;
+      if (await isTokenValid(conn.pageToken)) { working.push(pageId); continue; }
       const name = conn.pageName.trim();
       await notifyAdmins(
+        `page-dead:${pageId}`,
         `Facebook Page connection stopped working: ${name}`,
         `Taskezy can't read leads from the Facebook Page "${name}" any more: Meta no longer accepts its saved connection ` +
         `(the Page may have been deleted or unpublished, or the person who connected it lost access). Any leads from it are lost. ` +
         `Go to Settings → Integrations → Meta and reconnect with a Facebook account that manages this Page, or disconnect it if it's no longer used.`,
-        INTEGRATIONS_LINK,
-        UNCONNECTED_PAGE_REMIND_DAYS
+        INTEGRATIONS_LINK
       );
-      deadPageLastReminded.set(pageId, businessDateOffset(0));
     } catch (err) {
       if (isRateLimit(err)) {
         logger.warn({ err, pageId }, "Meta rate limit in the Page connection check; finishing next cycle");
-        return false;
+        complete = false;
+        break;
       }
       logger.warn({ err, pageId }, "Could not check this Page's connection; skipping it this cycle");
     }
   }
-  return true;
+  await clearAlerts(working.map(id => `page-dead:${id}`));
+  return complete;
 }
 
 /**
@@ -191,7 +212,7 @@ export async function alertDeadPageConnections(pageIds: Iterable<string>): Promi
  * ads run on an unconnected Page. Returns false if Meta failed partway (e.g. a
  * rate limit), so the day isn't marked done and the next cycle finishes it.
  */
-async function alertLeadCampaignsOnUnconnectedPages(
+export async function alertLeadCampaignsOnUnconnectedPages(
   tokenByAccount: Map<string, string>, connected: Set<string>, pageNames: Map<string, string>
 ): Promise<boolean> {
   let campaigns: { id: string; name: string; ad_account_id: string }[];
@@ -210,6 +231,7 @@ async function alertLeadCampaignsOnUnconnectedPages(
     return false;
   }
   let complete = true;
+  const fine: string[] = [];
   for (const c of campaigns) {
     const token = tokenByAccount.get(c.ad_account_id);
     if (!token) continue;
@@ -221,19 +243,21 @@ async function alertLeadCampaignsOnUnconnectedPages(
       // about this one campaign: skip it so the rest still get checked.
       if (isRateLimit(err)) {
         logger.warn({ err, campaignId: c.id }, "Meta rate limit in the unconnected-Page check; finishing next cycle");
-        return false;
+        complete = false;
+        break;
       }
       logger.warn({ err, campaignId: c.id }, "Could not check which Page this campaign's ads use; skipping this campaign");
       continue;
     }
     const missing = pageIds.filter(id => !connected.has(id));
-    if (missing.length === 0) continue;
+    if (missing.length === 0) { fine.push(c.id); continue; }
     const lead = await isLeadCampaign(c.id, token);
     if (lead === null) { complete = false; continue; }
-    if (!lead) continue;
+    if (!lead) { fine.push(c.id); continue; }
     try {
       const pages = missing.map(id => `"${pageNames.get(id) ?? `Page ID ${id}`}"`).join(", ");
       await notifyAdmins(
+        `campaign-unconnected-page:${c.id}`,
         `Campaign on an unconnected Page: ${c.name}`,
         `The campaign "${c.name}" runs ads on ${pages}, which ${missing.length === 1 ? "isn't" : "aren't"} connected to Taskezy, ` +
         `so its leads are being lost. Go to Settings → Integrations → Meta, reconnect and tick ${missing.length === 1 ? "that Page" : "those Pages"}.`,
@@ -243,6 +267,7 @@ async function alertLeadCampaignsOnUnconnectedPages(
       logger.error({ err, campaignId: c.id }, "Campaign-on-unconnected-Page alert failed");
     }
   }
+  await clearAlerts(fine.map(id => `campaign-unconnected-page:${id}`));
   return complete;
 }
 
@@ -286,13 +311,15 @@ export async function alertMissingMetaLeads(tokenByAccount: Map<string, string> 
     return false;
   }
   let complete = true;
+  const fine: string[] = [];
   for (const r of rows) {
-    if (r.taskezy_leads >= r.meta_leads * MISSING_LEADS_MAX_SHARE) continue;
+    if (r.taskezy_leads >= r.meta_leads * MISSING_LEADS_MAX_SHARE) { fine.push(r.cid); continue; }
     try {
       const lead = await isLeadCampaign(r.cid, r.ad_account_id ? tokenByAccount.get(r.ad_account_id) : undefined);
       if (lead === null) { complete = false; continue; }
-      if (!lead) continue;
+      if (!lead) { fine.push(r.cid); continue; }
       await notifyAdmins(
+        `leads-missing:${r.cid}`,
         `Meta leads missing: ${r.campaign}`,
         `Last ${WINDOW_DAYS} days: Meta reports ${r.meta_leads} leads for "${r.campaign}", but Taskezy received ${r.taskezy_leads}. ` +
         `Check that the campaign's Facebook Page is connected in Settings → Integrations → Meta.`,
@@ -302,5 +329,6 @@ export async function alertMissingMetaLeads(tokenByAccount: Map<string, string> 
       logger.error({ err, campaign: r.campaign }, "Missing Meta leads alert failed");
     }
   }
+  await clearAlerts(fine.map(id => `leads-missing:${id}`));
   return complete;
 }
