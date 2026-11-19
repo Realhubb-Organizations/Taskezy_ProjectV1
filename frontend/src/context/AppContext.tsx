@@ -112,6 +112,7 @@ import { dbCodeToFrontendStatus, frontendStatusToDbCode, isRealLeadId, isRealId 
 import { initNotificationSoundUnlock, playNotificationSound } from "@/lib/notificationSound";
 import { todayIso, toIsoDate } from "@/components/ui/DateRangePicker";
 import { consumePendingCallDial } from "@/lib/callTrigger";
+import { setPhoneMaskingUser } from "@/lib/maskPII";
 
 // --- Types ---
 export type Role = "ADMIN" | "FINANCE" | "AGENT";
@@ -1134,6 +1135,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // token restored from a previous session) is required. See `authLoading` /
   // the session-restore effect below and RequireAuth in dashboard/layout.tsx.
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  // Set during render (not in an effect) so the pages rendered below this
+  // provider already mask — or don't — on their very first paint.
+  setPhoneMaskingUser(currentUser?.email);
   const [authLoading, setAuthLoading] = useState(true);
   const [activeRole, setActiveRole] = useState<Role>("ADMIN");
   const [activeSystem, setActiveSystem] = useState<SystemType>("ADMIN");
