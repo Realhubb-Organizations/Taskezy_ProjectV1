@@ -146,6 +146,20 @@ export async function getCampaignObjective(campaignId: string, longLivedUserToke
 }
 
 /**
+ * Whether Meta still accepts a saved token. False when e.g. the Page was
+ * deleted or unpublished, or the person who connected it lost access. Asks
+ * Meta's debug_token with the app's own token, so it works even when the
+ * saved token itself no longer does.
+ */
+export async function isTokenValid(token: string): Promise<boolean> {
+  const data = await graphFetch<{ data?: { is_valid?: boolean } }>("/debug_token", {
+    input_token: token,
+    access_token: `${env.META_APP_ID}|${env.META_APP_SECRET}`
+  }, { retryOnRateLimit: false });
+  return data.data?.is_valid !== false;
+}
+
+/**
  * The Facebook Page(s) a campaign's currently ACTIVE ads run under. Its own
  * call (not part of getAdsForCampaign) so a Meta error here can only skip the
  * lead-loss check, never the Deep Dive ad sync. Asks only for the Page id:

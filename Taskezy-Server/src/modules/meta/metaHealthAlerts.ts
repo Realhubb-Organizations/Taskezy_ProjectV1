@@ -3,16 +3,17 @@ import { logger } from "../../utils/logger";
 import { BUSINESS_TIMEZONE, businessDateOffset } from "../../utils/businessDate";
 import { listActiveAdminIds } from "../users/users.repository";
 import { createNotification } from "../notifications/notifications.service";
-import { getManagedPageList, getCampaignAdPageIds, getCampaignObjective } from "./meta-client";
-import { listPageConnectionStates } from "./meta.repository";
+import { getManagedPageList, getCampaignAdPageIds, getCampaignObjective, isTokenValid } from "./meta-client";
+import { listPageConnectionStates, getActiveConnectionByPageId } from "./meta.repository";
 
 /**
  * Alerts admins (Reminder Alerts) when Meta leads can't reach Taskezy, so a
  * gap like UrbanRise (Meta 12 leads, Taskezy 0) is noticed within a day
  * instead of months later. Runs at most once per business day, after the Meta
  * sync has finished and refreshed the Campaigns page (jobs/metaAdSpendSync.ts).
- * Its Meta calls never wait on a rate limit: the first one ends the run and it
- * tries again next cycle. Every step is isolated; nothing here can throw.
+ * Its Meta calls never wait on a rate limit: a rate-limited check stops and the
+ * day isn't marked done, so the next cycle runs it again. Every step is
+ * isolated; nothing here can throw.
  *
  *  1. A Facebook Page the connected login manages isn't connected (weekly
  *     reminder; Pages someone disconnected on purpose are left alone).
@@ -20,6 +21,8 @@ import { listPageConnectionStates } from "./meta.repository";
  *     connected, so its leads are being lost right now.
  *  3. Last 7 days: Meta reports 5+ leads for a lead campaign but Taskezy
  *     received less than half of them, whatever the cause.
+ *  4. A connected Page whose saved connection Meta no longer accepts, so its
+ *     leads are silently lost (weekly reminder).
  *
  * "Lead campaign" = objective OUTCOME_LEADS / LEAD_GENERATION, so website or
  * traffic campaigns (whose pixel "leads" Meta also counts) never alert.
@@ -40,11 +43,14 @@ let lastRunDay: string | null = null;
 // ponytail: in-memory, so a server restart allows one extra reminder; move to a
 // table if that ever matters.
 const pageLastReminded = new Map<string, string>();
+// Same, for connected Pages whose saved connection stopped working.
+const deadPageLastReminded = new Map<string, string>();
 // A campaign's objective never changes, so Meta is asked once per campaign.
 const objectiveByCampaign = new Map<string, string>();
 
-const RATE_LIMIT_CODE = 17;
-const isRateLimit = (err: unknown) => (err as { code?: number })?.code === RATE_LIMIT_CODE;
+// 17 = per-user limit; 4 / 32 / 613 = app, Page and call-rate limits (debug_token runs on the app's own token).
+const RATE_LIMIT_CODES = new Set([4, 17, 32, 613]);
+const isRateLimit = (err: unknown) => RATE_LIMIT_CODES.has((err as { code?: number })?.code ?? 0);
 
 export async function runDailyMetaHealthChecks(accounts: Account[]): Promise<void> {
   const today = businessDateOffset(0);
@@ -75,10 +81,11 @@ export async function runDailyMetaHealthChecks(accounts: Account[]): Promise<voi
   }
 
   await alertUnconnectedPages([...pageNames].map(([id, name]) => ({ id, name })), connected, disconnected);
+  const deadChecked = await alertDeadPageConnections(connected);
   const campaignsChecked = await alertLeadCampaignsOnUnconnectedPages(tokenByAccount, connected, pageNames);
   const missingChecked = await alertMissingMetaLeads(tokenByAccount);
   // Only a complete run counts for the day; otherwise the next cycle tries again.
-  if (pagesListed && campaignsChecked && missingChecked) lastRunDay = today;
+  if (pagesListed && deadChecked && campaignsChecked && missingChecked) lastRunDay = today;
 }
 
 /** Sends to every active admin unless an alert with this title went out within `withinDays` business days. */
@@ -142,6 +149,41 @@ export async function alertUnconnectedPages(
       logger.error({ err, pageId: page.id }, "Unconnected Page alert failed");
     }
   }
+}
+
+/**
+ * 4. Connected Pages whose saved connection Meta no longer accepts (the Page
+ * was deleted or unpublished, or the person who connected it lost access).
+ * Taskezy still shows them as connected, but every lead from them fails to
+ * load. Returns false on a rate limit so the next cycle finishes the check.
+ */
+export async function alertDeadPageConnections(pageIds: Iterable<string>): Promise<boolean> {
+  const remindedSince = businessDateOffset(-(UNCONNECTED_PAGE_REMIND_DAYS - 1));
+  for (const pageId of pageIds) {
+    const last = deadPageLastReminded.get(pageId);
+    if (last && last >= remindedSince) continue;
+    try {
+      const conn = await getActiveConnectionByPageId(pageId);
+      if (!conn || (await isTokenValid(conn.pageToken))) continue;
+      const name = conn.pageName.trim();
+      await notifyAdmins(
+        `Facebook Page connection stopped working: ${name}`,
+        `Taskezy can't read leads from the Facebook Page "${name}" any more: Meta no longer accepts its saved connection ` +
+        `(the Page may have been deleted or unpublished, or the person who connected it lost access). Any leads from it are lost. ` +
+        `Go to Settings → Integrations → Meta and reconnect with a Facebook account that manages this Page, or disconnect it if it's no longer used.`,
+        INTEGRATIONS_LINK,
+        UNCONNECTED_PAGE_REMIND_DAYS
+      );
+      deadPageLastReminded.set(pageId, businessDateOffset(0));
+    } catch (err) {
+      if (isRateLimit(err)) {
+        logger.warn({ err, pageId }, "Meta rate limit in the Page connection check; finishing next cycle");
+        return false;
+      }
+      logger.warn({ err, pageId }, "Could not check this Page's connection; skipping it this cycle");
+    }
+  }
+  return true;
 }
 
 /**
