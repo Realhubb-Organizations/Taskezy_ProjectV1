@@ -11,7 +11,21 @@
 // foreign number (see leads.repository.ts's normalizeLeadPhone), so a fixed
 // first-2/last-2 mask reads consistently (keeping a foreign number's +);
 // non-standard lengths still degrade safely.
+// Accounts that see full phone numbers even though they aren't Admin.
+// Email stays masked for them. Mirrors WEB_CALL_ALLOWED_EMAILS in callTrigger.ts.
+const PHONE_UNMASKED_EMAILS = ["santosh@realhubb.in"];
+
+// Set once per login by AppContext (setPhoneMaskingUser), so every
+// maskPhone() call site honours the exception without each one knowing who
+// is signed in.
+let phoneUnmasked = false;
+
+export function setPhoneMaskingUser(email: string | null | undefined): void {
+  phoneUnmasked = !!email && PHONE_UNMASKED_EMAILS.includes(email.trim().toLowerCase());
+}
+
 export function maskPhone(phone: string): string {
+  if (phoneUnmasked) return phone;
   const digits = phone.replace(/\D/g, "");
   const plus = phone.trim().startsWith("+") ? "+" : "";
   if (digits.length <= 4) return "•".repeat(digits.length || 4);
