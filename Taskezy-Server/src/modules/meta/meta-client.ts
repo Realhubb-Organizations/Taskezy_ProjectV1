@@ -117,11 +117,15 @@ export interface MetaPage {
   access_token: string;
 }
 
-/** Page tokens minted from a long-lived user token do not expire on their own. */
+/**
+ * Page tokens minted from a long-lived user token do not expire on their own.
+ * Without a limit Meta returns only its default first 25 Pages.
+ */
 export async function getManagedPages(longLivedUserToken: string): Promise<MetaPage[]> {
   const data = await graphFetch<{ data: MetaPage[] }>("/me/accounts", {
     access_token: longLivedUserToken,
-    fields: "id,name,access_token"
+    fields: "id,name,access_token",
+    limit: "200"
   });
   return data.data;
 }
