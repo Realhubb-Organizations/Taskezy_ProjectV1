@@ -55,30 +55,12 @@ const lastActivityIso = (l: Lead): string | undefined => {
 
 const lastActivityTime = (l: Lead): string => formatDateTime(lastActivityIso(l));
 
-// Booking a lead auto-generates a real invoice using this deal value as
-// the base amount (see AppContext's updateLeadStatus) — a real value is
-// required here, not invented, matching the same guard used everywhere
-// else in the app a status dropdown can reach a Booking status.
+// Booked only starts the Sales PNL approval — no deal value is asked here;
+// the agreement value is entered later when the booking is created.
 export function useLeadStatusChange() {
   const { updateLeadStatus } = useApp();
-  const { toast, prompt: promptDialog } = useDialog();
   return async (leadId: string, status: LeadStatus) => {
-    if (status === "Booked") {
-      const input = await promptDialog({
-        title: "Enter deal value",
-        message: "Enter the real deal value for this booking (INR):",
-        label: "Deal value (INR)",
-        confirmLabel: "Mark as Booked"
-      });
-      const dealValue = input ? parseFloat(input.replace(/[^0-9.]/g, "")) : NaN;
-      if (!input || isNaN(dealValue) || dealValue <= 0) {
-        toast("A valid deal value is required to mark a lead as Booked.", "warning");
-        return;
-      }
-      updateLeadStatus(leadId, status, dealValue);
-    } else {
-      updateLeadStatus(leadId, status);
-    }
+    updateLeadStatus(leadId, status);
   };
 }
 

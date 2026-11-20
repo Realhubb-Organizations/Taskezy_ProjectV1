@@ -265,28 +265,11 @@ export default function LeadDashboard() {
     .filter(u => !myTeamNames || myTeamNames.has(u.name))
     .map(u => u.name);
 
+  // Booked only starts the Sales PNL approval — no deal value is asked here;
+  // the agreement value is entered later when the booking is created.
   const handleUpdateLeadStatus = async (leadId: string, status: LeadStatus) => {
-    // Booking a lead auto-generates a real invoice using this deal value as
-    // the base amount (see AppContext's updateLeadStatus) — a real value is
-    // required here, not a hardcoded ₹5,00,000 regardless of the actual deal.
-    if (status === "Booked") {
-      const input = await promptDialog({
-        title: "Enter deal value",
-        message: "Enter the real deal value for this booking (INR):",
-        label: "Deal value (INR)",
-        confirmLabel: "Mark as Booked"
-      });
-      const dealValue = input ? parseFloat(input.replace(/[^0-9.]/g, "")) : NaN;
-      if (!input || isNaN(dealValue) || dealValue <= 0) {
-        toast("A valid deal value is required to mark a lead as Booked.", "warning");
-        return;
-      }
-      updateLeadStatus(leadId, status, dealValue);
-      setServerLeads(prev => prev.map(l => (l.id === leadId ? { ...l, status, dealValue } : l)));
-    } else {
-      updateLeadStatus(leadId, status);
-      setServerLeads(prev => prev.map(l => (l.id === leadId ? { ...l, status } : l)));
-    }
+    updateLeadStatus(leadId, status);
+    setServerLeads(prev => prev.map(l => (l.id === leadId ? { ...l, status } : l)));
 
     // Update local drawer state if active
     if (selectedLead && selectedLead.id === leadId) {

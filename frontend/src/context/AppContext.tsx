@@ -2236,42 +2236,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       lead.dealValue = dealValue;
       lead.kycDocName = kycDocName;
 
-      // One invoice per booking — skip if a status flip-flop already
-      // created one for this lead.
-      if (!invoices.some(i => i.leadId === lead.id)) {
-        const localInvoiceId = `inv-${Date.now()}`;
-        setInvoices(prev => [...prev, {
-          id: localInvoiceId,
-          leadId: lead.id,
-          clientName: lead.name,
-          baseAmount: dealValue || 0,
-          cgst: (dealValue || 0) * 0.09,
-          sgst: (dealValue || 0) * 0.09,
-          totalAmount: (dealValue || 0) * 1.18,
-          status: "Draft",
-          createdAt: new Date().toISOString(),
-          dueDate: new Date(Date.now() + 86400000 * 15).toISOString(),
-          projectName: lead.property
-        }]);
-
-        if (isApiSessionActive() && isRealLeadId(leadId)) {
-          apiCreateInvoice({
-            leadId,
-            clientName: lead.name,
-            baseAmount: dealValue || 0,
-            projectName: lead.property
-          })
-            .then((created) => setInvoices(prev => prev.map(i => (i.id === localInvoiceId ? mapApiInvoiceToFrontend(created) : i))))
-            .catch((err) => console.warn("Could not persist auto-generated invoice to the database:", err));
-        }
-      }
-
+      // No invoice is created here any more: Booked only starts the Sales
+      // PNL approval, and invoices/payments live in Sales PNL.
       addCalendarEvent({
         system: "CRM",
         type: "BOOKING",
         title: `Booking Finalized — ${lead.name}`,
         date: todayIso(),
-        description: `${lead.property || "Property"} • Deal Value ₹${(dealValue || 0).toLocaleString("en-IN")}`,
+        description: `${lead.property || "Property"} • Sent for booking approval`,
         leadId: lead.id
       });
     } else if (targetStatus === "EOI") {

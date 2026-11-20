@@ -1,7 +1,7 @@
 import { PoolClient } from "pg";
 import { TASK_DUE_AT_SQL, TASK_OVERDUE_SQL } from "../tasks/taskDue";
 import { REACHED_FOLLOWUP_OR_SITE_VISIT_SQL } from "./leadStatusTransitions";
-import { CAMPAIGN_LEAD_SQL, ON_LEADS_PAGE_SQL, QUALIFIED_LEAD_SQL, RNR_PICKED_UP_SQL, UNQUALIFIED_LEAD_SQL } from "./qualifiedLeads";
+import { BOOKING_VALUE_SQL, CAMPAIGN_LEAD_SQL, ON_LEADS_PAGE_SQL, QUALIFIED_LEAD_SQL, RNR_PICKED_UP_SQL, UNQUALIFIED_LEAD_SQL } from "./qualifiedLeads";
 import { pool, query, withTransaction } from "../../db/pool";
 import { BUSINESS_TIMEZONE } from "../../utils/businessDate";
 import { normalizeForeignPhone } from "../../utils/validation";
@@ -607,7 +607,7 @@ export async function getAgentReportStats(
             count(*) FILTER (WHERE l.status_code NOT IN ('NEW_LEAD', 'REVIVED')) AS contacted,
             count(*) FILTER (WHERE l.status_code = ANY($${qualifiedParam}::text[]) OR ${RNR_PICKED_UP_SQL("l")}) AS qualified,
             count(*) FILTER (WHERE l.status_code = ANY($${siteVisitParam}::text[])) AS site_visits,
-            COALESCE(SUM(l.deal_value) FILTER (WHERE l.status_code = 'BOOKED'), 0) AS booking_value,
+            COALESCE(SUM(${BOOKING_VALUE_SQL("l")}), 0) AS booking_value,
             count(*) FILTER (WHERE l.status_code = 'BOOKED') AS booking_count,
             COALESCE(SUM(c.spend_per_lead), 0) AS allocated_spend,
             count(*) FILTER (
@@ -742,7 +742,7 @@ export async function getManagerReportStatsByAgent(
      SELECT l.assigned_agent_id,
             count(*) AS leads_count,
             COALESCE(SUM(c.spend_per_lead), 0) AS spend,
-            COALESCE(SUM(l.deal_value) FILTER (WHERE l.status_code = 'BOOKED'), 0) AS booking_value,
+            COALESCE(SUM(${BOOKING_VALUE_SQL("l")}), 0) AS booking_value,
             count(*) FILTER (
               WHERE l.source <> 'Bulk Upload' AND NOT ${WAITING_ON_ADMIN_SQL} AND l.assigned_at IS NOT NULL AND (
                 (l.first_response_at IS NOT NULL AND EXTRACT(EPOCH FROM (l.first_response_at - l.assigned_at)) / 60 > $${slaParam}::numeric)
