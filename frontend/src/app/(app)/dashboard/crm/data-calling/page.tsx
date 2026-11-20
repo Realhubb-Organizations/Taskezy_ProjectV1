@@ -13,7 +13,7 @@ import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/Searcha
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
 import DateRangePicker, { DateRangeValue, toIsoDate } from "@/components/ui/DateRangePicker";
 import DateRangeSelect from "@/components/ui/DateRangeSelect";
-import { canChangeLeadStatus, canReassignThisLead, canUploadLeads, otherManagers, splitEvenly, uploadAssignableUsers, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
+import { canChangeLeadStatus, canReassignThisLead, canUploadLeads, isLeadAssignableUser, otherManagers, splitEvenly, uploadAssignableUsers, STATUS_LOCKED_HINT } from "@/lib/leadAssignment";
 import { nextCallFor } from "@/lib/followups";
 import NextCallCell from "@/components/crm/NextCallCell";
 import { useDialog } from "@/components/ui/DialogProvider";
@@ -917,7 +917,7 @@ export default function DataCallingPage() {
 
   // Admin's Reshuffle needs no note. Same as the Leads page.
   const adminReshuffle = isAdmin && assignFlowMode === "reshuffle";
-  const eligibleAssignees = useMemo(() => users.filter(u => u.role === "AGENT"), [users]);
+  const eligibleAssignees = useMemo(() => users.filter(isLeadAssignableUser), [users]);
   const [assignNote, setAssignNote] = useState("");
   const canConfirmAssign = assignSelectedAssigneeIds.length > 0 && (adminReshuffle || assignNote.trim().length > 0);
   const [assignSubmitting, setAssignSubmitting] = useState(false);

@@ -27,8 +27,14 @@ export function otherManagers<U extends AssignableUser>(users: U[], callerId: st
  * Who can hold a lead: active CRM sales agents and managers. Never Finance,
  * Admin or other departments — same rule the server enforces on reassign.
  */
+/**
+ * Can be given leads: an active sales agent/manager, or an admin who is in
+ * the Sales department (an admin who also sells). Same rule as the server.
+ */
 export function isLeadAssignableUser(u: { role: string; status?: string; department?: string }): boolean {
-  return u.role === "AGENT" && u.status !== "INACTIVE" && (!u.department || u.department === "SALES");
+  if (u.status === "INACTIVE") return false;
+  if (u.role === "AGENT") return !u.department || u.department === "SALES";
+  return u.role === "ADMIN" && u.department === "SALES";
 }
 
 /** Mirrors the server rule: the lead's owner, the owner's manager, or an admin may change its status. */
@@ -83,7 +89,7 @@ export function eligibleAssignees<U extends AssignableUser>({
       anyAllMembers = true;
     }
   });
-  let pool = anyAllMembers ? users.filter(u => u.role === "AGENT") : users.filter(u => teamIds.has(u.id));
+  let pool = anyAllMembers ? users.filter(isLeadAssignableUser) : users.filter(u => teamIds.has(u.id));
 
   if (caller.role !== "ADMIN") {
     // Own direct reports (for these properties), plus every other manager
@@ -112,7 +118,7 @@ export function uploadAssignableUsers<U extends { id: string; role: string; stat
   users: U[],
   uploader: { id: string; role: string } | null
 ): U[] {
-  const sales = users.filter(u => u.role === "AGENT" && u.status !== "INACTIVE" && (!u.department || u.department === "SALES"));
+  const sales = users.filter(isLeadAssignableUser);
   if (!uploader) return [];
   if (uploader.role === "ADMIN") return sales;
   return sales.filter(u => u.id === uploader.id || u.managerId === uploader.id);

@@ -314,7 +314,8 @@ export async function findActiveSalesUsersByIds(client: PoolClient, ids: string[
   const { rows } = await client.query<{ id: string; name: string }>(
     `SELECT id, first_name || COALESCE(' ' || last_name, '') AS name
      FROM users
-     WHERE id = ANY($1::uuid[]) AND role = 'AGENT' AND status = 'ACTIVE' AND (department IS NULL OR department = 'SALES')`,
+     WHERE id = ANY($1::uuid[]) AND status = 'ACTIVE'
+       AND ((role = 'AGENT' AND (department IS NULL OR department = 'SALES')) OR (role = 'ADMIN' AND department = 'SALES'))`,
     [ids]
   );
   return rows;
