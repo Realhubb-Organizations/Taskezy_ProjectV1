@@ -1,8 +1,7 @@
 import { PoolClient } from "pg";
 import { TASK_DUE_AT_SQL, TASK_OVERDUE_SQL } from "../tasks/taskDue";
 import { REACHED_FOLLOWUP_OR_SITE_VISIT_SQL } from "./leadStatusTransitions";
-import { CALL_NOT_QUALIFIED_SQL, CAMPAIGN_LEAD_SQL, ON_LEADS_PAGE_SQL, QUALIFIED_LEAD_SQL, RNR_PICKED_UP_SQL, UNQUALIFIED_LEAD_SQL } from "./qualifiedLeads";
-import { BOOKING_VALUE_SQL, CAMPAIGN_LEAD_SQL, ON_LEADS_PAGE_SQL, QUALIFIED_LEAD_SQL, RNR_PICKED_UP_SQL, UNQUALIFIED_LEAD_SQL } from "./qualifiedLeads";
+import { BOOKING_VALUE_SQL, CALL_NOT_QUALIFIED_SQL, CAMPAIGN_LEAD_SQL, ON_LEADS_PAGE_SQL, QUALIFIED_LEAD_SQL, RNR_PICKED_UP_SQL, UNQUALIFIED_LEAD_SQL } from "./qualifiedLeads";
 import { pool, query, withTransaction } from "../../db/pool";
 import { BUSINESS_TIMEZONE } from "../../utils/businessDate";
 import { normalizeForeignPhone } from "../../utils/validation";
