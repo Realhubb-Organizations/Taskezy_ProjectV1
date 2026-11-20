@@ -265,8 +265,8 @@ export interface MetaCampaign {
   name: string;
   status?: string;
   effective_status?: string;
-  /** Total spend over the campaign's whole life; undefined when Meta didn't return it. */
-  lifetimeSpend?: number;
+  /** Spend over the `spendWindow` asked for (getCampaigns); undefined when Meta didn't return it. */
+  windowSpend?: number;
 }
 
 const CAMPAIGN_FIELDS = "id,name,status,effective_status";
@@ -274,31 +274,35 @@ const CAMPAIGN_FIELDS = "id,name,status,effective_status";
 /**
  * Every campaign (any status) under one ad account, every page. Requests both
  * status and effective_status — some ad account/permission combinations leave
- * one or the other unset. With `withLifetimeSpend` (the 6-hourly spend sync
- * only) each campaign's lifetime spend comes in the same call (Meta leaves
- * `insights` out for a campaign that never spent); if Meta refuses that
- * bigger request, the plain list is read and lifetimeSpend stays undefined,
- * so nothing is skipped on a guess.
+ * one or the other unset. With `spendWindow` (the 6-hourly spend sync only)
+ * each campaign's spend over those dates comes in the same call (Meta leaves
+ * `insights` out for a campaign with no spend in them); if Meta refuses that
+ * bigger request, the plain list is read and windowSpend stays undefined, so
+ * nothing is skipped on a guess.
  */
-export async function getCampaigns(adAccountId: string, longLivedUserToken: string, opts: { withLifetimeSpend?: boolean } = {}): Promise<MetaCampaign[]> {
+export async function getCampaigns(
+  adAccountId: string,
+  longLivedUserToken: string,
+  opts: { spendWindow?: { since: string; until: string } } = {}
+): Promise<MetaCampaign[]> {
   const plainList = () => graphFetchAll<MetaCampaign>(`/${adAccountId}/campaigns`, { access_token: longLivedUserToken, fields: CAMPAIGN_FIELDS, limit: "200" });
-  if (!opts.withLifetimeSpend) return plainList();
+  if (!opts.spendWindow) return plainList();
   try {
     // 100 per page: the spend figure makes each page heavier for Meta.
     const rows = await graphFetchAll<MetaCampaign & { insights?: { data?: { spend?: string }[] } }>(`/${adAccountId}/campaigns`, {
       access_token: longLivedUserToken,
-      fields: `${CAMPAIGN_FIELDS},insights.date_preset(maximum){spend}`,
+      fields: `${CAMPAIGN_FIELDS},insights.time_range(${JSON.stringify(opts.spendWindow)}){spend}`,
       limit: "100"
     });
     return rows.map(({ insights, ...campaign }) => {
       const spend = Number(insights?.data?.[0]?.spend ?? 0);
-      return { ...campaign, lifetimeSpend: Number.isFinite(spend) ? spend : undefined };
+      return { ...campaign, windowSpend: Number.isFinite(spend) ? spend : undefined };
     });
   } catch (err) {
     // Meta busy (any of its rate-limit codes): don't hit the throttled account
     // again straight away — this account waits for the next cycle, as before.
     if (META_THROTTLE_CODES.includes((err as { code?: number }).code ?? 0)) throw err;
-    logger.warn({ err, adAccountId }, "Meta refused the campaign list with lifetime spend — reading the plain list");
+    logger.warn({ err, adAccountId }, "Meta refused the campaign list with spend — reading the plain list");
     return plainList();
   }
 }

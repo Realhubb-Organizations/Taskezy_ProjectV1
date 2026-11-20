@@ -33,14 +33,15 @@ const FIRST_SYNC_LOOKBACK_DAYS = 365;
 // comfortably allow it, lower it if cycles start failing.
 const MAX_WIDE_BACKFILLS_PER_CYCLE = 5;
 
-// A finished campaign Meta says never spent anything (lifetime spend 0, from
-// the campaign list itself): no spend, leads or ads to read. Its ad tree used
-// to be re-read every cycle (ad sets + ads + a year of insights per ad, all
-// empty — ~250 calls a cycle on production) and it took the full-year
-// re-read slots. Unknown spend (Meta didn't return it) or a campaign that is
+// A finished campaign Meta says spent nothing in the last FIRST_SYNC_LOOKBACK_DAYS
+// (the furthest this sync ever reads; from the campaign list itself): never
+// spent, or spent only before that. Nothing here could read anything for it,
+// yet its ad tree was re-read every cycle (ad sets + ads + a year of insights
+// per ad, all empty) and it took the full-year re-read slots — 77 campaigns
+// on production. Unknown spend (Meta didn't return it) or a campaign that is
 // running again is read as before.
 function finishedWithoutSpend(campaign: MetaCampaign): boolean {
-  return !isCampaignActive(campaign) && campaign.lifetimeSpend === 0;
+  return !isCampaignActive(campaign) && campaign.windowSpend === 0;
 }
 
 function isoDateNDaysAgo(n: number): string {
@@ -102,7 +103,7 @@ async function runSync(): Promise<void> {
   const items: { account: (typeof adAccounts)[number]; campaign: MetaCampaign }[] = [];
   for (const account of adAccounts) {
     try {
-      for (const campaign of await getCampaigns(account.id, account.userToken, { withLifetimeSpend: true })) items.push({ account, campaign });
+      for (const campaign of await getCampaigns(account.id, account.userToken, { spendWindow: { since: wideSince, until } })) items.push({ account, campaign });
     } catch (err) {
       logger.error({ err, adAccountId: account.id }, "Could not fetch campaigns for ad account — skipping this account this cycle");
     }
@@ -118,15 +119,15 @@ async function runSync(): Promise<void> {
   //    took every slot and old counts were never corrected.
   //  - ad level: campaigns whose per-ad rows still hold the old count, in
   //    Meta's list order as before.
-  // A finished campaign Meta says never spent anything has nothing to read,
-  // so it gets no slot (and no further calls in the loop below).
-  // Meta's "never spent" is only trusted when Taskezy has never saved any
-  // spend for the campaign either.
+  // A finished campaign with no spend in the window has nothing to read, so
+  // it gets no slot (and no further calls in the loop below). Meta's "no
+  // spend" is only trusted when Taskezy has saved no spend in that window
+  // either; older saved numbers are kept as they are.
   const skipReadsFor = new Set<string>();
   for (const { campaign } of items) {
     if (!finishedWithoutSpend(campaign)) continue;
     try {
-      if (!(await metaRepo.hasAnyCampaignSpend(campaign.id))) skipReadsFor.add(campaign.id);
+      if (!(await metaRepo.hasCampaignSpendSince(campaign.id, wideSince))) skipReadsFor.add(campaign.id);
     } catch (err) {
       logger.warn({ err, campaignId: campaign.id }, "Could not check this campaign's saved spend; it is read as usual this cycle");
     }
