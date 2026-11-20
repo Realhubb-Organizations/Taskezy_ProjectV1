@@ -20,6 +20,7 @@ import {
   verifyWebhookSignature
 } from "./meta-client";
 import { ingestMetaLead } from "./meta.lead-ingest";
+import { getPageStatuses, syncPages } from "./meta.pageSync";
 import * as repo from "./meta.repository";
 
 export const metaRouter = Router();
@@ -116,6 +117,26 @@ metaRouter.get(
 metaRouter.get("/connections", requireAuth, requireRole("ADMIN"), asyncHandler(async (_req: Request, res: Response) => {
   sendOk(res, await repo.listConnections());
 }));
+
+// Settings → Meta Ads: every Page's state, and a Sync that connects missing Pages
+// with the Facebook logins Taskezy already holds (see meta.pageSync.ts).
+metaRouter.get("/pages", requireAuth, requireRole("ADMIN"), asyncHandler(async (_req: Request, res: Response) => {
+  sendOk(res, await getPageStatuses());
+}));
+
+const syncPagesSchema = z.object({
+  pageIds: z.array(z.string().regex(/^\d{1,30}$/, "Page ids are numeric")).min(1).max(200).optional()
+});
+
+metaRouter.post(
+  "/pages/sync",
+  requireAuth,
+  requireRole("ADMIN"),
+  validate({ body: syncPagesSchema }),
+  asyncHandler(async (req: Request, res: Response) => {
+    sendOk(res, await syncPages(req.user!.sub, req.body.pageIds));
+  })
+);
 
 const connectionIdParamSchema = z.object({ id: z.string().uuid() });
 

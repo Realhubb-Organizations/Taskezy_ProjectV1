@@ -9,10 +9,13 @@ import {
   apiListMetaConnections,
   apiGetMetaConnectUrl,
   apiDisconnectMeta,
+  apiSyncMetaPages,
+  ApiRequestError,
   ApiMetaConnection,
   apiListGoogleAdsAccounts,
   ApiGoogleAdsAccount
 } from "@/lib/apiClient";
+import { useMetaPageStatuses, describeSyncResult, ConnectionLostPill, NotConnectedPages } from "@/components/dashboard/MetaPageSync";
 import { ChevronRight, CheckCircle, AlertTriangle, Info, Search, ArrowRight, Users, TrendingUp, LayoutGrid, Calendar, RefreshCw, Clock, Zap, Mail, Hash, IndianRupee, ShieldCheck, Edit, Unplug } from "lucide-react";
 import { LineSkeleton } from "@/components/ui/Skeletons";
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
@@ -246,6 +249,25 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
     }
   };
 
+  // Live Page states from Meta (connected / connection lost / ready / disconnected) and the Sync.
+  const metaPages = useMetaPageStatuses(key === "meta" && activeRole === "ADMIN");
+  const metaPageState = new Map((metaPages.statuses?.pages ?? []).map(p => [p.pageId, p]));
+  const [metaSyncing, setMetaSyncing] = useState(false);
+  const handleSyncMeta = async (pageIds?: string[]) => {
+    setMetaSyncing(true);
+    try {
+      setMetaBanner(describeSyncResult(await apiSyncMetaPages(pageIds)));
+      await Promise.all([loadMetaConnections(), metaPages.reload()]);
+    } catch (err) {
+      // 409 = a sync is already running; its own message says so
+      const text = err instanceof ApiRequestError && err.status === 409 ? err.message : "Sync didn't finish — please try again.";
+      setMetaBanner({ kind: "error", text });
+      console.warn("Meta sync failed:", err);
+    } finally {
+      setMetaSyncing(false);
+    }
+  };
+
   const activeMetaConnections = metaConnections.filter(c => c.status === "ACTIVE");
   const filteredMetaConnections = activeMetaConnections.filter(c =>
     !pageSearch.trim() || c.page_name.toLowerCase().includes(pageSearch.trim().toLowerCase())
@@ -372,17 +394,31 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
   const checkError = key === "meta" ? metaCheckError : googleCheckError;
   const retryCheck = key === "meta" ? loadMetaConnections : loadGoogleAccounts;
   const connectedCount = key === "meta" ? activeMetaConnections.length : activeGoogleAccounts.length;
-  // Most recent connection's created_at, across whichever platform is
-  // active — the same real timestamp the Connected Apps card labels
-  // "Last synced" (there's no separate sync-log table for a true one).
-  const lastSyncedAt = [...(key === "meta" ? activeMetaConnections : activeGoogleAccounts)]
-    .map(c => c.created_at)
-    .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
+  // Meta: the last time a Sync or Connect confirmed a Page (migration 058),
+  // undefined until the first sync. Google: most recent account's created_at,
+  // the same timestamp the Connected Apps card shows (no sync log there).
+  const lastSyncedAt = (key === "meta"
+    ? activeMetaConnections.map(c => c.last_synced_at).filter((t): t is string => !!t)
+    : activeGoogleAccounts.map(c => c.created_at)
+  ).sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
 
   const webhookUrl = useMemo(() => {
     const base = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
     return `${base}/api/v1/meta/webhook`;
   }, []);
+
+  const notConnectedSection = key === "meta" && activeRole === "ADMIN" ? (
+    <NotConnectedPages
+      pages={metaPages.statuses?.pages ?? []}
+      loading={metaPages.loading}
+      failed={metaPages.failed}
+      loginErrors={metaPages.statuses?.loginErrors ?? 0}
+      busy={metaSyncing || metaLoading}
+      onRetry={metaPages.reload}
+      onConnect={pageId => handleSyncMeta([pageId])}
+      onConnectWithFacebook={handleConnectMeta}
+    />
+  ) : null;
 
   const pagesTable = (
     <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
@@ -432,7 +468,11 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
                   <tr key={c.id}>
                     <td className="px-5 py-3 font-bold text-slate-800">{c.page_name}</td>
                     <td className="px-5 py-3 font-mono text-slate-500">{c.page_id}</td>
-                    <td className="px-5 py-3">{statusPill(true)}</td>
+                    <td className="px-5 py-3">
+                      {metaPageState.get(c.page_id)?.state === "connection_lost"
+                        ? <ConnectionLostPill page={metaPageState.get(c.page_id)!} />
+                        : statusPill(true)}
+                    </td>
                     <td className="px-5 py-3 text-slate-700">
                       {isDataLoading ? <LineSkeleton width={24} height={12} /> : leadsForPageLast30Days(c.page_name)}
                     </td>
@@ -589,7 +629,23 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
                 <p className="text-[10px] text-slate-500 font-bold whitespace-nowrap">{key === "meta" ? "Total Leads" : "Total Spend Synced"}</p>
               </div>
             </div>
-            {active && lastSyncedAt && (
+            {key === "meta" && activeRole === "ADMIN" ? (
+              <div className="w-full flex flex-wrap items-center justify-end gap-3 -mt-1">
+                <p className="text-[10px] text-slate-400 font-semibold flex items-center gap-1.5">
+                  <span className={`h-1.5 w-1.5 rounded-full ${lastSyncedAt ? "bg-emerald-500" : "bg-slate-300"}`} />
+                  {lastSyncedAt ? `Last synced ${formatDateTime(lastSyncedAt)}` : "Not synced yet"}
+                </p>
+                <button
+                  onClick={() => handleSyncMeta()}
+                  disabled={metaSyncing}
+                  title="Connect every Page the saved Facebook logins manage, repair lost connections and add new ad accounts"
+                  className="ui-btn ui-btn-secondary inline-flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${metaSyncing ? "motion-safe:animate-spin" : ""}`} />
+                  {metaSyncing ? "Syncing…" : "Sync now"}
+                </button>
+              </div>
+            ) : active && lastSyncedAt && (
               <div className="w-full flex justify-end -mt-1">
                 <p className="text-[10px] text-slate-400 font-semibold flex items-center gap-1.5">
                   <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
@@ -688,7 +744,7 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
                           <div className="flex items-center gap-2"><Calendar className="h-3.5 w-3.5 text-slate-400 shrink-0" /><span className="text-slate-400 font-semibold">Connected Since</span></div>
                           <p className="font-bold text-slate-700 -mt-1.5 pl-5.5">{formatDate(mostRecentMetaConnection?.created_at)}</p>
                           <div className="flex items-center gap-2"><RefreshCw className="h-3.5 w-3.5 text-slate-400 shrink-0" /><span className="text-slate-400 font-semibold">Last Synced</span></div>
-                          <p className="font-bold text-slate-700 -mt-1.5 pl-5.5">{formatDateTime(lastSyncedAt)}</p>
+                          <p className="font-bold text-slate-700 -mt-1.5 pl-5.5">{lastSyncedAt ? formatDateTime(lastSyncedAt) : "Not synced yet"}</p>
                           <div className="flex items-center gap-2"><Clock className="h-3.5 w-3.5 text-slate-400 shrink-0" /><span className="text-slate-400 font-semibold">Next Sync</span></div>
                           {/* Meta delivers leads via a real-time webhook, not a
                               polling job — there's no "next run" to count down
@@ -790,11 +846,17 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
               </div>
 
               {pagesTable}
+              {notConnectedSection}
               {statCards}
             </div>
           )}
 
-          {tab === "pages" && key === "meta" && pagesTable}
+          {tab === "pages" && key === "meta" && (
+            <div className="space-y-4">
+              {pagesTable}
+              {notConnectedSection}
+            </div>
+          )}
           {tab === "accounts" && key === "google" && pagesTable}
 
           {tab === "mapping" && key === "meta" && (
