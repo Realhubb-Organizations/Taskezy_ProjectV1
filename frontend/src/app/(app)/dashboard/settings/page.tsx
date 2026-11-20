@@ -1125,7 +1125,10 @@ export default function SettingsPage() {
             {activeMetaConnections.length > 0 && (
               <p className="text-[10px] text-slate-400 flex items-center gap-1.5">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" />
-                Last synced {formatConnectedSince(activeMetaConnections.map(c => c.created_at))}
+                {/* real sync time (Sync now / Connect, migration 058), not the connection date */}
+                {activeMetaConnections.some(c => c.last_synced_at)
+                  ? `Last synced ${formatConnectedSince(activeMetaConnections.flatMap(c => c.last_synced_at ? [c.last_synced_at] : []))}`
+                  : "Not synced yet"}
               </p>
             )}
             <div className="flex items-center justify-between pt-1 mt-auto">

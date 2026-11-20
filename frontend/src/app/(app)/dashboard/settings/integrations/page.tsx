@@ -286,14 +286,13 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
   const leadsForPageLast30Days = (pageName: string) => leads.filter(l =>
     l.metaPageName === pageName && l.createdAtStr && Date.now() - new Date(l.createdAtStr).getTime() <= THIRTY_DAYS_MS
   ).length;
-  // Most recent real lead for a Page — the closest honest stand-in for a
-  // per-page "last synced" (falls back to the connection's own created_at
-  // if the Page hasn't produced a lead yet).
-  const lastActivityForPage = (c: ApiMetaConnection) => {
-    const pageLeads = leads.filter(l => l.metaPageName === c.page_name && l.createdAtStr);
-    if (pageLeads.length === 0) return c.created_at;
-    return pageLeads.map(l => l.createdAtStr!).sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
-  };
+  // When a Page's most recent lead arrived ("Last Lead" column); undefined if
+  // it hasn't produced one yet. The real sync time is shown in the header.
+  const lastLeadForPage = (c: ApiMetaConnection): string | undefined =>
+    leads
+      .filter(l => l.metaPageName === c.page_name && l.createdAtStr)
+      .map(l => l.createdAtStr!)
+      .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
 
   const metaLeadsAll = useMemo(() => leads.filter(l => !!l.metaPageName || l.source === "Meta Ads"), [leads]);
   const totalLeadsViaMeta = metaLeadsAll.length;
@@ -330,6 +329,9 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
   const mostRecentMetaConnection = [...activeMetaConnections].sort(
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
   )[0];
+  // "Connected Since" = when the first Page still connected was connected, not the newest one.
+  const firstMetaConnectedAt = activeMetaConnections.map(c => c.created_at)
+    .sort((a, b) => new Date(a).getTime() - new Date(b).getTime())[0];
   const connectedByUser = mostRecentMetaConnection ? users.find(u => u.id === mostRecentMetaConnection.connected_by) : undefined;
   const metaConnectedByName = connectedByUser?.name || mostRecentMetaConnection?.connected_by || null;
   const metaAdAccountId = activeMetaConnections.find(c => c.ad_account_id)?.ad_account_id;
@@ -455,7 +457,7 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
               <th className="px-5 py-2.5">{key === "meta" ? "Page ID" : "Account ID"}</th>
               <th className="px-5 py-2.5">Status</th>
               <th className="px-5 py-2.5">{key === "meta" ? "Leads (Last 30 Days)" : "Spend Synced"}</th>
-              <th className="px-5 py-2.5">{key === "meta" ? "Last Synced" : "Connected Since"}</th>
+              <th className="px-5 py-2.5">{key === "meta" ? "Last Lead" : "Connected Since"}</th>
               {key === "meta" && <th className="px-5 py-2.5 text-right">Actions</th>}
             </tr>
           </thead>
@@ -476,7 +478,7 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
                     <td className="px-5 py-3 text-slate-700">
                       {isDataLoading ? <LineSkeleton width={24} height={12} /> : leadsForPageLast30Days(c.page_name)}
                     </td>
-                    <td className="px-5 py-3 text-slate-500">{formatDateTime(lastActivityForPage(c))}</td>
+                    <td className="px-5 py-3 text-slate-500">{lastLeadForPage(c) ? formatDateTime(lastLeadForPage(c)) : "No leads yet"}</td>
                     <td className="px-5 py-3 text-right">
                       <RowActionsMenu
                         label="Page actions"
@@ -742,7 +744,7 @@ function RealIntegrationDetail({ keyParam }: { keyParam: string | null }) {
                         </button>
                         <div className="space-y-2.5 text-xs pt-1">
                           <div className="flex items-center gap-2"><Calendar className="h-3.5 w-3.5 text-slate-400 shrink-0" /><span className="text-slate-400 font-semibold">Connected Since</span></div>
-                          <p className="font-bold text-slate-700 -mt-1.5 pl-5.5">{formatDate(mostRecentMetaConnection?.created_at)}</p>
+                          <p className="font-bold text-slate-700 -mt-1.5 pl-5.5">{formatDate(firstMetaConnectedAt)}</p>
                           <div className="flex items-center gap-2"><RefreshCw className="h-3.5 w-3.5 text-slate-400 shrink-0" /><span className="text-slate-400 font-semibold">Last Synced</span></div>
                           <p className="font-bold text-slate-700 -mt-1.5 pl-5.5">{lastSyncedAt ? formatDateTime(lastSyncedAt) : "Not synced yet"}</p>
                           <div className="flex items-center gap-2"><Clock className="h-3.5 w-3.5 text-slate-400 shrink-0" /><span className="text-slate-400 font-semibold">Next Sync</span></div>
