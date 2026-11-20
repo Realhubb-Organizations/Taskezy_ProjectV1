@@ -402,7 +402,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   ];
 
   const financeItems = [
-    { name: "Sales Tracker", href: "/dashboard/finance", activeCheck: (p: string, t?: string | null) => p === "/dashboard/finance", icon: IndianRupee }
+    { name: "Sales PNL", href: "/dashboard/finance", activeCheck: (p: string, t?: string | null) => p === "/dashboard/finance", icon: IndianRupee }
   ];
 
   const sidebarGroups = (
@@ -443,7 +443,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
       right: currentUser?.role === "ADMIN" ? ["Campaigns", "Reports", "Calendar"] : ["Call Log", "Reports", "Calendar"]
     },
     HRMS: { left: ["Teams", "Attendance"], right: ["Calendar", "Reports"] },
-    FINANCE: { left: ["Sales Tracker"], right: [] }
+    FINANCE: { left: ["Sales PNL"], right: [] }
   };
   const mobileSlots = activeGroupForMobile ? mobileNavLayout[activeGroupForMobile.key] : undefined;
   const findMobileItem = (name: string) => activeGroupForMobile?.items.find(i => i.name === name);
