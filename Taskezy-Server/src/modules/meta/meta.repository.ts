@@ -224,10 +224,13 @@ export async function hasAdSetsForCampaign(campaignId: string): Promise<boolean>
   return (result.rowCount ?? 0) > 0;
 }
 
-// Any real spend ever saved for this campaign — the sync's safety check before
-// trusting Meta's "never spent" (metaAdSpendSync.ts finishedWithoutSpend).
-export async function hasAnyCampaignSpend(campaignId: string): Promise<boolean> {
-  const result = await pool.query("SELECT 1 FROM ad_spend_records WHERE meta_campaign_id = $1 AND spend > 0 LIMIT 1", [campaignId]);
+// Real spend saved for this campaign on or after `since` — the sync's safety
+// check before trusting Meta's "no spend in the window" (metaAdSpendSync.ts).
+export async function hasCampaignSpendSince(campaignId: string, since: string): Promise<boolean> {
+  const result = await pool.query(
+    "SELECT 1 FROM ad_spend_records WHERE meta_campaign_id = $1 AND spend > 0 AND spend_date >= $2 LIMIT 1",
+    [campaignId, since]
+  );
   return (result.rowCount ?? 0) > 0;
 }
 
