@@ -6,7 +6,8 @@ import {
   isCampaignActive,
   getAdSetsForCampaign,
   getAdsForCampaign,
-  getAdDailyInsights
+  getAdDailyInsights,
+  type MetaCampaign
 } from "../modules/meta/meta-client";
 import * as metaRepo from "../modules/meta/meta.repository";
 import { runDailyMetaHealthChecks } from "../modules/meta/metaHealthAlerts";
@@ -86,131 +87,152 @@ async function runSync(): Promise<void> {
   const since = isoDateNDaysAgo(LOOKBACK_DAYS);
   const until = isoDateNDaysAgo(0);
   const wideSince = isoDateNDaysAgo(FIRST_SYNC_LOOKBACK_DAYS);
-  let wideBackfillsThisCycle = 0;
-  let adRecountsThisCycle = 0;
-
+  // Every ad account's campaigns first, so this cycle's re-read slots can be
+  // given out across all accounts at once.
+  const items: { account: (typeof adAccounts)[number]; campaign: MetaCampaign }[] = [];
   for (const account of adAccounts) {
-    let campaigns;
     try {
-      campaigns = await getCampaigns(account.id, account.userToken);
+      for (const campaign of await getCampaigns(account.id, account.userToken)) items.push({ account, campaign });
     } catch (err) {
       logger.error({ err, adAccountId: account.id }, "Could not fetch campaigns for ad account — skipping this account this cycle");
+    }
+  }
+
+  // This cycle's full-year re-reads, decided up front across all accounts
+  // (capped per cycle so a large backlog can't all fire at once):
+  //  - campaign level: rows saved before the lead-count fix (migration 056)
+  //    that still hold the old ~5x number come FIRST; then the one-time wide
+  //    backfill for campaigns with no history older than the normal window
+  //    (see hasOlderCampaignSpendHistory). Young or never-spent campaigns
+  //    always match that second rule, and Meta lists them first, so without
+  //    this order they took every slot and old counts were never corrected.
+  //  - ad level: campaigns whose per-ad rows still hold the old count, in
+  //    Meta's list order as before.
+  const needsRecount = new Set<string>();
+  const noOlderHistory = new Set<string>();
+  const needsAdRecount = new Set<string>();
+  for (const { campaign } of items) {
+    try {
+      if (await metaRepo.hasUncorrectedCampaignLeadCounts(campaign.id, wideSince)) needsRecount.add(campaign.id);
+      else if (!(await metaRepo.hasOlderCampaignSpendHistory(campaign.id, since))) noOlderHistory.add(campaign.id);
+      if (await metaRepo.hasUncorrectedAdLeadCountsForCampaign(campaign.id, wideSince)) needsAdRecount.add(campaign.id);
+    } catch (err) {
+      logger.warn({ err, campaignId: campaign.id }, "Could not check whether this campaign needs a full re-read; it gets the normal read this cycle");
+    }
+  }
+  const ids = (list: typeof items) => list.map(i => i.campaign.id);
+  const wideReads = new Set(
+    ids([...items.filter(i => needsRecount.has(i.campaign.id)), ...items.filter(i => noOlderHistory.has(i.campaign.id))])
+      .slice(0, MAX_WIDE_BACKFILLS_PER_CYCLE)
+  );
+  const adRecounts = new Set(ids(items.filter(i => needsAdRecount.has(i.campaign.id))).slice(0, MAX_WIDE_BACKFILLS_PER_CYCLE));
+  // The lead-count corrections run first (a few cheap campaign-level reads),
+  // so a slow cycle (Meta rate limits on the ad-set reads) or a restart can't
+  // keep them waiting; everything else keeps its usual order.
+  const correctingNow = (i: (typeof items)[number]) => wideReads.has(i.campaign.id) && needsRecount.has(i.campaign.id);
+  const ordered = [...items.filter(correctingNow), ...items.filter(i => !correctingNow(i))];
+
+  for (const { account, campaign } of ordered) {
+    const status = isCampaignActive(campaign) ? "ACTIVE" : "INACTIVE";
+    try {
+      const propertyId = await metaRepo.upsertCampaign({ id: campaign.id, adAccountId: account.id, name: campaign.name, status });
+
+      const needsWideBackfill = wideReads.has(campaign.id);
+      const campaignSince = needsWideBackfill ? wideSince : since;
+
+      const dailyInsights = await getCampaignDailyInsights(campaign.id, account.userToken, campaignSince, until);
+      for (const day of dailyInsights) {
+        await metaRepo.upsertSpendRecord({
+          campaignId: campaign.id,
+          accountName: campaign.name,
+          propertyId,
+          spendDate: day.date_start,
+          spend: Number(day.spend) || 0,
+          leadsGenerated: extractLeadCount(day),
+          impressions: day.impressions !== undefined && day.impressions !== "" ? Number(day.impressions) || 0 : null,
+          clicks: day.clicks !== undefined && day.clicks !== "" ? Number(day.clicks) || 0 : null
+        });
+      }
+      if (needsWideBackfill) await metaRepo.markCampaignLeadCountsCorrected(campaign.id, wideSince);
+    } catch (err) {
+      logger.error({ err, campaignId: campaign.id }, "Could not sync insights for campaign — skipping, will retry next cycle");
+    }
+
+    // Real ad-set/ad/creative names + real per-ad daily spend/leads, for
+    // Campaign Deep Dive's Ad Set Name / Ad creative Name columns and a
+    // real per-ad CPL breakdown. Kept in its own try/catch, separate from
+    // the campaign-level insights above, so a failure here (e.g. an ad
+    // account missing ads_management on some ad sets) never blocks the
+    // campaign-level spend sync that already worked before this existed.
+    //
+    // An INACTIVE campaign's ad tree is permanent history once it's
+    // actually been backfilled with real insight numbers — re-fetching
+    // all of it (ad sets + ads + one insights call per ad) for every one
+    // of potentially 100+ ended campaigns on every 6h cycle is what
+    // exhausts Meta's per-ad-account rate limit before the still-ACTIVE
+    // campaigns (the ones that actually need fresh numbers) get a turn.
+    // So finished campaigns are synced once, then skipped — but
+    // hasAdSetsForCampaign alone only proves the ad tree was
+    // discovered, not that it has real insight data: a campaign whose
+    // narrow first-look window missed its ads' actual activity (see
+    // FIRST_SYNC_LOOKBACK_DAYS below) would stay permanently skipped at
+    // zero insights forever if that were the only check. Requiring real
+    // insight rows too means a campaign stuck at zero keeps getting a
+    // real chance (with the wide window) until it actually succeeds.
+    // A finished campaign whose per-ad rows still hold the old ~5x lead
+    // count (migration 056) gets one more pass to correct them, capped
+    // per cycle and chosen up front like the campaign-level re-read above.
+    const adRecount = adRecounts.has(campaign.id);
+    if (!adRecount && status === "INACTIVE" && (await metaRepo.hasAdSetsForCampaign(campaign.id)) && (await metaRepo.hasAdLevelSpendRecordsForCampaign(campaign.id))) {
       continue;
     }
 
-    for (const campaign of campaigns) {
-      const status = isCampaignActive(campaign) ? "ACTIVE" : "INACTIVE";
-      try {
-        const propertyId = await metaRepo.upsertCampaign({ id: campaign.id, adAccountId: account.id, name: campaign.name, status });
-
-        // One-time wide backfill, same reasoning as the per-ad version below
-        // — see hasOlderCampaignSpendHistory's comment — capped per cycle so
-        // a large backlog of un-backfilled campaigns can't all fire at once.
-        // Also re-read the whole window once when rows saved before the
-        // lead-count fix (migration 056) still hold the old ~5x number —
-        // same per-cycle cap, so the correction spreads over a few cycles.
-        const hasOlderHistory = await metaRepo.hasOlderCampaignSpendHistory(campaign.id, since);
-        const needsRecount = await metaRepo.hasUncorrectedCampaignLeadCounts(campaign.id, wideSince);
-        const needsWideBackfill = (!hasOlderHistory || needsRecount) && wideBackfillsThisCycle < MAX_WIDE_BACKFILLS_PER_CYCLE;
-        if (needsWideBackfill) wideBackfillsThisCycle++;
-        const campaignSince = needsWideBackfill ? wideSince : since;
-
-        const dailyInsights = await getCampaignDailyInsights(campaign.id, account.userToken, campaignSince, until);
-        for (const day of dailyInsights) {
-          await metaRepo.upsertSpendRecord({
-            campaignId: campaign.id,
-            accountName: campaign.name,
-            propertyId,
-            spendDate: day.date_start,
-            spend: Number(day.spend) || 0,
-            leadsGenerated: extractLeadCount(day),
-            impressions: day.impressions !== undefined && day.impressions !== "" ? Number(day.impressions) || 0 : null,
-            clicks: day.clicks !== undefined && day.clicks !== "" ? Number(day.clicks) || 0 : null
-          });
-        }
-        if (needsWideBackfill) await metaRepo.markCampaignLeadCountsCorrected(campaign.id, wideSince);
-      } catch (err) {
-        logger.error({ err, campaignId: campaign.id }, "Could not sync insights for campaign — skipping, will retry next cycle");
+    try {
+      const adSets = await getAdSetsForCampaign(campaign.id, account.userToken);
+      for (const adSet of adSets) {
+        await metaRepo.upsertAdSet({ id: adSet.id, campaignId: campaign.id, name: adSet.name, status: adSet.status });
       }
 
-      // Real ad-set/ad/creative names + real per-ad daily spend/leads, for
-      // Campaign Deep Dive's Ad Set Name / Ad creative Name columns and a
-      // real per-ad CPL breakdown. Kept in its own try/catch, separate from
-      // the campaign-level insights above, so a failure here (e.g. an ad
-      // account missing ads_management on some ad sets) never blocks the
-      // campaign-level spend sync that already worked before this existed.
-      //
-      // An INACTIVE campaign's ad tree is permanent history once it's
-      // actually been backfilled with real insight numbers — re-fetching
-      // all of it (ad sets + ads + one insights call per ad) for every one
-      // of potentially 100+ ended campaigns on every 6h cycle is what
-      // exhausts Meta's per-ad-account rate limit before the still-ACTIVE
-      // campaigns (the ones that actually need fresh numbers) get a turn.
-      // So finished campaigns are synced once, then skipped — but
-      // hasAdSetsForCampaign alone only proves the ad tree was
-      // discovered, not that it has real insight data: a campaign whose
-      // narrow first-look window missed its ads' actual activity (see
-      // FIRST_SYNC_LOOKBACK_DAYS below) would stay permanently skipped at
-      // zero insights forever if that were the only check. Requiring real
-      // insight rows too means a campaign stuck at zero keeps getting a
-      // real chance (with the wide window) until it actually succeeds.
-      // A finished campaign whose per-ad rows still hold the old ~5x lead
-      // count (migration 056) gets one more pass to correct them, capped
-      // per cycle like the campaign-level re-read above.
-      const adRecount = adRecountsThisCycle < MAX_WIDE_BACKFILLS_PER_CYCLE
-        && (await metaRepo.hasUncorrectedAdLeadCountsForCampaign(campaign.id, wideSince));
-      if (!adRecount && status === "INACTIVE" && (await metaRepo.hasAdSetsForCampaign(campaign.id)) && (await metaRepo.hasAdLevelSpendRecordsForCampaign(campaign.id))) {
-        continue;
-      }
-      if (adRecount) adRecountsThisCycle++;
+      const ads = await getAdsForCampaign(campaign.id, account.userToken);
+      for (const ad of ads) {
+        await metaRepo.upsertAd({
+          id: ad.id,
+          campaignId: campaign.id,
+          adsetId: ad.adset_id,
+          name: ad.name,
+          creativeId: ad.creative?.id,
+          creativeName: ad.creative?.name,
+          status: ad.status
+        });
 
-      try {
-        const adSets = await getAdSetsForCampaign(campaign.id, account.userToken);
-        for (const adSet of adSets) {
-          await metaRepo.upsertAdSet({ id: adSet.id, campaignId: campaign.id, name: adSet.name, status: adSet.status });
-        }
-
-        const ads = await getAdsForCampaign(campaign.id, account.userToken);
-        for (const ad of ads) {
-          await metaRepo.upsertAd({
-            id: ad.id,
-            campaignId: campaign.id,
-            adsetId: ad.adset_id,
-            name: ad.name,
-            creativeId: ad.creative?.id,
-            creativeName: ad.creative?.name,
-            status: ad.status
-          });
-
-          try {
-            // First time this ad has ever had insights pulled: go back a
-            // full year instead of the normal 35 days. Without this, an ad
-            // whose campaign went INACTIVE (and so gets backfilled only
-            // once, ever — see the skip above) before this ad was ever
-            // checked would have its real activity window missed entirely
-            // if it happened to fall outside that one narrow attempt,
-            // leaving it permanently blank with zero insight rows even
-            // though Meta genuinely has the data.
-            const everSynced = await metaRepo.hasAdLevelSpendRecordsForAd(ad.id);
-            const adWide = !everSynced || (adRecount && (await metaRepo.hasUncorrectedAdLeadCounts(ad.id, wideSince)));
-            const adSince = adWide ? wideSince : since;
-            const adInsights = await getAdDailyInsights(ad.id, account.userToken, adSince, until);
-            for (const day of adInsights) {
-              await metaRepo.upsertAdLevelSpendRecord({
-                adId: ad.id,
-                spendDate: day.date_start,
-                spend: Number(day.spend) || 0,
-                leadsGenerated: extractLeadCount(day)
-              });
-            }
-            if (adWide) await metaRepo.markAdLeadCountsCorrected(ad.id, wideSince);
-          } catch (err) {
-            logger.error({ err, adId: ad.id }, "Could not sync insights for ad — skipping this ad, will retry next cycle");
+        try {
+          // First time this ad has ever had insights pulled: go back a
+          // full year instead of the normal 35 days. Without this, an ad
+          // whose campaign went INACTIVE (and so gets backfilled only
+          // once, ever — see the skip above) before this ad was ever
+          // checked would have its real activity window missed entirely
+          // if it happened to fall outside that one narrow attempt,
+          // leaving it permanently blank with zero insight rows even
+          // though Meta genuinely has the data.
+          const everSynced = await metaRepo.hasAdLevelSpendRecordsForAd(ad.id);
+          const adWide = !everSynced || (adRecount && (await metaRepo.hasUncorrectedAdLeadCounts(ad.id, wideSince)));
+          const adSince = adWide ? wideSince : since;
+          const adInsights = await getAdDailyInsights(ad.id, account.userToken, adSince, until);
+          for (const day of adInsights) {
+            await metaRepo.upsertAdLevelSpendRecord({
+              adId: ad.id,
+              spendDate: day.date_start,
+              spend: Number(day.spend) || 0,
+              leadsGenerated: extractLeadCount(day)
+            });
           }
+          if (adWide) await metaRepo.markAdLeadCountsCorrected(ad.id, wideSince);
+        } catch (err) {
+          logger.error({ err, adId: ad.id }, "Could not sync insights for ad — skipping this ad, will retry next cycle");
         }
-      } catch (err) {
-        logger.error({ err, campaignId: campaign.id }, "Could not sync ad sets/ads for campaign — skipping, will retry next cycle");
       }
+    } catch (err) {
+      logger.error({ err, campaignId: campaign.id }, "Could not sync ad sets/ads for campaign — skipping, will retry next cycle");
     }
   }
 

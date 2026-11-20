@@ -12,7 +12,7 @@ import { LEAD_SOURCE_BUCKET_SQL } from "../leads/leads.repository";
 import { ON_LEADS_PAGE_SQL } from "../leads/qualifiedLeads";
 import { canSeeMissedTaskCount } from "../leads/leads.handover";
 import { MISSED_BY_JOIN_SQL } from "./siteVisitSql";
-import { QUALIFIED_LEAD_SQL } from "../leads/qualifiedLeads";
+import { CALL_NOT_QUALIFIED_SQL, QUALIFIED_LEAD_SQL } from "../leads/qualifiedLeads";
 import { FOLLOWUP_EVER_MISSED_SQL, IS_SITE_VISIT_FOLLOWUP_SQL, SITE_VISIT_DONE_LOG } from "./siteVisitSql";
 
 // Reports → Team Reports (frontend TeamReports.tsx): KPI cards, the
@@ -67,6 +67,23 @@ async function scopeForCaller(caller: AccessTokenPayload): Promise<string[] | nu
   return [caller.sub];
 }
 
+/** `column`'s business-calendar day inside the report's date range ("TRUE" when there is no range). */
+function dayInRange(column: string, q: TeamReportQuery, params: unknown[]): string {
+  const p = (v: unknown) => `$${params.push(v)}`;
+  const c: string[] = [];
+  if (q.dateFrom) c.push(`(${column} AT TIME ZONE ${p(BUSINESS_TIMEZONE)})::date >= ${p(q.dateFrom)}::date`);
+  if (q.dateTo) c.push(`(${column} AT TIME ZONE ${p(BUSINESS_TIMEZONE)})::date <= ${p(q.dateTo)}::date`);
+  return c.length ? `(${c.join(" AND ")})` : "TRUE";
+}
+
+/**
+ * Data Calling results (Connected / Qualified / Unqualified / RNR) count on
+ * the day the call status was set (leads.call_status_at, migration 059), not
+ * the day the lead was uploaded; a lead from before that was recorded falls
+ * back to its upload day.
+ */
+const CALL_RESULT_AT_SQL = "COALESCE(l.call_status_at, l.created_at)";
+
 /**
  * WHERE conditions for leads (alias `l`), pushing their values onto
  * `params`. noDate leaves out the created-date bounds (tasks and site
@@ -84,8 +101,7 @@ function leadConditions(
   const c: string[] = [];
   if (scope) c.push(`${agentColumn} = ANY(${p(scope)}::uuid[])`);
   if (q.assignedAgentId?.length) c.push(`${agentColumn} = ANY(${p(q.assignedAgentId)}::uuid[])`);
-  if (!opts.noDate && q.dateFrom) c.push(`(l.created_at AT TIME ZONE ${p(BUSINESS_TIMEZONE)})::date >= ${p(q.dateFrom)}::date`);
-  if (!opts.noDate && q.dateTo) c.push(`(l.created_at AT TIME ZONE ${p(BUSINESS_TIMEZONE)})::date <= ${p(q.dateTo)}::date`);
+  if (!opts.noDate) c.push(dayInRange("l.created_at", q, params));
   if (q.campaign?.length) c.push(`LOWER(COALESCE(l.campaign, l.source)) = ANY(${p(q.campaign.map(x => x.toLowerCase()))}::text[])`);
   if (q.propertyId?.length || q.noProperty) {
     c.push(`(l.property_id = ANY(${p(q.propertyId ?? [])}::uuid[])${q.noProperty ? " OR l.property_id IS NULL" : ""})`);
@@ -139,9 +155,20 @@ teamReportRouter.get(
     // Not Qualified = a Connected call's sub-status, RNR = Not Reachable.
     const qualifiedSql = dataCalling ? `(l.call_status = 'Connected' AND l.call_sub_status = 'Qualified')` : QUALIFIED_LEAD_SQL("l");
     const rnrSql = dataCalling ? `l.call_status = 'Not Reachable'` : `l.status_code = 'RNR'`;
+    // Data Calling: every called lead that isn't Connected + Qualified
+    // (Connected-Unqualified, Called, Not Reachable/RNR, Wrong Number);
+    // leads not called yet aren't counted. Leads mode keeps its old rule.
+    const notQualifiedSql = dataCalling ? CALL_NOT_QUALIFIED_SQL("l") : `(l.call_status = 'Connected' AND l.call_sub_status = 'Unqualified')`;
 
+    // Leads mode: everything counts on the lead's created day, as before.
+    // Data Calling: lead totals stay on the upload day; call results count on
+    // the day the call status was set (CALL_RESULT_AT_SQL).
     const leadParams: unknown[] = [];
-    const leadWhere = leadConditions(q, scope, leadParams);
+    const uploaded = dataCalling ? dayInRange("l.created_at", q, leadParams) : "TRUE";
+    const resultSet = dataCalling ? dayInRange(CALL_RESULT_AT_SQL, q, leadParams) : "TRUE";
+    const leadWhere = dataCalling
+      ? `${leadConditions(q, scope, leadParams, { noDate: true })} AND (${uploaded} OR ${resultSet})`
+      : leadConditions(q, scope, leadParams);
 
     const taskParams: unknown[] = [];
     const taskWhere = `${FOLLOWUP_EVER_MISSED_SQL} AND ${dueConditions(q, taskParams)} AND ${leadConditions(q, scope, taskParams, { noDate: true, agentColumn: "r.agent_id" })}`;
@@ -166,16 +193,16 @@ teamReportRouter.get(
     const [byAgentResult, missedResult, svResult, subSourceResult, callsResult] = await Promise.all([
       query<Record<string, string | null>>(
         `SELECT l.assigned_agent_id AS agent_id, ${userName("u")} AS agent_name,
-                count(*) AS total,
-                count(*) FILTER (WHERE l.assigned_agent_id IS NOT NULL) AS assigned,
-                count(*) FILTER (WHERE ${qualifiedSql}) AS qualified,
-                count(*) FILTER (WHERE l.call_status = 'Connected' AND l.call_sub_status = 'Unqualified') AS not_qualified,
-                count(*) FILTER (WHERE l.call_status IS NOT NULL) AS calls_made,
-                count(*) FILTER (WHERE l.call_status = 'Connected') AS connected,
-                count(*) FILTER (WHERE l.status_code IN ('SITE_VISIT_SCHEDULED', 'SITE_VISIT_DONE')) AS site_visits,
-                count(*) FILTER (WHERE ${rnrSql}) AS rnr,
-                count(*) FILTER (WHERE l.status_code = 'FOLLOWUP') AS follow_ups,
-                count(*) FILTER (WHERE l.status_code = ANY('{${CALL_BACK_CODES.join(",")}}'::text[])) AS call_backs
+                count(*) FILTER (WHERE ${uploaded}) AS total,
+                count(*) FILTER (WHERE l.assigned_agent_id IS NOT NULL AND ${uploaded}) AS assigned,
+                count(*) FILTER (WHERE ${qualifiedSql} AND ${resultSet}) AS qualified,
+                count(*) FILTER (WHERE ${notQualifiedSql} AND ${resultSet}) AS not_qualified,
+                count(*) FILTER (WHERE l.call_status IS NOT NULL AND ${resultSet}) AS calls_made,
+                count(*) FILTER (WHERE l.call_status = 'Connected' AND ${resultSet}) AS connected,
+                count(*) FILTER (WHERE l.status_code IN ('SITE_VISIT_SCHEDULED', 'SITE_VISIT_DONE') AND ${uploaded}) AS site_visits,
+                count(*) FILTER (WHERE ${rnrSql} AND ${resultSet}) AS rnr,
+                count(*) FILTER (WHERE l.status_code = 'FOLLOWUP' AND ${uploaded}) AS follow_ups,
+                count(*) FILTER (WHERE l.status_code = ANY('{${CALL_BACK_CODES.join(",")}}'::text[]) AND ${uploaded}) AS call_backs
          FROM leads l
          LEFT JOIN users u ON u.id = l.assigned_agent_id
          WHERE ${leadWhere}
@@ -429,7 +456,8 @@ teamReportRouter.get(
 );
 
 // Salesperson Data Calling Report — one row per Data Calling lead in the
-// filters (leads created in the range), a page at a time.
+// filters (uploaded in the range, or whose call status was set in it), a
+// page at a time.
 teamReportRouter.get(
   "/team/data-calling-leads",
   validate({ query: teamReportQuerySchema.extend({ ...pageSchema, search: z.string().trim().max(200).optional() }) }),
@@ -437,7 +465,7 @@ teamReportRouter.get(
     const q = { ...(req.query as unknown as Paged & { search?: string }), mode: "DATA_CALLING" as const };
     const scope = await scopeForCaller(req.user!);
     const params: unknown[] = [];
-    let where = leadConditions(q, scope, params);
+    let where = `${leadConditions(q, scope, params, { noDate: true })} AND (${dayInRange("l.created_at", q, params)} OR ${dayInRange(CALL_RESULT_AT_SQL, q, params)})`;
     if (q.search) where += ` AND l.name ILIKE $${params.push(`%${q.search}%`)}`;
     const countResult = await query<{ count: string }>(`SELECT count(*) FROM leads l WHERE ${where}`, params);
     const totalCount = Number(countResult.rows[0]?.count ?? 0);

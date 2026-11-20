@@ -247,6 +247,8 @@ export interface Lead {
   callStatus?: "Connected" | "Called" | "Not Reachable" | "Wrong Number";
   /** Qualified / Unqualified — only set while callStatus is Connected (migration 033). */
   callSubStatus?: "Qualified" | "Unqualified";
+  /** When the call status was last set (migration 059) — Data Calling reports count the result on this day. */
+  callStatusAt?: string;
   /** When a fresh Meta/Google enquiry last revived this lead — a revived Data Calling lead belongs on the Leads page. */
   revivedAt?: string;
   // True when this lead's backend status_code is the internal UNASSIGNED
@@ -813,6 +815,7 @@ export function mapApiLeadToFrontendLead(row: ApiLeadRow): Lead {
       row.call_status === "Connected" && (row.call_sub_status === "Qualified" || row.call_sub_status === "Unqualified")
         ? row.call_sub_status
         : undefined,
+    callStatusAt: row.call_status_at || undefined,
     campaign: row.campaign || undefined,
     metaPageName: row.meta_page_name || undefined,
     metaFormId: row.meta_form_id || undefined,
@@ -2302,7 +2305,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const updated = mapApiLeadToFrontendLead(await apiUpdateCallStatus(leadId, callStatus, callSubStatus, note));
       // Replace the server-owned fields explicitly so a cleared sub-status
       // (undefined) doesn't get skipped by the spread.
-      setAllLeads(prev => prev.map(l => (l.id === leadId ? { ...l, ...updated, callSubStatus: updated.callSubStatus } : l)));
+      setAllLeads(prev => prev.map(l => (l.id === leadId ? { ...l, ...updated, callSubStatus: updated.callSubStatus, callStatusAt: updated.callStatusAt } : l)));
       refreshOwnTasksSoon();
       return;
     }
@@ -2325,6 +2328,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           ...l,
           callStatus,
           callSubStatus: nextSub,
+          // Only an actual change moves the day the result counts on (same as the server).
+          callStatusAt: lead.callStatus !== callStatus || lead.callSubStatus !== nextSub ? now : lead.callStatusAt,
           notes: note,
           notesUpdatedAt: now,
           notesUpdatedBy: by,

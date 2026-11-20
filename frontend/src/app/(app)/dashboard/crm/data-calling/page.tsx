@@ -27,7 +27,8 @@ import { isSuperAdminUser } from "@/lib/superAdmin";
 import { maskPhone, maskEmail } from "@/lib/maskPII";
 import { ExcelIcon } from "@/components/icons/ContactIcons";
 import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/callTrigger";
-import { CALL_SUB_STATUS_OPTIONS, CallSubStatus, callSubStatusOf, isQualifiedCall, isUnqualifiedCall } from "@/lib/callSubStatus";
+import { CALL_SUB_STATUS_OPTIONS, CallSubStatus, callSubStatusOf, isQualifiedCall } from "@/lib/callSubStatus";
+import { AnalyticsPerformanceRow, callResultAt, computeAnalyticsPerformanceRows, isCallNotQualified, withCallsMade as setRowCallsMade } from "@/lib/dataCallingResults";
 import { DateSortButton, sortByDate, type SortDir } from "@/components/ui/DateSortButton";
 import MissedCountBadge from "@/components/crm/MissedCountBadge";
 import { ROW_CALL_STATUS_OPTIONS, useCallStatusUpdate } from "@/components/crm/useCallStatusUpdate";
@@ -136,49 +137,13 @@ const ANALYTICS_DEFAULT_VISIBLE_COLUMNS: Record<AnalyticsColumnKey, boolean> = {
 const ANALYTICS_CHART_METRICS = ["Qualified", "RNR", "Calls Made", "Total Leads", "Not Qualified"] as const;
 type AnalyticsChartMetric = typeof ANALYTICS_CHART_METRICS[number];
 
-interface AnalyticsPerformanceRow {
-  name: string;
-  totalLeads: number;
-  callsMade: number;
-  connected: number;
-  qualifiedLeads: number;
-  unqualifiedLeads: number;
-  rnr: number;
-  siteVisits: number;
-  qualificationRate: string;
-}
-
-function computeAnalyticsPerformanceRows(list: Lead[], groupBy: (l: Lead) => string | undefined): AnalyticsPerformanceRow[] {
-  const groups = new Map<string, Lead[]>();
-  list.forEach(l => {
-    const key = groupBy(l);
-    if (!key) return;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key)!.push(l);
-  });
-  return Array.from(groups.entries()).map(([name, group]) => {
-    const qualifiedLeads = group.filter(isQualifiedCall).length;
-    return {
-      name,
-      totalLeads: group.length,
-      callsMade: 0, // filled from the Call button's records (withCallsMade)
-      connected: group.filter(l => l.callStatus === "Connected").length,
-      qualifiedLeads,
-      unqualifiedLeads: group.length - qualifiedLeads,
-      rnr: group.filter(l => l.callStatus === "Not Reachable").length,
-      siteVisits: group.filter(l => l.status === "Site Visit Scheduled" || l.status === "Site Visit Done").length,
-      qualificationRate: group.length > 0 ? `${((qualifiedLeads / group.length) * 100).toFixed(1)}%` : "0.0%"
-    };
-  }).sort((a, b) => b.totalLeads - a.totalLeads);
-}
-
 function analyticsLeadMatchesMetric(l: Lead, metric: AnalyticsChartMetric): boolean {
   switch (metric) {
     case "Qualified": return isQualifiedCall(l);
     case "RNR": return l.callStatus === "Not Reachable";
     case "Calls Made": return false; // counted from the Call button's records (chartData)
     case "Total Leads": return true;
-    case "Not Qualified": return isUnqualifiedCall(l);
+    case "Not Qualified": return isCallNotQualified(l);
   }
 }
 
@@ -300,6 +265,9 @@ export default function DataCallingPage() {
     return d.getMonth() === refNow.getMonth() && d.getFullYear() === refNow.getFullYear();
   };
   const leadInSelectedRange = (l: Lead) => dateInRange(l.createdAtStr, mapDateRangeToKey(dateRange), today, summaryCustomRange);
+  // Call results (Qualified / Not Qualified / RNR) count on the day the call
+  // status was set, not the upload day (lib/dataCallingResults.ts).
+  const resultInSelectedRange = (l: Lead) => dateInRange(callResultAt(l), mapDateRangeToKey(dateRange), today, summaryCustomRange);
 
   // Custom date-range calendar pill (toolbar) — the shared CRM
   // DateRangePicker. Independent of the summary-card preset above; null =
@@ -426,13 +394,13 @@ export default function DataCallingPage() {
     // Connected+Unqualified lead must not also count as "qualified".
     "Qualified Leads": leads.filter(isQualifiedCall),
     "RNR": leads.filter(l => l.callStatus === "Not Reachable"),
-    "Not Qualified": leads.filter(isUnqualifiedCall)
+    "Not Qualified": leads.filter(isCallNotQualified)
   }), [leads]);
 
   const categoryLeadsInRange = useMemo(() => {
     const out: Record<string, Lead[]> = {};
     Object.entries(categoryLeads).forEach(([key, list]) => {
-      out[key] = list.filter(leadInSelectedRange);
+      out[key] = list.filter(key === "Total Leads Assigned" ? leadInSelectedRange : resultInSelectedRange);
     });
     // Leads called in the range (the call's day, not the lead's upload day).
     out["Calls Made"] = calledLeads(summaryCalls);
@@ -452,19 +420,26 @@ export default function DataCallingPage() {
   // (appliedCustomRange) and, for everything except Source Performance, by
   // whichever Sub-Source is selected up top. Source Performance deliberately
   // stays unscoped by Sub-Source — it's the breakdown ACROSS every source.
-  const leadMatchesAppliedRange = (l: Lead): boolean => {
+  // Compared as calendar days (YYYY-MM-DD), not instants: new Date("YYYY-MM-DD")
+  // is UTC midnight (05:30 IST), which used to drop 00:00–05:29 on the first day.
+  const inAppliedRange = (iso: string | undefined): boolean => {
     if (!appliedCustomRange) return true;
-    if (!l.createdAtStr) return false;
-    const d = new Date(l.createdAtStr);
+    if (!iso) return false;
+    const d = new Date(iso);
     if (isNaN(d.getTime())) return false;
-    const start = new Date(appliedCustomRange.start);
-    const end = new Date(appliedCustomRange.end);
-    end.setHours(23, 59, 59, 999);
-    return d >= start && d <= end;
+    const day = toIsoDate(d);
+    return day >= appliedCustomRange.start && day <= appliedCustomRange.end;
   };
 
+  // Leads uploaded in the range (Total Leads, site visits) …
   const analyticsDateFilteredLeads = useMemo(
-    () => leads.filter(leadMatchesAppliedRange),
+    () => leads.filter(l => inAppliedRange(l.createdAtStr)),
+    [leads, appliedCustomRange]
+  );
+  // … and leads whose call result was set in the range (Connected, Qualified,
+  // Not Qualified, RNR) — lib/dataCallingResults.ts callResultAt.
+  const analyticsResultLeads = useMemo(
+    () => leads.filter(l => inAppliedRange(callResultAt(l))),
     [leads, appliedCustomRange]
   );
 
@@ -479,6 +454,12 @@ export default function DataCallingPage() {
       : analyticsDateFilteredLeads.filter(l => !!l.source && analyticsSubSources.includes(l.source)),
     [analyticsDateFilteredLeads, analyticsSubSources]
   );
+  const subSourceScopedResultLeads = useMemo(
+    () => analyticsSubSources.length === 0
+      ? analyticsResultLeads
+      : analyticsResultLeads.filter(l => !!l.source && analyticsSubSources.includes(l.source)),
+    [analyticsResultLeads, analyticsSubSources]
+  );
 
   // Analytics Calls Made: Sub-Source scope + the calendar applied to the call's day.
   const analyticsCallDayOk = (day: string) => !appliedCustomRange || (day >= appliedCustomRange.start && day <= appliedCustomRange.end);
@@ -491,10 +472,10 @@ export default function DataCallingPage() {
   const analyticsSummaryMetrics = useMemo(() => ({
     totalAssigned: subSourceScopedLeads.filter(l => !!l.assignedAgent).length,
     callsMade: countLeadDays(analyticsCalls),
-    qualifiedLeads: subSourceScopedLeads.filter(isQualifiedCall).length,
-    rnr: subSourceScopedLeads.filter(l => l.callStatus === "Not Reachable").length,
-    notQualified: subSourceScopedLeads.filter(isUnqualifiedCall).length
-  }), [subSourceScopedLeads, analyticsCalls]);
+    qualifiedLeads: subSourceScopedResultLeads.filter(isQualifiedCall).length,
+    rnr: subSourceScopedResultLeads.filter(l => l.callStatus === "Not Reachable").length,
+    notQualified: subSourceScopedResultLeads.filter(isCallNotQualified).length
+  }), [subSourceScopedLeads, subSourceScopedResultLeads, analyticsCalls]);
 
   // Real underlying lead list behind each Analytics stat card, keyed the
   // same way as the Data Calling tab's own categoryLeadsInRange — so
@@ -502,10 +483,10 @@ export default function DataCallingPage() {
   const analyticsCategoryLeads: Record<string, Lead[]> = useMemo(() => ({
     "Total Leads Assigned": subSourceScopedLeads.filter(l => !!l.assignedAgent),
     "Calls Made": calledLeads(analyticsCalls),
-    "Qualified Leads": subSourceScopedLeads.filter(isQualifiedCall),
-    "RNR": subSourceScopedLeads.filter(l => l.callStatus === "Not Reachable"),
-    "Not Qualified": subSourceScopedLeads.filter(isUnqualifiedCall)
-  }), [subSourceScopedLeads, analyticsCalls]);
+    "Qualified Leads": subSourceScopedResultLeads.filter(isQualifiedCall),
+    "RNR": subSourceScopedResultLeads.filter(l => l.callStatus === "Not Reachable"),
+    "Not Qualified": subSourceScopedResultLeads.filter(isCallNotQualified)
+  }), [subSourceScopedLeads, subSourceScopedResultLeads, analyticsCalls]);
 
   // Manager sees only their own direct reports' rows here — never other
   // managers' teams, and never a row for themself (this table is about
@@ -529,26 +510,32 @@ export default function DataCallingPage() {
       if (!byKey.has(key)) byKey.set(key, []);
       byKey.get(key)!.push(c);
     });
-    const out = rows.map(r => ({ ...r, callsMade: countLeadDays(byKey.get(r.name) ?? []) }));
+    const out = rows.map(r => setRowCallsMade(r, countLeadDays(byKey.get(r.name) ?? [])));
     byKey.forEach((calls, name) => {
       if (!out.some(r => r.name === name)) {
-        out.push({ name, totalLeads: 0, callsMade: countLeadDays(calls), connected: 0, qualifiedLeads: 0, unqualifiedLeads: 0, rnr: 0, siteVisits: 0, qualificationRate: "0.0%" });
+        out.push(setRowCallsMade({ name, totalLeads: 0, callsMade: 0, connected: 0, qualifiedLeads: 0, unqualifiedLeads: 0, rnr: 0, siteVisits: 0, qualificationRate: "0.0%" }, countLeadDays(calls)));
       }
     });
     return out;
   };
   const salespersonRows = useMemo(() => {
-    const rows = withCallsMade(computeAnalyticsPerformanceRows(subSourceScopedLeads, l => l.assignedAgent), ([, agentId]) => userNameById.get(agentId));
+    const rows = withCallsMade(
+      computeAnalyticsPerformanceRows(subSourceScopedLeads, subSourceScopedResultLeads, l => l.assignedAgent),
+      ([, agentId]) => userNameById.get(agentId)
+    );
     return isAdmin ? rows : rows.filter(r => myTeamMemberNames.has(r.name));
-  }, [subSourceScopedLeads, isAdmin, myTeamMemberNames, analyticsCalls, userNameById]);
+  }, [subSourceScopedLeads, subSourceScopedResultLeads, isAdmin, myTeamMemberNames, analyticsCalls, userNameById]);
   const filteredSalespersonRows = useMemo(() => {
     const q = salespersonSearch.trim().toLowerCase();
     return q ? salespersonRows.filter(r => r.name.toLowerCase().includes(q)) : salespersonRows;
   }, [salespersonRows, salespersonSearch]);
 
   const sourceRows = useMemo(
-    () => withCallsMade(computeAnalyticsPerformanceRows(analyticsDateFilteredLeads, l => l.source), ([leadId]) => leadById.get(leadId)?.source),
-    [analyticsDateFilteredLeads, analyticsCalls, leadById]
+    () => withCallsMade(
+      computeAnalyticsPerformanceRows(analyticsDateFilteredLeads, analyticsResultLeads, l => l.source),
+      ([leadId]) => leadById.get(leadId)?.source
+    ),
+    [analyticsDateFilteredLeads, analyticsResultLeads, analyticsCalls, leadById]
   );
   const filteredSourceRows = useMemo(() => {
     const q = sourceSearch.trim().toLowerCase();
@@ -592,13 +579,19 @@ export default function DataCallingPage() {
       // Calls Made: different leads called with the Call button that day.
       const value = analyticsChartMetric === "Calls Made"
         ? countLeadDays(callsWhere(d => d === toIsoDate(day), inAnalyticsSubSource))
-        : subSourceScopedLeads.filter(l => l.createdAtStr && new Date(l.createdAtStr).toDateString() === dayStr && analyticsLeadMatchesMetric(l, analyticsChartMetric)).length;
+        : analyticsChartMetric === "Total Leads"
+          // Total Leads: the upload day. Call results: the day the result was set.
+          ? subSourceScopedLeads.filter(l => l.createdAtStr && new Date(l.createdAtStr).toDateString() === dayStr).length
+          : subSourceScopedResultLeads.filter(l => {
+            const at = callResultAt(l);
+            return !!at && new Date(at).toDateString() === dayStr && analyticsLeadMatchesMetric(l, analyticsChartMetric);
+          }).length;
       return {
         label: day.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }),
         value
       };
     });
-  }, [chartDays, subSourceScopedLeads, analyticsChartMetric, callDays, leadById, analyticsSubSources]);
+  }, [chartDays, subSourceScopedLeads, subSourceScopedResultLeads, analyticsChartMetric, callDays, leadById, analyticsSubSources]);
 
   const chartAverage = chartData.length > 0
     ? chartData.reduce((sum, d) => sum + d.value, 0) / chartData.length

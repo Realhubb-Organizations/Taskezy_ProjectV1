@@ -38,6 +38,16 @@ export const UNQUALIFIED_LEAD_SQL = (alias: string) =>
   `(${alias}.status_code IN (${inList(UNQUALIFIED_STATUS_CODES)}) OR ${RNR_NOT_PICKED_UP_SQL(alias)})`;
 
 /**
+ * Data Calling "Not Qualified": a lead that has been called (has a call
+ * status) but isn't Connected + Qualified — Connected-Unqualified, Connected
+ * with no sub-status yet, Called, Not Reachable (RNR) and Wrong Number. Leads
+ * nobody has called yet aren't counted. Same rule as the Data Calling page
+ * (frontend lib/dataCallingResults.ts isCallNotQualified).
+ */
+export const CALL_NOT_QUALIFIED_SQL = (alias: string) =>
+  `(${alias}.call_status IS NOT NULL AND NOT (${alias}.call_status = 'Connected' AND ${alias}.call_sub_status IS NOT DISTINCT FROM 'Qualified'))`;
+
+/**
  * Leads that belong on the Leads page and in Leads Analytics: every lead
  * except Data Calling ones — those only count once Connected + Qualified, or
  * revived by a fresh Meta/Google enquiry (leadRevival.ts). Keyed on

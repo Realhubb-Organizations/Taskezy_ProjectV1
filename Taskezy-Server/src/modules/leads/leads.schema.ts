@@ -71,6 +71,11 @@ export const listLeadsQuerySchema = z.object({
   calledBy: uuidToArray,
   calledFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "calledFrom must be YYYY-MM-DD").optional(),
   calledTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "calledTo must be YYYY-MM-DD").optional(),
+  // Team Reports' Data Calling result drill-downs: the day the call status was
+  // set (migration 059), and "Not Qualified" = called but not Connected + Qualified.
+  resultFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "resultFrom must be YYYY-MM-DD").optional(),
+  resultTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "resultTo must be YYYY-MM-DD").optional(),
+  callNotQualified: z.enum(["true", "false"]).optional().transform(v => v === "true"),
   // Qualified / Unqualified drill-downs — the one rule (qualifiedLeads.ts),
   // which a plain status list can't express (RNR depends on a picked-up call).
   qualifiedOnly: z.enum(["true", "false"]).optional().transform(v => v === "true"),
