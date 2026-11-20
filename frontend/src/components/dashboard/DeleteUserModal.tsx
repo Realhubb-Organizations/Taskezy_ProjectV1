@@ -7,6 +7,7 @@ import { useApp } from "@/context/AppContext";
 import { apiGetUserDeleteImpact } from "@/lib/apiClient";
 import { SearchableMultiSelect } from "@/components/ui/SearchableDropdown";
 import { LineSkeleton } from "@/components/ui/Skeletons";
+import { isLeadAssignableUser } from "@/lib/leadAssignment";
 
 // Admin "Delete user" popup (Settings → Manage Users and the Admin page).
 // A user who still holds leads can only be deleted after choosing who gets
@@ -54,7 +55,7 @@ export default function DeleteUserModal({
   // Same people the server accepts: active CRM sales agents and managers.
   const members = useMemo(
     () => users
-      .filter(u => u.id !== user.id && u.role === "AGENT" && u.status !== "INACTIVE" && (!u.department || u.department === "SALES"))
+      .filter(u => u.id !== user.id && isLeadAssignableUser(u))
       .sort((a, b) => a.name.localeCompare(b.name)),
     [users, user.id]
   );

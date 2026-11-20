@@ -54,25 +54,9 @@ function AgentTasksView() {
     return true;
   }, [agent, tab, taskTypes, range, source]);
 
-  // Same Booking guard as the Leads page and the dashboard: booking a lead
-  // auto-generates an invoice from its deal value, so a real value is required.
+  // Booked only starts the Sales PNL approval — no deal value is asked.
   const handleStatusChange = async (leadId: string, status: LeadStatus) => {
-    if (status === "Booked") {
-      const input = await promptDialog({
-        title: "Enter deal value",
-        message: "Enter the real deal value for this booking (INR):",
-        label: "Deal value (INR)",
-        confirmLabel: "Mark as Booked"
-      });
-      const dealValue = input ? parseFloat(input.replace(/[^0-9.]/g, "")) : NaN;
-      if (!input || isNaN(dealValue) || dealValue <= 0) {
-        toast("A valid deal value is required to mark a lead as Booked.", "warning");
-        return;
-      }
-      updateLeadStatus(leadId, status, dealValue);
-    } else {
-      updateLeadStatus(leadId, status);
-    }
+    updateLeadStatus(leadId, status);
   };
   // RNR/Call Back/Followup/Site Visit Scheduled are gated behind a
   // blocking popup before handleStatusChange actually runs. Called

@@ -473,7 +473,7 @@ export default function AdminCampaignsPage() {
   // of these 7 buckets (it's a 6-status combined bucket including EOI/
   // Booked, which this endpoint doesn't track) — that one sums
   // campaignDailyStats' qualifiedLeads instead (see summaryMetrics below).
-  const ZERO_LEAD_SUMMARY: LeadSummaryStats = { totalLeads: 0, newLeads: 0, rnr: 0, callBacks: 0, followUps: 0, siteVisitScheduled: 0, siteVisitDone: 0 };
+  const ZERO_LEAD_SUMMARY: LeadSummaryStats = { totalLeads: 0, newLeads: 0, rnr: 0, callBacks: 0, followUps: 0, siteVisitScheduled: 0, siteVisitDone: 0, lowBudget: 0, otherRequirement: 0 };
   const [leadsStats, setLeadsStats] = useState<LeadSummaryStats>(ZERO_LEAD_SUMMARY);
   useEffect(() => {
     let cancelled = false;

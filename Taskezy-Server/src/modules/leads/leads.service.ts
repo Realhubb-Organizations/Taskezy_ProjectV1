@@ -14,6 +14,7 @@ import { broadcastLeadChanged, broadcastManyLeadsChanged } from "./leads.realtim
 import { HANDOVER_NOTE_PREFIX } from "./leads.handover";
 import { normalizeTypedLeadPhone } from "../../utils/validation";
 import { logger } from "../../utils/logger";
+import { SALES_TRACKER_EMAILS } from "../../config/salesTracker";
 import { assertTransitionAllowed, LeadStatusCode, REVIVED_CODE } from "./leadStatusTransitions";
 
 /**
@@ -185,6 +186,8 @@ const CALL_BACKS_CODE = "CALL_BACK";
 const FOLLOW_UPS_CODE = "FOLLOWUP";
 const SITE_VISIT_SCHEDULED_CODE = "SITE_VISIT_SCHEDULED";
 const SITE_VISIT_DONE_CODE = "SITE_VISIT_DONE";
+const LOW_BUDGET_CODE = "LOW_BUDGET";
+const OTHER_REQUIREMENT_CODE = "OTHER_REQUIREMENT";
 
 export interface LeadSummaryStats {
   totalLeads: number;
@@ -194,6 +197,8 @@ export interface LeadSummaryStats {
   followUps: number;
   siteVisitScheduled: number;
   siteVisitDone: number;
+  lowBudget: number;
+  otherRequirement: number;
 }
 
 /**
@@ -260,7 +265,9 @@ export async function getLeadStats(caller: AccessTokenPayload, filter: {
     callBacks: countFor(CALL_BACKS_CODE),
     followUps: countFor(FOLLOW_UPS_CODE),
     siteVisitScheduled: countFor(SITE_VISIT_SCHEDULED_CODE),
-    siteVisitDone: countFor(SITE_VISIT_DONE_CODE)
+    siteVisitDone: countFor(SITE_VISIT_DONE_CODE),
+    lowBudget: countFor(LOW_BUDGET_CODE),
+    otherRequirement: countFor(OTHER_REQUIREMENT_CODE)
   };
 }
 
@@ -1003,8 +1010,36 @@ export async function updateLeadStatus(
   // stale for everyone who received them.
   await deleteLeadActivityNotifications(leadId);
 
+  // A new booking waits for the Sales Tracker team's approval. Best-effort:
+  // a failed notification must never fail the status change itself.
+  if (statusCode === "BOOKED" && existing.status_code !== "BOOKED") {
+    // Booked again after a rejection: it goes back to Pending for a fresh review.
+    await query(`DELETE FROM booking_approval_decisions WHERE lead_id = $1 AND decision = 'REJECTED'`, [leadId]);
+    notifyBookingApproval(leadId, existing.name, existing.assigned_agent_name).catch(err =>
+      logger.error({ err, leadId }, "Could not send the Booking Approval notification")
+    );
+  }
+
   broadcastLeadChanged(leadId);
   return repo.findById(leadId, scopedToAgentIds);
+}
+
+/** Tells every Sales Tracker account (config/salesTracker.ts) a lead was marked Booked. */
+async function notifyBookingApproval(leadId: string, leadName: string, agentName: string): Promise<void> {
+  const { rows } = await query<{ id: string }>(
+    `SELECT id FROM users WHERE status = 'ACTIVE' AND lower(email) = ANY($1::text[])`,
+    [SALES_TRACKER_EMAILS]
+  );
+  // CRM, not FINANCE: the bell hides Finance while the app is CRM-only.
+  await Promise.all(rows.map(u => createNotification({
+    system: "CRM",
+    category: "GENERAL",
+    title: "Booking Approval",
+    message: `${agentName} marked "${leadName}" as Booked. Review and approve it in the Sales Tracker.`,
+    recipientUserId: u.id,
+    leadId,
+    link: "/dashboard/finance?tab=approval"
+  })));
 }
 
 const VALID_CALL_STATUSES = new Set(["Connected", "Called", "Not Reachable", "Wrong Number"]);
@@ -1121,6 +1156,16 @@ export async function editLead(caller: AccessTokenPayload, leadId: string, input
  */
 /** Uploading (single or bulk): a manager may assign new leads to themselves or a direct report only. */
 /** New leads only ever go to active users — never an inactive (or deleted) one. */
+/**
+ * Who can be given leads by a (re)assignment: an active sales agent/manager,
+ * or an admin who is in the Sales department (an admin who also sells).
+ */
+function canReceiveLeads(u: { role: string; status: string; department?: string | null }): boolean {
+  if (u.status !== "ACTIVE") return false;
+  if (u.role === "AGENT") return !u.department || u.department === "SALES";
+  return u.role === "ADMIN" && u.department === "SALES";
+}
+
 async function assertActiveAssignees(agentIds: string[]): Promise<void> {
   const ids = Array.from(new Set(agentIds));
   if (ids.length === 0) return;
@@ -1313,7 +1358,7 @@ export async function reassignLead(caller: AccessTokenPayload, leadId: string, n
   if (!newAgent) throw ApiError.badRequest("New agent not found.");
   // Leads only ever go to active CRM sales agents/managers — never Finance,
   // Admin or other departments, who can't work them from the CRM.
-  if (newAgent.role !== "AGENT" || newAgent.status !== "ACTIVE" || (newAgent.department && newAgent.department !== "SALES")) {
+  if (!canReceiveLeads(newAgent)) {
     throw ApiError.badRequest("Leads can only be reassigned to active sales agents or managers.");
   }
   const newAgentName = `${newAgent.first_name}${newAgent.last_name ? " " + newAgent.last_name : ""}`;
@@ -1396,7 +1441,7 @@ export async function bulkReassignLeads(
   await assertReassignAllowed(caller, newAgentId);
   const newAgent = await usersRepo.findById(newAgentId);
   if (!newAgent) throw ApiError.badRequest("New agent not found.");
-  if (newAgent.role !== "AGENT" || newAgent.status !== "ACTIVE" || (newAgent.department && newAgent.department !== "SALES")) {
+  if (!canReceiveLeads(newAgent)) {
     throw ApiError.badRequest("Leads can only be reassigned to active sales agents or managers.");
   }
   const newAgentName = `${newAgent.first_name}${newAgent.last_name ? " " + newAgent.last_name : ""}`;

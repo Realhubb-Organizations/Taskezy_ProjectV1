@@ -447,7 +447,8 @@ export function DatePicker({
   minDate,
   maxDate,
   disabled,
-  className
+  className,
+  iconLeft = false
 }: {
   value: string;
   onChange: (iso: string) => void;
@@ -457,6 +458,8 @@ export function DatePicker({
   disabled?: boolean;
   /** Classes for the trigger; defaults to the app's form-field look. */
   className?: string;
+  /** Blue calendar icon before the text instead of after it (button look). */
+  iconLeft?: boolean;
 }) {
   const panel = usePanel();
   const [draft, setDraft] = useState("");
@@ -487,12 +490,13 @@ export function DatePicker({
         // silently drops `flex`, stacking the text and calendar icon onto
         // separate lines — a real bug this shape already caused once
         // (LeadScheduleModal.tsx passing a plain <input>-style className).
-        className={`w-full flex items-center justify-between gap-2 disabled:opacity-50 disabled:cursor-not-allowed ${
+        className={`${iconLeft ? "inline-flex justify-start" : "w-full flex justify-between"} items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed ${
           className ?? "bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none focus:border-brand-500"
         }`}
       >
-        <span className={`tabular-nums ${value ? "" : "text-slate-400"}`}>{value ? formatDisplayDate(value) : placeholder}</span>
-        <Calendar className="h-3.5 w-3.5 shrink-0 text-slate-500" />
+        {iconLeft && <Calendar className="h-4 w-4 shrink-0 text-blue-600" />}
+        <span className={`tabular-nums ${value ? "" : iconLeft ? "text-slate-800" : "text-slate-400"}`}>{value ? formatDisplayDate(value) : placeholder}</span>
+        {!iconLeft && <Calendar className="h-3.5 w-3.5 shrink-0 text-slate-500" />}
       </button>
       {panel.pos && createPortal(
         <>

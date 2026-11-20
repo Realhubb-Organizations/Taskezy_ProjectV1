@@ -72,7 +72,7 @@ function AdminCalendarContent() {
   const handleEventClick = (e: CalendarEvent) => {
     if (e.system === "CRM" && e.leadId) router.push(`/dashboard/crm?openLead=${e.leadId}`);
     else if (e.system === "HRMS") router.push("/dashboard/hrms?tab=calendar");
-    else if (e.system === "FINANCE") router.push("/dashboard/finance?tab=calendar");
+    else if (e.system === "FINANCE") router.push("/dashboard/finance");
   };
 
   return (
