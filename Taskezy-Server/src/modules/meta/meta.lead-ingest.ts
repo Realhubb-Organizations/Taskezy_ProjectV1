@@ -31,7 +31,8 @@ export async function ingestMetaLead(leadData: MetaLeadData, connectingAdminId: 
     .filter(Boolean)
     .join(" ");
   const rawName = firstFieldValue(leadData.field_data, ["full_name", "name"]) ?? (combinedFirstLast || undefined);
-  const rawPhone = firstFieldValue(leadData.field_data, ["phone_number", "phone"]);
+  // Some forms ask "WhatsApp number" instead of Meta's standard phone question.
+  const rawPhone = firstFieldValue(leadData.field_data, ["phone_number", "phone"]) ?? firstFieldValue(leadData.field_data, ["whatsapp_number"]);
   const email = firstFieldValue(leadData.field_data, ["email"]);
 
   if (!rawPhone) {

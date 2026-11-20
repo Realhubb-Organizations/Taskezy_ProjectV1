@@ -117,11 +117,15 @@ export interface MetaPage {
   access_token: string;
 }
 
-/** Page tokens minted from a long-lived user token do not expire on their own. */
+/**
+ * Page tokens minted from a long-lived user token do not expire on their own.
+ * Without a limit Meta returns only its default first 25 Pages.
+ */
 export async function getManagedPages(longLivedUserToken: string): Promise<MetaPage[]> {
   const data = await graphFetch<{ data: MetaPage[] }>("/me/accounts", {
     access_token: longLivedUserToken,
-    fields: "id,name,access_token"
+    fields: "id,name,access_token",
+    limit: "200"
   });
   return data.data;
 }
@@ -143,6 +147,20 @@ export async function getCampaignObjective(campaignId: string, longLivedUserToke
     fields: "objective"
   }, { retryOnRateLimit: false });
   return data.objective;
+}
+
+/**
+ * Whether Meta still accepts a saved token. False when e.g. the Page was
+ * deleted or unpublished, or the person who connected it lost access. Asks
+ * Meta's debug_token with the app's own token, so it works even when the
+ * saved token itself no longer does.
+ */
+export async function isTokenValid(token: string): Promise<boolean> {
+  const data = await graphFetch<{ data?: { is_valid?: boolean } }>("/debug_token", {
+    input_token: token,
+    access_token: `${env.META_APP_ID}|${env.META_APP_SECRET}`
+  }, { retryOnRateLimit: false });
+  return data.data?.is_valid !== false;
 }
 
 /**

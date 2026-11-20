@@ -68,14 +68,24 @@ metaRouter.get(
         return;
       }
 
+      // Each Page on its own: one Page Meta refuses (e.g. the person's access on
+      // it is too limited) must not stop the others or the ad-account refresh.
+      let connected = 0;
+      const failed: string[] = [];
       for (const page of pages) {
-        await subscribePageToLeadgen(page.id, page.access_token);
-        await repo.upsertConnection({
-          pageId: page.id,
-          pageName: page.name,
-          pageAccessToken: page.access_token,
-          connectedBy: adminId
-        });
+        try {
+          await subscribePageToLeadgen(page.id, page.access_token);
+          await repo.upsertConnection({
+            pageId: page.id,
+            pageName: page.name,
+            pageAccessToken: page.access_token,
+            connectedBy: adminId
+          });
+          connected++;
+        } catch (err) {
+          logger.warn({ err, pageId: page.id }, "Could not connect this Meta Page; connecting the rest");
+          failed.push(page.name);
+        }
       }
 
       // Ad accounts (for real campaign spend sync — see jobs/metaAdSpendSync.ts).
@@ -91,7 +101,11 @@ metaRouter.get(
         logger.warn({ err }, "Could not fetch/store ad accounts during Meta OAuth callback — Page/lead sync is unaffected");
       }
 
-      res.redirect(`${settingsUrl}?meta_connected=${pages.length}`);
+      // At most 5 names (plus a count) so the redirect address stays short.
+      const result = new URLSearchParams({ meta_connected: String(connected) });
+      failed.slice(0, 5).forEach(name => result.append("meta_failed", name));
+      if (failed.length > 5) result.set("meta_failed_more", String(failed.length - 5));
+      res.redirect(`${settingsUrl}?${result}`);
     } catch (err) {
       logger.error({ err }, "Meta OAuth callback failed");
       res.redirect(`${settingsUrl}?meta_error=1`);

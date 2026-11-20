@@ -256,12 +256,24 @@ export default function SettingsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeRole]);
 
-  // Handles the redirect back from /api/v1/meta/callback (?meta_connected=N or ?meta_error=...)
+  // Handles the redirect back from /api/v1/meta/callback
+  // (?meta_connected=N, plus up to 5 meta_failed=<Page name> and meta_failed_more=<count> for Pages Meta refused, or ?meta_error=...)
   useEffect(() => {
     const connected = searchParams.get("meta_connected");
+    const failed = searchParams.getAll("meta_failed");
+    const failedMore = Number(searchParams.get("meta_failed_more") ?? 0);
     const error = searchParams.get("meta_error");
     if (connected) {
-      setMetaBanner({ kind: "success", text: `Connected ${connected} Meta Page${connected === "1" ? "" : "s"} — new leads will start arriving in real time.` });
+      const pagesText = `Connected ${connected} Meta Page${connected === "1" ? "" : "s"}`;
+      const failedNames = `${failed.join(", ")}${failedMore > 0 ? ` and ${failedMore} more` : ""}`;
+      const failedCount = failed.length + failedMore;
+      setMetaBanner(failed.length
+        ? {
+            kind: "error",
+            text: `${connected === "0" ? "Couldn't connect any Meta Page" : `${pagesText}. Couldn't connect`}: ${failedNames}. ` +
+              `This usually means the Facebook account you used needs full access to ${failedCount === 1 ? "that Page" : "those Pages"}.`
+          }
+        : { kind: "success", text: `${pagesText} — new leads will start arriving in real time.` });
       loadMetaConnections();
       refreshMetaConnectionStatus();
       router.replace("/dashboard/settings");
