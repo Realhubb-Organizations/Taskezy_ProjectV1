@@ -1140,6 +1140,16 @@ export async function editLead(caller: AccessTokenPayload, leadId: string, input
  */
 /** Uploading (single or bulk): a manager may assign new leads to themselves or a direct report only. */
 /** New leads only ever go to active users — never an inactive (or deleted) one. */
+/**
+ * Who can be given leads by a (re)assignment: an active sales agent/manager,
+ * or an admin who is in the Sales department (an admin who also sells).
+ */
+function canReceiveLeads(u: { role: string; status: string; department?: string | null }): boolean {
+  if (u.status !== "ACTIVE") return false;
+  if (u.role === "AGENT") return !u.department || u.department === "SALES";
+  return u.role === "ADMIN" && u.department === "SALES";
+}
+
 async function assertActiveAssignees(agentIds: string[]): Promise<void> {
   const ids = Array.from(new Set(agentIds));
   if (ids.length === 0) return;
@@ -1332,7 +1342,7 @@ export async function reassignLead(caller: AccessTokenPayload, leadId: string, n
   if (!newAgent) throw ApiError.badRequest("New agent not found.");
   // Leads only ever go to active CRM sales agents/managers — never Finance,
   // Admin or other departments, who can't work them from the CRM.
-  if (newAgent.role !== "AGENT" || newAgent.status !== "ACTIVE" || (newAgent.department && newAgent.department !== "SALES")) {
+  if (!canReceiveLeads(newAgent)) {
     throw ApiError.badRequest("Leads can only be reassigned to active sales agents or managers.");
   }
   const newAgentName = `${newAgent.first_name}${newAgent.last_name ? " " + newAgent.last_name : ""}`;
@@ -1415,7 +1425,7 @@ export async function bulkReassignLeads(
   await assertReassignAllowed(caller, newAgentId);
   const newAgent = await usersRepo.findById(newAgentId);
   if (!newAgent) throw ApiError.badRequest("New agent not found.");
-  if (newAgent.role !== "AGENT" || newAgent.status !== "ACTIVE" || (newAgent.department && newAgent.department !== "SALES")) {
+  if (!canReceiveLeads(newAgent)) {
     throw ApiError.badRequest("Leads can only be reassigned to active sales agents or managers.");
   }
   const newAgentName = `${newAgent.first_name}${newAgent.last_name ? " " + newAgent.last_name : ""}`;
