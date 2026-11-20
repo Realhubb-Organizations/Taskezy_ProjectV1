@@ -179,6 +179,8 @@ const CALL_BACKS_CODE = "CALL_BACK";
 const FOLLOW_UPS_CODE = "FOLLOWUP";
 const SITE_VISIT_SCHEDULED_CODE = "SITE_VISIT_SCHEDULED";
 const SITE_VISIT_DONE_CODE = "SITE_VISIT_DONE";
+const LOW_BUDGET_CODE = "LOW_BUDGET";
+const OTHER_REQUIREMENT_CODE = "OTHER_REQUIREMENT";
 
 export interface LeadSummaryStats {
   totalLeads: number;
@@ -188,6 +190,8 @@ export interface LeadSummaryStats {
   followUps: number;
   siteVisitScheduled: number;
   siteVisitDone: number;
+  lowBudget: number;
+  otherRequirement: number;
 }
 
 /**
@@ -254,7 +258,9 @@ export async function getLeadStats(caller: AccessTokenPayload, filter: {
     callBacks: countFor(CALL_BACKS_CODE),
     followUps: countFor(FOLLOW_UPS_CODE),
     siteVisitScheduled: countFor(SITE_VISIT_SCHEDULED_CODE),
-    siteVisitDone: countFor(SITE_VISIT_DONE_CODE)
+    siteVisitDone: countFor(SITE_VISIT_DONE_CODE),
+    lowBudget: countFor(LOW_BUDGET_CODE),
+    otherRequirement: countFor(OTHER_REQUIREMENT_CODE)
   };
 }
 

@@ -540,7 +540,8 @@ export default function LeadDashboard() {
   // adminMetricPredicate below for the equivalent labels.
   const ADMIN_METRIC_TO_STATUS: Record<string, LeadStatus> = {
     new: "New Lead", rnr: "RNR", callbacks: "Call Back", followups: "Followup",
-    sitevisit_sched: "Site Visit Scheduled", sitevisit_done: "Site Visit Done"
+    sitevisit_sched: "Site Visit Scheduled", sitevisit_done: "Site Visit Done",
+    low_budget: "Low Budget", other_requirement: "Other requirement"
   };
 
   // Real distinct campaign names (server-scoped the same way scopedLeads
@@ -994,7 +995,7 @@ export default function LeadDashboard() {
   // effect above. The admin drill-down panel below (adminDrillMetric) now
   // fetches its own rows from the server too (adminDrillBaseFilters).
   const adminStats: LeadSummaryStats = serverStats ?? {
-    totalLeads: 0, newLeads: 0, rnr: 0, callBacks: 0, followUps: 0, siteVisitScheduled: 0, siteVisitDone: 0
+    totalLeads: 0, newLeads: 0, rnr: 0, callBacks: 0, followUps: 0, siteVisitScheduled: 0, siteVisitDone: 0, lowBudget: 0, otherRequirement: 0
   };
 
   const adminStatCards: { key: string; label: string; value: number; color: string }[] = [
@@ -1004,7 +1005,9 @@ export default function LeadDashboard() {
     { key: "callbacks", label: "Call Backs", value: adminStats.callBacks, color: "text-[#FF8C00]" },
     { key: "followups", label: "Follow Ups", value: adminStats.followUps, color: "text-[#0084FF]" },
     { key: "sitevisit_sched", label: "Site Visit Scheduled", value: adminStats.siteVisitScheduled, color: "text-[#FF0000]" },
-    { key: "sitevisit_done", label: "Site Visit Done", value: adminStats.siteVisitDone, color: "text-[#015814]" }
+    { key: "sitevisit_done", label: "Site Visit Done", value: adminStats.siteVisitDone, color: "text-[#015814]" },
+    { key: "low_budget", label: "Low Budget", value: adminStats.lowBudget, color: "text-[#B45309]" },
+    { key: "other_requirement", label: "Other Requirement", value: adminStats.otherRequirement, color: "text-slate-700" }
   ];
 
   // Admin drill-down panel's own filters: exactly the filters the cards
@@ -1741,7 +1744,7 @@ export default function LeadDashboard() {
                 )}
               </div>
 
-              <div className="flex md:grid md:grid-cols-7 bg-white divide-x divide-slate-100 overflow-x-auto min-w-full">
+              <div className="flex md:grid md:grid-cols-9 bg-white divide-x divide-slate-100 overflow-x-auto min-w-full">
                 {adminStatCards.map((s) => {
                   const isActive = (isAdmin ? adminDrillMetric : adminMetric) === s.key;
                   return (

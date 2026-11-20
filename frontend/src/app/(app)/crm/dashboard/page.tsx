@@ -148,7 +148,7 @@ export default function CrmDashboardPage() {
   // down the page, so those keep reading the bulk array for now (see the
   // server-side-aggregates plan for when that stops being necessary).
   const [stats, setStats] = useState<LeadSummaryStats>({
-    totalLeads: 0, newLeads: 0, rnr: 0, callBacks: 0, followUps: 0, siteVisitScheduled: 0, siteVisitDone: 0
+    totalLeads: 0, newLeads: 0, rnr: 0, callBacks: 0, followUps: 0, siteVisitScheduled: 0, siteVisitDone: 0, lowBudget: 0, otherRequirement: 0
   });
   const [statsLoading, setStatsLoading] = useState(true);
   // Refreshes live (quietly) when leads change anywhere.

@@ -1,4 +1,4 @@
-// Shared shape for the 7 lead-pipeline stat cards shown on the CRM
+// Shared shape for the lead-pipeline stat cards shown on the CRM
 // Dashboard and the admin Leads page — both now get these numbers from the
 // server (GET /leads/stats, see Taskezy-Server/src/modules/leads/
 // leads.service.ts's getLeadStats) rather than computing them client-side
@@ -12,4 +12,6 @@ export interface LeadSummaryStats {
   followUps: number;
   siteVisitScheduled: number;
   siteVisitDone: number;
+  lowBudget: number;
+  otherRequirement: number;
 }
