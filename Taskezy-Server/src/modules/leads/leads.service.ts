@@ -925,8 +925,8 @@ export async function precheckBulkImportLeads(leads: { name: string; phone: stri
 }
 
 // Statuses that still have a next call (frontend leadScheduler.ts
-// SCHEDULER_REQUIRED_STATUSES) — a WhatsApp status change to one of these
-// keeps the lead's scheduled call.
+// SCHEDULER_REQUIRED_STATUSES) — a status change to one of these keeps the
+// lead's future scheduled call (see updateLeadStatus).
 const STATUSES_THAT_KEEP_A_SCHEDULE: LeadStatusCode[] = ["RNR", "CALL_BACK", "FOLLOWUP", "EOI", "SITE_VISIT_SCHEDULED"];
 
 /** A lead's status can be changed by the agent it's assigned to, that agent's manager, or an admin. */
@@ -966,16 +966,26 @@ export async function updateLeadStatus(
       // scheduler (jobs/followupScheduler.ts) checks for before escalating
       // a missed reminder to admins, so it needs to land in the same
       // transaction as the status change itself.
-      // A status change normally closes the lead's scheduled call (the
-      // status popups schedule a new one). After a WhatsApp message no new
-      // time is asked, so the scheduled call is kept — unless the new
-      // status ends the follow-ups (Not Interested, Booked, …).
-      // Closes missed calls too, so an old time can't keep the lead under
-      // Missed Tasks after its status moved on.
-      if (!(keepSchedule && STATUSES_THAT_KEEP_A_SCHEDULE.includes(statusCode))) {
+      // A status that ends the follow-ups (Not Interested, Booked, …) closes
+      // every scheduled call. A status that still needs a next call keeps
+      // the future one — the status picker never books a new time, so
+      // closing it left the lead with no Next Call Date. Overdue calls are
+      // still closed, so an old time can't keep the lead under Missed Tasks
+      // after its status moved on, and a site visit is closed once the lead
+      // leaves Site Visit Scheduled. After a WhatsApp message (keepSchedule)
+      // every open call is kept.
+      if (!STATUSES_THAT_KEEP_A_SCHEDULE.includes(statusCode)) {
         await client.query(
           `UPDATE followup_calls SET status = 'COMPLETED' WHERE lead_id = $1 AND status <> 'COMPLETED'`,
           [leadId]
+        );
+      } else if (!keepSchedule) {
+        await client.query(
+          `UPDATE followup_calls SET status = 'COMPLETED'
+           WHERE lead_id = $1 AND status <> 'COMPLETED'
+             AND (status = 'MISSED' OR scheduled_at < now()
+                  OR (call_type = 'SITE_VISIT' AND $2::text <> 'SITE_VISIT_SCHEDULED'))`,
+          [leadId, statusCode]
         );
       }
     });

@@ -60,7 +60,7 @@ interface OverdueFollowup {
 /**
  * Escalates to every active admin when a follow-up has been due for more
  * than VIOLATION_WINDOW_MS with no lead status change in the meantime — see
- * leads.service.ts::updateLeadStatus, which marks the follow-up COMPLETED
+ * leads.service.ts::updateLeadStatus, which marks a due follow-up COMPLETED
  * the moment the assigned agent actually updates the lead, which is what
  * keeps a handled follow-up out of this query.
  */
