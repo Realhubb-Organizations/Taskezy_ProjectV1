@@ -46,9 +46,9 @@ export class ApiRequestError extends Error {
 // should happen for a timeout's own message below.
 const REQUEST_TIMEOUT_MS = 25_000;
 
-async function fetchWithTimeout(url: string, options: RequestInit): Promise<Response> {
+async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS): Promise<Response> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(url, { ...options, signal: controller.signal });
   } catch (err) {
@@ -76,17 +76,19 @@ function errorMessageOf(error: Envelope<unknown>["error"] | undefined): string {
   return fieldMessage || details?.formErrors?.[0] || error?.message || "Request failed";
 }
 
-async function request<T>(path: string, options: RequestInit = {}, allowRefreshRetry = true): Promise<T> {
+// timeoutMs: only for the few calls that legitimately take longer than REQUEST_TIMEOUT_MS (e.g. Meta Page sync).
+async function request<T>(path: string, options: RequestInit & { timeoutMs?: number } = {}, allowRefreshRetry = true): Promise<T> {
   const token = getAccessToken();
+  const { timeoutMs, ...init } = options;
   const res = await fetchWithTimeout(`${API_BASE_URL}${path}`, {
-    ...options,
+    ...init,
     credentials: "include", // sends the httpOnly refresh-token cookie
     headers: {
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(options.headers || {})
+      ...(init.headers || {})
     }
-  });
+  }, timeoutMs);
 
   // Only /login and /refresh itself should skip the retry (a 401 from
   // /login means a wrong password, not an expired token, and retrying
@@ -2341,10 +2343,56 @@ export interface ApiMetaConnection {
   status: "ACTIVE" | "DISCONNECTED";
   connected_by: string;
   created_at: string;
+  /** Last time a Sync or Connect confirmed this Page; null = not synced yet. */
+  last_synced_at: string | null;
 }
 
 export function apiListMetaConnections(): Promise<ApiMetaConnection[]> {
   return request<ApiMetaConnection[]>("/api/v1/meta/connections");
+}
+
+/** connected = working; connection_lost = Meta no longer accepts it; ready = a saved login manages it but it isn't connected; disconnected = an admin turned it off. */
+export type ApiMetaPageState = "connected" | "connection_lost" | "ready" | "disconnected";
+
+export interface ApiMetaPageStatus {
+  pageId: string;
+  name: string;
+  state: ApiMetaPageState;
+  /** Facebook people (saved logins) who manage this Page; empty = none can see it. */
+  managedBy: string[];
+  /** A saved login manages it, so Sync / Connect / Reconnect can act on it. */
+  canSync: boolean;
+}
+
+export interface ApiMetaPageStatuses {
+  pages: ApiMetaPageStatus[];
+  lastSyncedAt: string | null;
+  loginErrors: number;
+}
+
+export interface ApiMetaSyncResult {
+  connected: string[];
+  failed: string[];
+  adAccountsAdded: number;
+  /** Saved Facebook logins that couldn't be read (e.g. expired). */
+  loginErrors: number;
+}
+
+// Both ask Meta about every Page, so they get longer than the usual 25s.
+const META_PAGE_SYNC_TIMEOUT_MS = 120_000;
+
+/** Every Page's state, checked live with Meta (takes a few seconds). Admin only. */
+export function apiGetMetaPageStatuses(): Promise<ApiMetaPageStatuses> {
+  return request<ApiMetaPageStatuses>("/api/v1/meta/pages", { timeoutMs: META_PAGE_SYNC_TIMEOUT_MS });
+}
+
+/** No pageIds = Sync now (all missing Pages + new ad accounts); with pageIds = connect/reconnect just those. Admin only. */
+export function apiSyncMetaPages(pageIds?: string[]): Promise<ApiMetaSyncResult> {
+  return request<ApiMetaSyncResult>("/api/v1/meta/pages/sync", {
+    method: "POST",
+    body: JSON.stringify(pageIds ? { pageIds } : {}),
+    timeoutMs: META_PAGE_SYNC_TIMEOUT_MS
+  });
 }
 
 // Returns the Meta OAuth dialog URL — the caller navigates the browser there

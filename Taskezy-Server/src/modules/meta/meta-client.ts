@@ -121,13 +121,18 @@ export interface MetaPage {
  * Page tokens minted from a long-lived user token do not expire on their own.
  * Without a limit Meta returns only its default first 25 Pages.
  */
-export async function getManagedPages(longLivedUserToken: string): Promise<MetaPage[]> {
+export async function getManagedPages(longLivedUserToken: string, opts: { retryOnRateLimit?: boolean } = {}): Promise<MetaPage[]> {
   const data = await graphFetch<{ data: MetaPage[] }>("/me/accounts", {
     access_token: longLivedUserToken,
     fields: "id,name,access_token",
     limit: "200"
-  });
+  }, opts);
   return data.data;
+}
+
+/** The Facebook person behind a saved login (to tell logins apart and say who manages a Page). */
+export async function getMe(longLivedUserToken: string, opts: { retryOnRateLimit?: boolean } = {}): Promise<{ id: string; name: string }> {
+  return graphFetch<{ id: string; name: string }>("/me", { access_token: longLivedUserToken, fields: "id,name" }, opts);
 }
 
 /** Every Page this login manages (id + name only, up to 200) — for the "Page not connected" check. */
@@ -224,11 +229,12 @@ export interface MetaAdAccount {
 }
 
 /** The ad accounts this long-lived user token has access to — used to sync real campaign spend. */
-export async function getAdAccounts(longLivedUserToken: string): Promise<MetaAdAccount[]> {
+export async function getAdAccounts(longLivedUserToken: string, opts: { retryOnRateLimit?: boolean } = {}): Promise<MetaAdAccount[]> {
   const data = await graphFetch<{ data: MetaAdAccount[] }>("/me/adaccounts", {
     access_token: longLivedUserToken,
-    fields: "id,name"
-  });
+    fields: "id,name",
+    limit: "200"   // Meta's default is only the first 25
+  }, opts);
   return data.data;
 }
 

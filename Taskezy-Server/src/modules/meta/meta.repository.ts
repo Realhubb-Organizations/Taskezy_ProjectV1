@@ -9,9 +9,11 @@ export interface MetaConnectionRow {
   status: "ACTIVE" | "DISCONNECTED";
   connected_by: string;
   created_at: string;
+  /** Last time a Sync or Connect confirmed this Page (migration 058); null = not synced yet. */
+  last_synced_at: string | null;
 }
 
-const SAFE_SELECT = `SELECT id, page_id, page_name, ad_account_id, status, connected_by, created_at FROM meta_connections`;
+const SAFE_SELECT = `SELECT id, page_id, page_name, ad_account_id, status, connected_by, created_at, last_synced_at FROM meta_connections`;
 
 export async function listConnections(): Promise<MetaConnectionRow[]> {
   const { rows } = await query<MetaConnectionRow>(`${SAFE_SELECT} ORDER BY created_at DESC`);
@@ -29,15 +31,16 @@ export interface UpsertConnectionInput {
 export async function upsertConnection(input: UpsertConnectionInput): Promise<void> {
   const { ciphertext, iv, authTag } = encryptSecret(input.pageAccessToken);
   await pool.query(
-    `INSERT INTO meta_connections (page_id, page_name, page_token_encrypted, page_token_iv, page_token_tag, connected_by, status)
-     VALUES ($1, $2, $3, $4, $5, $6, 'ACTIVE')
+    `INSERT INTO meta_connections (page_id, page_name, page_token_encrypted, page_token_iv, page_token_tag, connected_by, status, last_synced_at)
+     VALUES ($1, $2, $3, $4, $5, $6, 'ACTIVE', now())
      ON CONFLICT (page_id) DO UPDATE SET
        page_name = EXCLUDED.page_name,
        page_token_encrypted = EXCLUDED.page_token_encrypted,
        page_token_iv = EXCLUDED.page_token_iv,
        page_token_tag = EXCLUDED.page_token_tag,
        connected_by = EXCLUDED.connected_by,
-       status = 'ACTIVE'`,
+       status = 'ACTIVE',
+       last_synced_at = now()`,
     [input.pageId, input.pageName, ciphertext, iv, authTag, input.connectedBy]
   );
 }
@@ -73,6 +76,18 @@ export async function getActiveConnectionByPageId(pageId: string): Promise<Activ
   };
 }
 
+/** Stamps the Pages a Sync just confirmed as working. */
+export async function markPagesSynced(pageIds: string[]): Promise<void> {
+  if (!pageIds.length) return;
+  await pool.query(`UPDATE meta_connections SET last_synced_at = now() WHERE page_id = ANY($1) AND status = 'ACTIVE'`, [pageIds]);
+}
+
+/** Most recent sync of any connected Page, or null if none has been synced yet. */
+export async function latestPageSync(): Promise<string | null> {
+  const { rows } = await query<{ at: string | null }>(`SELECT max(last_synced_at) AS at FROM meta_connections WHERE status = 'ACTIVE'`);
+  return rows[0]?.at ?? null;
+}
+
 export async function disconnect(id: string): Promise<boolean> {
   const { rowCount } = await pool.query(`UPDATE meta_connections SET status = 'DISCONNECTED' WHERE id = $1`, [id]);
   return (rowCount ?? 0) > 0;
@@ -102,6 +117,22 @@ export async function upsertAdAccount(input: UpsertAdAccountInput): Promise<void
        status = 'ACTIVE'`,
     [input.id, input.name, input.connectedBy, ciphertext, iv, authTag]
   );
+}
+
+/**
+ * Saves an ad account only if Taskezy has never seen it. Unlike
+ * upsertAdAccount, it never touches an existing row, so one an admin turned
+ * off stays off. Returns whether it was added.
+ */
+export async function addAdAccountIfNew(input: UpsertAdAccountInput): Promise<boolean> {
+  const { ciphertext, iv, authTag } = encryptSecret(input.userToken);
+  const { rowCount } = await pool.query(
+    `INSERT INTO meta_ad_accounts (id, name, connected_by, user_token_encrypted, user_token_iv, user_token_tag, status)
+     VALUES ($1, $2, $3, $4, $5, $6, 'ACTIVE')
+     ON CONFLICT (id) DO NOTHING`,
+    [input.id, input.name, input.connectedBy, ciphertext, iv, authTag]
+  );
+  return (rowCount ?? 0) > 0;
 }
 
 export interface ActiveAdAccount {
