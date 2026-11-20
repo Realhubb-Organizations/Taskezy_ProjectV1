@@ -14,6 +14,7 @@ import { broadcastLeadChanged, broadcastManyLeadsChanged } from "./leads.realtim
 import { HANDOVER_NOTE_PREFIX } from "./leads.handover";
 import { normalizeTypedLeadPhone } from "../../utils/validation";
 import { logger } from "../../utils/logger";
+import { SALES_TRACKER_EMAILS } from "../../config/salesTracker";
 import { assertTransitionAllowed, LeadStatusCode, REVIVED_CODE } from "./leadStatusTransitions";
 
 /**
@@ -993,8 +994,36 @@ export async function updateLeadStatus(
   // stale for everyone who received them.
   await deleteLeadActivityNotifications(leadId);
 
+  // A new booking waits for the Sales Tracker team's approval. Best-effort:
+  // a failed notification must never fail the status change itself.
+  if (statusCode === "BOOKED" && existing.status_code !== "BOOKED") {
+    // Booked again after a rejection: it goes back to Pending for a fresh review.
+    await query(`DELETE FROM booking_approval_decisions WHERE lead_id = $1 AND decision = 'REJECTED'`, [leadId]);
+    notifyBookingApproval(leadId, existing.name, existing.assigned_agent_name).catch(err =>
+      logger.error({ err, leadId }, "Could not send the Booking Approval notification")
+    );
+  }
+
   broadcastLeadChanged(leadId);
   return repo.findById(leadId, scopedToAgentIds);
+}
+
+/** Tells every Sales Tracker account (config/salesTracker.ts) a lead was marked Booked. */
+async function notifyBookingApproval(leadId: string, leadName: string, agentName: string): Promise<void> {
+  const { rows } = await query<{ id: string }>(
+    `SELECT id FROM users WHERE status = 'ACTIVE' AND lower(email) = ANY($1::text[])`,
+    [SALES_TRACKER_EMAILS]
+  );
+  // CRM, not FINANCE: the bell hides Finance while the app is CRM-only.
+  await Promise.all(rows.map(u => createNotification({
+    system: "CRM",
+    category: "GENERAL",
+    title: "Booking Approval",
+    message: `${agentName} marked "${leadName}" as Booked. Review and approve it in the Sales Tracker.`,
+    recipientUserId: u.id,
+    leadId,
+    link: "/dashboard/finance?tab=approval"
+  })));
 }
 
 const VALID_CALL_STATUSES = new Set(["Connected", "Called", "Not Reachable", "Wrong Number"]);

@@ -19,6 +19,7 @@ import { attendanceRouter } from "./modules/attendance/attendance.routes";
 import { timesheetsRouter } from "./modules/timesheets/timesheets.routes";
 import { reimbursementsRouter } from "./modules/reimbursements/reimbursements.routes";
 import { invoicesRouter } from "./modules/invoices/invoices.routes";
+import { salesTrackerRouter } from "./modules/sales-tracker/salesTracker.routes";
 import { notificationsRouter } from "./modules/notifications/notifications.routes";
 import { presenceRouter } from "./modules/presence/presence.routes";
 import { devicesRouter } from "./modules/devices/devices.routes";
@@ -100,6 +101,7 @@ export function createApp(): Express {
   app.use("/api/v1/timesheets", timesheetsRouter);
   app.use("/api/v1/reimbursements", reimbursementsRouter);
   app.use("/api/v1/invoices", invoicesRouter);
+  app.use("/api/v1/sales-tracker", salesTrackerRouter);
   app.use("/api/v1/notifications", notificationsRouter);
   app.use("/api/v1/presence", presenceRouter);
   app.use("/api/v1/devices", devicesRouter);

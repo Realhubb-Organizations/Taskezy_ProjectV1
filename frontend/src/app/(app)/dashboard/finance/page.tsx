@@ -1,908 +1,189 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
-import { useApp, Invoice, ReimbursementClaim, Lead, CalendarEventType, mapApiInvoiceToFrontend, mapApiReimbursementToFrontend } from "@/context/AppContext";
-import { maskPhone, maskEmail } from "@/lib/maskPII";
-import { useSearchParams } from "next/navigation";
+import React, { useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Plus } from "lucide-react";
+import { useApp } from "@/context/AppContext";
 import { useDialog } from "@/components/ui/DialogProvider";
-import MonthCalendar from "@/components/calendar/MonthCalendar";
-import AddCalendarEventModal from "@/components/calendar/AddCalendarEventModal";
-import { LineSkeleton, TableRowsSkeleton, CardListSkeleton } from "@/components/ui/Skeletons";
-import TablePagination from "@/components/ui/TablePagination";
-import { apiListInvoicesPage, apiListReimbursementsPage, apiListLeadsPage, type ApiLeadRow } from "@/lib/apiClient";
-import {
-  CreditCard,
-  DollarSign,
-  FileText,
-  CheckCircle,
-  XCircle,
-  HelpCircle,
-  Percent,
-  Plus,
-  X,
-  Search,
-  Check,
-  ShieldAlert,
-  Trash2,
-  CalendarDays,
-  AlertTriangle
-} from "lucide-react";
-import { todayIso } from "@/components/ui/DateRangePicker";
+import OverviewTab from "@/components/finance/OverviewTab";
+import BookingsTab from "@/components/finance/BookingsTab";
+import BookingDetails from "@/components/finance/BookingDetails";
+import PaymentsTab from "@/components/finance/PaymentsTab";
+import PaymentDetails from "@/components/finance/PaymentDetails";
+import BookingApprovalTab from "@/components/finance/BookingApprovalTab";
+import { AddBookingModal } from "@/components/finance/BookingModals";
+import { AddPaymentModal } from "@/components/finance/PaymentModals";
+import { EMPTY_FILTERS, FilterState, useLookups } from "@/components/finance/stShared";
 
-export default function FinancePage() {
-  const { confirm: confirmDialog } = useDialog();
-  const {
-    invoices,
-    reimbursements,
-    leads,
-    approveClaim,
-    rejectClaim,
-    markInvoicePaid,
-    addInvoice,
-    generateInvoice,
-    deleteInvoice,
-    deleteClaim,
-    activeRole,
-    calendarEvents,
-    addCalendarEvent,
-    isDataLoading,
-    manualRefreshSignal
-  } = useApp();
+// Finance → Sales Tracker. Bookings of Booked leads, the brokerage on each
+// (Basic / NRI / AOP), and that brokerage split into invoices/payments.
+// Open only to the accounts in lib/salesTracker.ts (layout.tsx's
+// checkUserAccess gates the page; the API enforces the same list).
+//
+// URL: ?tab=bookings|payments (Overview when absent); ?booking=<id> opens a
+// booking's details page under Bookings.
 
+type TrackerTab = "overview" | "bookings" | "payments" | "approval";
+
+const TABS: { key: TrackerTab; label: string }[] = [
+  { key: "overview", label: "Overview" },
+  { key: "bookings", label: "Bookings" },
+  { key: "payments", label: "Payments & Invoices" },
+  { key: "approval", label: "Booking Approval" }
+];
+
+export default function SalesTrackerPage() {
+  const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
-  const activeTabParam = searchParams.get("tab") || "dashboard";
+  const { manualRefreshSignal } = useApp();
+  const { toast } = useDialog();
+  const lookups = useLookups();
 
-  // Reimbursement filters
-  const [reimbFilter, setReimbFilter] = useState("All");
+  const bookingId = searchParams.get("booking");
+  // ?payment=<id>&pb=<its booking id> opens a payment's details under Payments & Invoices.
+  const paymentId = searchParams.get("payment");
+  const paymentBookingId = searchParams.get("pb");
+  const tabParam = searchParams.get("tab");
+  const activeTab: TrackerTab = bookingId ? "bookings" : paymentId ? "payments" : TABS.some(t => t.key === tabParam) ? (tabParam as TrackerTab) : "overview";
 
-  // Invoices list state
-  const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+  const go = (query: string) => router.push(query ? `${pathname}?${query}` : pathname, { scroll: false });
+  const setTab = (tab: TrackerTab) => go(tab === "overview" ? "" : `tab=${tab}`);
+  const openBooking = (id: string) => go(`tab=bookings&booking=${id}`);
+  const openPayment = (id: string, bookingOfPayment: string) => go(`tab=payments&payment=${id}&pb=${bookingOfPayment}`);
 
-  // ---- Server-paginated Billing tab (real fetch-per-page, mirrors the
-  // Leads tab's admin table fix) — the invoices table's own rows are
-  // fetched directly from the server for exactly the current page, instead
-  // of rendering the full `invoices` array AppContext still bulk-loads for
-  // other consumers (Dashboard/Reports tabs' aggregates, the "Create
-  // Invoice" lead lookup) that genuinely need the whole dataset. 10 matches
-  // this codebase's own default-page-size convention (TablePagination's
-  // DEFAULT_ROWS_PER_PAGE_OPTIONS[0]) since the Billing tab had no rows-
-  // per-page control of its own before this fix.
-  const [invoicesPage, setInvoicesPage] = useState(1);
-  const [invoicesRowsPerPage, setInvoicesRowsPerPage] = useState(10);
-  const [serverInvoices, setServerInvoices] = useState<Invoice[]>([]);
-  const [serverInvoicesTotalCount, setServerInvoicesTotalCount] = useState(0);
-  const [serverInvoicesLoading, setServerInvoicesLoading] = useState(true);
-  // Distinct from "0 rows" — a failed fetch must never look like a
-  // genuinely-empty billing list. Same pattern as properties page's propertiesLoadError.
-  const [invoicesLoadError, setInvoicesLoadError] = useState(false);
+  // Each tab keeps its own filters while you switch between them.
+  const [filters, setFilters] = useState<Record<TrackerTab, FilterState>>({
+    overview: EMPTY_FILTERS,
+    bookings: EMPTY_FILTERS,
+    payments: EMPTY_FILTERS,
+    approval: EMPTY_FILTERS
+  });
+  const setTabFilters = (tab: TrackerTab) => (f: FilterState) => setFilters(prev => ({ ...prev, [tab]: f }));
 
-  const fetchInvoicesPage = (page: number, rowsPerPage: number) => {
-    setServerInvoicesLoading(true);
-    setInvoicesLoadError(false);
-    apiListInvoicesPage(page, rowsPerPage)
-      .then((result) => {
-        setServerInvoices(result.rows.map(mapApiInvoiceToFrontend));
-        setServerInvoicesTotalCount(result.totalCount);
-      })
-      .catch((err) => {
-        console.error("Could not load the invoices list page:", err);
-        setServerInvoices([]);
-        setServerInvoicesTotalCount(0);
-        setInvoicesLoadError(true);
-      })
-      .finally(() => setServerInvoicesLoading(false));
-  };
+  // Bumped after any save so every list (and the Overview totals) reload.
+  const [dataVersion, setDataVersion] = useState(0);
+  const refreshSignal = manualRefreshSignal + dataVersion;
+  const onDataChanged = () => setDataVersion(v => v + 1);
 
-  useEffect(() => {
-    if (activeTabParam !== "billing") return;
-    fetchInvoicesPage(invoicesPage, invoicesRowsPerPage);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTabParam, invoicesPage, invoicesRowsPerPage, manualRefreshSignal]);
-
-  // Row-level mutations (generate/mark-paid/delete) update AppContext's
-  // `invoices` optimistically — overlay those onto the server-fetched page
-  // so a status/amount change or delete shows immediately without waiting
-  // for the next page fetch, while the row SET and pagination itself still
-  // come from the server, bounded to one page at a time.
-  const displayedInvoices = serverInvoices
-    .filter(si => invoices.some(i => i.id === si.id))
-    .map(si => invoices.find(i => i.id === si.id)!);
-
-  // ---- Server-paginated Reimbursements tab (same pattern) ----
-  const REIMB_STATUS_TO_API: Record<string, "PENDING" | "PAID" | "REJECTED"> = {
-    Pending: "PENDING", Paid: "PAID", Rejected: "REJECTED"
-  };
-  const [reimbPage, setReimbPage] = useState(1);
-  const [reimbRowsPerPage, setReimbRowsPerPage] = useState(10);
-  const [serverReimbursements, setServerReimbursements] = useState<ReimbursementClaim[]>([]);
-  const [serverReimbTotalCount, setServerReimbTotalCount] = useState(0);
-  const [serverReimbLoading, setServerReimbLoading] = useState(true);
-  // Distinct from "0 rows" — a failed fetch must never look like a
-  // genuinely-empty claims list. Same pattern as properties page's propertiesLoadError.
-  const [reimbursementsLoadError, setReimbursementsLoadError] = useState(false);
-  const [reimbRefreshNonce, setReimbRefreshNonce] = useState(0);
-
-  useEffect(() => {
-    if (activeTabParam !== "reimbursements") return;
-    let cancelled = false;
-    setServerReimbLoading(true);
-    setReimbursementsLoadError(false);
-    apiListReimbursementsPage(reimbPage, reimbRowsPerPage, {
-      status: reimbFilter === "All" ? undefined : REIMB_STATUS_TO_API[reimbFilter]
-    })
-      .then((result) => {
-        if (cancelled) return;
-        setServerReimbursements(result.rows.map(mapApiReimbursementToFrontend));
-        setServerReimbTotalCount(result.totalCount);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        console.error("Could not load the reimbursements list page:", err);
-        setServerReimbursements([]);
-        setServerReimbTotalCount(0);
-        setReimbursementsLoadError(true);
-      })
-      .finally(() => {
-        if (!cancelled) setServerReimbLoading(false);
-      });
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTabParam, reimbPage, reimbRowsPerPage, reimbFilter, manualRefreshSignal, reimbRefreshNonce]);
-
-  // Same overlay as displayedInvoices — approve/reject/delete update
-  // AppContext's `reimbursements` optimistically, reflected immediately.
-  const displayedReimbursements = serverReimbursements
-    .filter(sr => reimbursements.some(r => r.id === sr.id))
-    .map(sr => reimbursements.find(r => r.id === sr.id)!);
-
-  // New Invoice form state
-  const [isNewInvoiceOpen, setIsNewInvoiceOpen] = useState(false);
-  const [clientName, setClientName] = useState("");
-  const [baseAmount, setBaseAmount] = useState("");
-  const [projectName, setProjectName] = useState("");
-  const [leadId, setLeadId] = useState("");
-  const [newInvoiceError, setNewInvoiceError] = useState("");
-
-  // Searchable lead picker — the full lead list is too big for a plain
-  // <select> (and is no longer loaded in bulk anyway), so this hits
-  // GET /leads?search= as the admin types instead.
-  const [leadSearchQuery, setLeadSearchQuery] = useState("");
-  const [leadSearchResults, setLeadSearchResults] = useState<ApiLeadRow[]>([]);
-  const [leadSearchOpen, setLeadSearchOpen] = useState(false);
-  useEffect(() => {
-    if (!leadSearchOpen || leadSearchQuery.trim().length < 2) { setLeadSearchResults([]); return; }
-    let cancelled = false;
-    const timer = setTimeout(() => {
-      apiListLeadsPage(1, 20, { search: leadSearchQuery.trim() })
-        .then(result => { if (!cancelled) setLeadSearchResults(result.rows); })
-        .catch(() => { if (!cancelled) setLeadSearchResults([]); });
-    }, 300);
-    return () => { cancelled = true; clearTimeout(timer); };
-  }, [leadSearchQuery, leadSearchOpen]);
-  const selectLeadResult = (l: ApiLeadRow) => {
-    setLeadId(l.id);
-    setLeadSearchQuery(`${l.name} — ${activeRole === "ADMIN" ? l.phone : maskPhone(l.phone)}`);
-    setLeadSearchOpen(false);
-  };
-
-  // Calendar tab state
-  const todayStr0 = todayIso();
-  const [selectedCalDate, setSelectedCalDate] = useState<string>(todayStr0);
-  const [isAddEventOpen, setIsAddEventOpen] = useState(false);
-  const financeEvents = calendarEvents.filter(e => e.system === "FINANCE");
-  const dayFinanceEvents = financeEvents.filter(e => e.date === selectedCalDate);
-
-  const handleCreateInvoice = (e: React.FormEvent) => {
-    e.preventDefault();
-    setNewInvoiceError("");
-    if (!clientName || !baseAmount || !leadId) {
-      setNewInvoiceError("Client name, base value, and an associated lead are all required.");
-      return;
-    }
-
-    const result = addInvoice(leadId, clientName, Number(baseAmount), projectName || undefined);
-    if (!result.success) {
-      setNewInvoiceError(result.error || "Could not create invoice.");
-      return;
-    }
-    setIsNewInvoiceOpen(false);
-    setClientName("");
-    setBaseAmount("");
-    setProjectName("");
-    setLeadId("");
-    setLeadSearchQuery("");
-    setLeadSearchResults([]);
-    // A brand-new invoice is the newest row (ORDER BY created_at DESC) so it
-    // lands on page 1 — the overlay in displayedInvoices only re-syncs rows
-    // already present on the currently-fetched page, so a genuinely new row
-    // needs its own refetch to appear at all.
-    setInvoicesPage(1);
-    fetchInvoicesPage(1, invoicesRowsPerPage);
-  };
-
-  // Migration 029 collapsed the old Booking Done/Finance Review/Booking
-  // Approved distinction down to one "Booked" Lead Status — a lead is
-  // Booked immediately, with no separate pending-approval status. Finance's
-  // own review step now lives entirely on the auto-generated invoice
-  // itself (it starts as "Draft" the moment a lead is marked Booked, see
-  // AppContext's updateLeadStatus): approving activates it, rejecting
-  // deletes it. The lead's status never changes here anymore.
-  const handleApproveBooking = (leadId: string) => {
-    const associatedInvoice = invoices.find(inv => inv.leadId === leadId);
-    if (associatedInvoice) {
-      generateInvoice(associatedInvoice.id);
-    }
-  };
-
-  const handleRejectBooking = (leadId: string) => {
-    const associatedInvoice = invoices.find(inv => inv.leadId === leadId);
-    if (associatedInvoice) {
-      deleteInvoice(associatedInvoice.id);
-    }
-  };
-
-  const handleDeleteInvoice = async (id: string) => {
-    if (await confirmDialog({ title: "Delete this invoice?", message: "This invoice ledger will be permanently deleted.", confirmLabel: "Delete", danger: true })) {
-      deleteInvoice(id);
-    }
-  };
-
-  // Calculate stats
-  const totalInvoiced = invoices.reduce((sum, inv) => sum + inv.totalAmount, 0);
-  const pendingApprovals = leads.filter(l => l.status === "Booked" && invoices.some(inv => inv.leadId === l.id && inv.status === "Draft"));
+  const [adding, setAdding] = useState(false);
+  const [creatingPayment, setCreatingPayment] = useState(false);
+  // The tab row's main button: Create Payment on Payments & Invoices, Add Booking elsewhere.
+  const onPayments = activeTab === "payments";
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-          <h2 className="text-xl font-bold text-brand-700 flex items-center gap-2">
-            <CreditCard className="h-5.5 w-5.5 text-brand-650" />
-            Finance Operations
-          </h2>
-          <p className="text-xs text-slate-500">
-            Generate tax ledgers, inspect fuel/mobile reimbursements, and release bookings.
-          </p>
-        </div>
-
-        {activeTabParam === "billing" && (
+    <div className="space-y-4 pb-8 animate-fade-in text-slate-800">
+      <div className="flex items-end justify-between gap-3">
+        <nav className="flex gap-6 overflow-x-auto" aria-label="Sales Tracker sections">
+          {TABS.map(t => {
+            const active = t.key === activeTab;
+            return (
+              <button
+                key={t.key}
+                type="button"
+                onClick={() => setTab(t.key)}
+                className={`pb-2 border-b-2 text-sm font-semibold whitespace-nowrap transition-colors ${
+                  active ? "border-[#0B1E6E] text-[#0B1E6E]" : "border-transparent text-slate-500 hover:text-slate-800"
+                }`}
+              >
+                {t.label}
+              </button>
+            );
+          })}
+        </nav>
+        {/* Not on a booking's own details page, nor on Booking Approval (design). */}
+        {!bookingId && activeTab !== "approval" && (
           <button
-            onClick={() => setIsNewInvoiceOpen(true)}
-            className="inline-flex items-center gap-1.5 bg-[#0B1E6E] hover:bg-[#081650] text-white px-4 py-2 rounded-lg text-xs font-bold transition-all shadow-md"
+            type="button"
+            onClick={() => (onPayments ? setCreatingPayment(true) : setAdding(true))}
+            className="ui-btn ui-btn-primary shrink-0"
           >
             <Plus className="h-4 w-4" />
-            Create Invoice Ledger
-          </button>
-        )}
-
-        {activeTabParam === "calendar" && (
-          <button
-            onClick={() => setIsAddEventOpen(true)}
-            className="inline-flex items-center gap-1.5 bg-[#0B1E6E] hover:bg-[#081650] text-white px-4 py-2 rounded-lg text-xs font-bold transition-all shadow-md"
-          >
-            <Plus className="h-4 w-4" />
-            Add Reminder / Task
+            <span className="hidden sm:inline">{onPayments ? "Create Payment" : "Add Booking"}</span>
+            <span className="sm:hidden">{onPayments ? "Payment" : "Add"}</span>
           </button>
         )}
       </div>
 
-      {/* 1. Billing Tab */}
-      {activeTabParam === "billing" && (
-        <div className="glass-card p-6 rounded-2xl space-y-6 animate-fade-in">
-          <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="bg-slate-50 border-b border-slate-200 text-[10px] uppercase font-bold text-slate-500 tracking-wider">
-                    <th className="p-4">Invoice ID</th>
-                    <th className="p-4">Client Name</th>
-                    <th className="p-4">Project</th>
-                    <th className="p-4">Base Amount</th>
-                    <th className="p-4">Tax (18% GST)</th>
-                    <th className="p-4">Total Amount</th>
-                    <th className="p-4">Status</th>
-                    <th className="p-4 text-right sticky right-0 bg-slate-50 z-10">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
-                  {invoicesLoadError ? (
-                    <tr>
-                      <td colSpan={8} className="p-8">
-                        <div className="flex flex-col items-center gap-3 text-center">
-                          <AlertTriangle className="h-5 w-5 text-amber-500" />
-                          <p className="text-xs font-semibold text-slate-600">Couldn&apos;t load invoices.</p>
-                          <button
-                            type="button"
-                            onClick={() => fetchInvoicesPage(invoicesPage, invoicesRowsPerPage)}
-                            className="px-4 py-1.5 rounded-lg bg-[#0B1E6E] hover:bg-[#081650] text-white text-xs font-bold transition-colors"
-                          >
-                            Retry
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ) : serverInvoicesLoading && serverInvoices.length === 0 ? (
-                    <TableRowsSkeleton rows={6} columns={8} />
-                  ) : displayedInvoices.map((inv) => (
-                    <tr key={inv.id} className="hover:bg-slate-50/50">
-                      <td className="p-4 font-mono font-bold text-brand-700">{inv.invoiceNumber || "Draft (Pending)"}</td>
-                      <td className="p-4 font-bold text-slate-800">{inv.clientName}</td>
-                      <td className="p-4 text-slate-500">{inv.projectName || "N/A"}</td>
-                      <td className="p-4 font-mono">₹{inv.baseAmount.toLocaleString("en-IN")}</td>
-                      <td className="p-4 font-mono text-slate-500">₹{(inv.cgst + inv.sgst).toLocaleString("en-IN")}</td>
-                      <td className="p-4 font-mono text-slate-805">₹{inv.totalAmount.toLocaleString("en-IN")}</td>
-                      <td className="p-4">
-                        <span className={`inline-block border px-2 py-0.5 rounded text-[10px] font-bold ${
-                          inv.status === "Paid"
-                            ? "bg-emerald-50 text-emerald-700 border-emerald-100"
-                            : "bg-amber-50 text-amber-700 border-amber-100"
-                        }`}>
-                          {inv.status}
-                        </span>
-                      </td>
-                      <td className="p-4 text-right space-x-2 sticky right-0 bg-white z-10">
-                        {inv.status !== "Paid" ? (
-                          <button
-                            onClick={() => {
-                              if (inv.invoiceNumber) {
-                                markInvoicePaid(inv.id);
-                              } else {
-                                generateInvoice(inv.id);
-                              }
-                            }}
-                            className="px-2.5 py-1 rounded bg-brand-50 border border-brand-200 text-brand-700 text-[10px] font-bold hover:bg-[#0B1E6E] hover:text-white transition-all"
-                          >
-                            {inv.invoiceNumber ? "Collect Payment" : "Activate Invoice"}
-                          </button>
-                        ) : (
-                          <span className="text-[10px] text-slate-450 italic">Fully Settled</span>
-                        )}
-                        {activeRole === "ADMIN" && (
-                          <button
-                            onClick={() => handleDeleteInvoice(inv.id)}
-                            className="px-2 py-1 rounded bg-red-50 hover:bg-red-100 border border-red-200 text-red-750 text-[10px] font-bold transition-all inline-flex items-center gap-0.5"
-                            title="Delete invoice entry"
-                          >
-                            <Trash2 className="h-3 w-3" /> Delete
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <TablePagination
-              totalRows={serverInvoicesTotalCount}
-              page={invoicesPage}
-              rowsPerPage={invoicesRowsPerPage}
-              onPageChange={setInvoicesPage}
-              onRowsPerPageChange={(n) => { setInvoicesRowsPerPage(n); setInvoicesPage(1); }}
-              rowLabel="Invoice"
-            />
-          </div>
-        </div>
+      {activeTab === "overview" && (
+        <OverviewTab
+          filters={filters.overview}
+          onFiltersChange={setTabFilters("overview")}
+          lookups={lookups}
+          refreshSignal={refreshSignal}
+          onExplore={openBooking}
+        />
+      )}
+      {activeTab === "bookings" && (bookingId ? (
+        <BookingDetails
+          bookingId={bookingId}
+          lookups={lookups}
+          refreshSignal={refreshSignal}
+          onBack={() => setTab("bookings")}
+          onDataChanged={onDataChanged}
+        />
+      ) : (
+        <BookingsTab
+          filters={filters.bookings}
+          onFiltersChange={setTabFilters("bookings")}
+          lookups={lookups}
+          refreshSignal={refreshSignal}
+          onExplore={openBooking}
+        />
+      ))}
+      {activeTab === "payments" && paymentId && paymentBookingId && (
+        <PaymentDetails
+          paymentId={paymentId}
+          bookingId={paymentBookingId}
+          refreshSignal={refreshSignal}
+          onBack={() => setTab("payments")}
+          onDataChanged={onDataChanged}
+        />
+      )}
+      {activeTab === "payments" && !(paymentId && paymentBookingId) && (
+        <PaymentsTab
+          filters={filters.payments}
+          onFiltersChange={setTabFilters("payments")}
+          lookups={lookups}
+          refreshSignal={refreshSignal}
+          onDataChanged={onDataChanged}
+          onOpenPayment={(p) => openPayment(p.payment_id, p.booking_id)}
+        />
       )}
 
-      {/* 2. Reimbursements Tab */}
-      {activeTabParam === "reimbursements" && (
-        <div className="glass-card p-6 rounded-2xl space-y-6 animate-fade-in">
-          {/* Filter */}
-          <div className="flex justify-between items-center border-b border-slate-100 pb-3">
-            <h3 className="text-xs font-bold text-slate-700">Receipt Expense Ledger</h3>
-            <div className="flex gap-2">
-              {["All", "Pending", "Paid", "Rejected"].map(status => (
-                <button
-                  key={status}
-                  onClick={() => { setReimbFilter(status); setReimbPage(1); }}
-                  className={`px-3 py-1 rounded-lg text-[10px] font-bold border transition-all ${
-                    reimbFilter === status
-                      ? "bg-brand-50 border-brand-200 text-brand-700"
-                      : "bg-white border-slate-200 text-slate-500 hover:text-slate-750"
-                  }`}
-                >
-                  {status}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="border border-slate-205 rounded-xl overflow-hidden bg-white shadow-sm">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="bg-slate-50 border-b border-slate-200 text-[10px] uppercase font-bold text-slate-500 tracking-wider">
-                    <th className="p-4">Submission Date</th>
-                    <th className="p-4">Agent Name</th>
-                    <th className="p-4">Claim Purpose</th>
-                    <th className="p-4">Category</th>
-                    <th className="p-4">Amount</th>
-                    <th className="p-4">Status</th>
-                    <th className="p-4 text-right sticky right-0 bg-slate-50 z-10">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
-                  {reimbursementsLoadError ? (
-                    <tr>
-                      <td colSpan={7} className="p-8">
-                        <div className="flex flex-col items-center gap-3 text-center">
-                          <AlertTriangle className="h-5 w-5 text-amber-500" />
-                          <p className="text-xs font-semibold text-slate-600">Couldn&apos;t load reimbursement claims.</p>
-                          <button
-                            type="button"
-                            onClick={() => setReimbRefreshNonce(n => n + 1)}
-                            className="px-4 py-1.5 rounded-lg bg-[#0B1E6E] hover:bg-[#081650] text-white text-xs font-bold transition-colors"
-                          >
-                            Retry
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ) : serverReimbLoading && serverReimbursements.length === 0 ? (
-                    <TableRowsSkeleton rows={6} columns={7} />
-                  ) : displayedReimbursements.map((c) => (
-                    <tr key={c.id} className="hover:bg-slate-50/50">
-                      <td className="p-4 text-slate-500 font-mono">{c.date}</td>
-                      <td className="p-4 font-bold text-slate-800">{c.agentName}</td>
-                      <td className="p-4">
-                        <p className="text-slate-850 font-bold">{c.title}</p>
-                        {c.notes && <p className="text-[10px] text-slate-450 mt-0.5">{c.notes}</p>}
-                      </td>
-                      <td className="p-4 text-slate-500">{c.type}</td>
-                      <td className="p-4 font-mono font-bold text-slate-800">₹{c.amount.toLocaleString("en-IN")}</td>
-                      <td className="p-4">
-                        <span className={`inline-block border px-2 py-0.5 rounded text-[10px] font-bold ${
-                          c.status === "Paid"
-                            ? "bg-emerald-50 text-emerald-700 border-emerald-100"
-                            : c.status === "Rejected"
-                            ? "bg-red-50 text-red-700 border-red-100"
-                            : "bg-amber-50 text-amber-700 border-amber-100"
-                        }`}>
-                          {c.status}
-                        </span>
-                      </td>
-                      <td className="p-4 text-right sticky right-0 bg-white z-10">
-                        <div className="flex gap-2 justify-end items-center">
-                          {c.status === "Pending" ? (
-                            <>
-                              <button
-                                onClick={() => approveClaim(c.id)}
-                                className="min-h-9 px-2.5 sm:min-h-0 sm:px-1 py-1 rounded bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700"
-                                title="Release reimbursement claim"
-                              >
-                                <Check className="h-3.5 w-3.5" />
-                              </button>
-                              <button
-                                onClick={() => rejectClaim(c.id)}
-                                className="min-h-9 px-2.5 sm:min-h-0 sm:px-1 py-1 rounded bg-red-50 hover:bg-red-100 border border-red-200 text-red-700"
-                                title="Reject claim"
-                              >
-                                <X className="h-3.5 w-3.5" />
-                              </button>
-                            </>
-                          ) : (
-                            <span className="text-[10px] text-slate-450 italic">Closed</span>
-                          )}
-                          {activeRole === "ADMIN" && (
-                            <button
-                              onClick={async () => {
-                                if (await confirmDialog({ title: "Delete this claim?", message: "This reimbursement claim will be permanently deleted.", confirmLabel: "Delete", danger: true })) {
-                                  deleteClaim(c.id);
-                                }
-                              }}
-                              className="p-1 rounded bg-red-50 hover:bg-red-100 border border-red-200 text-red-750"
-                              title="Delete claim entry"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <TablePagination
-              totalRows={serverReimbTotalCount}
-              page={reimbPage}
-              rowsPerPage={reimbRowsPerPage}
-              onPageChange={setReimbPage}
-              onRowsPerPageChange={(n) => { setReimbRowsPerPage(n); setReimbPage(1); }}
-              rowLabel="Claim"
-            />
-          </div>
-        </div>
+      {activeTab === "approval" && (
+        <BookingApprovalTab
+          filters={filters.approval}
+          onFiltersChange={setTabFilters("approval")}
+          lookups={lookups}
+          refreshSignal={refreshSignal}
+          onDataChanged={onDataChanged}
+        />
       )}
 
-      {/* Finance Calendar tab */}
-      {activeTabParam === "calendar" && (
-        <div className="space-y-6 animate-fade-in">
-          <div className="flex flex-wrap gap-3">
-            {[
-              { label: "Payment Reminder", color: "bg-sky-500" },
-              { label: "Task", color: "bg-orange-500" }
-            ].map(item => (
-              <div key={item.label} className="flex items-center gap-1.5 text-[10px] font-bold text-slate-600">
-                <span className={`h-2 w-2 rounded-full ${item.color}`} />
-                {item.label}
-              </div>
-            ))}
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-            <div className="lg:col-span-8">
-              <MonthCalendar
-                events={financeEvents}
-                selectedDate={selectedCalDate}
-                onSelectDate={setSelectedCalDate}
-                colorForEvent={(e) => (e.type === "PAYMENT_REMINDER" ? "bg-sky-500" : "bg-orange-500")}
-              />
-            </div>
-
-            <div className="lg:col-span-4 glass-card p-5 rounded-2xl space-y-3">
-              <h3 className="text-xs font-bold text-slate-700 border-b border-slate-100 pb-2">
-                {new Date(selectedCalDate + "T00:00:00").toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
-              </h3>
-              {dayFinanceEvents.length === 0 ? (
-                <p className="text-[11px] text-slate-400 italic py-4 text-center">No reminders or tasks scheduled on this date.</p>
-              ) : (
-                <div className="space-y-2 max-h-[26rem] overflow-y-auto pr-1">
-                  {dayFinanceEvents.map(e => (
-                    <div key={e.id} className="p-3 rounded-xl border border-slate-200 bg-slate-50">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-xs font-bold text-slate-800">{e.title}</p>
-                        <span
-                          className={`text-[8px] font-bold px-1.5 py-0.5 rounded shrink-0 ${
-                            e.type === "PAYMENT_REMINDER"
-                              ? "bg-sky-50 text-sky-700 border border-sky-100"
-                              : "bg-orange-50 text-orange-700 border border-orange-100"
-                          }`}
-                        >
-                          {e.type === "PAYMENT_REMINDER" ? "REMINDER" : "TASK"}
-                        </span>
-                      </div>
-                      {e.time && <p className="text-[10px] text-slate-500 font-mono mt-1">{e.time}</p>}
-                      {e.description && <p className="text-[10px] text-slate-500 mt-1">{e.description}</p>}
-                      {typeof e.amount === "number" && (
-                        <p className="text-[10px] text-slate-700 font-bold font-mono mt-1">₹{e.amount.toLocaleString("en-IN")}</p>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+      {creatingPayment && (
+        <AddPaymentModal
+          onClose={() => setCreatingPayment(false)}
+          onSaved={() => {
+            setCreatingPayment(false);
+            toast("Payment created.", "success");
+            onDataChanged();
+          }}
+        />
       )}
 
-      {/* 3. Finance Dashboard Tab */}
-      {activeTabParam === "dashboard" && (
-        <div className="space-y-6 animate-fade-in">
-          {/* Counters */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
-              <div className="space-y-1">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Completed Revenue</span>
-                <p className="text-xl font-black text-slate-800">
-                  {isDataLoading ? <LineSkeleton width={90} height={20} /> : `₹${invoices.filter(i => i.status === "Paid").reduce((sum, i) => sum + i.totalAmount, 0).toLocaleString("en-IN")}`}
-                </p>
-              </div>
-              <div className="h-10 w-10 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600">
-                <DollarSign className="h-5.5 w-5.5" />
-              </div>
-            </div>
-
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
-              <div className="space-y-1">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Draft/Pending Invoices</span>
-                <p className="text-xl font-black text-slate-800">
-                  {isDataLoading ? <LineSkeleton width={30} height={20} /> : invoices.filter(i => i.status !== "Paid").length}
-                </p>
-              </div>
-              <div className="h-10 w-10 rounded-xl bg-amber-50 border border-amber-100 flex items-center justify-center text-amber-600">
-                <FileText className="h-5.5 w-5.5" />
-              </div>
-            </div>
-
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
-              <div className="space-y-1">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Pending Bookings</span>
-                <p className="text-xl font-black text-slate-850">
-                  {isDataLoading ? <LineSkeleton width={30} height={20} /> : pendingApprovals.length}
-                </p>
-              </div>
-              <div className="h-10 w-10 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-650">
-                <ShieldAlert className="h-5.5 w-5.5" />
-              </div>
-            </div>
-
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
-              <div className="space-y-1">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Unpaid Claims</span>
-                <p className="text-xl font-black text-red-600">
-                  {isDataLoading ? <LineSkeleton width={80} height={20} /> : `₹${reimbursements.filter(r => r.status === "Pending").reduce((sum, r) => sum + r.amount, 0).toLocaleString("en-IN")}`}
-                </p>
-              </div>
-              <div className="h-10 w-10 rounded-xl bg-red-50 border border-red-105 flex items-center justify-center text-red-600">
-                <CreditCard className="h-5.5 w-5.5" />
-              </div>
-            </div>
-          </div>
-
-          {/* Pending Bookings Roster */}
-          <div className="glass-card p-6 rounded-2xl space-y-4">
-            <div className="flex justify-between items-center border-b border-slate-100 pb-3">
-              <h3 className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                <ShieldAlert className="h-4.5 w-4.5 text-slate-500" />
-                Pending Booking Signoffs (Requires KYC Validation &amp; Tax Activation)
-              </h3>
-              <span className="text-[9px] bg-indigo-50 border border-indigo-150 text-indigo-700 px-2 py-0.5 rounded font-black">
-                Gated DAG Check
-              </span>
-            </div>
-
-            <div className="space-y-3">
-              {isDataLoading && pendingApprovals.length === 0 ? (
-                <CardListSkeleton count={4} />
-              ) : pendingApprovals.length === 0 ? (
-                <div className="text-center py-8 text-xs text-slate-400 border border-dashed border-slate-200 rounded-xl">
-                  All customer bookings are fully verified, tax incepted, and matching in the system.
-                </div>
-              ) : (
-                pendingApprovals.map((l) => (
-                  <div key={l.id} className="p-4 rounded-xl border border-slate-200 bg-slate-50 flex flex-col sm:flex-row justify-between sm:items-center gap-4 text-xs">
-                    <div>
-                      <p className="font-bold text-slate-800">{l.name}</p>
-                      <p className="text-[10px] text-slate-500 font-mono mt-0.5">+91-{activeRole === "ADMIN" ? l.phone : maskPhone(l.phone)} • {activeRole === "ADMIN" ? l.email : maskEmail(l.email)}</p>
-                      <div className="flex gap-2 mt-2">
-                        <span className="bg-brand-50 border border-brand-100 text-brand-700 px-1.5 py-0.5 rounded text-[9px] font-bold">
-                          Property: {l.property || "Not set"}
-                        </span>
-                        <span className="bg-slate-200 border border-slate-250 text-slate-700 px-1.5 py-0.5 rounded text-[9px] font-bold">
-                          Draft Value: {l.dealValue ? `₹${l.dealValue.toLocaleString("en-IN")}` : "Not set"}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="flex gap-2 sm:justify-end">
-                      <button
-                        onClick={() => handleApproveBooking(l.id)}
-                        className="px-3 py-1.5 rounded bg-[#0B1E6E] text-white hover:bg-[#081650] text-[10px] font-bold shadow-sm"
-                      >
-                        Approve Booking &amp; Activate Invoice
-                      </button>
-                      <button
-                        onClick={() => handleRejectBooking(l.id)}
-                        className="px-3 py-1.5 rounded bg-slate-200 hover:bg-slate-300 text-slate-700 text-[10px] font-bold"
-                      >
-                        Reject
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
+      {adding && (
+        <AddBookingModal
+          lookups={lookups}
+          onClose={() => setAdding(false)}
+          onSaved={(created) => {
+            setAdding(false);
+            toast("Booking added.", "success");
+            onDataChanged();
+            openBooking(created.booking_id);
+          }}
+        />
       )}
-
-      {/* 4. Finance Reports Tab — upcoming/overdue/collected, computed live from
-          real invoice due_date/status/collectedAmount (no "overdue" background
-          job exists in the backend to set that status automatically, so it's
-          derived here from the actual due date rather than trusted from a
-          status value nothing ever transitions to it). */}
-      {activeTabParam === "reports" && (
-        <div className="space-y-6 animate-fade-in">
-          {(() => {
-            const todayStr = todayIso();
-            const unpaid = invoices.filter(i => i.status !== "Paid");
-            const overdue = unpaid.filter(i => i.dueDate < todayStr);
-            const upcoming = unpaid.filter(i => i.dueDate >= todayStr);
-            const totalCollected = invoices.filter(i => i.status === "Paid").reduce((sum, i) => sum + i.totalAmount, 0);
-            const overdueTotal = overdue.reduce((sum, i) => sum + (i.totalAmount - (i.collectedAmount || 0)), 0);
-            const upcomingTotal = upcoming.reduce((sum, i) => sum + (i.totalAmount - (i.collectedAmount || 0)), 0);
-
-            const rows = [...unpaid].sort((a, b) => a.dueDate.localeCompare(b.dueDate));
-
-            return (
-              <>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Upcoming Payments</span>
-                    <p className="text-xl font-black text-slate-800 mt-1">
-                      {isDataLoading ? <LineSkeleton width={80} height={20} /> : `₹${upcomingTotal.toLocaleString("en-IN")}`}
-                    </p>
-                    <span className="text-[9px] text-slate-450">
-                      {isDataLoading ? <LineSkeleton width={100} height={11} /> : `${upcoming.length} invoice${upcoming.length === 1 ? "" : "s"} not yet due`}
-                    </span>
-                  </div>
-                  <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Overdue Payments</span>
-                    <p className="text-xl font-black text-red-600 mt-1">
-                      {isDataLoading ? <LineSkeleton width={80} height={20} /> : `₹${overdueTotal.toLocaleString("en-IN")}`}
-                    </p>
-                    <span className="text-[9px] text-slate-450">
-                      {isDataLoading ? <LineSkeleton width={100} height={11} /> : `${overdue.length} invoice${overdue.length === 1 ? "" : "s"} past due date`}
-                    </span>
-                  </div>
-                  <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Collected</span>
-                    <p className="text-xl font-black text-emerald-600 mt-1">
-                      {isDataLoading ? <LineSkeleton width={80} height={20} /> : `₹${totalCollected.toLocaleString("en-IN")}`}
-                    </p>
-                    <span className="text-[9px] text-slate-450">All-time, fully paid invoices</span>
-                  </div>
-                </div>
-
-                <div className="glass-card p-6 rounded-2xl space-y-4">
-                  <h3 className="text-xs font-bold text-slate-700 border-b border-slate-100 pb-3">Outstanding Invoices, by Due Date</h3>
-                  <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm">
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left text-xs border-collapse">
-                        <thead>
-                          <tr className="bg-slate-50 border-b border-slate-200 text-[10px] uppercase font-bold text-slate-500 tracking-wider">
-                            <th className="p-4">Client</th>
-                            <th className="p-4">Project</th>
-                            <th className="p-4">Due Date</th>
-                            <th className="p-4">Amount Due</th>
-                            <th className="p-4 text-right">Status</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
-                          {isDataLoading && rows.length === 0 ? (
-                            <TableRowsSkeleton rows={6} columns={5} />
-                          ) : rows.length === 0 ? (
-                            <tr>
-                              <td colSpan={5} className="p-6 text-center text-slate-400 font-semibold italic">
-                                No outstanding invoices — everything is settled.
-                              </td>
-                            </tr>
-                          ) : (
-                            rows.map((inv) => {
-                              const isOverdue = inv.dueDate < todayStr;
-                              return (
-                                <tr key={inv.id} className="hover:bg-slate-50/50">
-                                  <td className="p-4 font-bold text-slate-800">{inv.clientName}</td>
-                                  <td className="p-4 text-slate-500">{inv.projectName || "N/A"}</td>
-                                  <td className="p-4 font-mono">{inv.dueDate}</td>
-                                  <td className="p-4 font-mono">₹{(inv.totalAmount - (inv.collectedAmount || 0)).toLocaleString("en-IN")}</td>
-                                  <td className="p-4 text-right">
-                                    <span className={`inline-block border px-2 py-0.5 rounded text-[10px] font-bold ${
-                                      isOverdue ? "bg-red-50 text-red-700 border-red-100" : "bg-amber-50 text-amber-700 border-amber-100"
-                                    }`}>
-                                      {isOverdue ? "Overdue" : "Upcoming"}
-                                    </span>
-                                  </td>
-                                </tr>
-                              );
-                            })
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                </div>
-              </>
-            );
-          })()}
-        </div>
-      )}
-
-      {/* Create Invoice Modal */}
-      {isNewInvoiceOpen && (
-        <>
-          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-30" onClick={() => setIsNewInvoiceOpen(false)} />
-          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[calc(100%-2rem)] max-w-md bg-white border border-slate-200 p-6 rounded-2xl shadow-2xl z-40 space-y-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center border-b border-slate-200 pb-2">
-              <h3 className="text-sm font-bold text-brand-700">Create Tax Invoice Ledger</h3>
-              <button onClick={() => setIsNewInvoiceOpen(false)} className="text-slate-400 hover:text-slate-655">
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateInvoice} className="space-y-4">
-              {newInvoiceError && (
-                <p className="text-[10px] text-red-600 font-bold bg-red-50 border border-red-150 rounded-lg px-3 py-2">{newInvoiceError}</p>
-              )}
-
-              <div className="relative">
-                <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Lead</label>
-                <input
-                  type="text"
-                  required
-                  value={leadSearchQuery}
-                  onChange={(e) => { setLeadId(""); setLeadSearchQuery(e.target.value); setLeadSearchOpen(true); }}
-                  onFocus={() => setLeadSearchOpen(true)}
-                  onBlur={() => setTimeout(() => setLeadSearchOpen(false), 150)}
-                  placeholder="Search by name or phone…"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none"
-                />
-                {leadSearchOpen && leadSearchResults.length > 0 && (
-                  <div className="absolute z-50 mt-1 w-full max-h-48 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg">
-                    {leadSearchResults.map(l => (
-                      <button
-                        key={l.id}
-                        type="button"
-                        onClick={() => selectLeadResult(l)}
-                        className="w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 [overflow-wrap:anywhere]"
-                      >
-                        {l.name} — {activeRole === "ADMIN" ? l.phone : maskPhone(l.phone)}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Client Name</label>
-                <input
-                  type="text"
-                  required
-                  value={clientName}
-                  onChange={(e) => setClientName(e.target.value)}
-                  placeholder="e.g. Priya Arvind"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Base Value (INR)</label>
-                <input
-                  type="number"
-                  required
-                  value={baseAmount}
-                  onChange={(e) => setBaseAmount(e.target.value)}
-                  placeholder="15000000"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Project / Property</label>
-                <input
-                  type="text"
-                  value={projectName}
-                  onChange={(e) => setProjectName(e.target.value)}
-                  placeholder="e.g. Altura"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none"
-                />
-              </div>
-
-              <button
-                type="submit"
-                className="w-full bg-[#0B1E6E] hover:bg-[#081650] text-white font-bold py-2.5 rounded-lg text-xs transition-all shadow-sm"
-              >
-                Ingest Invoice
-              </button>
-            </form>
-          </div>
-        </>
-      )}
-
-      {/* Add Finance Calendar Reminder/Task Modal */}
-      <AddCalendarEventModal
-        isOpen={isAddEventOpen}
-        onClose={() => setIsAddEventOpen(false)}
-        heading="Add Payment Reminder / Task"
-        showAmount
-        typeOptions={[
-          { value: "PAYMENT_REMINDER" as CalendarEventType, label: "Payment Reminder" },
-          { value: "TASK" as CalendarEventType, label: "Task" }
-        ]}
-        onSubmit={(data) => {
-          addCalendarEvent({
-            system: "FINANCE",
-            type: data.type,
-            title: data.title,
-            date: data.date,
-            time: data.time,
-            description: data.description,
-            amount: data.amount
-          });
-          setIsAddEventOpen(false);
-        }}
-      />
     </div>
   );
 }

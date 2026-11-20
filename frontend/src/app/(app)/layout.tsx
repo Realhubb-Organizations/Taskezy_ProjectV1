@@ -9,6 +9,7 @@ import { PushNotifications } from "@capacitor/push-notifications";
 import { Device } from "@capacitor/device";
 import { useApp, SystemType, CRM_ONLY_MODE, mapApiNotificationToFrontend } from "@/context/AppContext";
 import { notificationHref } from "@/lib/reportDetail";
+import { hasSalesTrackerAccess } from "@/lib/salesTracker";
 import { apiGetNotification, apiRegisterDevice, apiRemoveDevice } from "@/lib/apiClient";
 import NotificationBell from "@/components/dashboard/NotificationBell";
 import NotificationPopup from "@/components/dashboard/NotificationPopup";
@@ -23,7 +24,6 @@ import {
   Target,
   Users,
   Clock,
-  DollarSign,
   Settings,
   Wifi,
   WifiOff,
@@ -43,7 +43,8 @@ import {
   Calendar,
   PanelLeftClose,
   PanelLeftOpen,
-  Radio
+  Radio,
+  IndianRupee
 } from "lucide-react";
 
 // Organization + Help & Support / CRM Tutorials are hidden
@@ -87,8 +88,14 @@ function ComingSoonNavRow({ label, icon: Icon, collapsed = false }: { label: str
   );
 }
 
-function checkUserAccess(user: { role: string; department?: string; role_type?: string } | null, path: string): boolean {
+function checkUserAccess(user: { role: string; email?: string; department?: string; role_type?: string } | null, path: string): boolean {
   if (!user) return false;
+
+  // Finance is only the Sales Tracker, open to its named accounts alone
+  // (lib/salesTracker.ts) — not by role, and not hidden by CRM_ONLY_MODE.
+  if (path.startsWith("/dashboard/finance")) {
+    return hasSalesTrackerAccess(user.email);
+  }
 
   // This test round is CRM-only — see CRM_ONLY_MODE in AppContext.tsx.
   // Overrides even Admin, so the module disappears from nav and renders
@@ -96,9 +103,7 @@ function checkUserAccess(user: { role: string; department?: string; role_type?: 
   if (
     CRM_ONLY_MODE &&
     (path.startsWith("/dashboard/hrms") ||
-      path.startsWith("/hrms/dashboard") ||
-      path.startsWith("/dashboard/finance") ||
-      path.startsWith("/finance/dashboard"))
+      path.startsWith("/hrms/dashboard"))
   ) {
     return false;
   }
@@ -120,11 +125,6 @@ function checkUserAccess(user: { role: string; department?: string; role_type?: 
   // HRMS: accessible to all departments (SALES, TECH, MARKETING, FINANCE)
   if (path.startsWith("/dashboard/hrms") || path.startsWith("/hrms/dashboard")) {
     return !!(user.department && ["SALES", "TECH", "MARKETING", "FINANCE"].includes(user.department));
-  }
-
-  // Finance: accessible only to FINANCE department
-  if (path.startsWith("/dashboard/finance") || path.startsWith("/finance/dashboard")) {
-    return user.department === "FINANCE" || user.role === "FINANCE";
   }
 
   // Admin Cockpit: accessible only to ADMIN
@@ -256,7 +256,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   const activeGroupKey: SystemType | null =
     pathname.startsWith("/dashboard/hrms") || pathname.startsWith("/hrms/dashboard") ? "HRMS" :
     pathname.startsWith("/dashboard/crm") || pathname.startsWith("/crm/dashboard") ? "CRM" :
-    pathname.startsWith("/dashboard/finance") || pathname.startsWith("/finance/dashboard") ? "FINANCE" :
+    pathname.startsWith("/dashboard/finance") ? "FINANCE" :
     null;
 
   // Auto-expand whichever group you navigate into — but only when the
@@ -402,15 +402,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   ];
 
   const financeItems = [
-    { name: "Billing", href: "/dashboard/finance?tab=billing", activeCheck: (p: string, t?: string | null) => p === "/dashboard/finance" && t === "billing", icon: DollarSign },
-    { name: "Reimbursements", href: "/dashboard/finance?tab=reimbursements", activeCheck: (p: string, t?: string | null) => p === "/dashboard/finance" && t === "reimbursements", icon: FileText },
-    { name: "Finance Dashboard", href: "/finance/dashboard", activeCheck: (p: string, t?: string | null) => p === "/finance/dashboard", icon: LayoutDashboard },
-    { name: "Calendar", href: "/dashboard/finance?tab=calendar", activeCheck: (p: string, t?: string | null) => p === "/dashboard/finance" && t === "calendar", icon: Calendar },
-    // Finance Settings/Reports are a distinct, Finance-flavored view (GST/
-    // due-date rules; upcoming/overdue/collected payments report) — not the
-    // same global destination CRM's Settings/Reports items point to.
-    { name: "Settings", href: "/dashboard/settings?tab=Finance", activeCheck: (p: string, t?: string | null) => p === "/dashboard/settings" && t === "Finance", icon: Settings },
-    { name: "Reports", href: "/dashboard/finance?tab=reports", activeCheck: (p: string, t?: string | null) => p === "/dashboard/finance" && t === "reports", icon: BarChart }
+    { name: "Sales Tracker", href: "/dashboard/finance", activeCheck: (p: string, t?: string | null) => p === "/dashboard/finance", icon: IndianRupee }
   ];
 
   const sidebarGroups = (
@@ -425,6 +417,8 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
 
   // Admins still see HRMS / Finance (as "Soon" rows) while CRM-only mode hides them.
   const showComingSoonModules = CRM_ONLY_MODE && currentUser?.role === "ADMIN";
+  // ...except Finance for the Sales Tracker accounts, who get the real group.
+  const showFinanceComingSoon = showComingSoonModules && !sidebarGroups.some(g => g.key === "FINANCE");
 
   // Static links, always visible below the groups regardless of which is expanded.
   const staticBottomLinks = [
@@ -449,7 +443,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
       right: currentUser?.role === "ADMIN" ? ["Campaigns", "Reports", "Calendar"] : ["Call Log", "Reports", "Calendar"]
     },
     HRMS: { left: ["Teams", "Attendance"], right: ["Calendar", "Reports"] },
-    FINANCE: { left: ["Billing", "Reimbursements"], right: ["Calendar", "Reports"] }
+    FINANCE: { left: ["Sales Tracker"], right: [] }
   };
   const mobileSlots = activeGroupForMobile ? mobileNavLayout[activeGroupForMobile.key] : undefined;
   const findMobileItem = (name: string) => activeGroupForMobile?.items.find(i => i.name === name);
@@ -586,7 +580,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
               );
             })}
 
-            {showComingSoonModules && <ComingSoonNavRow label="FINANCE" icon={FileText} collapsed={isSidebarCollapsed} />}
+            {showFinanceComingSoon && <ComingSoonNavRow label="FINANCE" icon={FileText} collapsed={isSidebarCollapsed} />}
 
             {/* Settings — right after FINANCE, styled like the group headers.
                 No page behind it yet, so it doesn't navigate anywhere.
@@ -829,7 +823,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                   );
                 })}
 
-                {showComingSoonModules && <ComingSoonNavRow label="FINANCE" icon={FileText} />}
+                {showFinanceComingSoon && <ComingSoonNavRow label="FINANCE" icon={FileText} />}
 
                 {/* Settings — right after FINANCE, same as the desktop sidebar
                     (no page yet, Admin-only, see the desktop copy's comment) */}
