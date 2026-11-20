@@ -2812,3 +2812,254 @@ export async function apiListReportExports(
 export function apiListReportExportNames(): Promise<string[]> {
   return request<string[]>("/api/v1/reports/exports/reports");
 }
+
+// --- Finance → Sales Tracker (Taskezy-Server/src/modules/sales-tracker) ---
+// Numbers from Postgres NUMERIC columns arrive as strings; callers Number() them.
+
+// BASIC / NRI / AOP, or a brokerage type added in the tracker (its own label).
+export type StBrokerageType = string;
+// Pending → Invoice Raised → (GST Pending) → Completed, or Rejected before Completed.
+export type StPaymentStatus = "PENDING" | "INVOICE_RAISED" | "GST_PENDING" | "COMPLETED" | "REJECTED";
+export type StBrokerageStatus = "PENDING" | "IN_PROGRESS" | "CLOSED";
+
+export interface StFilters {
+  search?: string;
+  propertyId?: string[];
+  salespersonId?: string[];
+  brokerageType?: string[];
+  status?: string[];
+  from?: string;
+  to?: string;
+  month?: string; // YYYY-MM
+}
+
+export interface StSummary {
+  totalBookings: number;
+  totalBrokerage: number;
+  received: number;
+  outstanding: number;
+  invoiceRaised: number;
+}
+
+export interface StBookingBrokerage {
+  brokerageId: string;
+  type: StBrokerageType;
+  percentage: number;
+  value: number;
+  status: StBrokerageStatus;
+  allocated: number;
+  allocatedPercentage: number;
+  received: number;
+  invoiced: number;
+  paymentCount: number;
+}
+
+/** One status for the whole booking (its "Payment Status"). */
+export type StBookingStage = "PENDING" | "IN_PROGRESS" | "CLOSED" | "CANCELLED";
+
+export interface StBooking {
+  booking_id: string;
+  lead_id: string | null;
+  property_id: string | null;
+  property_name: string;
+  employee_id: string | null;
+  salesperson_name: string;
+  lead_name: string;
+  lead_phone_number: string;
+  brokerage_type: StBrokerageType[];
+  unit_number: string;
+  bhk_type: string;
+  agreement_value: string;
+  property_area: string | null;
+  source: string | null;
+  lead_email: string | null;
+  stage: StBookingStage;
+  cashback: boolean;
+  cashback_amount: string | null;
+  payment_status: "ACTIVE" | "CLOSED";
+  booking_month: string;
+  booking_date: string;
+  is_cancelled: boolean;
+  cancelled_at: string | null;
+  created_at: string;
+  updated_at: string;
+  brokerages: StBookingBrokerage[];
+  total_brokerage: string;
+  received: string;
+  invoiced: string;
+}
+
+export interface StPayment {
+  payment_id: string;
+  brokerage_id: string;
+  brokerage_type: StBrokerageType;
+  brokerage_percentage: string;
+  brokerage_value: string;
+  payment_status: StPaymentStatus;
+  invoice_number: string;
+  invoice_raised_date: string | null;
+  payment_received_date: string | null;
+  created_at: string;
+  /** Tax on the brokerage amount — IGST 18%, or CGST 9% + SGST 9%; null = no tax. */
+  tax_type: StTaxType | null;
+  igst_amount: string;
+  cgst_amount: string;
+  sgst_amount: string;
+  /** Brokerage amount + tax. */
+  total_amount: string;
+  rejected_at: string | null;
+}
+
+export type StTaxType = "IGST" | "CGST_SGST";
+
+export interface StBookingDetail extends StBooking {
+  payments: StPayment[];
+}
+
+export interface StBrokerageRow {
+  brokerage_id: string;
+  booking_id: string;
+  brokerage_type: StBrokerageType;
+  broker_percentage: string;
+  value: string;
+  status: StBrokerageStatus;
+  created_date: string;
+  updated_at: string;
+  lead_name: string;
+  lead_phone_number: string;
+  property_name: string;
+  unit_number: string;
+  salesperson_name: string;
+  agreement_value: string;
+  booking_date: string;
+  allocated: string;
+  allocated_percentage: string;
+  received: string;
+  invoiced: string;
+  payment_count: string;
+}
+
+export interface StPaymentRow extends StPayment {
+  broker_percentage: string;
+  brokerage_total: string;
+  booking_id: string;
+  lead_name: string;
+  lead_phone_number: string;
+  property_name: string;
+  unit_number: string;
+  salesperson_name: string;
+  booking_date: string;
+}
+
+export interface StBookedLead {
+  id: string;
+  name: string;
+  phone: string;
+  property_id: string | null;
+  property_name: string | null;
+  assigned_agent_id: string | null;
+  /** Booking Approval: who asked for it (the lead's agent), the lead's notes, when it was marked Booked. */
+  agent_name: string | null;
+  notes: string | null;
+  booked_at: string;
+  has_booking: boolean;
+  /** Booking Approval decision — only APPROVED leads can be picked in Create Booking. */
+  approval: "PENDING" | "APPROVED" | "REJECTED";
+  decided_at: string | null;
+  decided_by_name: string | null;
+}
+
+export interface StBookingInput {
+  leadId: string;
+  propertyId: string;
+  salespersonId: string;
+  bhkType: string;
+  unitNumber: string;
+  agreementValue: number;
+  brokerageType: StBrokerageType[];
+  cashback: boolean;
+  cashbackAmount: number | null;
+  bookingDate: string;
+  propertyArea: number | null;
+  source: string | null;
+}
+
+export interface StOverdueRow {
+  payment_id: string;
+  brokerage_type: StBrokerageType;
+  brokerage_value: string;
+  invoice_number: string;
+  invoice_raised_date: string;
+  days_delayed: number;
+  brokerage_total: string;
+  booking_id: string;
+  lead_name: string;
+  property_name: string;
+  agreement_value: string;
+}
+
+function stQuery(filters: StFilters, extra: Record<string, string | number | undefined> = {}): string {
+  const params = new URLSearchParams();
+  Object.entries({ ...filters, ...extra }).forEach(([k, v]) => {
+    if (v === undefined || v === "" || (Array.isArray(v) && v.length === 0)) return;
+    params.set(k, Array.isArray(v) ? v.join(",") : String(v));
+  });
+  return params.toString();
+}
+
+async function stList<T>(path: string, filters: StFilters, page: number, pageSize: number, extra: Record<string, string | undefined> = {}) {
+  const { data, meta } = await requestWithMeta<T>(`/api/v1/sales-tracker/${path}?${stQuery(filters, { page, pageSize, ...extra })}`);
+  return { rows: data, totalCount: meta?.totalCount ?? data.length };
+}
+
+export interface StLookups {
+  properties: { id: string; name: string }[];
+  users: { id: string; name: string }[];
+  /** 1–4 BHK / Villa / Plot plus any added in the tracker. */
+  propertyTypes: string[];
+  /** Basic / NRI / AOP plus any added in the tracker. */
+  brokerageTypes: { value: StBrokerageType; label: string }[];
+}
+export const apiStLookups = () => request<StLookups>("/api/v1/sales-tracker/lookups");
+/** Saves a property type or brokerage type typed in by hand; returns the refreshed lookups. */
+export const apiStAddOption = (kind: "PROPERTY_TYPE" | "BROKERAGE_TYPE", value: string) =>
+  request<StLookups>("/api/v1/sales-tracker/options", { method: "POST", body: JSON.stringify({ kind, value }) });
+export const apiStBookedLeads = () => request<StBookedLead[]>("/api/v1/sales-tracker/leads");
+/** Booking Approval: approve (→ pickable in Create Booking) or reject a Booked lead. */
+export const apiStDecideBooking = (leadId: string, decision: "approve" | "reject") =>
+  request<{ decision: string }>(`/api/v1/sales-tracker/leads/${leadId}/${decision}`, { method: "POST" });
+export const apiStSummary = (filters: StFilters) => request<StSummary>(`/api/v1/sales-tracker/summary?${stQuery(filters)}`);
+
+export const apiStListBookings = (filters: StFilters, page: number, pageSize: number) =>
+  stList<StBooking>("bookings", filters, page, pageSize);
+export const apiStGetBooking = (id: string) => request<StBookingDetail>(`/api/v1/sales-tracker/bookings/${id}`);
+export const apiStCreateBooking = (input: StBookingInput) =>
+  request<StBookingDetail>("/api/v1/sales-tracker/bookings", { method: "POST", body: JSON.stringify(input) });
+export const apiStUpdateBooking = (id: string, input: StBookingInput) =>
+  request<StBookingDetail>(`/api/v1/sales-tracker/bookings/${id}`, { method: "PATCH", body: JSON.stringify(input) });
+export const apiStCancelBooking = (id: string) =>
+  request<StBookingDetail>(`/api/v1/sales-tracker/bookings/${id}/cancel`, { method: "POST" });
+export const apiStSaveBrokerage = (bookingId: string, items: { type: StBrokerageType; percentage: number; value: number }[]) =>
+  request<StBookingDetail>(`/api/v1/sales-tracker/bookings/${bookingId}/brokerage`, { method: "PUT", body: JSON.stringify({ items }) });
+
+export const apiStListBrokerages = (filters: StFilters, page: number, pageSize: number, openOnly = false) =>
+  stList<StBrokerageRow>("brokerages", filters, page, pageSize, { openOnly: openOnly ? "true" : undefined });
+
+export const apiStListPayments = (filters: StFilters, page: number, pageSize: number) =>
+  stList<StPaymentRow>("payments", filters, page, pageSize);
+export const apiStListOverdue = (filters: StFilters, page: number, pageSize: number, invoiceMonth?: string) =>
+  stList<StOverdueRow>("overdue", filters, page, pageSize, { invoiceMonth });
+export const apiStCreatePayment = (input: { brokerageId: string; percentage: number; value: number; invoiceNumber: string; taxType?: StTaxType | null }) =>
+  request<{ paymentId: string }>("/api/v1/sales-tracker/payments", { method: "POST", body: JSON.stringify(input) });
+export const apiStUpdatePayment = (
+  id: string,
+  input: { percentage?: number; value?: number; invoiceNumber?: string; invoiceRaisedDate?: string; paymentReceivedDate?: string; taxType?: StTaxType | null }
+) => request<{ updated: boolean }>(`/api/v1/sales-tracker/payments/${id}`, { method: "PATCH", body: JSON.stringify(input) });
+/** One step forward. From Invoice Raised, `to` = GST Pending or straight to Completed (default). */
+export const apiStAdvancePayment = (id: string, date: string, invoiceNumber?: string, to?: "GST_PENDING" | "COMPLETED") =>
+  request<{ updated: boolean }>(`/api/v1/sales-tracker/payments/${id}/advance`, {
+    method: "POST",
+    body: JSON.stringify({ date, invoiceNumber, to })
+  });
+export const apiStRejectPayment = (id: string) =>
+  request<{ updated: boolean }>(`/api/v1/sales-tracker/payments/${id}/reject`, { method: "POST" });

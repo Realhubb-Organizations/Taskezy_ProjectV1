@@ -33,7 +33,8 @@ type OptionsInput = (string | DropdownOption)[];
  */
 // "toolbar": a page-toolbar filter that sits next to action buttons — same
 // height, text and corners as .ui-btn.
-export type DropdownVariant = "field" | "pill" | "inline" | "toolbar";
+// "boxed": a white, lightly shadowed form field (Sales Tracker's Create Payment).
+export type DropdownVariant = "field" | "pill" | "inline" | "toolbar" | "boxed";
 
 interface CommonProps {
   options: OptionsInput;
@@ -65,7 +66,9 @@ const TRIGGER_BASE: Record<DropdownVariant, string> = {
     "inline-flex items-center gap-1.5 bg-white border rounded-lg px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 transition-colors max-w-[220px]",
   inline: "inline-flex items-center gap-1 font-bold hover:text-brand-700 whitespace-nowrap",
   toolbar:
-    "inline-flex items-center gap-2 bg-white border h-9 px-3.5 rounded-xl text-[13px] font-semibold text-slate-700 hover:bg-slate-50 transition-colors max-w-[240px]"
+    "inline-flex items-center gap-2 bg-white border h-9 px-3.5 rounded-xl text-[13px] font-semibold text-slate-700 hover:bg-slate-50 transition-colors max-w-[240px]",
+  boxed:
+    "w-full flex items-center justify-between gap-2 bg-white border rounded-md shadow-md px-3 py-2 text-xs font-medium text-slate-800 focus:outline-none transition-all"
 };
 
 // Autofocusing the search box on touch screens opens the keyboard and shuts the panel.
@@ -330,6 +333,7 @@ export function SearchableSelect({
   disabled,
   className,
   title,
+  icon,
   clearable = false
 }: CommonProps & {
   value: string;
@@ -348,14 +352,14 @@ export function SearchableSelect({
   ) : hasValue ? (
     <span className="truncate">{render(selectedOpt?.label ?? value)}</span>
   ) : (
-    <span className={`truncate ${variant === "field" ? "text-slate-400 font-semibold" : ""}`}>{placeholder}</span>
+    <span className={`truncate ${variant === "field" ? "text-slate-400 font-semibold" : variant === "boxed" ? "text-slate-400 font-normal" : ""}`}>{placeholder}</span>
   );
 
   const pick = (v: string) => { onChange(v); state.close(); };
 
   return (
     <>
-      <Trigger state={state} variant={variant} active={!!label && value !== ""} disabled={disabled} className={className} title={title}>
+      <Trigger state={state} variant={variant} active={!!label && value !== ""} disabled={disabled} className={className} title={title} icon={icon}>
         {triggerContent}
       </Trigger>
       {state.open && (
