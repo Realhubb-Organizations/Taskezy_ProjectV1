@@ -224,6 +224,13 @@ export async function hasAdSetsForCampaign(campaignId: string): Promise<boolean>
   return (result.rowCount ?? 0) > 0;
 }
 
+// Any real spend ever saved for this campaign — the sync's safety check before
+// trusting Meta's "never spent" (metaAdSpendSync.ts finishedWithoutSpend).
+export async function hasAnyCampaignSpend(campaignId: string): Promise<boolean> {
+  const result = await pool.query("SELECT 1 FROM ad_spend_records WHERE meta_campaign_id = $1 AND spend > 0 LIMIT 1", [campaignId]);
+  return (result.rowCount ?? 0) > 0;
+}
+
 // Tells syncOnce whether this campaign's CAMPAIGN-LEVEL spend (ad_spend_records
 // — the table the Campaigns page's cards/chart and Marketing Reports actually
 // read from) has ever had its one-time wide backfill. Checking "any row
