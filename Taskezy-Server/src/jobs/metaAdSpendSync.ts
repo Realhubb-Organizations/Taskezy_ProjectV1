@@ -33,6 +33,16 @@ const FIRST_SYNC_LOOKBACK_DAYS = 365;
 // comfortably allow it, lower it if cycles start failing.
 const MAX_WIDE_BACKFILLS_PER_CYCLE = 5;
 
+// A finished campaign Meta says never spent anything (lifetime spend 0, from
+// the campaign list itself): no spend, leads or ads to read. Its ad tree used
+// to be re-read every cycle (ad sets + ads + a year of insights per ad, all
+// empty — ~250 calls a cycle on production) and it took the full-year
+// re-read slots. Unknown spend (Meta didn't return it) or a campaign that is
+// running again is read as before.
+function finishedWithoutSpend(campaign: MetaCampaign): boolean {
+  return !isCampaignActive(campaign) && campaign.lifetimeSpend === 0;
+}
+
 function isoDateNDaysAgo(n: number): string {
   return businessDateOffset(-n);
 }
@@ -92,7 +102,7 @@ async function runSync(): Promise<void> {
   const items: { account: (typeof adAccounts)[number]; campaign: MetaCampaign }[] = [];
   for (const account of adAccounts) {
     try {
-      for (const campaign of await getCampaigns(account.id, account.userToken)) items.push({ account, campaign });
+      for (const campaign of await getCampaigns(account.id, account.userToken, { withLifetimeSpend: true })) items.push({ account, campaign });
     } catch (err) {
       logger.error({ err, adAccountId: account.id }, "Could not fetch campaigns for ad account — skipping this account this cycle");
     }
@@ -103,15 +113,29 @@ async function runSync(): Promise<void> {
   //  - campaign level: rows saved before the lead-count fix (migration 056)
   //    that still hold the old ~5x number come FIRST; then the one-time wide
   //    backfill for campaigns with no history older than the normal window
-  //    (see hasOlderCampaignSpendHistory). Young or never-spent campaigns
-  //    always match that second rule, and Meta lists them first, so without
-  //    this order they took every slot and old counts were never corrected.
+  //    (see hasOlderCampaignSpendHistory). Young campaigns always match that
+  //    second rule, and Meta lists them first, so without this order they
+  //    took every slot and old counts were never corrected.
   //  - ad level: campaigns whose per-ad rows still hold the old count, in
   //    Meta's list order as before.
+  // A finished campaign Meta says never spent anything has nothing to read,
+  // so it gets no slot (and no further calls in the loop below).
+  // Meta's "never spent" is only trusted when Taskezy has never saved any
+  // spend for the campaign either.
+  const skipReadsFor = new Set<string>();
+  for (const { campaign } of items) {
+    if (!finishedWithoutSpend(campaign)) continue;
+    try {
+      if (!(await metaRepo.hasAnyCampaignSpend(campaign.id))) skipReadsFor.add(campaign.id);
+    } catch (err) {
+      logger.warn({ err, campaignId: campaign.id }, "Could not check this campaign's saved spend; it is read as usual this cycle");
+    }
+  }
   const needsRecount = new Set<string>();
   const noOlderHistory = new Set<string>();
   const needsAdRecount = new Set<string>();
   for (const { campaign } of items) {
+    if (skipReadsFor.has(campaign.id)) continue;
     try {
       if (await metaRepo.hasUncorrectedCampaignLeadCounts(campaign.id, wideSince)) needsRecount.add(campaign.id);
       else if (!(await metaRepo.hasOlderCampaignSpendHistory(campaign.id, since))) noOlderHistory.add(campaign.id);
@@ -134,8 +158,10 @@ async function runSync(): Promise<void> {
 
   for (const { account, campaign } of ordered) {
     const status = isCampaignActive(campaign) ? "ACTIVE" : "INACTIVE";
+    const skipReads = skipReadsFor.has(campaign.id);
     try {
       const propertyId = await metaRepo.upsertCampaign({ id: campaign.id, adAccountId: account.id, name: campaign.name, status });
+      if (skipReads) continue; // name/status saved; no spend, leads or ads to read
 
       const needsWideBackfill = wideReads.has(campaign.id);
       const campaignSince = needsWideBackfill ? wideSince : since;
@@ -183,6 +209,7 @@ async function runSync(): Promise<void> {
     // count (migration 056) gets one more pass to correct them, capped
     // per cycle and chosen up front like the campaign-level re-read above.
     const adRecount = adRecounts.has(campaign.id);
+    if (skipReads) continue;
     if (!adRecount && status === "INACTIVE" && (await metaRepo.hasAdSetsForCampaign(campaign.id)) && (await metaRepo.hasAdLevelSpendRecordsForCampaign(campaign.id))) {
       continue;
     }

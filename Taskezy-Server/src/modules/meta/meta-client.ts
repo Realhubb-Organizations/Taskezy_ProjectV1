@@ -15,6 +15,8 @@ const GRAPH_BASE = `https://graph.facebook.com/${env.META_GRAPH_API_VERSION}`;
 const CALL_SPACING_MS = 250;
 const RATE_LIMIT_BACKOFFS_MS = [10_000, 30_000, 60_000, 120_000];
 const RATE_LIMIT_ERROR_CODE = 17;
+// Every code Meta uses for "too many calls" (app, user, ad account, insights throttles).
+const META_THROTTLE_CODES = [4, 17, 32, 613, 80000, 80004];
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -43,6 +45,26 @@ async function graphFetch<T>(path: string, params: Record<string, string>, opts:
     await sleep(CALL_SPACING_MS);
     return body;
   }
+}
+
+// Safety cap on a list's pages (100-200 items each), so a paging loop can never run forever.
+const MAX_LIST_PAGES = 50;
+
+/** Every page of a Graph list — Meta returns at most `limit` items per call plus a cursor for the rest. */
+async function graphFetchAll<T>(path: string, params: Record<string, string>): Promise<T[]> {
+  const all: T[] = [];
+  let after: string | undefined;
+  for (let page = 0; page < MAX_LIST_PAGES; page++) {
+    const body = await graphFetch<{ data?: T[]; paging?: { next?: string; cursors?: { after?: string } } }>(
+      path,
+      after ? { ...params, after } : params
+    );
+    all.push(...(body.data ?? []));
+    after = body.paging?.next ? body.paging.cursors?.after : undefined;
+    if (!after) return all;
+  }
+  logger.warn({ path, pages: MAX_LIST_PAGES }, "Meta list longer than the page cap — only the first pages were read");
+  return all;
 }
 
 const STATE_MAX_AGE_MS = 10 * 60 * 1000;
@@ -243,16 +265,42 @@ export interface MetaCampaign {
   name: string;
   status?: string;
   effective_status?: string;
+  /** Total spend over the campaign's whole life; undefined when Meta didn't return it. */
+  lifetimeSpend?: number;
 }
 
-/** Every campaign (any status) under one ad account. Requests both status and effective_status — some ad account/permission combinations leave one or the other unset. */
-export async function getCampaigns(adAccountId: string, longLivedUserToken: string): Promise<MetaCampaign[]> {
-  const data = await graphFetch<{ data: MetaCampaign[] }>(`/${adAccountId}/campaigns`, {
-    access_token: longLivedUserToken,
-    fields: "id,name,status,effective_status",
-    limit: "200"
-  });
-  return data.data;
+const CAMPAIGN_FIELDS = "id,name,status,effective_status";
+
+/**
+ * Every campaign (any status) under one ad account, every page. Requests both
+ * status and effective_status — some ad account/permission combinations leave
+ * one or the other unset. With `withLifetimeSpend` (the 6-hourly spend sync
+ * only) each campaign's lifetime spend comes in the same call (Meta leaves
+ * `insights` out for a campaign that never spent); if Meta refuses that
+ * bigger request, the plain list is read and lifetimeSpend stays undefined,
+ * so nothing is skipped on a guess.
+ */
+export async function getCampaigns(adAccountId: string, longLivedUserToken: string, opts: { withLifetimeSpend?: boolean } = {}): Promise<MetaCampaign[]> {
+  const plainList = () => graphFetchAll<MetaCampaign>(`/${adAccountId}/campaigns`, { access_token: longLivedUserToken, fields: CAMPAIGN_FIELDS, limit: "200" });
+  if (!opts.withLifetimeSpend) return plainList();
+  try {
+    // 100 per page: the spend figure makes each page heavier for Meta.
+    const rows = await graphFetchAll<MetaCampaign & { insights?: { data?: { spend?: string }[] } }>(`/${adAccountId}/campaigns`, {
+      access_token: longLivedUserToken,
+      fields: `${CAMPAIGN_FIELDS},insights.date_preset(maximum){spend}`,
+      limit: "100"
+    });
+    return rows.map(({ insights, ...campaign }) => {
+      const spend = Number(insights?.data?.[0]?.spend ?? 0);
+      return { ...campaign, lifetimeSpend: Number.isFinite(spend) ? spend : undefined };
+    });
+  } catch (err) {
+    // Meta busy (any of its rate-limit codes): don't hit the throttled account
+    // again straight away — this account waits for the next cycle, as before.
+    if (META_THROTTLE_CODES.includes((err as { code?: number }).code ?? 0)) throw err;
+    logger.warn({ err, adAccountId }, "Meta refused the campaign list with lifetime spend — reading the plain list");
+    return plainList();
+  }
 }
 
 /** True if either status field Meta returned says this campaign is actually running — effective_status can be missing/stale depending on the permission level the token was granted. */
@@ -302,12 +350,11 @@ export interface MetaAdSet {
 
 /** Every ad set under one campaign — real names, for Campaign Deep Dive's Ad Set Name column. */
 export async function getAdSetsForCampaign(campaignId: string, longLivedUserToken: string): Promise<MetaAdSet[]> {
-  const data = await graphFetch<{ data: MetaAdSet[] }>(`/${campaignId}/adsets`, {
+  return graphFetchAll<MetaAdSet>(`/${campaignId}/adsets`, {
     access_token: longLivedUserToken,
     fields: "id,name,status",
     limit: "200"
   });
-  return data.data;
 }
 
 export interface MetaAdCreative {
@@ -325,12 +372,11 @@ export interface MetaAd {
 
 /** Every ad under one campaign, each with its own creative — real names for Campaign Deep Dive's Ad creative Name column, and the adset_id linking each ad back to its real ad set. */
 export async function getAdsForCampaign(campaignId: string, longLivedUserToken: string): Promise<MetaAd[]> {
-  const data = await graphFetch<{ data: MetaAd[] }>(`/${campaignId}/ads`, {
+  return graphFetchAll<MetaAd>(`/${campaignId}/ads`, {
     access_token: longLivedUserToken,
     fields: "id,name,adset_id,status,creative{id,name}",
     limit: "200"
   });
-  return data.data;
 }
 
 /**
