@@ -69,6 +69,9 @@ export async function listLeads(caller: AccessTokenPayload, filter: {
   calledBy?: string[];
   calledFrom?: string;
   calledTo?: string;
+  resultFrom?: string;
+  resultTo?: string;
+  callNotQualified?: boolean;
   qualifiedOnly?: boolean;
   unqualifiedOnly?: boolean;
 }) {
@@ -105,6 +108,9 @@ export async function listLeads(caller: AccessTokenPayload, filter: {
     calledBy: filter.calledBy,
     calledFrom: filter.calledFrom,
     calledTo: filter.calledTo,
+    resultFrom: filter.resultFrom,
+    resultTo: filter.resultTo,
+    callNotQualified: filter.callNotQualified,
     qualifiedOnly: filter.qualifiedOnly,
     unqualifiedOnly: filter.unqualifiedOnly,
     scopedToAgentIds

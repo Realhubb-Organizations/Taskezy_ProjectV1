@@ -1,7 +1,7 @@
 import { PoolClient } from "pg";
 import { TASK_DUE_AT_SQL, TASK_OVERDUE_SQL } from "../tasks/taskDue";
 import { REACHED_FOLLOWUP_OR_SITE_VISIT_SQL } from "./leadStatusTransitions";
-import { CAMPAIGN_LEAD_SQL, ON_LEADS_PAGE_SQL, QUALIFIED_LEAD_SQL, RNR_PICKED_UP_SQL, UNQUALIFIED_LEAD_SQL } from "./qualifiedLeads";
+import { CALL_NOT_QUALIFIED_SQL, CAMPAIGN_LEAD_SQL, ON_LEADS_PAGE_SQL, QUALIFIED_LEAD_SQL, RNR_PICKED_UP_SQL, UNQUALIFIED_LEAD_SQL } from "./qualifiedLeads";
 import { pool, query, withTransaction } from "../../db/pool";
 import { BUSINESS_TIMEZONE } from "../../utils/businessDate";
 import { normalizeForeignPhone } from "../../utils/validation";
@@ -97,6 +97,8 @@ export interface LeadListRow {
   // Qualified / Unqualified — only ever set while call_status is Connected
   // (migration 033).
   call_sub_status: string | null;
+  /** When the call status was last set (migration 059); null = before that was recorded. */
+  call_status_at: string | null;
   // Distinct business-calendar days this lead has a real phone call logged
   // (call_attempts, channel = 'CALL') — lets the frontend disable the Dead
   // Lead status option until leadStatusTransitions.ts's
@@ -158,6 +160,11 @@ export interface LeadFilterConditions {
   calledBy?: string[];
   calledFrom?: string;
   calledTo?: string;
+  /** Data Calling result set on resultFrom..resultTo (business days; COALESCE(call_status_at, created_at)). */
+  resultFrom?: string;
+  resultTo?: string;
+  /** Data Calling "Not Qualified": called but not Connected + Qualified (CALL_NOT_QUALIFIED_SQL). */
+  callNotQualified?: boolean;
   /** Only qualified / only unqualified leads (qualifiedLeads.ts). */
   qualifiedOnly?: boolean;
   unqualifiedOnly?: boolean;
@@ -273,6 +280,16 @@ function buildLeadWhereClause(filter: LeadFilterConditions): { whereClause: stri
     params.push(filter.callSubStatus);
     conditions.push(`l.call_status = 'Connected' AND l.call_sub_status = ANY($${params.length}::text[])`);
   }
+  if (filter.callNotQualified) conditions.push(CALL_NOT_QUALIFIED_SQL("l"));
+  // Data Calling result day (Team report drill-downs), business-calendar bounds like dateFrom/dateTo below.
+  if (filter.resultFrom) {
+    params.push(filter.resultFrom, BUSINESS_TIMEZONE);
+    conditions.push(`COALESCE(l.call_status_at, l.created_at) >= ($${params.length - 1}::date::timestamp AT TIME ZONE $${params.length})`);
+  }
+  if (filter.resultTo) {
+    params.push(filter.resultTo, BUSINESS_TIMEZONE);
+    conditions.push(`COALESCE(l.call_status_at, l.created_at) < (($${params.length - 1}::date + 1)::timestamp AT TIME ZONE $${params.length})`);
+  }
 
   if (filter.sourceBucket && filter.sourceBucket.length > 0) {
     params.push(filter.sourceBucket);
@@ -354,7 +371,7 @@ const LIST_SELECT = `
     l.property_id, p.name AS property_name,
     l.data_calling_property_id, dcp.name AS data_calling_property_name,
     l.assigned_at, l.first_response_at, l.created_at,
-    l.source, l.sub_source, l.call_status, l.call_sub_status, l.campaign, l.meta_page_name, l.meta_form_id, l.meta_ad_id,
+    l.source, l.sub_source, l.call_status, l.call_sub_status, l.call_status_at, l.campaign, l.meta_page_name, l.meta_form_id, l.meta_ad_id,
     (SELECT count(DISTINCT (ca.created_at AT TIME ZONE '${BUSINESS_TIMEZONE}')::date)
      FROM call_attempts ca WHERE ca.lead_id = l.id AND ca.channel = 'CALL') AS dead_lead_call_days,
     ${REACHED_FOLLOWUP_OR_SITE_VISIT_SQL("l")} AS reached_followup_or_site_visit,
@@ -972,6 +989,10 @@ export async function updateCallStatus(
     `UPDATE leads
      SET call_status = $1,
          call_sub_status = $5,
+         -- The day this result counts on in Data Calling reports (migration 059):
+         -- only an actual change moves it; re-saving the same result keeps its day.
+         call_status_at = CASE WHEN call_status IS DISTINCT FROM $1 OR call_sub_status IS DISTINCT FROM $5
+                               THEN now() ELSE call_status_at END,
          source = CASE WHEN $6::boolean THEN 'Bulk Upload' ELSE COALESCE($2, source) END,
          status_code = COALESCE($3, status_code),
          assigned_at = CASE WHEN $2::text IS NOT NULL THEN now() ELSE assigned_at END,

@@ -304,6 +304,8 @@ export interface ApiLeadRow {
   // at least once.
   call_status: string | null;
   call_sub_status?: string | null;
+  /** When the call status was last set (migration 059) — the day Data Calling reports count the result on. */
+  call_status_at?: string | null;
   // Distinct business-calendar days this lead has a real logged phone call —
   // the Dead Lead status option is disabled client-side until this reaches
   // leadStatusMapping.ts's DEAD_LEAD_MIN_CALL_DAYS (also enforced server-side).
@@ -401,6 +403,11 @@ export interface LeadListFilters {
   calledBy?: string[];
   calledFrom?: string;
   calledTo?: string;
+  /** Data Calling result set on resultFrom..resultTo (the day the call status was set, migration 059). */
+  resultFrom?: string;
+  resultTo?: string;
+  /** Data Calling "Not Qualified": called but not Connected + Qualified. */
+  callNotQualified?: boolean;
 }
 
 function buildLeadFilterParams(filters: LeadListFilters): URLSearchParams {
@@ -438,6 +445,9 @@ function buildLeadFilterParams(filters: LeadListFilters): URLSearchParams {
   filters.calledBy?.forEach(id => params.append("calledBy", id));
   if (filters.calledFrom) params.set("calledFrom", filters.calledFrom);
   if (filters.calledTo) params.set("calledTo", filters.calledTo);
+  if (filters.resultFrom) params.set("resultFrom", filters.resultFrom);
+  if (filters.resultTo) params.set("resultTo", filters.resultTo);
+  if (filters.callNotQualified) params.set("callNotQualified", "true");
   return params;
 }
 

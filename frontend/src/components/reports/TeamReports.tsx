@@ -446,7 +446,15 @@ export default function TeamReports({ dateRange, onDateRangeChange, initialAgent
       ? { dataCallingOnly: true, subSource: filters.subSource }
       : { excludeBulkUpload: true, sourceBucket: filters.source })
   };
-  const qualifiedDrill: LeadListFilters = dataCalling ? { callSubStatus: ["Qualified"] } : { status: [QUALIFIED_STATUS_FILTER] };
+  // Data Calling results (Connected / Qualified / Not Qualified / RNR) are
+  // counted on the day the call status was set, not the upload day — so their
+  // lists filter on that day too (same as the server's numbers).
+  const resultDay = (extra: LeadListFilters): LeadListFilters =>
+    ({ resultFrom: filters.dateFrom, resultTo: filters.dateTo, dateFrom: undefined, dateTo: undefined, ...extra });
+  const qualifiedDrill: LeadListFilters = dataCalling ? resultDay({ callSubStatus: ["Qualified"] }) : { status: [QUALIFIED_STATUS_FILTER] };
+  const connectedDrill = resultDay({ callStatus: ["Connected"] });
+  const notQualifiedDrill = resultDay({ callNotQualified: true });
+  const rnrDrill = resultDay({ callStatus: ["Not Reachable"] });
   // Call Made = leads an agent called with the Call button in the date range
   // (the call's day), whoever has the lead now — same as the server's count.
   const calledDrill = (agentIds: string[]): LeadListFilters => ({
@@ -460,10 +468,10 @@ export default function TeamReports({ dateRange, onDateRangeChange, initialAgent
     ? [
       { label: "Total Leads Assigned", value: k.assigned, color: "text-slate-900", drill: { assignedOnly: true } },
       { label: "Call Made", value: k.callsMade, color: "text-green-600", drill: calledDrill(callerIds) },
-      { label: "Connected", value: k.connected, color: "text-[#FF0000]", drill: { callStatus: ["Connected"] } },
-      { label: "Not Qualified", value: k.notQualified, color: "text-[#FF8C00]", drill: { callSubStatus: ["Unqualified"] } },
+      { label: "Connected", value: k.connected, color: "text-[#FF0000]", drill: connectedDrill },
+      { label: "Not Qualified", value: k.notQualified, color: "text-[#FF8C00]", drill: notQualifiedDrill },
       { label: "Qualified", value: k.qualified, color: "text-[#0084FF]", drill: qualifiedDrill },
-      { label: "RNR", value: k.rnr, color: "text-[#FF8C00]", drill: { callStatus: ["Not Reachable"] } },
+      { label: "RNR", value: k.rnr, color: "text-[#FF8C00]", drill: rnrDrill },
       { label: "Missed Tasks", value: k.missedTasks, color: "text-[#0084FF]" }
     ]
     : [
@@ -515,10 +523,10 @@ export default function TeamReports({ dateRange, onDateRangeChange, initialAgent
     ? [
       { label: "Leads Assigned", value: r => r.assigned, detail: r => leadsOf(r, "Leads Assigned", { assignedOnly: true }) },
       { label: "Call Made", value: r => r.callsMade, detail: r => leadsOf(r, "Call Made", calledDrill([r.agentId])) },
-      { label: "Connected", value: r => r.connected, detail: r => leadsOf(r, "Connected", { callStatus: ["Connected"] }) },
+      { label: "Connected", value: r => r.connected, detail: r => leadsOf(r, "Connected", connectedDrill) },
       { label: "Qualified Leads", value: r => r.qualified, detail: r => leadsOf(r, "Qualified Leads", qualifiedDrill) },
-      { label: "RNR", value: r => r.rnr, detail: r => leadsOf(r, "RNR", { callStatus: ["Not Reachable"] }) },
-      { label: "Not Qualified", value: r => r.notQualified, detail: r => leadsOf(r, "Not Qualified", { callSubStatus: ["Unqualified"] }) }
+      { label: "RNR", value: r => r.rnr, detail: r => leadsOf(r, "RNR", rnrDrill) },
+      { label: "Not Qualified", value: r => r.notQualified, detail: r => leadsOf(r, "Not Qualified", notQualifiedDrill) }
     ]
     : [
       { label: "Qualified Leads", value: r => r.qualified, detail: r => leadsOf(r, "Qualified Leads", qualifiedDrill) },
