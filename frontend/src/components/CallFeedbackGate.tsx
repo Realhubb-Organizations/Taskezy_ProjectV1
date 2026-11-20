@@ -35,7 +35,7 @@ import { findAgentScheduleConflict, agentConflictMessage } from "@/lib/duplicate
 //      Call Back / Followup / Site Visit Scheduled (regular leads, see
 //      leadScheduler.ts's SCHEDULER_REQUIRED_STATUSES) or Not Reachable
 //      (Data Calling leads) need the next call's date and time after a
-//      call (never after a WhatsApp message); Booked needs the deal value.
+//      call (never after a WhatsApp message).
 // The status and note are saved, then the attempt is closed — only then
 // does the app unlock. Scheduling the next call happens on the backend's
 // job queue afterward, not awaited here — see finish()'s own comment.
@@ -121,7 +121,6 @@ export default function CallFeedbackGate() {
   const [callSubStatus, setCallSubStatus] = useState<CallSubStatus | null>(null);
   const [nextDate, setNextDate] = useState("");
   const [nextTime, setNextTime] = useState("");
-  const [dealValue, setDealValue] = useState("");
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -134,7 +133,6 @@ export default function CallFeedbackGate() {
     setReasonText("");
     setNextDate("");
     setNextTime("");
-    setDealValue("");
     setNote("");
     setRescheduleReason("");
     setError("");
@@ -247,7 +245,6 @@ export default function CallFeedbackGate() {
     ? callStatus === "Not Reachable" && callStatusChanged
     : NEEDS_NEXT_CALL.includes(status));
   const isSiteVisitReschedule = !isDataCallingLead && status === "Site Visit Scheduled" && hadSiteVisit;
-  const needsDealValue = !isDataCallingLead && status === "Booked" && statusChanged;
   const somethingChanged = statusChanged || callStatusChanged;
 
   const finish = async (e: React.FormEvent) => {
@@ -260,8 +257,6 @@ export default function CallFeedbackGate() {
       if (isNaN(scheduledAt.getTime()) || scheduledAt.getTime() < Date.now()) return setError("The next call must be in the future.");
     }
     if (isSiteVisitReschedule && scheduledAt && !rescheduleReason.trim()) return setError("Please add the reason for rescheduling the site visit.");
-    const deal = needsDealValue ? parseFloat(dealValue.replace(/[^0-9.]/g, "")) : undefined;
-    if (needsDealValue && (!deal || deal <= 0)) return setError("Enter the booking's deal value.");
     // Data Calling: a note is always required (it's saved as the lead's note).
     if (isDataCallingLead && !note.trim()) return setError("Please add a note about the call.");
     if (!somethingChanged && !note.trim()) return setError("Status is unchanged — add a note about what happened.");
@@ -288,7 +283,7 @@ export default function CallFeedbackGate() {
       } else if (lead && statusChanged) {
         const code = frontendStatusToDbCode(status);
         if (!code) throw new Error(`"${status}" can't be set here.`);
-        await apiUpdateLeadStatus(lead.id, code, deal, isWhatsApp);
+        await apiUpdateLeadStatus(lead.id, code, undefined, isWhatsApp);
       }
       // 1b. Regular leads: this note also becomes the lead's actual Notes
       // field (same as the Notes column's pencil-edit), not just a line in
@@ -463,12 +458,6 @@ export default function CallFeedbackGate() {
               <div className="space-y-1">
                 <label className="block text-[10px] font-bold text-slate-500 uppercase">Reschedule reason</label>
                 <input value={rescheduleReason} onChange={(e) => setRescheduleReason(e.target.value)} maxLength={500} placeholder="e.g. Out of station" className={`${inputClass} font-normal`} />
-              </div>
-            )}
-            {needsDealValue && (
-              <div className="space-y-1">
-                <label className="block text-[10px] font-bold text-slate-500 uppercase">Deal value (₹)</label>
-                <input inputMode="decimal" value={dealValue} onChange={(e) => setDealValue(e.target.value)} placeholder="e.g. 8500000" className={inputClass} />
               </div>
             )}
             <div className="space-y-1">

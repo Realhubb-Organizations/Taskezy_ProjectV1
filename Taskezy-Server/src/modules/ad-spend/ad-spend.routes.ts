@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { ON_LEADS_PAGE_SQL, QUALIFIED_LEAD_SQL, QUALIFIED_STATUS_CODES, RNR_NOT_PICKED_UP_SQL, RNR_PICKED_UP_SQL, UNQUALIFIED_LEAD_SQL, UNQUALIFIED_STATUS_CODES } from "../leads/qualifiedLeads";
+import { BOOKING_VALUE_SQL, ON_LEADS_PAGE_SQL, QUALIFIED_LEAD_SQL, QUALIFIED_STATUS_CODES, RNR_NOT_PICKED_UP_SQL, RNR_PICKED_UP_SQL, UNQUALIFIED_LEAD_SQL, UNQUALIFIED_STATUS_CODES } from "../leads/qualifiedLeads";
 import { z } from "zod";
 import { requireAuth, requireRole } from "../../middleware/auth";
 import { validate } from "../../middleware/validate";
@@ -681,7 +681,7 @@ adSpendRouter.get(
                 count(*) FILTER (WHERE l.status_code = ANY($5::text[]) OR ${RNR_NOT_PICKED_UP_SQL("l")}) AS non_buyer_count,
                 count(*) FILTER (WHERE l.status_code = ANY($6::text[])) AS converted_count,
                 count(*) AS total_count,
-                COALESCE(SUM(l.deal_value) FILTER (WHERE l.status_code = 'BOOKED'), 0) AS booking_value,
+                COALESCE(SUM(${BOOKING_VALUE_SQL("l")}), 0) AS booking_value,
                 count(*) FILTER (WHERE l.status_code = 'BOOKED') AS booking_count
          FROM leads l
          WHERE ${dateBounds}`,
@@ -691,7 +691,7 @@ adSpendRouter.get(
         `SELECT l.campaign,
                 count(*) FILTER (WHERE l.status_code = ANY($4::text[]) OR ${RNR_PICKED_UP_SQL("l")}) AS buyer_count,
                 count(*) FILTER (WHERE l.status_code = ANY($5::text[]) OR ${RNR_NOT_PICKED_UP_SQL("l")}) AS non_buyer_count,
-                COALESCE(SUM(l.deal_value) FILTER (WHERE l.status_code = 'BOOKED'), 0) AS booking_value
+                COALESCE(SUM(${BOOKING_VALUE_SQL("l")}), 0) AS booking_value
          FROM leads l
          WHERE l.campaign IS NOT NULL AND ${dateBounds}
          GROUP BY l.campaign`,
@@ -700,7 +700,7 @@ adSpendRouter.get(
       query<{ property_name: string; leads_count: string; booking_value: string; booking_count: string }>(
         `SELECT p.name AS property_name,
                 count(*) AS leads_count,
-                COALESCE(SUM(l.deal_value) FILTER (WHERE l.status_code = 'BOOKED'), 0) AS booking_value,
+                COALESCE(SUM(${BOOKING_VALUE_SQL("l")}), 0) AS booking_value,
                 count(*) FILTER (WHERE l.status_code = 'BOOKED') AS booking_count
          FROM leads l
          JOIN properties p ON p.id = l.property_id
