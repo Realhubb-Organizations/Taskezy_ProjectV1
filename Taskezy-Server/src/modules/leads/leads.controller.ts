@@ -95,9 +95,9 @@ export async function createLeadHandler(req: Request, res: Response): Promise<vo
 }
 
 export async function updateLeadStatusHandler(req: Request, res: Response): Promise<void> {
-  const { statusCode, dealValue, keepSchedule } = req.body;
+  const { statusCode, keepSchedule } = req.body;
   await assertNoPendingFeedback(req.user!.sub, req.params.id);
-  const lead = await leadsService.updateLeadStatus(req.user!, req.params.id, statusCode, dealValue, keepSchedule);
+  const lead = await leadsService.updateLeadStatus(req.user!, req.params.id, statusCode, keepSchedule);
   sendOk(res, leadForCaller(req.user!, lead));
 }
 

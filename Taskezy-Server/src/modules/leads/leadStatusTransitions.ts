@@ -164,7 +164,7 @@ async function assertDeadLeadCallHistorySatisfied(leadId: string): Promise<void>
 
 /** Single enforcement point for every lead-status change — see updateLeadStatus in leads.service.ts. */
 export async function assertTransitionAllowed(fromCode: string, toCode: LeadStatusCode, leadId: string, isAdmin = false): Promise<void> {
-  if (fromCode === toCode) return; // not a transition — e.g. editing dealValue without changing status
+  if (fromCode === toCode) return; // not a transition — the status didn't change
   if (toCode === REVIVED_CODE) {
     throw ApiError.badRequest(`"${LABEL.REVIVED}" is set automatically when a repeat enquiry comes in, and can't be chosen by hand.`);
   }

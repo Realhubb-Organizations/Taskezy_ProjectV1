@@ -231,7 +231,6 @@ export interface Lead {
   phone: string;
   email: string;
   status: LeadStatus;
-  dealValue?: number; // INR
   kycDocName?: string;
   kycDocUrl?: string;
   kycVerified: boolean;
@@ -686,7 +685,6 @@ interface AppActions {
   updateLeadStatus: (
     leadId: string,
     status: LeadStatus,
-    dealValue?: number,
     kycDocName?: string
   ) => { success: boolean; error?: string };
   /** Data Calling's own, independent field (migration 030) — see updateLeadStatus for the main Lead Status. */
@@ -793,7 +791,6 @@ export function mapApiLeadToFrontendLead(row: ApiLeadRow): Lead {
     email: row.email || "",
     status: dbCodeToFrontendStatus(row.status_code),
     isUnassignedInSystem: row.status_code === "UNASSIGNED",
-    dealValue: row.deal_value ? Number(row.deal_value) : undefined,
     kycVerified: false, // not included in the leads list endpoint yet
     assignedAgent: row.assigned_agent_name,
     assignedAgentId: row.assigned_agent_id,
@@ -2219,7 +2216,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const updateLeadStatus = (
     leadId: string,
     targetStatus: LeadStatus,
-    dealValue?: number,
     kycDocName?: string
   ) => {
     const lead = allLeads.find(l => l.id === leadId);
@@ -2236,7 +2232,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     lead.status = targetStatus;
     if (targetStatus === "Booked") {
-      lead.dealValue = dealValue;
       lead.kycDocName = kycDocName;
 
       // No invoice is created here any more: Booked only starts the Sales
@@ -2274,7 +2269,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (isApiSessionActive() && isRealLeadId(leadId)) {
       const dbCode = frontendStatusToDbCode(targetStatus);
       if (dbCode) {
-        apiUpdateLeadStatus(leadId, dbCode, dealValue).then(() => refreshOwnTasksSoon()).catch((err) =>
+        apiUpdateLeadStatus(leadId, dbCode).then(() => refreshOwnTasksSoon()).catch((err) =>
           console.warn("Could not persist status update to the database:", err)
         );
         // The server deletes this lead's activity alerts on a status update; drop live copies too.
@@ -2286,7 +2281,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Data Calling's own, independent field (migration 030) — no transition
-  // rules, no dealValue/kycDocName/invoice/calendar side effects like
+  // rules, no kycDocName/invoice/calendar side effects like
   // updateLeadStatus above; a Connected result on a bulk-uploaded lead
   // graduates it out of Data Calling into the main CRM leads list.
   // Every update carries a required note, saved as the lead's note in the

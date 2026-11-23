@@ -948,7 +948,6 @@ export async function updateLeadStatus(
   caller: AccessTokenPayload,
   leadId: string,
   statusCode: LeadStatusCode,
-  dealValue: number | undefined,
   keepSchedule = false
 ) {
   const scopedToAgentIds = await scopeForCaller(caller);
@@ -967,7 +966,7 @@ export async function updateLeadStatus(
 
   try {
     await withTransaction(async (client) => {
-      await repo.updateStatus(client, leadId, statusCode, dealValue, stampFirstResponse);
+      await repo.updateStatus(client, leadId, statusCode, stampFirstResponse);
       await repo.insertLeadLog(client, leadId, caller.sub, caller.name, `Status changed to "${statusCode}"`);
       // The agent responded in time — this is what the follow-up SLA
       // scheduler (jobs/followupScheduler.ts) checks for before escalating

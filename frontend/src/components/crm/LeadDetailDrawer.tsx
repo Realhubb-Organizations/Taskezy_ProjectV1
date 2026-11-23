@@ -23,7 +23,7 @@ interface LeadDetailDrawerProps {
   lead: Lead | null;
   isOpen: boolean;
   onClose: () => void;
-  onUpdateStatus: (leadId: string, status: LeadStatus, dealValue?: number, kycDocName?: string) => void;
+  onUpdateStatus: (leadId: string, status: LeadStatus, kycDocName?: string) => void;
   /** Called after a reassignment has been saved, so the caller can refresh its list. */
   onReassigned?: (leadId: string) => void;
   /** Called after the lead's note is saved, so the caller can update its list. */

@@ -180,7 +180,7 @@ export default function OverviewTab({
   const columns = card ? card.columns : RECENT_COLUMNS;
 
   return (
-    <PageCard title="Admin Sales Tracker" right={<HeaderFilters value={filters} onChange={onFiltersChange} lookups={lookups} />}>
+    <PageCard title="Sales PNL" right={<HeaderFilters value={filters} onChange={onFiltersChange} lookups={lookups} />}>
       {/* Totals */}
       <div>
         <div className="h-6 rounded-t-2xl bg-[#0B0B4A]" />
