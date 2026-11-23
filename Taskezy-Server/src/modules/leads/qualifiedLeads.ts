@@ -68,8 +68,7 @@ export const CAMPAIGN_LEAD_SQL = (alias: string) =>
 
 /**
  * A lead's booking value for the reports: the Agreement Value of its Sales
- * PNL booking (cancelled bookings don't count). Replaces leads.deal_value,
- * which is no longer asked for when a lead is marked Booked.
+ * PNL booking (cancelled bookings don't count).
  */
 export const BOOKING_VALUE_SQL = (alias: string) =>
   `(SELECT COALESCE(SUM(bk.agreement_value), 0) FROM booked_users bk WHERE bk.lead_id = ${alias}.id AND NOT bk.is_cancelled)`;

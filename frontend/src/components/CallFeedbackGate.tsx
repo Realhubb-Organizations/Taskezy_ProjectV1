@@ -283,7 +283,7 @@ export default function CallFeedbackGate() {
       } else if (lead && statusChanged) {
         const code = frontendStatusToDbCode(status);
         if (!code) throw new Error(`"${status}" can't be set here.`);
-        await apiUpdateLeadStatus(lead.id, code, undefined, isWhatsApp);
+        await apiUpdateLeadStatus(lead.id, code, isWhatsApp);
       }
       // 1b. Regular leads: this note also becomes the lead's actual Notes
       // field (same as the Notes column's pencil-edit), not just a line in

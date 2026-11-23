@@ -269,7 +269,6 @@ export interface ApiLeadRow {
   email: string | null;
   status_code: string;
   status_label: string;
-  deal_value: string | null;
   lead_score: number | null;
   assigned_agent_id: string;
   assigned_agent_name: string;
@@ -769,13 +768,12 @@ export async function pollJob<T>(getStatus: () => Promise<JobStatus<T>>): Promis
 export function apiUpdateLeadStatus(
   leadId: string,
   statusCode: string,
-  dealValue?: number,
   /** After a WhatsApp message: keep the lead's scheduled call. */
   keepSchedule?: boolean
 ): Promise<ApiLeadRow> {
   return request<ApiLeadRow>(`/api/v1/leads/${leadId}/status`, {
     method: "PATCH",
-    body: JSON.stringify({ statusCode, dealValue, ...(keepSchedule ? { keepSchedule: true } : {}) })
+    body: JSON.stringify({ statusCode, ...(keepSchedule ? { keepSchedule: true } : {}) })
   });
 }
 

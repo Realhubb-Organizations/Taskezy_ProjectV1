@@ -51,7 +51,6 @@ export interface LeadListRow {
   email: string | null;
   status_code: string;
   status_label: string;
-  deal_value: string | null;
   lead_score: number | null;
   assigned_agent_id: string;
   assigned_agent_name: string;
@@ -362,7 +361,7 @@ function buildLeadWhereClause(filter: LeadFilterConditions): { whereClause: stri
 const LIST_SELECT = `
   SELECT
     l.id, l.name, l.phone, l.email, l.status_code, ls.label AS status_label,
-    l.deal_value, l.lead_score, l.assigned_agent_id,
+    l.lead_score, l.assigned_agent_id,
     u.first_name || COALESCE(' ' || u.last_name, '') AS assigned_agent_name,
     COALESCE(pu.first_name || COALESCE(' ' || pu.last_name, ''), l.previous_agent_name) AS previous_agent_name, l.reassigned_at,
     l.notes, l.notes_updated_at,
@@ -946,16 +945,14 @@ export async function updateStatus(
   client: PoolClient,
   leadId: string,
   statusCode: string,
-  dealValue: number | undefined,
   stampFirstResponse: boolean
 ): Promise<void> {
   await client.query(
     `UPDATE leads
      SET status_code = $1,
-         deal_value = COALESCE($2, deal_value),
-         first_response_at = CASE WHEN $3 AND first_response_at IS NULL THEN now() ELSE first_response_at END
-     WHERE id = $4`,
-    [statusCode, dealValue ?? null, stampFirstResponse, leadId]
+         first_response_at = CASE WHEN $2 AND first_response_at IS NULL THEN now() ELSE first_response_at END
+     WHERE id = $3`,
+    [statusCode, stampFirstResponse, leadId]
   );
 }
 

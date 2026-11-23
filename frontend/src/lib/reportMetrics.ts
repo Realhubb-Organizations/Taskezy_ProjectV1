@@ -79,9 +79,6 @@ export function agentFunnelLeads(leads: Lead[]): { assigned: Lead[]; contacted: 
   };
 }
 
-export function computeBookingValue(leads: Lead[]): number {
-  return leads.filter(l => BOOKING_STATUSES.has(l.status)).reduce((sum, l) => sum + (l.dealValue || 0), 0);
-}
 
 export function computeBookingCount(leads: Lead[]): number {
   return leads.filter(l => BOOKING_STATUSES.has(l.status)).length;
