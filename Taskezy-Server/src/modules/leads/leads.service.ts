@@ -747,7 +747,7 @@ export async function bulkImportLeads(input: BulkImportLeadsInput): Promise<Bulk
       agentCursor++;
       statusCode = "NEW_LEAD";
     } else {
-      const autoAssignedAgentId = pickPropertyAgent?.();
+      const autoAssignedAgentId = pickPropertyAgent?.next();
       assignedAgentId = autoAssignedAgentId ?? fallbackAdminId;
       statusCode = autoAssignedAgentId ? "NEW_LEAD" : "UNASSIGNED";
     }
@@ -764,6 +764,8 @@ export async function bulkImportLeads(input: BulkImportLeadsInput): Promise<Bulk
     seenPhones.add(phone);
     candidates.push({ row, name, phone, email, assignedAgentId, statusCode });
   }
+  // The next lead for this property (from any source) carries on the rotation from here.
+  await pickPropertyAgent?.save();
 
   let created = 0;
   let restored = 0;

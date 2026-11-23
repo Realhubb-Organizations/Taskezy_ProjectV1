@@ -249,9 +249,11 @@ export async function getAssignmentPool(propertyId: string): Promise<{ teamAssig
   if (property.team_assignment_mode === "CUSTOM_MEMBERS") {
     const { rows: members } = await query<{ user_id: string; percentage: number | null }>(
       // Inactive members stay on the list but get no new leads (percentages re-weight over the rest).
+      // Fixed order (by name) so Round Robin rotates through the team the same way every time.
       `SELECT ptm.user_id, ptm.percentage FROM property_team_members ptm
        JOIN users u ON u.id = ptm.user_id
-       WHERE ptm.property_id = $1 AND u.status = 'ACTIVE'`,
+       WHERE ptm.property_id = $1 AND u.status = 'ACTIVE'
+       ORDER BY u.first_name, u.last_name, u.id`,
       [propertyId]
     );
     return {
@@ -262,7 +264,8 @@ export async function getAssignmentPool(propertyId: string): Promise<{ teamAssig
   }
 
   const { rows: allMembers } = await query<{ id: string }>(
-    `SELECT id FROM users WHERE status = 'ACTIVE' AND department = 'SALES' AND role != 'ADMIN'`
+    `SELECT id FROM users WHERE status = 'ACTIVE' AND department = 'SALES' AND role != 'ADMIN'
+     ORDER BY first_name, last_name, id`
   );
   return {
     teamAssignmentMode: property.team_assignment_mode,
@@ -271,16 +274,46 @@ export async function getAssignmentPool(propertyId: string): Promise<{ teamAssig
   };
 }
 
-/** How many leads each candidate currently holds for this property — the tiebreaker Round Robin picks the minimum of. */
-export async function countLeadsPerAgentForProperty(propertyId: string, agentIds: string[]): Promise<Record<string, number>> {
-  if (agentIds.length === 0) return {};
-  const { rows } = await query<{ assigned_agent_id: string; count: string }>(
-    `SELECT assigned_agent_id, count(*) FROM leads WHERE property_id = $1 AND assigned_agent_id = ANY($2) GROUP BY assigned_agent_id`,
-    [propertyId, agentIds]
+/** Whoever comes after `last` in the team's fixed order (the first person if `last` isn't on it). */
+export function nextInRotation(pool: string[], last: string | null): string {
+  const i = last ? pool.indexOf(last) : -1;
+  return pool[(i + 1) % pool.length];
+}
+
+/**
+ * Round Robin's next person for a property, and records them as the last
+ * one — atomically: the property's row is locked while picking, so leads
+ * arriving at the same moment still go to different people.
+ */
+export async function takeNextInRotation(propertyId: string, pool: string[]): Promise<string> {
+  return withTransaction(async (client) => {
+    await client.query(`INSERT INTO property_round_robin (property_id) VALUES ($1) ON CONFLICT DO NOTHING`, [propertyId]);
+    const { rows } = await client.query<{ last_user_id: string | null }>(
+      `SELECT last_user_id FROM property_round_robin WHERE property_id = $1 FOR UPDATE`,
+      [propertyId]
+    );
+    const next = nextInRotation(pool, rows[0]?.last_user_id ?? null);
+    await client.query(`UPDATE property_round_robin SET last_user_id = $2, updated_at = now() WHERE property_id = $1`, [propertyId, next]);
+    return next;
+  });
+}
+
+/** Who got the last Round Robin lead for this property (null = nobody yet). */
+export async function getLastInRotation(propertyId: string): Promise<string | null> {
+  const { rows } = await query<{ last_user_id: string | null }>(
+    `SELECT last_user_id FROM property_round_robin WHERE property_id = $1`,
+    [propertyId]
   );
-  const counts: Record<string, number> = {};
-  for (const row of rows) counts[row.assigned_agent_id] = Number(row.count);
-  return counts;
+  return rows[0]?.last_user_id ?? null;
+}
+
+/** Saves who got the last Round Robin lead (after a bulk upload rotated through the team in memory). */
+export async function setLastInRotation(propertyId: string, userId: string): Promise<void> {
+  await query(
+    `INSERT INTO property_round_robin (property_id, last_user_id) VALUES ($1, $2)
+     ON CONFLICT (property_id) DO UPDATE SET last_user_id = EXCLUDED.last_user_id, updated_at = now()`,
+    [propertyId, userId]
+  );
 }
 
 // --- Meta campaign linking (see Taskezy_DB/migrations/005_*.sql) ---
