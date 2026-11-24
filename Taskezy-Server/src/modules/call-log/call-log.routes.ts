@@ -128,6 +128,14 @@ const listCallLogQuerySchema = z.object({
     .transform(v => v === undefined ? undefined : (Array.isArray(v) ? v : [v]))
 });
 
+/** 98••••••46 — same look as the website's maskPhone (lib/maskPII.ts). */
+function maskPhone(phone: string): string {
+  const digits = phone.replace(/\D/g, "");
+  const plus = phone.trim().startsWith("+") ? "+" : "";
+  if (digits.length <= 4) return "•".repeat(digits.length || 4);
+  return `${plus}${digits.slice(0, 2)}${"•".repeat(digits.length - 4)}${digits.slice(-2)}`;
+}
+
 // leads.phone is already stored normalized to a bare 10-digit mobile or a
 // "+<country code>" foreign number (see normalizeLeadPhone in leads.repository.ts), and
 // device_call_log.phone_number is normalized the same way at insert time —
@@ -216,11 +224,14 @@ callLogRouter.get(
       dataParams
     );
 
+    // Sales agents (Members) never get the lead's phone number here — only
+    // admins and managers (for their own team, per scopedUserIdsForCaller) do.
+    const hidePhone = req.user!.role === "AGENT" && req.user!.roleType !== "MANAGER";
     const data = rows.map(r => ({
       id: r.id,
       userId: r.user_id,
       userName: r.user_name,
-      phoneNumber: r.phone_number,
+      phoneNumber: hidePhone ? maskPhone(r.phone_number) : r.phone_number,
       leadId: r.lead_id,
       leadName: r.lead_name,
       callType: r.call_type,
