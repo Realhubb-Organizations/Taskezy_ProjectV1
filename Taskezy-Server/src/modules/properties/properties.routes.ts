@@ -141,8 +141,8 @@ propertiesRouter.delete(
 );
 
 // Campaigns and sheets bring in ad leads — a Data Calling property (its
-// leads come only from Data Calling uploads) has none. It does keep a team
-// and round robin, used when a Data Calling upload assigns by property.
+// leads come only from Data Calling uploads) has none. It has no team or
+// round robin either: Data Calling leads are given to salespeople by hand.
 function assertLeadsProperty(property: repo.PropertyRow): void {
   if (property.kind === "DATA_CALLING") {
     throw ApiError.badRequest("Data Calling properties have no campaigns or sheets.");
@@ -204,6 +204,9 @@ propertiesRouter.put(
   asyncHandler(async (req, res) => {
     const existing = await repo.findById(req.params.id);
     if (!existing) throw ApiError.notFound("Property not found");
+    if (existing.kind === "DATA_CALLING") {
+      throw ApiError.badRequest("Data Calling properties have no team. Data Calling leads are assigned to salespeople by hand.");
+    }
     const previousMemberIds = new Set(existing.team_members.map(m => m.userId));
 
     try {

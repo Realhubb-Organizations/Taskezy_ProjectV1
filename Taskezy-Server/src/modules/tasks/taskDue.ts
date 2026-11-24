@@ -1,4 +1,5 @@
 import { FEEDBACK_PENDING_LOG_PREFIX } from "../call-attempts/feedbackLock";
+import { slaStartSql } from "../../config/workingHours";
 
 // A lead's task time — the ONE rule behind both Pending Tasks
 // (GET /tasks/pending) and the Leads tables' Next Call Date (task_due_at on
@@ -9,7 +10,9 @@ import { FEEDBACK_PENDING_LOG_PREFIX } from "../call-attempts/feedbackLock";
 //     upcoming one — and only that one becomes a task.
 //  2. No open call:
 //       last action was a WhatsApp message → no task (NULL)
-//       New Lead / Revived Lead    → when it was assigned / revived (or created);
+//       New Lead / Revived Lead    → when it was assigned / revived (or created),
+//                                    or the next 9:00 AM if that was outside
+//                                    working hours (config/workingHours.ts);
 //                                    a Data Calling upload never is (no task
 //                                    until a call is booked for it)
 //       RNR / Call Back / Followup → its last activity
@@ -35,7 +38,7 @@ export const TASK_DUE_AT_SQL = `COALESCE(
     LIMIT 1),
   CASE
     WHEN COALESCE(${LATEST_LOG_SQL("message")}, '') LIKE 'WhatsApp message outcome:%' THEN NULL
-    WHEN l.status_code IN ('NEW_LEAD', 'REVIVED') AND l.source IS DISTINCT FROM 'Bulk Upload' THEN COALESCE(l.assigned_at, l.created_at)
+    WHEN l.status_code IN ('NEW_LEAD', 'REVIVED') AND l.source IS DISTINCT FROM 'Bulk Upload' THEN ${slaStartSql("COALESCE(l.assigned_at, l.created_at)")}
     WHEN l.status_code IN ('RNR', 'CALL_BACK', 'FOLLOWUP') THEN COALESCE(${LATEST_LOG_SQL("created_at")}, l.created_at)
   END
 )`;

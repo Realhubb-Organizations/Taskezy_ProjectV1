@@ -9,6 +9,7 @@ import { canSeeMissedTaskCount } from "../leads/leads.handover";
 import { REACHED_FOLLOWUP_OR_SITE_VISIT_SQL } from "../leads/leadStatusTransitions";
 import { FEEDBACK_PENDING_LOG_PREFIX } from "../call-attempts/feedbackLock";
 import { OPEN_CALL_ORDER_SQL } from "./taskDue";
+import { slaStartSql } from "../../config/workingHours";
 
 export const tasksRouter = Router();
 
@@ -76,6 +77,8 @@ interface ActionableLeadRow {
   status_label: string;
   assigned_at: string | null;
   created_at: string;
+  /** When its first call is due: assigned (or created), or the next 9:00 AM outside working hours. */
+  first_call_due_at: string;
   assigned_to_name: string;
   latest_log_message: string | null;
   latest_log_at: string | null;
@@ -176,7 +179,7 @@ tasksRouter.get(
     }
     const { rows: leadRows } = await query<ActionableLeadRow>(
       `SELECT l.id, l.name, l.phone, l.email, l.status_code, ls.label AS status_label,
-              l.assigned_at, l.created_at,
+              l.assigned_at, l.created_at, ${slaStartSql("COALESCE(l.assigned_at, l.created_at)")} AS first_call_due_at,
               u.first_name || COALESCE(' ' || u.last_name, '') AS assigned_to_name,
               ll.message AS latest_log_message, ll.created_at AS latest_log_at,
               l.source = 'Bulk Upload' AS is_data_calling, l.call_status, l.call_sub_status, l.missed_task_count,
@@ -245,7 +248,7 @@ tasksRouter.get(
 
     for (const r of leadRows) {
       // Same rule as taskDue.ts TASK_DUE_AT_SQL (the Leads page's Next Call Date).
-      const dueAt = ACTIONABLE_LEAD_CODES.includes(r.status_code) ? (r.assigned_at || r.created_at) : (r.latest_log_at || r.created_at);
+      const dueAt = ACTIONABLE_LEAD_CODES.includes(r.status_code) ? r.first_call_due_at : (r.latest_log_at || r.created_at);
       tasks.push({
         id: `lead-${r.id}`,
         leadId: r.id,

@@ -6,65 +6,13 @@ import { sendOk, sendPaginated } from "../../utils/apiResponse";
 import { ApiError } from "../../utils/ApiError";
 import { AccessTokenPayload } from "../../utils/tokens";
 import { hashPassword } from "../../utils/password";
-import { createUserSchema, deleteUserSchema, editUserSchema, listUsersQuerySchema, resetPasswordSchema, userIdParamSchema, updateOwnEodReportTimeSchema } from "./users.schema";
+import { createUserSchema, editUserSchema, listUsersQuerySchema, resetPasswordSchema, userIdParamSchema, updateOwnEodReportTimeSchema } from "./users.schema";
 import * as repo from "./users.repository";
-import { pool, withTransaction } from "../../db/pool";
-import * as leadsRepo from "../leads/leads.repository";
-import * as leadsService from "../leads/leads.service";
-import { broadcastLeadChanged } from "../leads/leads.realtime";
-import { createNotification } from "../notifications/notifications.service";
+import { pool } from "../../db/pool";
 import { SUPER_ADMIN_EMAIL } from "../../config/superAdmin";
 import { getPresence, getDevicePresence } from "../../utils/presence";
-import { leadIdsLink } from "../notifications/notificationLinks";
 
 export const usersRouter = Router();
-
-type HandoverUser = { id: string; first_name: string; last_name: string | null };
-
-/**
- * Hands every lead `existing` holds to `reassignTo` (round-robin, with the
- * admin's note), inside the caller's transaction — shared by delete and
- * make-inactive. Throws if they hold leads and no one was chosen.
- */
-async function handOverAllLeads(
-  client: Parameters<Parameters<typeof withTransaction>[0]>[0],
-  caller: AccessTokenPayload,
-  existing: HandoverUser,
-  action: string,
-  reassignTo: string[] | undefined,
-  note: string | undefined
-): Promise<{ received: Map<string, number>; movedLeadIds: string[] }> {
-  const fromUser = { id: existing.id, name: `${existing.first_name}${existing.last_name ? " " + existing.last_name : ""}` };
-  const leadIds = await leadsRepo.lockLeadIdsForAgent(client, existing.id);
-  if (leadIds.length === 0) return { received: new Map(), movedLeadIds: [] };
-  if (!reassignTo?.length || !note) {
-    throw ApiError.conflict(`${fromUser.name} has ${leadIds.length} lead${leadIds.length === 1 ? "" : "s"}. Choose who should get them before ${action}.`);
-  }
-  const ids = Array.from(new Set(reassignTo));
-  if (ids.includes(existing.id)) throw ApiError.badRequest(`Leads can't be reassigned to the user being ${action === "deleting" ? "deleted" : "made inactive"}.`);
-  const found = await repo.findActiveSalesUsersByIds(client, ids);
-  if (found.length !== ids.length) throw ApiError.badRequest("Leads can only go to active sales agents or managers.");
-  // Keep the admin's order so the round-robin is predictable.
-  const targets = ids.map(id => found.find(u => u.id === id)!);
-  const received = await leadsService.handOverLeadsInTransaction(client, caller, fromUser, leadIds, targets, note);
-  return { received, movedLeadIds: leadIds };
-}
-
-/** After a handover commits: tell each receiver, and refresh the moved leads everywhere. */
-async function notifyHandover(caller: AccessTokenPayload, fromName: string, received: Map<string, number>, movedLeadIds: string[]): Promise<void> {
-  for (const [userId, count] of received) {
-    await createNotification({
-      system: "CRM",
-      category: "REASSIGNMENT",
-      title: "Leads Reassigned To You",
-      // The moved leads now with this user — just theirs, out of the whole handover.
-      link: leadIdsLink("Leads Reassigned To You", movedLeadIds, "/dashboard/crm", { assignedAgentId: [userId] }),
-      message: `${count} lead${count === 1 ? "" : "s"} from ${fromName} ${count === 1 ? "was" : "were"} reassigned to you by ${caller.name}.`,
-      recipientUserId: userId
-    });
-  }
-  movedLeadIds.forEach(broadcastLeadChanged);
-}
 
 usersRouter.use(requireAuth);
 
@@ -217,22 +165,15 @@ usersRouter.patch(
       }
     }
 
-    // Don't allow demoting/deactivating the last active admin — would lock
-    // the tenant out of its own admin console with no way back in.
-    if (existing.role === "ADMIN" && req.body.status === "INACTIVE") {
-      const remainingAdmins = await repo.countAdmins(existing.id);
-      if (remainingAdmins === 0) {
-        throw ApiError.badRequest("Cannot deactivate the last active administrator account.");
-      }
-    }
-
-    // Making someone inactive with leads goes through POST /:id/deactivate,
-    // which asks who gets those leads first.
-    if (req.body.status === "INACTIVE" && existing.status !== "INACTIVE") {
-      const leadCount = await leadsRepo.countLeadsForAgent(existing.id);
-      if (leadCount > 0) {
-        throw ApiError.conflict(`${existing.first_name} has ${leadCount} lead${leadCount === 1 ? "" : "s"}. Choose who should get them before making them inactive.`);
-      }
+    // Inactive is one-way: an inactive user is never made active again.
+    // Making someone inactive goes through POST /:id/deactivate (its own
+    // checks: not yourself, not the last admin).
+    if (req.body.status !== undefined && req.body.status !== existing.status) {
+      throw ApiError.badRequest(
+        existing.status === "INACTIVE"
+          ? "An inactive user can't be made active again."
+          : "Use Make Inactive to change this user's status."
+      );
     }
 
     if (req.body.managerId === req.params.id) {
@@ -265,23 +206,6 @@ usersRouter.patch(
     const passwordHash = await hashPassword(req.body.newPassword);
     await repo.updatePasswordHash(req.params.id, passwordHash);
     sendOk(res, { passwordReset: true });
-  })
-);
-
-// How much a delete would hand over, so the admin's delete dialog knows
-// whether to ask who should get the user's leads.
-usersRouter.get(
-  "/:id/delete-impact",
-  requireRole("ADMIN"),
-  validate({ params: userIdParamSchema }),
-  asyncHandler(async (req, res) => {
-    const existing = await repo.findById(req.params.id);
-    if (!existing) throw ApiError.notFound("User not found");
-    sendOk(res, {
-      leadCount: await leadsRepo.countLeadsForAgent(req.params.id),
-      // Team members whose "Reports to" will be cleared (admin re-assigns it after).
-      reportNames: await repo.findDirectReportNames(req.params.id)
-    });
   })
 );
 
@@ -323,68 +247,17 @@ usersRouter.get(
   })
 );
 
-usersRouter.delete(
-  "/:id",
-  requireRole("ADMIN"),
-  validate({ params: userIdParamSchema, body: deleteUserSchema }),
-  asyncHandler(async (req, res) => {
-    const existing = await repo.findById(req.params.id);
-    if (!existing) throw ApiError.notFound("User not found");
-
-    if (req.params.id === req.user!.sub) {
-      throw ApiError.badRequest("You cannot delete your own account.");
-    }
-    if (existing.role === "ADMIN") {
-      await assertSuperAdminForAdminTarget(req.user!.sub, existing, "delete");
-      const remainingAdmins = await repo.countAdmins(existing.id);
-      if (remainingAdmins === 0) {
-        throw ApiError.badRequest("Cannot delete the last active administrator account.");
-      }
-    }
-
-    const { reassignTo, note } = req.body as { reassignTo?: string[]; note?: string };
-    const fromUser = { id: existing.id, name: `${existing.first_name}${existing.last_name ? " " + existing.last_name : ""}` };
-
-    // One transaction: the user's leads (and their follow-ups) are handed
-    // over and the user is deleted together, or nothing changes at all.
-    let received = new Map<string, number>();
-    let movedLeadIds: string[] = [];
-    let clearedReports = 0;
-    try {
-      await withTransaction(async (client) => {
-        ({ received, movedLeadIds } = await handOverAllLeads(client, req.user!, existing, "deleting", reassignTo, note));
-        const leftover = await leadsRepo.moveFollowupsToLeadOwners(client, existing.id);
-        if (leftover > 0) {
-          throw ApiError.conflict(`${fromUser.name} still has ${leftover} follow-up${leftover === 1 ? "" : "s"} not linked to a lead and cannot be deleted.`);
-        }
-        // Their team members' "Reports to" is cleared; the admin sets a new
-        // manager for them from Manage Users afterwards.
-        clearedReports = await repo.clearReportsTo(client, existing.id);
-        // Leads keep this user's name as "Reassigned From" after they're gone.
-        await leadsRepo.detachPreviousAgent(client, existing.id, fromUser.name);
-        await repo.deleteCallRecordsWithClient(client, existing.id);
-        await repo.removeWithClient(client, existing.id);
-      });
-    } catch (err) {
-      // reimbursement_claims and Meta connections reference users with ON
-      // DELETE RESTRICT for audit/financial history — a real, expected failure mode.
-      if (isForeignKeyViolation(err)) {
-        throw ApiError.conflict("This user has expense claims or a connected Meta account linked to them and cannot be deleted. Remove those first.");
-      }
-      throw err;
-    }
-
-    await notifyHandover(req.user!, fromUser.name, received, movedLeadIds);
-    sendOk(res, { deleted: true, reassignedLeads: movedLeadIds.length, clearedReports });
-  })
-);
-
-// Make a user inactive: their leads are handed over first (same popup and
-// rules as delete), then the status changes — together or not at all.
+// Users are never deleted — an admin makes them Inactive instead, so every
+// record that mentions them (leads, activity, calls, reports, missed-lead
+// records) stays exactly as it was.
+//
+// Make a user inactive. It's one-way: an inactive user can't log in and can
+// never be made active again. Nothing they hold moves — their leads, calls
+// and history stay assigned to them as they were.
 usersRouter.post(
   "/:id/deactivate",
   requireRole("ADMIN"),
-  validate({ params: userIdParamSchema, body: deleteUserSchema }),
+  validate({ params: userIdParamSchema }),
   asyncHandler(async (req, res) => {
     const existing = await repo.findById(req.params.id);
     if (!existing) throw ApiError.notFound("User not found");
@@ -394,20 +267,8 @@ usersRouter.post(
     if (existing.role === "ADMIN" && (await repo.countAdmins(existing.id)) === 0) {
       throw ApiError.badRequest("Cannot deactivate the last active administrator account.");
     }
-
-    const { reassignTo, note } = req.body as { reassignTo?: string[]; note?: string };
-    const fromName = `${existing.first_name}${existing.last_name ? " " + existing.last_name : ""}`;
-    let received = new Map<string, number>();
-    let movedLeadIds: string[] = [];
-    await withTransaction(async (client) => {
-      ({ received, movedLeadIds } = await handOverAllLeads(client, req.user!, existing, "making them inactive", reassignTo, note));
-      // Their calls on other people's leads go to those leads' owners.
-      await leadsRepo.moveFollowupsToLeadOwners(client, existing.id);
-      await client.query(`UPDATE users SET status = 'INACTIVE' WHERE id = $1`, [existing.id]);
-    });
-
-    await notifyHandover(req.user!, fromName, received, movedLeadIds);
-    sendOk(res, { deactivated: true, reassignedLeads: movedLeadIds.length });
+    await pool.query(`UPDATE users SET status = 'INACTIVE' WHERE id = $1`, [existing.id]);
+    sendOk(res, { deactivated: true });
   })
 );
 
@@ -421,7 +282,3 @@ usersRouter.patch(
     sendOk(res, { updated: true });
   })
 );
-
-function isForeignKeyViolation(err: unknown): boolean {
-  return typeof err === "object" && err !== null && "code" in err && (err as { code: string }).code === "23503";
-}

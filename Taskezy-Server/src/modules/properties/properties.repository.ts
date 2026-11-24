@@ -1,3 +1,4 @@
+import { PoolClient } from "pg";
 import { pool, query, withTransaction } from "../../db/pool";
 
 export interface PropertyRow {
@@ -158,13 +159,17 @@ export interface PropertyInput {
   kind?: PropertyKind;
 }
 
-export async function create(input: PropertyInput): Promise<string> {
-  const { rows } = await pool.query(
+async function insertProperty(client: PoolClient, input: PropertyInput, kind: PropertyKind, linkedPropertyId: string | null): Promise<string> {
+  // A Data Calling property never picks salespeople, so it gets no team mode of its own.
+  const teamMode = kind === "DATA_CALLING" ? null : input.teamAssignmentMode ?? null;
+  const leadMode = kind === "DATA_CALLING" ? null : input.leadAssignmentMode ?? null;
+  const { rows } = await client.query(
     `INSERT INTO properties (
        name, developer, location, locality, zone, price_value, price_type, property_type, property_status,
        description, possession_date, land_parcel, towers, structure, amenities, contact_number, map_url,
-       website_url, brochure_url, lead_registration_url, tags, media_file_names, team_assignment_mode, lead_assignment_mode, kind
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,COALESCE($23,'ALL_MEMBERS')::team_assignment_mode,$24,$25)
+       website_url, brochure_url, lead_registration_url, tags, media_file_names, team_assignment_mode, lead_assignment_mode, kind,
+       linked_property_id
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,COALESCE($23,'ALL_MEMBERS')::team_assignment_mode,$24,$25,$26)
      RETURNING id`,
     [
       input.name, input.developer, input.location, input.locality ?? null, input.zone ?? null,
@@ -172,11 +177,24 @@ export async function create(input: PropertyInput): Promise<string> {
       input.description ?? null, input.possessionDate ?? null, input.landParcel ?? null, input.towers ?? null,
       input.structure ?? null, input.amenities ?? null, input.contactNumber || null, input.mapUrl || null,
       input.websiteUrl || null, input.brochureUrl || null, input.leadRegistrationUrl || null,
-      input.tags ?? null, input.mediaFileNames ?? null, input.teamAssignmentMode ?? null, input.leadAssignmentMode ?? null,
-      input.kind ?? "LEADS"
+      input.tags ?? null, input.mediaFileNames ?? null, teamMode, leadMode,
+      kind, linkedPropertyId
     ]
   );
   return rows[0].id;
+}
+
+/**
+ * One Add Property adds the property to both lists: the Leads property and
+ * its Data Calling copy (linked_property_id, migration 063). Returns the id
+ * of the one in the list it was added from (`input.kind`).
+ */
+export async function create(input: PropertyInput): Promise<string> {
+  return withTransaction(async (client) => {
+    const leadsId = await insertProperty(client, input, "LEADS", null);
+    const dataCallingId = await insertProperty(client, input, "DATA_CALLING", leadsId);
+    return input.kind === "DATA_CALLING" ? dataCallingId : leadsId;
+  });
 }
 
 const FIELD_TO_COLUMN: Record<string, string> = {
@@ -189,22 +207,50 @@ const FIELD_TO_COLUMN: Record<string, string> = {
   teamAssignmentMode: "team_assignment_mode", leadAssignmentMode: "lead_assignment_mode"
 };
 
-export async function update(id: string, input: Partial<PropertyInput>): Promise<void> {
+// The details both lists share — everything except the Leads-only team settings.
+const LEADS_ONLY_FIELDS = new Set(["teamAssignmentMode", "leadAssignmentMode"]);
+
+function setClause(input: Partial<PropertyInput>, fields: (field: string) => boolean): { sets: string[]; params: unknown[] } {
   const sets: string[] = [];
   const params: unknown[] = [];
-
   for (const [field, value] of Object.entries(input)) {
-    if (value === undefined) continue;
+    if (value === undefined || !fields(field)) continue;
     const column = FIELD_TO_COLUMN[field];
     if (!column) continue;
     params.push(value === "" ? null : value);
     sets.push(`${column} = $${params.length}`);
   }
+  return { sets, params };
+}
 
-  if (sets.length === 0) return;
-  // updated_at is auto-maintained by trg_properties_updated_at (schema.sql) — not set here.
-  params.push(id);
-  await pool.query(`UPDATE properties SET ${sets.join(", ")} WHERE id = $${params.length}`, params);
+/**
+ * Edits a property. Its details are copied to its twin in the other list
+ * (a Leads property's Data Calling copy, or a Data Calling copy's Leads
+ * property), so an edit in either list shows in both.
+ */
+export async function update(id: string, input: Partial<PropertyInput>): Promise<void> {
+  await withTransaction(async (client) => {
+    const { rows } = await client.query<{ kind: PropertyKind; linked_property_id: string | null }>(
+      `SELECT kind, linked_property_id FROM properties WHERE id = $1`,
+      [id]
+    );
+    const row = rows[0];
+    if (!row) return;
+    const isDataCalling = row.kind === "DATA_CALLING";
+
+    // A Data Calling property has no team settings to change.
+    const own = setClause(input, field => !(isDataCalling && LEADS_ONLY_FIELDS.has(field)));
+    if (own.sets.length === 0) return;
+    // updated_at is auto-maintained by trg_properties_updated_at (schema.sql) — not set here.
+    await client.query(`UPDATE properties SET ${own.sets.join(", ")} WHERE id = $${own.params.length + 1}`, [...own.params, id]);
+
+    const shared = setClause(input, field => !LEADS_ONLY_FIELDS.has(field));
+    if (shared.sets.length === 0) return;
+    const twin = isDataCalling ? `id = $${shared.params.length + 1}` : `linked_property_id = $${shared.params.length + 1}`;
+    const twinKey = isDataCalling ? row.linked_property_id : id;
+    if (!twinKey) return;
+    await client.query(`UPDATE properties SET ${shared.sets.join(", ")} WHERE ${twin}`, [...shared.params, twinKey]);
+  });
 }
 
 export async function remove(id: string): Promise<boolean> {

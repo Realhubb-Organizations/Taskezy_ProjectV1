@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown } from "lucide-react";
 import { apiGetSiteVisitHistory } from "@/lib/apiClient";
+import OutsideHoursNote from "@/components/crm/OutsideHoursNote";
 
 // Schedule Call ▾ in the lead details panel: a small dropdown (same look as
 // SearchableSelect's panel) with a date + time to book the lead's next call.
@@ -90,6 +91,7 @@ export default function NextCallDropdown({
             <div>
               <label className="block text-[10px] font-bold text-slate-500 uppercase">Time</label>
               <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className={inputClass} />
+              <OutsideHoursNote time={time} />
             </div>
             {isReschedule && (
               <div>

@@ -23,7 +23,6 @@ import { isPhoneLayout } from "@/lib/viewport";
 import { dateRangeLabel } from "@/lib/dateRangeLabel";
 import { apiBulkDeleteLeads, apiBulkReassignLeads, apiBulkSetLeadProperty, apiDeleteLead, apiGetDataCallingCallDays } from "@/lib/apiClient";
 import { useLiveRefresh } from "@/lib/useLiveRefresh";
-import { isSuperAdminUser } from "@/lib/superAdmin";
 import { maskPhone, maskEmail } from "@/lib/maskPII";
 import { ExcelIcon } from "@/components/icons/ContactIcons";
 import { canTriggerLeadCall, triggerLeadCall, triggerLeadWhatsApp } from "@/lib/callTrigger";
@@ -111,7 +110,7 @@ const DATA_CALLING_DEFAULT_COLUMN_ORDER: DataCallingColumnKey[] = [
 // "—" rather than a fabricated number, same convention as Campaigns.
 type AnalyticsColumnKey =
   | "cpl" | "date" | "status" | "ctr" | "siteVisit" | "clicks"
-  | "adSetName" | "impressions" | "source" | "qcpl" | "unqualifiedLeads" | "qualifiedLeads";
+  | "adSetName" | "impressions" | "source" | "qcpl" | "unqualifiedLeads" | "qualifiedLeads" | "callsMade";
 
 const ANALYTICS_COLUMNS: { key: AnalyticsColumnKey; label: string }[] = [
   { key: "cpl", label: "CPL" },
@@ -125,13 +124,15 @@ const ANALYTICS_COLUMNS: { key: AnalyticsColumnKey; label: string }[] = [
   { key: "source", label: "Source" },
   { key: "qcpl", label: "QCPL" },
   { key: "unqualifiedLeads", label: "Unqualified Leads" },
-  { key: "qualifiedLeads", label: "Qualified Leads" }
+  { key: "qualifiedLeads", label: "Qualified Leads" },
+  // Optional: once per lead per day. The fixed "Unique Calls Made" column counts each lead once.
+  { key: "callsMade", label: "Calls Made" }
 ];
 
 const ANALYTICS_DEFAULT_VISIBLE_COLUMNS: Record<AnalyticsColumnKey, boolean> = {
   cpl: true, date: false, status: true, ctr: false, siteVisit: true, clicks: false,
   adSetName: false, impressions: false, source: false, qcpl: false,
-  unqualifiedLeads: true, qualifiedLeads: true
+  unqualifiedLeads: true, qualifiedLeads: true, callsMade: false
 };
 
 const ANALYTICS_CHART_METRICS = ["Qualified", "RNR", "Calls Made", "Total Leads", "Not Qualified"] as const;
@@ -377,6 +378,8 @@ export default function DataCallingPage() {
   const userNameById = useMemo(() => new Map(users.map(u => [u.id, u.name])), [users]);
   /** Different leads called per day among `rows` — a lead called twice on one day counts once. */
   const countLeadDays = (rows: [string, string, string][]) => new Set(rows.map(([leadId, , day]) => `${leadId}|${day}`)).size;
+  /** Different leads called among `rows` — each lead once, however many times or days. */
+  const countLeads = (rows: [string, string, string][]) => new Set(rows.map(([leadId]) => leadId)).size;
   // Calls on leads this page shows, on a day that passes `dayOk`, optionally only these leads.
   const callsWhere = (dayOk: (day: string) => boolean, leadOk: (l: Lead) => boolean = () => true) =>
     callDays.filter(([leadId, , day]) => { const l = leadById.get(leadId); return !!l && leadOk(l) && dayOk(day); });
@@ -510,10 +513,12 @@ export default function DataCallingPage() {
       if (!byKey.has(key)) byKey.set(key, []);
       byKey.get(key)!.push(c);
     });
-    const out = rows.map(r => setRowCallsMade(r, countLeadDays(byKey.get(r.name) ?? [])));
+    const withBoth = (row: AnalyticsPerformanceRow, calls: [string, string, string][]) =>
+      setRowCallsMade(row, countLeadDays(calls), countLeads(calls));
+    const out = rows.map(r => withBoth(r, byKey.get(r.name) ?? []));
     byKey.forEach((calls, name) => {
       if (!out.some(r => r.name === name)) {
-        out.push(setRowCallsMade({ name, totalLeads: 0, callsMade: 0, connected: 0, qualifiedLeads: 0, unqualifiedLeads: 0, rnr: 0, siteVisits: 0, qualificationRate: "0.0%" }, countLeadDays(calls)));
+        out.push(withBoth({ name, totalLeads: 0, callsMade: 0, connected: 0, qualifiedLeads: 0, unqualifiedLeads: 0, rnr: 0, siteVisits: 0, qualificationRate: "0.0%" }, calls));
       }
     });
     return out;
@@ -925,9 +930,8 @@ export default function DataCallingPage() {
   const closeAssignFlow = () => { if (!assignSubmitting) setAssignFlowMode(null); };
 
   // Set Property: tags the selected leads with one Data Calling property
-  // (or clears it). Same access as changing a lead's property on the Leads
-  // page — the Super Admin among admins; the server enforces it too.
-  const canSetDataCallingProperty = isAdmin && isSuperAdminUser(currentUser?.email);
+  // (or clears it). Admins and the Super Admin only; the server enforces it too.
+  const canSetDataCallingProperty = isAdmin;
   const [setPropertyOpen, setSetPropertyOpen] = useState(false);
   const [setPropertyId, setSetPropertyId] = useState("");
   const [setPropertySubmitting, setSetPropertySubmitting] = useState(false);
@@ -1603,7 +1607,8 @@ export default function DataCallingPage() {
                         )}
                       </th>
                       <th className="px-4 py-3 whitespace-nowrap">Leads Assgned</th>
-                      <th className="px-4 py-3 whitespace-nowrap">Calls Made</th>
+                      <th className="px-4 py-3 whitespace-nowrap">Unique Calls Made</th>
+                      {analyticsVisibleColumns.callsMade && <th className="px-4 py-3 whitespace-nowrap">Calls Made</th>}
                       <th className="px-4 py-3 whitespace-nowrap">Connected</th>
                       <th className="px-4 py-3 whitespace-nowrap">Qualified Leads</th>
                       <th className="px-4 py-3 whitespace-nowrap">RNR</th>
@@ -1612,17 +1617,18 @@ export default function DataCallingPage() {
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-[13px] text-slate-700">
                     {isDataLoading && filteredSalespersonRows.length === 0 ? (
-                      <TableRowsSkeleton rows={6} columns={7} />
+                      <TableRowsSkeleton rows={6} columns={7 + (analyticsVisibleColumns.callsMade ? 1 : 0)} />
                     ) : filteredSalespersonRows.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="px-4 py-8 text-center text-slate-400 italic">No salesperson activity found for this scope.</td>
+                        <td colSpan={7 + (analyticsVisibleColumns.callsMade ? 1 : 0)} className="px-4 py-8 text-center text-slate-400 italic">No salesperson activity found for this scope.</td>
                       </tr>
                     ) : (
                       salespersonPagination.pageRows.map(r => (
                         <tr key={r.name} className="hover:bg-slate-50/50 transition-colors">
                           <td className="px-4 py-3 font-semibold text-slate-900 [overflow-wrap:anywhere]">{r.name}</td>
                           <td className="px-4 py-3">{r.totalLeads}</td>
-                          <td className="px-4 py-3">{r.callsMade}</td>
+                          <td className="px-4 py-3">{r.uniqueCallsMade ?? 0}</td>
+                          {analyticsVisibleColumns.callsMade && <td className="px-4 py-3">{r.callsMade}</td>}
                           <td className="px-4 py-3">{r.connected}</td>
                           <td className="px-4 py-3">{r.qualifiedLeads}</td>
                           <td className="px-4 py-3">{r.rnr}</td>
@@ -1691,6 +1697,7 @@ export default function DataCallingPage() {
                     <col />
                     <col />
                     <col />
+                    {analyticsVisibleColumns.callsMade && <col />}
                     <col />
                     <col />
                     <col />
@@ -1733,7 +1740,8 @@ export default function DataCallingPage() {
                         )}
                       </th>
                       <th className="px-4 py-3 whitespace-nowrap">Total Leads</th>
-                      <th className="px-4 py-3 whitespace-nowrap">Calls Made</th>
+                      <th className="px-4 py-3 whitespace-nowrap">Unique Calls Made</th>
+                      {analyticsVisibleColumns.callsMade && <th className="px-4 py-3 whitespace-nowrap">Calls Made</th>}
                       <th className="px-4 py-3 whitespace-nowrap">Connected</th>
                       <th className="px-4 py-3 whitespace-nowrap">Qualified Leads</th>
                       <th className="px-4 py-3 whitespace-nowrap">RNR</th>
@@ -1765,7 +1773,8 @@ export default function DataCallingPage() {
                         <tr key={r.name} className="hover:bg-slate-50/50 transition-colors">
                           <td className="px-4 py-3 font-medium text-slate-900 [overflow-wrap:anywhere]">{r.name}</td>
                           <td className="px-4 py-3">{r.totalLeads.toLocaleString()}</td>
-                          <td className="px-4 py-3">{r.callsMade.toLocaleString()}</td>
+                          <td className="px-4 py-3">{(r.uniqueCallsMade ?? 0).toLocaleString()}</td>
+                          {analyticsVisibleColumns.callsMade && <td className="px-4 py-3">{r.callsMade.toLocaleString()}</td>}
                           <td className="px-4 py-3">{r.connected.toLocaleString()}</td>
                           <td className="px-4 py-3">{r.qualifiedLeads.toLocaleString()}</td>
                           <td className="px-4 py-3">{r.rnr.toLocaleString()}</td>

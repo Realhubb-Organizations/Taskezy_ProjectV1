@@ -145,11 +145,11 @@ export interface BulkImportSubmitResult {
 
 export interface BulkImportSubmitInput {
   subSource: string;
-  // PROPERTY: rows are shared among the Data Calling property's own team
-  // (its round robin / percentage). AGENT: rows go to the picked agents.
-  assignmentMode: "PROPERTY" | "AGENT";
+  // Data Calling leads always go to the agents picked here — a Data Calling
+  // property never assigns anyone.
+  assignmentMode: "AGENT";
   agentIds?: string[];
-  // A Data Calling property — required in PROPERTY mode, optional tag in AGENT mode.
+  // An optional Data Calling property tag for the whole file.
   dataCallingPropertyId?: string;
   leads: ParsedLeadRow[];
   // One batch-level choice from the archive-match precheck below — true
@@ -222,7 +222,6 @@ async function parseLeadsFile(file: File): Promise<ParsedLeadRow[]> {
 }
 
 export default function UploadLeadsModal({ isOpen, onClose, onSubmit, propertiesList, agentsList }: UploadLeadsModalProps) {
-  const [assignmentMode, setAssignmentMode] = useState<"PROPERTY" | "AGENT">("PROPERTY");
   const [propertyId, setPropertyId] = useState("");
   const [agentIds, setAgentIds] = useState<string[]>([]);
   const [subSource, setSubSource] = useState("");
@@ -249,7 +248,6 @@ export default function UploadLeadsModal({ isOpen, onClose, onSubmit, properties
 
   useEffect(() => {
     if (isOpen) return;
-    setAssignmentMode("PROPERTY");
     setPropertyId("");
     setAgentIds([]);
     setSubSource("");
@@ -291,11 +289,7 @@ export default function UploadLeadsModal({ isOpen, onClose, onSubmit, properties
       setErrorMsg("Please enter a sub-source for this batch — it's how these leads can be filtered, reassigned, and reshuffled together later.");
       return;
     }
-    if (assignmentMode === "PROPERTY" && !propertyId) {
-      setErrorMsg("Please select a property to assign these leads by.");
-      return;
-    }
-    if (assignmentMode === "AGENT" && agentIds.length === 0) {
+    if (agentIds.length === 0) {
       setErrorMsg("Please select at least one agent to assign these leads to.");
       return;
     }
@@ -321,8 +315,8 @@ export default function UploadLeadsModal({ isOpen, onClose, onSubmit, properties
       }
       const submitResult = await onSubmit({
         subSource: subSource.trim(),
-        assignmentMode,
-        agentIds: assignmentMode === "AGENT" ? agentIds : undefined,
+        assignmentMode: "AGENT",
+        agentIds,
         dataCallingPropertyId: propertyId || undefined,
         leads,
         restoreArchivedMatches: false
@@ -342,8 +336,8 @@ export default function UploadLeadsModal({ isOpen, onClose, onSubmit, properties
     try {
       const submitResult = await onSubmit({
         subSource: subSource.trim(),
-        assignmentMode,
-        agentIds: assignmentMode === "AGENT" ? agentIds : undefined,
+        assignmentMode: "AGENT",
+        agentIds,
         dataCallingPropertyId: propertyId || undefined,
         leads: parsedLeads,
         restoreArchivedMatches
@@ -414,52 +408,22 @@ export default function UploadLeadsModal({ isOpen, onClose, onSubmit, properties
           ) : (
             <div className="px-6 py-5 grid grid-cols-1 sm:grid-cols-[1fr_150px] gap-6">
               <div className="space-y-4">
-                {/* Assignment mode — Property-wise shares the rows among that
-                    Data Calling property's own team (Round Robin/Percentage);
-                    Agent puts them directly on the chosen people. */}
-                <div className="ui-toggle flex w-full">
-                  <button
-                    type="button"
-                    onClick={() => setAssignmentMode("PROPERTY")}
-                    className={`ui-toggle-item flex-1 ${assignmentMode === "PROPERTY" ? "ui-toggle-item-active" : ""}`}
-                  >
-                    Assign by Property
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setAssignmentMode("AGENT")}
-                    className={`ui-toggle-item flex-1 ${assignmentMode === "AGENT" ? "ui-toggle-item-active" : ""}`}
-                  >
-                    Assign to Agent
-                  </button>
-                </div>
-
+                {/* Data Calling leads go straight to the chosen agents; the
+                    property is only a tag and never picks anyone. */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-1">
-                    <label className="block text-xs font-bold text-slate-700">
-                      {assignmentMode === "PROPERTY" ? "Select Property" : "Select Agent(s)"}
-                    </label>
-                    {assignmentMode === "PROPERTY" ? (
-                      <SearchableSelect
-                        value={propertyId}
-                        onChange={setPropertyId}
-                        options={propertiesList.map(p => ({ value: p.id, label: p.name }))}
-                        placeholder="Select property"
-                        searchPlaceholder="Search properties..."
-                      />
-                    ) : (
-                      // Rows get round-robined evenly across whichever agents
-                      // are checked (see leads.service.ts's bulkImportLeads),
-                      // so more than one agent is a normal choice here.
-                      <SearchableMultiSelect
-                        variant="field"
-                        selected={agentIds}
-                        onChange={setAgentIds}
-                        options={agentsList.map(a => ({ value: a.id, label: a.name }))}
-                        placeholder="Select agent(s)"
-                        searchPlaceholder="Search agents..."
-                      />
-                    )}
+                    <label className="block text-xs font-bold text-slate-700">Select Agent(s)</label>
+                    {/* Rows get round-robined evenly across whichever agents
+                        are checked (see leads.service.ts's bulkImportLeads),
+                        so more than one agent is a normal choice here. */}
+                    <SearchableMultiSelect
+                      variant="field"
+                      selected={agentIds}
+                      onChange={setAgentIds}
+                      options={agentsList.map(a => ({ value: a.id, label: a.name }))}
+                      placeholder="Select agent(s)"
+                      searchPlaceholder="Search agents..."
+                    />
                   </div>
                   <div className="space-y-1">
                     <label className="block text-xs font-bold text-slate-700">Sub-source</label>
@@ -467,22 +431,19 @@ export default function UploadLeadsModal({ isOpen, onClose, onSubmit, properties
                   </div>
                 </div>
 
-                {/* Agent mode can still tag the file with a Data Calling property. */}
-                {assignmentMode === "AGENT" && (
-                  <div className="space-y-1">
-                    <label className="block text-xs font-bold text-slate-700">
-                      Property <span className="font-normal text-slate-400">(optional)</span>
-                    </label>
-                    <SearchableSelect
-                      value={propertyId}
-                      onChange={setPropertyId}
-                      options={propertiesList.map(p => ({ value: p.id, label: p.name }))}
-                      placeholder="Select property"
-                      searchPlaceholder="Search properties..."
-                      clearable
-                    />
-                  </div>
-                )}
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold text-slate-700">
+                    Property <span className="font-normal text-slate-400">(optional)</span>
+                  </label>
+                  <SearchableSelect
+                    value={propertyId}
+                    onChange={setPropertyId}
+                    options={propertiesList.map(p => ({ value: p.id, label: p.name }))}
+                    placeholder="Select property"
+                    searchPlaceholder="Search properties..."
+                    clearable
+                  />
+                </div>
 
                 <div
                   onDragOver={handleDragOver}

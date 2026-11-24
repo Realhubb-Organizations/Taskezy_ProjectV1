@@ -1,4 +1,3 @@
-import type { PoolClient } from "pg";
 import { pool, query } from "../../db/pool";
 import { SUPER_ADMIN_EMAIL } from "../../config/superAdmin";
 
@@ -271,54 +270,6 @@ export async function updatePasswordHash(id: string, passwordHash: string): Prom
 /** A Manager's own override for their team's End of Day report time — null clears it, reverting to the tenant-wide default. Self-scoped only (caller's own id), no role check needed. */
 export async function updateOwnEodReportTime(id: string, eodReportTime: string | null): Promise<void> {
   await pool.query(`UPDATE users SET eod_report_time = $1 WHERE id = $2`, [eodReportTime, id]);
-}
-
-export async function remove(id: string): Promise<boolean> {
-  const { rowCount } = await pool.query(`DELETE FROM users WHERE id = $1`, [id]);
-  return (rowCount ?? 0) > 0;
-}
-
-/**
- * Clears "Reports to" for everyone who reported to `managerId` (inside the
- * delete transaction), so deleting a manager never leaves members pointing
- * at a user who no longer exists. Returns how many were cleared.
- */
-export async function clearReportsTo(client: PoolClient, managerId: string): Promise<number> {
-  const { rowCount } = await client.query(`UPDATE users SET manager_id = NULL WHERE manager_id = $1`, [managerId]);
-  return rowCount ?? 0;
-}
-
-/** Names of active users who report to `managerId`. */
-export async function findDirectReportNames(managerId: string): Promise<string[]> {
-  const { rows } = await query<{ name: string }>(
-    `SELECT first_name || COALESCE(' ' || last_name, '') AS name FROM users WHERE manager_id = $1 AND status = 'ACTIVE' ORDER BY first_name`,
-    [managerId]
-  );
-  return rows.map(r => r.name);
-}
-
-/** Deletes the user inside an open transaction (see the DELETE /users/:id handover). */
-/** Before a user is deleted: their call records go with them (the leads' own history, lead_logs, stays). */
-export async function deleteCallRecordsWithClient(client: PoolClient, id: string): Promise<void> {
-  await client.query(`DELETE FROM call_attempts WHERE caller_user_id = $1`, [id]);
-  await client.query(`DELETE FROM device_call_log WHERE user_id = $1`, [id]);
-}
-
-export async function removeWithClient(client: PoolClient, id: string): Promise<boolean> {
-  const { rowCount } = await client.query(`DELETE FROM users WHERE id = $1`, [id]);
-  return (rowCount ?? 0) > 0;
-}
-
-/** The given users that can receive leads: active CRM sales agents and managers. */
-export async function findActiveSalesUsersByIds(client: PoolClient, ids: string[]): Promise<{ id: string; name: string }[]> {
-  const { rows } = await client.query<{ id: string; name: string }>(
-    `SELECT id, first_name || COALESCE(' ' || last_name, '') AS name
-     FROM users
-     WHERE id = ANY($1::uuid[]) AND status = 'ACTIVE'
-       AND ((role = 'AGENT' AND (department IS NULL OR department = 'SALES')) OR (role = 'ADMIN' AND department = 'SALES'))`,
-    [ids]
-  );
-  return rows;
 }
 
 export function isUniqueViolation(err: unknown): boolean {

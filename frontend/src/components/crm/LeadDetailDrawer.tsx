@@ -45,14 +45,15 @@ export default function LeadDetailDrawer({
   const { toast, confirm, prompt: promptDialog } = useDialog();
   const callAllowed = canTriggerLeadCall(activeRole === "ADMIN", currentUser?.email);
   const [localStatus, setLocalStatus] = useState<LeadStatus>("New Lead");
-  // Same gate as the Leads table's own inline Property editor
-  // (LeadDashboard.tsx's canAssignProperty) — Super Admin + any manager,
-  // every other admin is blocked. Kept in sync here so this drawer and the
-  // table never disagree on who can edit it.
-  const canEditProperty = isSuperAdminUser(currentUser?.email) || currentUser?.role_type === "Manager";
   // A Data Calling lead not yet qualified uses Data Calling's own property
   // list (never linked to agents); every other lead uses the main one.
   const isDataCallingLead = lead?.source === "Bulk Upload";
+  // A Data Calling lead's property: Admins and the Super Admin only. A main
+  // property: same gate as the Leads table's own inline Property editor
+  // (LeadDashboard.tsx's canAssignProperty) — Super Admin + any manager.
+  const canEditProperty = isDataCallingLead
+    ? activeRole === "ADMIN"
+    : isSuperAdminUser(currentUser?.email) || currentUser?.role_type === "Manager";
   const dataCallingProperties = useDataCallingProperties(isOpen && isDataCallingLead && canEditProperty);
   const propertyOptions = isDataCallingLead ? dataCallingProperties : properties;
   const shownProperty = isDataCallingLead ? lead?.dataCallingProperty || lead?.property : lead?.property;

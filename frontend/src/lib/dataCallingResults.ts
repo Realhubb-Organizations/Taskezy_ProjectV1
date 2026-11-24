@@ -22,6 +22,8 @@ export interface AnalyticsPerformanceRow {
   name: string;
   totalLeads: number;
   callsMade: number;
+  /** Different leads called — each lead once, however many times or days (the "Unique Calls Made" column). */
+  uniqueCallsMade?: number;
   connected: number;
   qualifiedLeads: number;
   unqualifiedLeads: number;
@@ -32,13 +34,13 @@ export interface AnalyticsPerformanceRow {
 
 type RowLead = Pick<Lead, "callStatus" | "callSubStatus" | "status">;
 
-/** Qualified % = Qualified ÷ Calls Made (different leads called with the Call button) × 100. */
-export const qualificationRate = (qualified: number, callsMade: number): string =>
-  callsMade > 0 ? `${((qualified / callsMade) * 100).toFixed(1)}%` : "0.0%";
+/** Qualified % = Qualified ÷ Unique Calls Made (different leads called with the Call button) × 100. */
+export const qualificationRate = (qualified: number, uniqueCallsMade: number): string =>
+  uniqueCallsMade > 0 ? `${((qualified / uniqueCallsMade) * 100).toFixed(1)}%` : "0.0%";
 
-/** A row with its Calls Made filled in (from the Call button's records) and its Qualified % worked out from it. */
-export const withCallsMade = (row: AnalyticsPerformanceRow, callsMade: number): AnalyticsPerformanceRow =>
-  ({ ...row, callsMade, qualificationRate: qualificationRate(row.qualifiedLeads, callsMade) });
+/** A row with its Calls Made and Unique Calls Made filled in (from the Call button's records) and its Qualified % worked out from Unique Calls Made. */
+export const withCallsMade = (row: AnalyticsPerformanceRow, callsMade: number, uniqueCallsMade: number): AnalyticsPerformanceRow =>
+  ({ ...row, callsMade, uniqueCallsMade, qualificationRate: qualificationRate(row.qualifiedLeads, uniqueCallsMade) });
 
 /**
  * One row per group (salesperson, source…). Lead totals and site visits come

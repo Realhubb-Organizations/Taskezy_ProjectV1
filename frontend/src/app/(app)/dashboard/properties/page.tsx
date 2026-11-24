@@ -428,7 +428,7 @@ export default function PropertiesPage() {
 
   // Data Calling properties have no campaigns, so that column doesn't show.
   const showCampaignsColumn = isAdmin && !isDataCallingList;
-  const tableColumnCount = 7 + (showCampaignsColumn ? 1 : 0);
+  const tableColumnCount = (isDataCallingList ? 6 : 7) + (showCampaignsColumn ? 1 : 0);
 
   const totalRows = serverTotalCount;
   const totalPages = Math.max(1, Math.ceil(totalRows / rowsPerPage));
@@ -504,11 +504,13 @@ export default function PropertiesPage() {
       return;
     }
 
-    if (editTeamAssignmentMode === "CUSTOM_MEMBERS" && editSelectedMemberIds.length === 0) {
+    // A Data Calling property has no team, so none of the team checks or fields apply.
+    const editingDataCalling = selectedProperty.kind === "DATA_CALLING";
+    if (!editingDataCalling && editTeamAssignmentMode === "CUSTOM_MEMBERS" && editSelectedMemberIds.length === 0) {
       toast("Select at least one team member, or switch to All Members.", "warning");
       return;
     }
-    if (editTeamAssignmentMode === "CUSTOM_MEMBERS" && editLeadAssignmentMode === "PERCENTAGE" && editPercentageTotal !== 100) {
+    if (!editingDataCalling && editTeamAssignmentMode === "CUSTOM_MEMBERS" && editLeadAssignmentMode === "PERCENTAGE" && editPercentageTotal !== 100) {
       if (!(await confirmDialog({
         title: "Save anyway?",
         message: `Selected member percentages add up to ${editPercentageTotal}%, not 100%.`,
@@ -551,9 +553,11 @@ export default function PropertiesPage() {
       contactNumber: editContactNumber.trim() ? normalizeIndianMobile(editContactNumber) ?? "" : "",
       mapUrl: editMapUrl.trim(),
       description: editDesc,
-      teamAssignmentMode: editTeamAssignmentMode,
-      leadAssignmentMode: editTeamAssignmentMode === "CUSTOM_MEMBERS" ? editLeadAssignmentMode : undefined,
-      assignedTeam
+      ...(editingDataCalling ? {} : {
+        teamAssignmentMode: editTeamAssignmentMode,
+        leadAssignmentMode: editTeamAssignmentMode === "CUSTOM_MEMBERS" ? editLeadAssignmentMode : undefined,
+        assignedTeam
+      })
     });
 
     setSuccessMsg(`Successfully updated property: ${editName}`);
@@ -663,7 +667,8 @@ export default function PropertiesPage() {
                     Date <ArrowUp className={`h-3 w-3 transition-transform duration-300 ease-out ${sortDir === "asc" ? "rotate-180" : ""}`} />
                   </button>
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Assigned To</th>
+                {/* Data Calling properties have no team. */}
+                {!isDataCallingList && <th className="px-4 py-3 text-left text-xs font-bold text-slate-800 whitespace-nowrap">Assigned To</th>}
                 {/* Ad-campaign source attribution is an Admin-only concern (same
                     reasoning as the campaign linkers in the detail drawer) —
                     hidden entirely for Manager/Member, not just emptied out.
@@ -710,10 +715,12 @@ export default function PropertiesPage() {
                     <td className="px-4 py-3 align-top text-slate-600"><div className="[overflow-wrap:anywhere]">{p.type}</div></td>
                     <td className="px-4 py-3 align-top font-semibold text-slate-800 whitespace-nowrap">{p.price ? `${p.price}*` : "—"}</td>
                     <td className="px-4 py-3 align-top text-slate-500"><DateTimeLines {...dateTimeParts(p.createdAt)} /></td>
-                    <td className="px-4 py-3 align-top text-slate-600">
-                      {/* Just the label here; the names list is in the property popup. */}
-                      <div className="[overflow-wrap:anywhere]">{teamLabelForProperty(p)}</div>
-                    </td>
+                    {!isDataCallingList && (
+                      <td className="px-4 py-3 align-top text-slate-600">
+                        {/* Just the label here; the names list is in the property popup. */}
+                        <div className="[overflow-wrap:anywhere]">{teamLabelForProperty(p)}</div>
+                      </td>
+                    )}
                     {showCampaignsColumn && (
                       <td className="px-4 py-3 align-top">
                         {(() => {
@@ -875,6 +882,8 @@ export default function PropertiesPage() {
                     <textarea value={editDesc} maxLength={5000} onChange={(e) => setEditDesc(e.target.value)} rows={3} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none" />
                   </div>
 
+                  {/* Data Calling properties have no team — their leads are assigned by hand. */}
+                  {selectedProperty.kind !== "DATA_CALLING" && (
                   <div className="border-t border-slate-200 pt-4 space-y-3">
                     <h4 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
                       <Users className="h-3.5 w-3.5 text-slate-500" /> Team Access Settings
@@ -933,6 +942,7 @@ export default function PropertiesPage() {
                       </div>
                     )}
                   </div>
+                  )}
 
                   {/* Data Calling properties have no campaigns or sheets. */}
                   {selectedProperty.kind !== "DATA_CALLING" && (<>
@@ -1005,6 +1015,7 @@ export default function PropertiesPage() {
                           : "—"}
                       </dd>
                     </div>
+                    {selectedProperty.kind !== "DATA_CALLING" && (
                     <div>
                       <dt className="text-xs text-slate-500">Assigned team</dt>
                       <dd className="text-sm font-medium text-slate-900 mt-0.5">
@@ -1015,13 +1026,14 @@ export default function PropertiesPage() {
                         ) : (teamLabelForProperty(selectedProperty) || "—")}
                       </dd>
                     </div>
-                    {selectedProperty.teamAssignmentMode === "CUSTOM_MEMBERS" && selectedProperty.leadAssignmentMode && (
+                    )}
+                    {selectedProperty.kind !== "DATA_CALLING" && selectedProperty.teamAssignmentMode === "CUSTOM_MEMBERS" && selectedProperty.leadAssignmentMode && (
                       <div>
                         <dt className="text-xs text-slate-500">Lead assignment</dt>
                         <dd className="text-sm font-medium text-slate-900 mt-0.5">{selectedProperty.leadAssignmentMode === "ROUND_ROBIN" ? "Round robin" : "Percentage split"}</dd>
                       </div>
                     )}
-                    {teamMembersToList(selectedProperty).length > 1 && expandedTeamPropertyId === selectedProperty.id && (
+                    {selectedProperty.kind !== "DATA_CALLING" && teamMembersToList(selectedProperty).length > 1 && expandedTeamPropertyId === selectedProperty.id && (
                       <div className="col-span-2">
                         <div className="flex flex-col gap-1 border border-slate-200 rounded-lg px-3 py-2 max-w-[260px] max-h-56 overflow-y-auto">
                           {teamMembersToList(selectedProperty).map(m => (
