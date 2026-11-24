@@ -50,7 +50,11 @@ const parseDisplayDate = (text: string): string | null => {
 // Positions a fixed panel under its trigger (flipping above when there's no
 // room below) and closes it on outside scroll — shared by both pickers.
 function usePanel() {
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  // placed: the final spot has been worked out (see the layout effect).
+  // maxHeight: set only when the calendar is taller than the screen — it
+  // then scrolls inside itself.
+  // compact: tighter spacing, used when the full-size calendar can't fit.
+  const [pos, setPos] = useState<{ top: number; left: number; placed?: boolean; maxHeight?: number; compact?: boolean } | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const close = () => setPos(null);
@@ -63,13 +67,24 @@ function usePanel() {
     setPos({ top: rect.bottom + 6, left });
   };
 
+  // Below the field if the calendar fits; else above it; else in the middle
+  // of the screen; on a short screen it first goes compact, and only if even
+  // that doesn't fit does it scroll inside itself — so no part of it (dates,
+  // Apply) is ever cut off.
   useLayoutEffect(() => {
-    if (!pos || !panelRef.current || !triggerRef.current) return;
+    if (!pos || pos.placed || !panelRef.current || !triggerRef.current) return;
     const h = panelRef.current.offsetHeight;
     const rect = triggerRef.current.getBoundingClientRect();
-    if (rect.bottom + 6 + h > window.innerHeight - 8 && rect.top - 6 - h > 8 && pos.top > rect.top) {
-      setPos(p => (p ? { ...p, top: rect.top - 6 - h } : p));
+    const screenH = window.innerHeight;
+    let top = rect.bottom + 6;
+    let maxHeight: number | undefined;
+    if (top + h > screenH - 8) {
+      if (rect.top - 6 - h >= 8) top = rect.top - 6 - h;
+      else if (h <= screenH - 16) top = Math.round((screenH - h) / 2);
+      else if (!pos.compact) { setPos(p => (p ? { ...p, compact: true } : p)); return; } // measure again, compact
+      else { top = 8; maxHeight = screenH - 16; }
     }
+    setPos(p => (p ? { ...p, top, maxHeight, placed: true } : p));
   }, [pos]);
 
   return { pos, open, close, triggerRef, panelRef };
@@ -83,7 +98,8 @@ function MonthGrid({
   isBetween,
   isDisabled,
   onPick,
-  onHover
+  onHover,
+  compact = false
 }: {
   month: Date; // first day of the shown month
   onMonthChange: (m: Date) => void;
@@ -93,6 +109,8 @@ function MonthGrid({
   isDisabled: (iso: string) => boolean;
   onPick: (iso: string) => void;
   onHover?: (iso: string | null) => void;
+  /** Tighter rows for short screens. */
+  compact?: boolean;
 }) {
   const year = month.getFullYear();
   const m = month.getMonth();
@@ -105,7 +123,7 @@ function MonthGrid({
 
   return (
     <div className="px-4" onMouseLeave={() => onHover?.(null)}>
-      <div className="flex items-center justify-between py-3">
+      <div className={`flex items-center justify-between ${compact ? "py-1" : "py-3"}`}>
         <button type="button" onClick={() => onMonthChange(new Date(year, m - 1, 1))} className="p-1 rounded-md text-slate-600 hover:bg-slate-100" aria-label="Previous month">
           <ChevronLeft className="h-4 w-4" />
         </button>
@@ -118,7 +136,7 @@ function MonthGrid({
       </div>
       <div className="grid grid-cols-7 text-center">
         {WEEKDAYS.map(d => (
-          <span key={d} className="py-1.5 text-[11px] font-medium text-slate-500">{d}</span>
+          <span key={d} className={`${compact ? "py-0.5" : "py-1.5"} text-[11px] font-medium text-slate-500`}>{d}</span>
         ))}
         {cells.map((iso, i) => {
           if (!iso) return <span key={`blank-${i}`} />;
@@ -132,7 +150,7 @@ function MonthGrid({
               disabled={disabled}
               onClick={() => onPick(iso)}
               onMouseEnter={() => onHover?.(iso)}
-              className={`h-11 sm:h-9 text-[13px] tabular-nums transition-colors ${
+              className={`${compact ? "h-8" : "h-11 sm:h-9"} text-[13px] tabular-nums transition-colors ${
                 end
                   ? "bg-[#0B1E6E] text-white font-semibold"
                   : between
@@ -151,9 +169,9 @@ function MonthGrid({
   );
 }
 
-function PanelFooter({ onClose, onApply, canApply }: { onClose: () => void; onApply: () => void; canApply: boolean }) {
+function PanelFooter({ onClose, onApply, canApply, compact = false }: { onClose: () => void; onApply: () => void; canApply: boolean; compact?: boolean }) {
   return (
-    <div className="flex items-center justify-between px-4 pt-4 pb-4">
+    <div className={`flex items-center justify-between px-4 ${compact ? "pt-2 pb-2" : "pt-4 pb-4"}`}>
       <button
         type="button"
         onClick={onClose}
@@ -505,9 +523,17 @@ export function DatePicker({
             ref={panel.panelRef}
             onKeyDown={(e) => { if (e.key === "Escape") panel.close(); }}
             className="fixed z-[210] max-w-[calc(100vw-1rem)] bg-white rounded-2xl shadow-2xl border border-slate-100"
-            style={{ top: panel.pos.top, left: panel.pos.left, width: PANEL_WIDTH }}
+            style={{
+              top: panel.pos.top,
+              left: panel.pos.left,
+              width: PANEL_WIDTH,
+              maxHeight: panel.pos.maxHeight,
+              overflowY: panel.pos.maxHeight ? "auto" : undefined,
+              // Hidden for the one frame before its final spot is worked out, so it never flashes cut off.
+              visibility: panel.pos.placed ? undefined : "hidden"
+            }}
           >
-            <div className="flex justify-center pt-4">
+            <div className={`flex justify-center ${panel.pos.compact ? "pt-2" : "pt-4"}`}>
               <div className="flex items-center rounded-full bg-white shadow-md border border-slate-100 px-4 py-1.5">
                 <HeaderDateInput
                   value={draft}
@@ -529,8 +555,9 @@ export function DatePicker({
               isBetween={() => false}
               isDisabled={isDisabled}
               onPick={setDraft}
+              compact={panel.pos.compact}
             />
-            <PanelFooter onClose={panel.close} onApply={apply} canApply={!!draft} />
+            <PanelFooter onClose={panel.close} onApply={apply} canApply={!!draft} compact={panel.pos.compact} />
           </div>
         </>,
         document.body
