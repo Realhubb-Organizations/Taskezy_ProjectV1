@@ -182,7 +182,10 @@ export default function CallLogPage() {
               ) : (
                 rows.map((row) => {
                   const { date, time } = dateTimeParts(row.callDate);
-                  const showRealPhone = isAdmin || row.userId === currentUser?.id;
+                  // Admins and managers (their own team — the server only sends those
+                  // calls) see the lead's number; sales agents never do. The server
+                  // already hides it for agents; an already-hidden number is shown as is.
+                  const showRealPhone = isAdmin || currentUser?.role_type === "Manager" || row.phoneNumber.includes("•");
                   return (
                     <tr key={row.id} className="border-b border-slate-100 last:border-b-0 hover:bg-slate-50/50">
                       <td className="px-5 py-3.5 whitespace-nowrap"><DateTimeLines date={date} time={time} /></td>
