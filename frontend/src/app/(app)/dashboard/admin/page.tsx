@@ -3,10 +3,10 @@
 import React, { useState } from "react";
 import RowActionsMenu from "@/components/ui/RowActionsMenu";
 import { useApp, User, Role } from "@/context/AppContext";
-import { ShieldCheck, Edit, X, AlertTriangle, Eye, EyeOff, CheckCircle, Plus, Trash2 } from "lucide-react";
+import { ShieldCheck, Edit, X, AlertTriangle, Eye, EyeOff, CheckCircle, Plus } from "lucide-react";
 import { TableRowsSkeleton } from "@/components/ui/Skeletons";
 import { useDialog } from "@/components/ui/DialogProvider";
-import DeleteUserModal from "@/components/dashboard/DeleteUserModal";
+import { useMakeUserInactive } from "@/components/dashboard/useMakeUserInactive";
 import FieldError, { fieldErrorClass } from "@/components/ui/FieldError";
 import { collectErrors, normalizeIndianMobile, phoneInputProps, sanitizePhoneInput, validateEmail, validatePassword, validatePersonName, validatePhone, validateText } from "@/lib/validation";
 
@@ -15,9 +15,9 @@ export default function AdminPage() {
   const { toast } = useDialog();
 
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
-  const [deletingUser, setDeletingUser] = useState<{ id: string; name: string } | null>(null);
   // Set to Inactive in the editor: the other edits are saved, then this popup asks who gets their leads.
-  const [deactivatingUser, setDeactivatingUser] = useState<{ id: string; name: string } | null>(null);
+  // Inactive is one-way, after a confirm; users are never deleted.
+  const makeUserInactive = useMakeUserInactive();
   
   // Editor form states
   const [firstName, setFirstName] = useState("");
@@ -80,11 +80,18 @@ export default function AdminPage() {
     try {
       const currentStatus = selectedUser.status === "INACTIVE" ? "INACTIVE" : "ACTIVE";
       const goingInactive = status === "INACTIVE" && currentStatus !== "INACTIVE";
-      await updateUserFields(selectedUser.id, firstName.trim(), lastName.trim(), passwordHash, designation.trim(), roleType, goingInactive ? currentStatus : status);
       if (goingInactive) {
-        setDeactivatingUser({ id: selectedUser.id, name: `${firstName.trim()} ${lastName.trim()}`.trim() });
+        const name = `${firstName.trim()} ${lastName.trim()}`.trim();
+        // Asks first; the other edits are saved only if the admin confirms.
+        if (!(await makeUserInactive({ id: selectedUser.id, name }, () => updateUserFields(selectedUser.id, firstName.trim(), lastName.trim(), passwordHash, designation.trim(), roleType, currentStatus)))) {
+          setStatus(currentStatus);
+          return;
+        }
+        toast(`${name} is now inactive.`, "success");
+        setSelectedUser(null);
         return;
       }
+      await updateUserFields(selectedUser.id, firstName.trim(), lastName.trim(), passwordHash, designation.trim(), roleType, status);
       setSuccessMsg(`Successfully updated ${firstName.trim()} ${lastName.trim()}${passwordHash ? " and set a new password" : ""}.`);
       setSelectedUser(null);
       setTimeout(() => setSuccessMsg(""), 5000);
@@ -258,8 +265,7 @@ export default function AdminPage() {
                         <RowActionsMenu
                           label="User actions"
                           actions={[
-                            { label: "Edit", icon: <Edit className="h-4 w-4 text-slate-500" />, onClick: () => handleEditClick(user) },
-                            { label: "Delete", icon: <Trash2 className="h-4 w-4" />, onClick: () => setDeletingUser({ id: user.id, name: user.name }), danger: true }
+                            { label: "Edit", icon: <Edit className="h-4 w-4 text-slate-500" />, onClick: () => handleEditClick(user) }
                           ]}
                         />
                       ) : (
@@ -516,14 +522,21 @@ export default function AdminPage() {
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold text-slate-500 mb-1.5 uppercase">Status</label>
-                  <select
-                    value={status}
-                    onChange={(e) => setStatus(e.target.value as "ACTIVE" | "INACTIVE")}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none"
-                  >
-                    <option value="ACTIVE">ACTIVE</option>
-                    <option value="INACTIVE">INACTIVE</option>
-                  </select>
+                  {selectedUser.status === "INACTIVE" ? (
+                    // Inactive is one-way — never made active again.
+                    <p className="px-3 py-2 text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg">
+                      INACTIVE · can&apos;t be made active again
+                    </p>
+                  ) : (
+                    <select
+                      value={status}
+                      onChange={(e) => setStatus(e.target.value as "ACTIVE" | "INACTIVE")}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none"
+                    >
+                      <option value="ACTIVE">ACTIVE</option>
+                      <option value="INACTIVE">INACTIVE</option>
+                    </select>
+                  )}
                 </div>
               </div>
 
@@ -564,28 +577,6 @@ export default function AdminPage() {
         </>
       )}
 
-      {deactivatingUser && (
-        <DeleteUserModal
-          user={deactivatingUser}
-          mode="deactivate"
-          onClose={() => setDeactivatingUser(null)}
-          onDeleted={(message) => {
-            setDeactivatingUser(null);
-            setSelectedUser(null);
-            toast(message, "success");
-          }}
-        />
-      )}
-      {deletingUser && (
-        <DeleteUserModal
-          user={deletingUser}
-          onClose={() => setDeletingUser(null)}
-          onDeleted={(message) => {
-            setDeletingUser(null);
-            toast(message, "success");
-          }}
-        />
-      )}
     </div>
   );
 }

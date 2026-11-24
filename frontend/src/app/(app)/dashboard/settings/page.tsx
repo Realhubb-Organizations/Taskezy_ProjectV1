@@ -62,7 +62,7 @@ import { LineSkeleton, CardListSkeleton } from "@/components/ui/Skeletons";
 import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/SearchableDropdown";
 import TablePagination, { usePagination } from "@/components/ui/TablePagination";
 import { useDialog } from "@/components/ui/DialogProvider";
-import DeleteUserModal from "@/components/dashboard/DeleteUserModal";
+import { useMakeUserInactive } from "@/components/dashboard/useMakeUserInactive";
 import FieldError, { fieldErrorClass } from "@/components/ui/FieldError";
 import { collectErrors, normalizeIndianMobile, phoneInputProps, sanitizePhoneInput, validateEmail, validatePassword, validatePersonName, validatePhone, validateText } from "@/lib/validation";
 
@@ -426,9 +426,8 @@ export default function SettingsPage() {
   // --- Manage Users ---
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
-  const [deletingUser, setDeletingUser] = useState<{ id: string; name: string } | null>(null);
-  // Set to Inactive in the editor: the other edits are saved, then this popup asks who gets their leads.
-  const [deactivatingUser, setDeactivatingUser] = useState<{ id: string; name: string } | null>(null);
+  // Set to Inactive in the editor: the other edits are saved, then a confirm makes them inactive (one-way).
+  const makeUserInactive = useMakeUserInactive();
   const [successMsg, setSuccessMsg] = useState("");
 
   const [firstName, setFirstName] = useState("");
@@ -519,10 +518,10 @@ export default function SettingsPage() {
     setUsersPage(1);
   }, [debouncedSearchQuery]);
 
-  // Bumped after this page's own add/edit/delete actions so the table
-  // refetches and doesn't keep showing a since-deleted/renamed row — those
-  // writes go through AppContext's updateUserFields/addTeamMember/
-  // deleteTeamMember, which patch the full `users` array (for every other
+  // Bumped after this page's own add/edit/make-inactive actions so the table
+  // refetches and doesn't keep showing a stale row — those writes go through
+  // AppContext's updateUserFields/addTeamMember/deactivateTeamMember, which
+  // patch the full `users` array (for every other
   // consumer) but not this table's separately-fetched serverUsers snapshot.
   const [usersRefreshKey, setUsersRefreshKey] = useState(0);
 
@@ -669,7 +668,10 @@ export default function SettingsPage() {
       apiListUsersPage(usersPage, usersRowsPerPage, { search: debouncedSearchQuery || undefined, group: effectiveUserGroup ?? undefined, status: userStatus })
         .then((result) => {
           if (cancelled) return;
-          setServerUsers(result.rows.map(mapApiUserDirectoryEntryToFrontendUser));
+          // The page is fetched for one status, so every row has it — the
+          // directory mapper alone would mark an inactive user ACTIVE (and the
+          // editor would then offer to make them active again).
+          setServerUsers(result.rows.map(row => ({ ...mapApiUserDirectoryEntryToFrontendUser(row), status: userStatus })));
           setServerUsersTotalCount(result.totalCount);
           setUsersListKey(k => k + 1);
           setServerUsersLoading(false);
@@ -743,11 +745,20 @@ export default function SettingsPage() {
     try {
       const currentStatus = selectedUser.status === "INACTIVE" ? "INACTIVE" : "ACTIVE";
       const goingInactive = status === "INACTIVE" && currentStatus !== "INACTIVE";
-      await updateUserFields(selectedUser.id, firstName.trim(), lastName.trim(), passwordHash, designation.trim(), roleType, goingInactive ? currentStatus : status, managerId || null, email.trim());
       if (goingInactive) {
-        setDeactivatingUser({ id: selectedUser.id, name: `${firstName.trim()} ${lastName.trim()}`.trim() });
+        const name = `${firstName.trim()} ${lastName.trim()}`.trim();
+        // Asks first; the other edits are saved only if the admin confirms.
+        if (!(await makeUserInactive({ id: selectedUser.id, name }, () => updateUserFields(selectedUser.id, firstName.trim(), lastName.trim(), passwordHash, designation.trim(), roleType, currentStatus, managerId || null, email.trim())))) {
+          setStatus(currentStatus);
+          return;
+        }
+        setSuccessMsg(`${name} is now inactive.`);
+        setSelectedUser(null);
+        setTimeout(() => setSuccessMsg(""), 5000);
+        setTimeout(() => setUsersRefreshKey(k => k + 1), 400);
         return;
       }
+      await updateUserFields(selectedUser.id, firstName.trim(), lastName.trim(), passwordHash, designation.trim(), roleType, status, managerId || null, email.trim());
       setSuccessMsg(`Successfully updated ${firstName.trim()} ${lastName.trim()}${passwordHash ? " and set a new password" : ""}.`);
       setSelectedUser(null);
       setTimeout(() => setSuccessMsg(""), 5000);
@@ -2321,12 +2332,19 @@ export default function SettingsPage() {
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold text-slate-500 mb-1.5 uppercase">Status</label>
-                  <SearchableSelect
-                    options={USER_STATUS_OPTIONS}
-                    value={status}
-                    onChange={(v) => setStatus(v as "ACTIVE" | "INACTIVE")}
-                    searchPlaceholder="Search status..."
-                  />
+                  {selectedUser.status === "INACTIVE" ? (
+                    // Inactive is one-way — never made active again.
+                    <p className="px-3 py-2 text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg">
+                      INACTIVE · can&apos;t be made active again
+                    </p>
+                  ) : (
+                    <SearchableSelect
+                      options={USER_STATUS_OPTIONS}
+                      value={status}
+                      onChange={(v) => setStatus(v as "ACTIVE" | "INACTIVE")}
+                      searchPlaceholder="Search status..."
+                    />
+                  )}
                 </div>
               </div>
 
@@ -2404,45 +2422,6 @@ export default function SettingsPage() {
                   <p className="text-[10px] text-red-600 font-semibold mt-1">{forceResetResult.error}</p>
                 )}
               </div>
-
-              {canManageUser(selectedUser) && selectedUser.id !== currentUser?.id && (
-                <button
-                  type="button"
-                  onClick={() => setDeletingUser({ id: selectedUser.id, name: selectedUser.name })}
-                  className="w-full flex items-center justify-center gap-1.5 text-red-600 hover:text-red-700 text-[11px] font-bold"
-                >
-                  <AlertTriangle className="h-3.5 w-3.5" />
-                  Delete this user
-                </button>
-              )}
-              {deactivatingUser && (
-                <DeleteUserModal
-                  user={deactivatingUser}
-                  mode="deactivate"
-                  onClose={() => setDeactivatingUser(null)}
-                  onDeleted={(message) => {
-                    setDeactivatingUser(null);
-                    setSelectedUser(null);
-                    setSuccessMsg(message);
-                    setTimeout(() => setSuccessMsg(""), 5000);
-                    setTimeout(() => setUsersRefreshKey(k => k + 1), 400);
-                  }}
-                />
-              )}
-              {deletingUser && (
-                <DeleteUserModal
-                  user={deletingUser}
-                  onClose={() => setDeletingUser(null)}
-                  onDeleted={(message) => {
-                    setDeletingUser(null);
-                    setSelectedUser(null);
-                    setSuccessMsg(message);
-                    setTimeout(() => setSuccessMsg(""), 5000);
-                    // Same race-avoidance delay as handleEditorSubmit above.
-                    setTimeout(() => setUsersRefreshKey(k => k + 1), 400);
-                  }}
-                />
-              )}
 
               <FieldError message={editErrors._form} />
               <button

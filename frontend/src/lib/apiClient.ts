@@ -1045,31 +1045,9 @@ export async function apiChangePassword(currentPassword: string, newPassword: st
   return { passwordChanged: data.passwordChanged };
 }
 
-/** Leads a user still holds (the delete dialog asks who gets them when > 0) and who reports to them. */
-export function apiGetUserDeleteImpact(userId: string): Promise<{ leadCount: number; reportNames: string[] }> {
-  return request<{ leadCount: number; reportNames: string[] }>(`/api/v1/users/${userId}/delete-impact`);
-}
-
-/** Deletes a user; one who still holds leads needs `handover` (members round-robin + required note). */
-export function apiDeleteUser(
-  userId: string,
-  handover?: { reassignTo: string[]; note: string }
-): Promise<{ deleted: boolean; reassignedLeads?: number }> {
-  return request<{ deleted: boolean; reassignedLeads?: number }>(`/api/v1/users/${userId}`, {
-    method: "DELETE",
-    ...(handover ? { body: JSON.stringify(handover) } : {})
-  });
-}
-
-/** Make a user inactive — their leads go to `handover` first (same rules as delete). */
-export function apiDeactivateUser(
-  userId: string,
-  handover?: { reassignTo: string[]; note: string }
-): Promise<{ deactivated: boolean; reassignedLeads?: number }> {
-  return request<{ deactivated: boolean; reassignedLeads?: number }>(`/api/v1/users/${userId}/deactivate`, {
-    method: "POST",
-    body: JSON.stringify(handover ?? {})
-  });
+/** Make a user Inactive — one-way; nothing they hold moves. Users are never deleted. */
+export function apiDeactivateUser(userId: string): Promise<{ deactivated: boolean }> {
+  return request<{ deactivated: boolean }>(`/api/v1/users/${userId}/deactivate`, { method: "POST", body: JSON.stringify({}) });
 }
 
 // --- Properties ---
