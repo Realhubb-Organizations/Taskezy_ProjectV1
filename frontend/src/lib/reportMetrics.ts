@@ -1,5 +1,6 @@
 import { Lead, AdSpendRecord, LeadStatus, FollowupCall } from "@/context/AppContext";
 import { toIsoDate } from "@/components/ui/DateRangePicker";
+import { slaStartTime } from "@/lib/workingHours";
 
 const BUYER_STATUSES = new Set<LeadStatus>([
   "Call Back", "Followup", "EOI", "Site Visit Scheduled", "Site Visit Done", "Booked"
@@ -122,12 +123,14 @@ export interface MissedInfo {
   responseMinutes?: number;
 }
 
-// A lead is "missed" when no status update occurred within the 20-minute SLA window after assignment
+// A lead is "missed" when no status update occurred within the 20-minute SLA window after assignment.
+// Outside working hours the window starts at the next 9:00 AM (lib/workingHours.ts), same as the server.
 export function getMissedInfo(lead: Lead): MissedInfo {
   if (!lead.assignedAt || lead.source === "Bulk Upload") return { missed: false };
-  const assignedTime = new Date(lead.assignedAt).getTime();
+  const assignedTime = slaStartTime(new Date(lead.assignedAt).getTime());
   if (lead.firstResponseAt) {
-    const responseMinutes = (new Date(lead.firstResponseAt).getTime() - assignedTime) / 60000;
+    // Answered before the clock even started (e.g. at night) counts as 0 minutes.
+    const responseMinutes = Math.max(0, (new Date(lead.firstResponseAt).getTime() - assignedTime) / 60000);
     return { missed: responseMinutes > SLA_MINUTES, responseMinutes: Math.round(responseMinutes) };
   }
   const minutesSinceAssign = (Date.now() - assignedTime) / 60000;

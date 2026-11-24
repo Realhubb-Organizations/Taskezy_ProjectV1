@@ -5,6 +5,7 @@ import { listActiveAdminIds } from "../modules/users/users.repository";
 import { broadcastDataChanged } from "../utils/dataChanged";
 import { missedRecordIdsLink } from "../modules/notifications/notificationLinks";
 import { INSERT_LEAD_MISS_RECORDS_SQL } from "../modules/missed-records/missedRecords.sql";
+import { slaStartSql } from "../config/workingHours";
 
 const POLL_INTERVAL_MS = 60_000;
 const SLA_MINUTES = 20; // matches Reports' isMissedLead / getMissedInfo rule (reportMetrics.ts)
@@ -50,7 +51,8 @@ async function notifyMissedLeads(): Promise<void> {
      WHERE u.id = l.assigned_agent_id
        AND l.first_response_at IS NULL
        AND l.assigned_at IS NOT NULL
-       AND l.assigned_at <= now() - interval '${SLA_MINUTES} minutes'
+       -- Outside working hours the 20 minutes start at the next 9:00 AM (config/workingHours.ts).
+       AND ${slaStartSql("l.assigned_at")} <= now() - interval '${SLA_MINUTES} minutes'
        AND l.missed_notified_at IS NULL
        AND l.source <> 'Bulk Upload'
        -- Waiting Unassigned on an admin because its campaign/sheet isn't

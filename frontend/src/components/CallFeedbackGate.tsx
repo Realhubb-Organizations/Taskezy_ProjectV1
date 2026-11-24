@@ -11,6 +11,7 @@ import { nextStatusOptions, frontendStatusToDbCode, NO_GOING_BACK_STATUSES } fro
 import { CALL_SUB_STATUS_OPTIONS, CallSubStatus, callSubStatusOf } from "@/lib/callSubStatus";
 import { SCHEDULER_REQUIRED_STATUSES } from "@/lib/leadScheduler";
 import { findAgentScheduleConflict, agentConflictMessage } from "@/lib/duplicateFollowupCheck";
+import OutsideHoursNote from "@/components/crm/OutsideHoursNote";
 
 // Full-screen, unclosable overlay — the app stays mounted behind it but
 // nothing in it can be reached (no backdrop-click, no Escape, and the
@@ -451,6 +452,7 @@ export default function CallFeedbackGate() {
                 <div className="space-y-1">
                   <label className="block text-[10px] font-bold text-slate-500 uppercase">Time</label>
                   <input type="time" value={nextTime} onChange={(e) => setNextTime(e.target.value)} className={inputClass} />
+                  <OutsideHoursNote time={nextTime} />
                 </div>
               </div>
             )}

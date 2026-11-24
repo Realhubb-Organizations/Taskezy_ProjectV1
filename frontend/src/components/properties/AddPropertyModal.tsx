@@ -250,7 +250,10 @@ export default function AddPropertyModal({ isOpen, onClose, onSuccess, duplicate
         <div className="w-full sm:max-w-3xl h-[95vh] sm:h-auto sm:max-h-[90vh] bg-white border-0 sm:border border-slate-200 rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden">
           {/* Header */}
           <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 shrink-0">
-            <h3 className="ui-title">{isDataCalling ? "Add Data Calling Property" : "Add Property details"}</h3>
+            <div className="min-w-0">
+              <h3 className="ui-title">Add Property details</h3>
+              <p className="ui-desc mt-0.5">Added to both Leads Properties and Data Calling Properties.</p>
+            </div>
             <button onClick={handleClose} className="text-slate-400 hover:text-slate-600">
               <X className="h-5 w-5" />
             </button>
@@ -266,14 +269,17 @@ export default function AddPropertyModal({ isOpen, onClose, onSuccess, duplicate
             >
               Property Details
             </button>
-            <button
-              onClick={() => setActiveTab("team")}
-              className={`py-3 text-xs font-bold border-b-2 transition-all ${
-                activeTab === "team" ? "border-brand-600 text-brand-700" : "border-transparent text-slate-450 hover:text-slate-600"
-              }`}
-            >
-              Team Access Settings
-            </button>
+            {/* Data Calling properties have no team — their leads are assigned by hand. */}
+            {!isDataCalling && (
+              <button
+                onClick={() => setActiveTab("team")}
+                className={`py-3 text-xs font-bold border-b-2 transition-all ${
+                  activeTab === "team" ? "border-brand-600 text-brand-700" : "border-transparent text-slate-450 hover:text-slate-600"
+                }`}
+              >
+                Team Access Settings
+              </button>
+            )}
           </div>
 
           {/* Scrollable body */}
@@ -453,7 +459,7 @@ export default function AddPropertyModal({ isOpen, onClose, onSuccess, duplicate
             >
               Cancel
             </button>
-            {activeTab === "details" ? (
+            {activeTab === "details" && !isDataCalling ? (
               <button
                 onClick={handleSaveAndNext}
                 className="ui-btn ui-btn-primary"

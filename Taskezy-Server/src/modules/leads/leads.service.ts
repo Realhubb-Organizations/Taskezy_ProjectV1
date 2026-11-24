@@ -683,13 +683,14 @@ export async function assertBulkImportAllowed(caller: AccessTokenPayload, input:
 export async function bulkImportLeads(input: BulkImportLeadsInput): Promise<BulkImportLeadsResult> {
   const fallbackAdminId = (await usersRepo.listActiveAdminIds())[0];
 
-  // Property mode: a Data Calling upload hands rows to its Data Calling
-  // property's team; any other upload to its main property's team.
+  // Property mode hands rows to the main property's team. A Data Calling
+  // upload never assigns by property — its salespeople are picked by hand.
   const isDataCallingUpload = !!input.subSource;
-  const assignmentPropertyId = input.assignmentMode !== "PROPERTY"
-    ? undefined
-    : isDataCallingUpload ? input.dataCallingPropertyId : input.propertyId;
-  if (assignmentPropertyId && !(await findPropertyName(assignmentPropertyId, isDataCallingUpload ? "DATA_CALLING" : "MAIN"))) {
+  if (isDataCallingUpload && input.assignmentMode === "PROPERTY") {
+    throw ApiError.badRequest("Data Calling leads are assigned to salespeople by hand. Choose Assign to Agent.");
+  }
+  const assignmentPropertyId = input.assignmentMode === "PROPERTY" ? input.propertyId : undefined;
+  if (assignmentPropertyId && !(await findPropertyName(assignmentPropertyId, "MAIN"))) {
     throw ApiError.badRequest("That property no longer exists.");
   }
   // Set up once, outside the per-row loop — see createPropertyAgentPicker.
@@ -1235,12 +1236,25 @@ async function findPropertyName(propertyId: string, kind: repo.LeadPropertyKind)
   return row && row.kind === (kind === "DATA_CALLING" ? "DATA_CALLING" : "LEADS") ? row.name : undefined;
 }
 
-// `kind` picks which of the lead's two property fields changes (see
-// repo.LEAD_PROPERTY_FIELDS). Same access rules for both.
-export async function setLeadProperty(caller: AccessTokenPayload, leadId: string, propertyId: string | null, note?: string, kind: repo.LeadPropertyKind = "MAIN") {
+/**
+ * Who can change a lead's property. A lead's Data Calling property: Admins
+ * and the Super Admin only. Its main property: the Super Admin (not other
+ * admins) or a manager for their own team, as before.
+ */
+async function assertLeadPropertyChangeAllowed(caller: AccessTokenPayload, kind: repo.LeadPropertyKind): Promise<void> {
+  if (kind === "DATA_CALLING") {
+    if (caller.role !== "ADMIN") throw ApiError.forbidden("Only Admins can change a lead's Data Calling property.");
+    return;
+  }
   if (caller.role === "ADMIN" && !(await usersRepo.isSuperAdmin(caller.sub))) {
     throw ApiError.forbidden("Only the Super Admin can change a lead's property.");
   }
+}
+
+// `kind` picks which of the lead's two property fields changes (see
+// repo.LEAD_PROPERTY_FIELDS).
+export async function setLeadProperty(caller: AccessTokenPayload, leadId: string, propertyId: string | null, note?: string, kind: repo.LeadPropertyKind = "MAIN") {
+  await assertLeadPropertyChangeAllowed(caller, kind);
   const scopedToAgentIds = await scopeForCaller(caller);
   const existing = await repo.findById(leadId, scopedToAgentIds);
   if (!existing) throw ApiError.notFound("Lead not found");
@@ -1261,7 +1275,8 @@ export async function setLeadProperty(caller: AccessTokenPayload, leadId: string
 
   await withTransaction(async (client) => {
     await repo.setPropertyId(client, leadId, propertyId, kind);
-    if (note) await repo.setNote(client, leadId, note, caller.sub);
+    // A Data Calling property change keeps the lead's own note; the note goes in its history only.
+    if (note && kind !== "DATA_CALLING") await repo.setNote(client, leadId, note, caller.sub);
     await repo.insertLeadLog(client, leadId, caller.sub, caller.name, note ? `${message}. Note: ${note}` : message);
   });
   broadcastLeadChanged(leadId);
@@ -1293,9 +1308,7 @@ export async function bulkSetLeadProperty(
   // on the caller and the target property, never on which lead is being
   // touched (see leads.repository.ts's setLeadPropertyChunk for the batched
   // per-lead work this used to redo, including fetching the same row 3x).
-  if (caller.role === "ADMIN" && !(await usersRepo.isSuperAdmin(caller.sub))) {
-    throw ApiError.forbidden("Only the Super Admin can change a lead's property.");
-  }
+  await assertLeadPropertyChangeAllowed(caller, kind);
   const nextName = propertyId ? await findPropertyName(propertyId, kind) : undefined;
   if (propertyId && !nextName) throw ApiError.badRequest("That property no longer exists.");
   const scopedToAgentIds = await scopeForCaller(caller);
@@ -1324,7 +1337,8 @@ export async function bulkSetLeadProperty(
  * assertBulkImportAllowed's shape; checked once before queueing, since the
  * queued worker runs without a caller.
  */
-export async function assertBulkPropertyChangeAllowed(caller: AccessTokenPayload): Promise<void> {
+export async function assertBulkPropertyChangeAllowed(caller: AccessTokenPayload, kind: repo.LeadPropertyKind = "MAIN"): Promise<void> {
+  if (kind === "DATA_CALLING") return assertLeadPropertyChangeAllowed(caller, kind);
   if (caller.role === "ADMIN") {
     if (await usersRepo.isSuperAdmin(caller.sub)) return;
     throw ApiError.forbidden("Only the Super Admin can bulk-change leads' property.");

@@ -7,6 +7,7 @@ import { useDialog } from "@/components/ui/DialogProvider";
 import { DatePicker, todayIso } from "@/components/ui/DateRangePicker";
 import { findOpenFollowup, formatFollowupWhen, findAgentScheduleConflict, agentConflictMessage, isTooCloseToExistingSchedule } from "@/lib/duplicateFollowupCheck";
 import { CALL_SUB_STATUS_OPTIONS, CallSubStatus, callSubStatusOf } from "@/lib/callSubStatus";
+import OutsideHoursNote from "@/components/crm/OutsideHoursNote";
 
 // Data Calling's own, independent Call Status (migration 030) — completely
 // separate from the main 14-value Lead Status. "Not Reachable" always
@@ -196,6 +197,7 @@ export function useCallStatusUpdate() {
                     onChange={(e) => setRnrTime(e.target.value)}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:bg-white focus:border-[#0B1E6E]"
                   />
+                  <OutsideHoursNote time={rnrTime} />
                 </div>
               </div>
             )}

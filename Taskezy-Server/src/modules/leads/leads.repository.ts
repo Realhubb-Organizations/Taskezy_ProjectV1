@@ -6,6 +6,7 @@ import { pool, query, withTransaction } from "../../db/pool";
 import { BUSINESS_TIMEZONE } from "../../utils/businessDate";
 import { normalizeForeignPhone } from "../../utils/validation";
 import { FOLLOWUP_EVER_MISSED_SQL, MISSED_BY_JOIN_SQL } from "../reports/siteVisitSql";
+import { slaStartSql } from "../../config/workingHours";
 
 /**
  * Lead `l` is waiting Unassigned on an admin because its campaign/sheet isn't
@@ -326,8 +327,8 @@ function buildLeadWhereClause(filter: LeadFilterConditions): { whereClause: stri
     params.push(filter.slaMinutes);
     const slaParam = params.length;
     conditions.push(`l.source <> 'Bulk Upload' AND NOT ${WAITING_ON_ADMIN_SQL} AND l.assigned_at IS NOT NULL AND (
-      (l.first_response_at IS NOT NULL AND EXTRACT(EPOCH FROM (l.first_response_at - l.assigned_at)) / 60 > $${slaParam}::numeric)
-      OR (l.first_response_at IS NULL AND EXTRACT(EPOCH FROM (now() - l.assigned_at)) / 60 > $${slaParam}::numeric)
+      (l.first_response_at IS NOT NULL AND EXTRACT(EPOCH FROM (l.first_response_at - ${slaStartSql("l.assigned_at")})) / 60 > $${slaParam}::numeric)
+      OR (l.first_response_at IS NULL AND EXTRACT(EPOCH FROM (now() - ${slaStartSql("l.assigned_at")})) / 60 > $${slaParam}::numeric)
     )`);
   }
 
@@ -628,8 +629,8 @@ export async function getAgentReportStats(
             COALESCE(SUM(c.spend_per_lead), 0) AS allocated_spend,
             count(*) FILTER (
               WHERE l.source <> 'Bulk Upload' AND NOT ${WAITING_ON_ADMIN_SQL} AND l.assigned_at IS NOT NULL AND (
-                (l.first_response_at IS NOT NULL AND EXTRACT(EPOCH FROM (l.first_response_at - l.assigned_at)) / 60 > $${slaParam}::numeric)
-                OR (l.first_response_at IS NULL AND EXTRACT(EPOCH FROM (now() - l.assigned_at)) / 60 > $${slaParam}::numeric)
+                (l.first_response_at IS NOT NULL AND EXTRACT(EPOCH FROM (l.first_response_at - ${slaStartSql("l.assigned_at")})) / 60 > $${slaParam}::numeric)
+                OR (l.first_response_at IS NULL AND EXTRACT(EPOCH FROM (now() - ${slaStartSql("l.assigned_at")})) / 60 > $${slaParam}::numeric)
               )
             ) AS missed_leads,
             COALESCE(SUM(l.missed_task_count), 0) AS total_missed_tasks
@@ -761,8 +762,8 @@ export async function getManagerReportStatsByAgent(
             COALESCE(SUM(${BOOKING_VALUE_SQL("l")}), 0) AS booking_value,
             count(*) FILTER (
               WHERE l.source <> 'Bulk Upload' AND NOT ${WAITING_ON_ADMIN_SQL} AND l.assigned_at IS NOT NULL AND (
-                (l.first_response_at IS NOT NULL AND EXTRACT(EPOCH FROM (l.first_response_at - l.assigned_at)) / 60 > $${slaParam}::numeric)
-                OR (l.first_response_at IS NULL AND EXTRACT(EPOCH FROM (now() - l.assigned_at)) / 60 > $${slaParam}::numeric)
+                (l.first_response_at IS NOT NULL AND EXTRACT(EPOCH FROM (l.first_response_at - ${slaStartSql("l.assigned_at")})) / 60 > $${slaParam}::numeric)
+                OR (l.first_response_at IS NULL AND EXTRACT(EPOCH FROM (now() - ${slaStartSql("l.assigned_at")})) / 60 > $${slaParam}::numeric)
               )
             ) AS missed_count,
             COALESCE(MAX(fs.missed_followups), 0) AS missed_followups
@@ -1074,7 +1075,8 @@ export async function setLeadPropertyChunk(
 
     const candidateIds = candidates.map(c => c.id);
     await client.query(`UPDATE leads SET ${column} = $1 WHERE id = ANY($2::uuid[])`, [propertyId, candidateIds]);
-    if (note) {
+    // A Data Calling property change keeps each lead's own note; the note goes in its history only.
+    if (note && kind !== "DATA_CALLING") {
       await client.query(
         `UPDATE leads SET notes = $1, notes_updated_at = now(), notes_updated_by = $2 WHERE id = ANY($3::uuid[])`,
         [note, actor.userId, candidateIds]

@@ -6,6 +6,7 @@ import { CalendarClock } from "lucide-react";
 import { DatePicker } from "@/components/ui/DateRangePicker";
 import { PendingLeadSchedule } from "@/lib/leadScheduler";
 import { apiGetSiteVisitHistory } from "@/lib/apiClient";
+import OutsideHoursNote from "@/components/crm/OutsideHoursNote";
 
 interface LeadScheduleModalProps {
   pending: PendingLeadSchedule;
@@ -96,6 +97,7 @@ export default function LeadScheduleModal({ pending, submitting, error, onCancel
             <div className="space-y-1">
               <label className="block text-[10px] font-bold text-slate-500 uppercase">Time{pending.required ? "" : " (optional)"}</label>
               <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className={inputClass} />
+              <OutsideHoursNote time={time} />
             </div>
           </div>
           {isReschedule && (

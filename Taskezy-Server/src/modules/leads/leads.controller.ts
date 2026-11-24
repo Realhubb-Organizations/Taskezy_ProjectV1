@@ -231,7 +231,7 @@ export async function getBulkReassignStatusHandler(req: Request, res: Response):
 
 export async function bulkSetLeadPropertyHandler(req: Request, res: Response): Promise<void> {
   // Checked here, before queueing — the worker runs without a caller.
-  await leadsService.assertBulkPropertyChangeAllowed(req.user!);
+  await leadsService.assertBulkPropertyChangeAllowed(req.user!, req.body.kind ?? "MAIN");
   assertNoteUnlessAdmin(req);
   const { leadIds, propertyId, note, kind } = req.body;
   const jobId = await boss.send(BULK_SET_PROPERTY_QUEUE, { caller: req.user!, leadIds, propertyId, note, kind });
