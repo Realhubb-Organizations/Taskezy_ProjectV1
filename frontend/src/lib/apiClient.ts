@@ -2750,6 +2750,26 @@ function teamReportParams(filters: TeamReportFilters): URLSearchParams {
 }
 
 /** Data Calling page's Calls Made: [leadId, agentId who called, "YYYY-MM-DD"] per lead called per day (Call button). */
+/** A deleted Data Calling lead as it was when deleted — the Data Calling analytics keep counting it. */
+export interface ApiDeletedDataCallingLead {
+  id: string;
+  name: string | null;
+  source: string | null;
+  sub_source: string | null;
+  status_code: string | null;
+  call_status: string | null;
+  call_sub_status: string | null;
+  call_status_at: string | null;
+  created_at: string | null;
+  assigned_agent_id: string | null;
+  assigned_agent_name: string | null;
+  deleted_at: string;
+}
+
+export function apiGetDataCallingDeletedLeads(): Promise<ApiDeletedDataCallingLead[]> {
+  return request<ApiDeletedDataCallingLead[]>("/api/v1/reports/data-calling/deleted-leads");
+}
+
 export function apiGetDataCallingCallDays(): Promise<[string, string, string][]> {
   return request<[string, string, string][]>("/api/v1/reports/data-calling/call-days");
 }

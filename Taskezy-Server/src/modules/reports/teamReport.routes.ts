@@ -444,14 +444,48 @@ teamReportRouter.get(
     const scope = await scopeForCaller(req.user!);
     const params: unknown[] = [BUSINESS_TIMEZONE];
     const scopeSql = scope ? `AND ca.caller_user_id = ANY($${params.push(scope)}::uuid[])` : "";
+    // Deleted Data Calling leads' call days too (saved at delete, migration
+    // 066), so deleting leads never changes the Data Calling analytics.
+    const archivedScopeSql = scope ? `AND (d->>0)::uuid = ANY($${params.push(scope)}::uuid[])` : "";
     const { rows } = await query<{ lead_id: string; caller_user_id: string; day: string }>(
-      `SELECT DISTINCT ca.lead_id, ca.caller_user_id, ${CALL_DAY_SQL("$1")}::text AS day
+      `SELECT DISTINCT ca.lead_id::text AS lead_id, ca.caller_user_id::text AS caller_user_id, ${CALL_DAY_SQL("$1")}::text AS day
        FROM call_attempts ca
        JOIN leads l ON l.id = ca.lead_id
-       WHERE ca.channel = 'CALL' AND l.sub_source IS NOT NULL ${scopeSql}`,
+       WHERE ca.channel = 'CALL' AND l.sub_source IS NOT NULL ${scopeSql}
+       UNION
+       SELECT a.lead_id::text, d->>0, d->>1
+       FROM lead_deletion_archive a, jsonb_array_elements(a.call_days_snapshot) d
+       WHERE a.restored_at IS NULL AND a.lead_snapshot->>'sub_source' IS NOT NULL ${archivedScopeSql}`,
       params
     );
     sendOk(res, rows.map(r => [r.lead_id, r.caller_user_id, r.day]));
+  })
+);
+
+// Deleted Data Calling leads as they were when deleted (lead_deletion_archive,
+// not restored) — the Data Calling page's analytics keep counting them, so
+// deleting leads never changes those numbers. Scoped like the leads list.
+teamReportRouter.get(
+  "/data-calling/deleted-leads",
+  asyncHandler(async (req, res) => {
+    const scope = await scopeForCaller(req.user!);
+    const params: unknown[] = [];
+    const scopeSql = scope ? `AND (a.lead_snapshot->>'assigned_agent_id')::uuid = ANY($${params.push(scope)}::uuid[])` : "";
+    const { rows } = await query<Record<string, string | null>>(
+      `SELECT a.lead_id::text AS id, a.lead_snapshot->>'name' AS name,
+              a.lead_snapshot->>'source' AS source, a.lead_snapshot->>'sub_source' AS sub_source,
+              a.lead_snapshot->>'status_code' AS status_code,
+              a.lead_snapshot->>'call_status' AS call_status, a.lead_snapshot->>'call_sub_status' AS call_sub_status,
+              a.lead_snapshot->>'call_status_at' AS call_status_at, a.lead_snapshot->>'created_at' AS created_at,
+              a.lead_snapshot->>'assigned_agent_id' AS assigned_agent_id,
+              NULLIF(TRIM(u.first_name || COALESCE(' ' || u.last_name, '')), '') AS assigned_agent_name,
+              a.deleted_at::text AS deleted_at
+       FROM lead_deletion_archive a
+       LEFT JOIN users u ON u.id = (a.lead_snapshot->>'assigned_agent_id')::uuid
+       WHERE a.restored_at IS NULL AND a.lead_snapshot->>'sub_source' IS NOT NULL ${scopeSql}`,
+      params
+    );
+    sendOk(res, rows);
   })
 );
 

@@ -21,7 +21,8 @@ import LeadNoteCell from "@/components/crm/LeadNoteCell";
 import LeadRowActionsMenu from "@/components/crm/LeadRowActionsMenu";
 import { isPhoneLayout } from "@/lib/viewport";
 import { dateRangeLabel } from "@/lib/dateRangeLabel";
-import { apiBulkDeleteLeads, apiBulkReassignLeads, apiBulkSetLeadProperty, apiDeleteLead, apiGetDataCallingCallDays } from "@/lib/apiClient";
+import { apiBulkDeleteLeads, apiBulkReassignLeads, apiBulkSetLeadProperty, apiDeleteLead, apiGetDataCallingCallDays, apiGetDataCallingDeletedLeads, type ApiDeletedDataCallingLead } from "@/lib/apiClient";
+import { dbCodeToFrontendStatus } from "@/lib/leadStatusMapping";
 import { useLiveRefresh } from "@/lib/useLiveRefresh";
 import { maskPhone, maskEmail } from "@/lib/maskPII";
 import { ExcelIcon } from "@/components/icons/ContactIcons";
@@ -148,6 +149,29 @@ function analyticsLeadMatchesMetric(l: Lead, metric: AnalyticsChartMetric): bool
   }
 }
 
+// A deleted Data Calling lead, for the analytics only (it isn't on the list
+// and can't be opened) — counted as it was when deleted.
+const CALL_STATUSES_KNOWN = ["Connected", "Called", "Not Reachable", "Wrong Number"] as const;
+function deletedLeadForAnalytics(r: ApiDeletedDataCallingLead): Lead {
+  const callStatus = CALL_STATUSES_KNOWN.find(s => s === r.call_status);
+  const callSubStatus = callStatus === "Connected" && (r.call_sub_status === "Qualified" || r.call_sub_status === "Unqualified") ? r.call_sub_status : undefined;
+  return {
+    id: r.id,
+    name: r.name ?? "—",
+    phone: "",
+    status: dbCodeToFrontendStatus(r.status_code ?? "NEW_LEAD"),
+    assignedAgent: r.assigned_agent_name ?? undefined,
+    assignedAgentId: r.assigned_agent_id ?? undefined,
+    source: r.source ?? undefined,
+    subSource: r.sub_source ?? undefined,
+    callStatus,
+    callSubStatus,
+    callStatusAt: r.call_status_at ?? undefined,
+    createdAtStr: r.created_at ?? undefined,
+    deletedFromDataCalling: true
+  } as Lead;
+}
+
 // A lead's Data Calling property; older uploads only have a main one.
 const dcPropertyOf = (l: Lead) => l.dataCallingProperty || l.property;
 
@@ -158,7 +182,7 @@ export default function DataCallingPage() {
   // AppContext.tsx), aliased to `leads` here so the rest of this large file
   // needs no other changes.
   const {
-    dataCallingLeads: leads, properties, users, currentUser, activeRole, updateLeadStatus, reassignLead,
+    dataCallingLeads: leads, leads: mainLeads, properties, users, currentUser, activeRole, updateLeadStatus, reassignLead,
     bulkImportLeads, removeLeadsLocally, removeFromDataCallingLocally, isDataLoading, recordCallEnded, recordWhatsAppOpened
   } = useApp();
   const { toast, confirm, prompt: promptDialog } = useDialog();
@@ -375,17 +399,35 @@ export default function DataCallingPage() {
     return () => { cancelled = true; };
   }, [callsLiveVersion]);
   const leadById = useMemo(() => new Map(leads.map(l => [l.id, l])), [leads]);
+  // The Analytics tab also counts leads taken off the Data Calling list, so
+  // deleting never changes its numbers: qualified leads removed from Data
+  // Calling (still in Leads) and deleted ones (as they were when deleted,
+  // with their saved call days — migration 066).
+  const [deletedDcLeads, setDeletedDcLeads] = useState<Lead[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    apiGetDataCallingDeletedLeads()
+      .then(rows => { if (!cancelled) setDeletedDcLeads(rows.map(deletedLeadForAnalytics)); })
+      .catch(() => { /* keep the last list */ });
+    return () => { cancelled = true; };
+  }, [callsLiveVersion]);
+  const analyticsLeads = useMemo(
+    () => [...leads, ...mainLeads.filter(l => !!l.subSource && l.removedFromDataCalling), ...deletedDcLeads],
+    [leads, mainLeads, deletedDcLeads]
+  );
+  const analyticsLeadById = useMemo(() => new Map(analyticsLeads.map(l => [l.id, l])), [analyticsLeads]);
   const userNameById = useMemo(() => new Map(users.map(u => [u.id, u.name])), [users]);
   /** Different leads called per day among `rows` — a lead called twice on one day counts once. */
   const countLeadDays = (rows: [string, string, string][]) => new Set(rows.map(([leadId, , day]) => `${leadId}|${day}`)).size;
   /** Different leads called among `rows` — each lead once, however many times or days. */
   const countLeads = (rows: [string, string, string][]) => new Set(rows.map(([leadId]) => leadId)).size;
   // Calls on leads this page shows, on a day that passes `dayOk`, optionally only these leads.
-  const callsWhere = (dayOk: (day: string) => boolean, leadOk: (l: Lead) => boolean = () => true) =>
-    callDays.filter(([leadId, , day]) => { const l = leadById.get(leadId); return !!l && leadOk(l) && dayOk(day); });
-  const calledLeads = (rows: [string, string, string][]) => {
+  // `byId`: which leads count — this list's, or the Analytics tab's (analyticsLeadById).
+  const callsWhere = (dayOk: (day: string) => boolean, leadOk: (l: Lead) => boolean = () => true, byId: Map<string, Lead> = leadById) =>
+    callDays.filter(([leadId, , day]) => { const l = byId.get(leadId); return !!l && leadOk(l) && dayOk(day); });
+  const calledLeads = (rows: [string, string, string][], from: Lead[] = leads) => {
     const ids = new Set(rows.map(([leadId]) => leadId));
-    return leads.filter(l => ids.has(l.id));
+    return from.filter(l => ids.has(l.id));
   };
   const summaryCallDayOk = (day: string) => dateInRange(`${day}T12:00:00`, mapDateRangeToKey(dateRange), today, summaryCustomRange);
   const summaryCalls = useMemo(() => callsWhere(summaryCallDayOk), [callDays, leadById, dateRange, summaryCustomRange]);
@@ -436,19 +478,19 @@ export default function DataCallingPage() {
 
   // Leads uploaded in the range (Total Leads, site visits) …
   const analyticsDateFilteredLeads = useMemo(
-    () => leads.filter(l => inAppliedRange(l.createdAtStr)),
-    [leads, appliedCustomRange]
+    () => analyticsLeads.filter(l => inAppliedRange(l.createdAtStr)),
+    [analyticsLeads, appliedCustomRange]
   );
   // … and leads whose call result was set in the range (Connected, Qualified,
   // Not Qualified, RNR) — lib/dataCallingResults.ts callResultAt.
   const analyticsResultLeads = useMemo(
-    () => leads.filter(l => inAppliedRange(callResultAt(l))),
-    [leads, appliedCustomRange]
+    () => analyticsLeads.filter(l => inAppliedRange(callResultAt(l))),
+    [analyticsLeads, appliedCustomRange]
   );
 
   const dataCallSources = useMemo(
-    () => Array.from(new Set(leads.map(l => l.source).filter((s): s is string => !!s))).sort(),
-    [leads]
+    () => Array.from(new Set(analyticsLeads.map(l => l.source).filter((s): s is string => !!s))).sort(),
+    [analyticsLeads]
   );
 
   const subSourceScopedLeads = useMemo(
@@ -468,8 +510,8 @@ export default function DataCallingPage() {
   const analyticsCallDayOk = (day: string) => !appliedCustomRange || (day >= appliedCustomRange.start && day <= appliedCustomRange.end);
   const inAnalyticsSubSource = (l: Lead) => analyticsSubSources.length === 0 || (!!l.source && analyticsSubSources.includes(l.source));
   const analyticsCalls = useMemo(
-    () => callsWhere(analyticsCallDayOk, inAnalyticsSubSource),
-    [callDays, leadById, appliedCustomRange, analyticsSubSources]
+    () => callsWhere(analyticsCallDayOk, inAnalyticsSubSource, analyticsLeadById),
+    [callDays, analyticsLeadById, appliedCustomRange, analyticsSubSources]
   );
 
   const analyticsSummaryMetrics = useMemo(() => ({
@@ -485,11 +527,11 @@ export default function DataCallingPage() {
   // clicking a card here drills into exactly what it counted.
   const analyticsCategoryLeads: Record<string, Lead[]> = useMemo(() => ({
     "Total Leads Assigned": subSourceScopedLeads.filter(l => !!l.assignedAgent),
-    "Calls Made": calledLeads(analyticsCalls),
+    "Calls Made": calledLeads(analyticsCalls, analyticsLeads),
     "Qualified Leads": subSourceScopedResultLeads.filter(isQualifiedCall),
     "RNR": subSourceScopedResultLeads.filter(l => l.callStatus === "Not Reachable"),
     "Not Qualified": subSourceScopedResultLeads.filter(isCallNotQualified)
-  }), [subSourceScopedLeads, subSourceScopedResultLeads, analyticsCalls]);
+  }), [subSourceScopedLeads, subSourceScopedResultLeads, analyticsCalls, analyticsLeads]);
 
   // Manager sees only their own direct reports' rows here — never other
   // managers' teams, and never a row for themself (this table is about
@@ -538,9 +580,9 @@ export default function DataCallingPage() {
   const sourceRows = useMemo(
     () => withCallsMade(
       computeAnalyticsPerformanceRows(analyticsDateFilteredLeads, analyticsResultLeads, l => l.source),
-      ([leadId]) => leadById.get(leadId)?.source
+      ([leadId]) => analyticsLeadById.get(leadId)?.source
     ),
-    [analyticsDateFilteredLeads, analyticsResultLeads, analyticsCalls, leadById]
+    [analyticsDateFilteredLeads, analyticsResultLeads, analyticsCalls, analyticsLeadById]
   );
   const filteredSourceRows = useMemo(() => {
     const q = sourceSearch.trim().toLowerCase();
@@ -583,7 +625,7 @@ export default function DataCallingPage() {
       const dayStr = day.toDateString();
       // Calls Made: different leads called with the Call button that day.
       const value = analyticsChartMetric === "Calls Made"
-        ? countLeadDays(callsWhere(d => d === toIsoDate(day), inAnalyticsSubSource))
+        ? countLeadDays(callsWhere(d => d === toIsoDate(day), inAnalyticsSubSource, analyticsLeadById))
         : analyticsChartMetric === "Total Leads"
           // Total Leads: the upload day. Call results: the day the result was set.
           ? subSourceScopedLeads.filter(l => l.createdAtStr && new Date(l.createdAtStr).toDateString() === dayStr).length
@@ -596,7 +638,7 @@ export default function DataCallingPage() {
         value
       };
     });
-  }, [chartDays, subSourceScopedLeads, subSourceScopedResultLeads, analyticsChartMetric, callDays, leadById, analyticsSubSources]);
+  }, [chartDays, subSourceScopedLeads, subSourceScopedResultLeads, analyticsChartMetric, callDays, analyticsLeadById, analyticsSubSources]);
 
   const chartAverage = chartData.length > 0
     ? chartData.reduce((sum, d) => sum + d.value, 0) / chartData.length
@@ -1340,12 +1382,16 @@ export default function DataCallingPage() {
                           if (!e.currentTarget.contains(target)) return;
                           if (target.closest("button, a, input, select, textarea, label, [role='button'], [role='combobox'], [role='listbox']")) return;
                           if (window.getSelection()?.toString()) return;
+                          if (l.deletedFromDataCalling) return; // deleted — nothing to open
                           setSelectedLead(l);
                         }}
-                        className="cursor-pointer hover:bg-slate-50/50 transition-colors"
+                        className={l.deletedFromDataCalling ? "" : "cursor-pointer hover:bg-slate-50/50 transition-colors"}
                       >
-                        <td className="px-4 py-2.5 font-semibold text-slate-900 [overflow-wrap:anywhere]">{l.name}</td>
-                        <td className="px-4 py-2.5 font-mono [overflow-wrap:anywhere]">{isAdmin ? l.phone : maskPhone(l.phone)}</td>
+                        <td className="px-4 py-2.5 font-semibold text-slate-900 [overflow-wrap:anywhere]">
+                          {l.name}
+                          {l.deletedFromDataCalling && <span className="ml-1.5 text-[10px] font-medium text-slate-400">Deleted</span>}
+                        </td>
+                        <td className="px-4 py-2.5 font-mono [overflow-wrap:anywhere]">{!l.phone ? "—" : isAdmin ? l.phone : maskPhone(l.phone)}</td>
                         <td className="px-4 py-2.5">{l.status}</td>
                         <td className="px-4 py-2.5 [overflow-wrap:anywhere]">{l.assignedAgent || "—"}</td>
                       </tr>

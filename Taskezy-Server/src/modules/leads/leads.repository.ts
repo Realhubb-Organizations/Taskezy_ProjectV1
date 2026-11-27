@@ -1566,6 +1566,30 @@ export async function removeFromDataCalling(ids: string[], actor: { userId: stri
   });
 }
 
+/**
+ * Keeps a deleted lead's call days in its archive row (migration 066): its
+ * call_attempts go with the lead, and the Data Calling analytics count Calls
+ * Made from these [caller, day] pairs. Runs before the lead is deleted.
+ */
+async function snapshotCallDays(client: PoolClient, archiveIds: string[]): Promise<void> {
+  if (archiveIds.length === 0) return;
+  await client.query(
+    `UPDATE lead_deletion_archive a
+     SET call_days_snapshot = s.days
+     FROM (
+       SELECT ca.lead_id,
+              jsonb_agg(DISTINCT jsonb_build_array(ca.caller_user_id::text,
+                ((COALESCE(ca.started_at, ca.created_at) AT TIME ZONE $2)::date)::text)) AS days
+       FROM call_attempts ca
+       WHERE ca.channel = 'CALL'
+         AND ca.lead_id IN (SELECT lead_id FROM lead_deletion_archive WHERE id = ANY($1::uuid[]))
+       GROUP BY ca.lead_id
+     ) s
+     WHERE a.id = ANY($1::uuid[]) AND a.lead_id = s.lead_id`,
+    [archiveIds, BUSINESS_TIMEZONE]
+  );
+}
+
 export async function archiveAndRemove(id: string, actor: { userId: string; name: string }): Promise<boolean> {
   return withTransaction(async (client) => {
     const { rows: leadRows } = await client.query<{ lead: unknown }>(
@@ -1581,11 +1605,13 @@ export async function archiveAndRemove(id: string, actor: { userId: string; name
     );
 
     // Stringified explicitly: node-pg would turn a JS array param into a Postgres array literal, not JSON.
-    await client.query(
+    const { rows: archived } = await client.query<{ id: string }>(
       `INSERT INTO lead_deletion_archive (lead_id, lead_snapshot, logs_snapshot, deleted_by_user_id, deleted_by_name_snapshot)
-       VALUES ($1, $2, $3, $4, $5)`,
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id`,
       [id, JSON.stringify(leadRows[0].lead), JSON.stringify(logRows[0].logs), actor.userId, actor.name]
     );
+    await snapshotCallDays(client, archived.map(a => a.id));
 
     const { rowCount } = await client.query(`DELETE FROM leads WHERE id = $1`, [id]);
     return (rowCount ?? 0) > 0;
@@ -1643,11 +1669,13 @@ export async function archiveAndRemoveChunk(ids: string[], actor: { userId: stri
     const deletedByUserIds = leadRows.map(() => actor.userId);
     const deletedByNames = leadRows.map(() => actor.name);
 
-    await client.query(
+    const { rows: archived } = await client.query<{ id: string }>(
       `INSERT INTO lead_deletion_archive (lead_id, lead_snapshot, logs_snapshot, deleted_by_user_id, deleted_by_name_snapshot)
-       SELECT * FROM unnest($1::uuid[], $2::jsonb[], $3::jsonb[], $4::uuid[], $5::text[])`,
+       SELECT * FROM unnest($1::uuid[], $2::jsonb[], $3::jsonb[], $4::uuid[], $5::text[])
+       RETURNING id`,
       [foundIds, leadSnapshots, logSnapshots, deletedByUserIds, deletedByNames]
     );
+    await snapshotCallDays(client, archived.map(a => a.id));
 
     await client.query(`DELETE FROM leads WHERE id = ANY($1::uuid[])`, [foundIds]);
 

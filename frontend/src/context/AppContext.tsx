@@ -239,6 +239,8 @@ export interface Lead {
   source?: string;
   /** Removed from the Data Calling list but kept in Leads (migration 065). */
   removedFromDataCalling?: boolean;
+  /** Only on the Data Calling analytics' copy of a deleted lead (it can't be opened). */
+  deletedFromDataCalling?: boolean;
   subSource?: string; // free-text batch label from bulk upload (e.g. "Kashmiri Data") — lets that batch be filtered/reassigned/reshuffled as a group. undefined for every other ingestion path.
   uploadedByName?: string; // which admin ran the bulk upload (migration 036) — undefined for every other ingestion path, and for leads uploaded before this column existed.
   // Data Calling's own, independent field (migration 030) — Connected/
