@@ -296,6 +296,8 @@ export interface ApiLeadRow {
   // Free-text batch label set at bulk-upload time (e.g. "Kashmiri Data") —
   // null for every other ingestion path. See ApiBulkImportLeadsInput.
   sub_source: string | null;
+  /** Removed from the Data Calling list but kept in Leads (migration 065). */
+  removed_from_data_calling_at?: string | null;
   /** When a fresh Meta/Google enquiry last revived this lead (migration 054_lead_status_revived). */
   revived_at?: string | null;
   // Data Calling's own, independent field (migration 030) — Connected/
@@ -832,8 +834,15 @@ export function apiUpdateLeadNote(leadId: string, note: string): Promise<ApiLead
   });
 }
 
-export function apiDeleteLead(leadId: string): Promise<{ deleted: boolean }> {
-  return request<{ deleted: boolean }>(`/api/v1/leads/${leadId}`, { method: "DELETE" });
+/**
+ * Deletes a lead. `fromDataCalling`: the Data Calling page's Delete — a lead
+ * that is also in Leads (qualified) is only removed from Data Calling.
+ */
+export function apiDeleteLead(leadId: string, opts: { fromDataCalling?: boolean } = {}): Promise<{ deleted: boolean; removedFromDataCalling?: boolean }> {
+  return request<{ deleted: boolean; removedFromDataCalling?: boolean }>(
+    `/api/v1/leads/${leadId}${opts.fromDataCalling ? "?from=data-calling" : ""}`,
+    { method: "DELETE" }
+  );
 }
 
 export interface BulkDeleteLeadsApiResult {
@@ -841,14 +850,16 @@ export interface BulkDeleteLeadsApiResult {
   deleted: number;
   notFound: number;
   blocked: { id: string; reason: string }[];
+  /** From the Data Calling page: qualified leads only removed from Data Calling, kept in Leads. */
+  removedFromDataCalling?: string[];
 }
 // Queued server-side (Taskezy-Server/src/jobs/queue.ts's bulk-delete-leads
 // worker); this still resolves to the final result like a normal await, so
 // callers (LeadDashboard/data-calling) needed no changes.
-export async function apiBulkDeleteLeads(leadIds: string[]): Promise<BulkDeleteLeadsApiResult> {
+export async function apiBulkDeleteLeads(leadIds: string[], opts: { fromDataCalling?: boolean } = {}): Promise<BulkDeleteLeadsApiResult> {
   const { jobId } = await request<{ jobId: string }>("/api/v1/leads/bulk-delete", {
     method: "POST",
-    body: JSON.stringify({ leadIds })
+    body: JSON.stringify({ leadIds, ...(opts.fromDataCalling ? { from: "DATA_CALLING" } : {}) })
   });
   return pollJob<BulkDeleteLeadsApiResult>(() =>
     request<JobStatus<BulkDeleteLeadsApiResult>>(`/api/v1/leads/bulk-delete/${jobId}/status`)

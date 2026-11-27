@@ -39,6 +39,7 @@ export const BULK_DELETE_LEADS_QUEUE = "bulk-delete-leads";
 interface BulkDeleteLeadsJobData {
   actor: { userId: string; name: string };
   leadIds: string[];
+  fromDataCalling?: boolean;
 }
 
 // Backs both pages' bulk Assign/Reshuffle — previously N individual
@@ -107,7 +108,7 @@ export async function startQueue(): Promise<void> {
   await boss.createQueue(BULK_DELETE_LEADS_QUEUE);
   await boss.work<BulkDeleteLeadsJobData>(BULK_DELETE_LEADS_QUEUE, async ([job]) => {
     logger.info({ jobId: job.id }, "Processing queued bulk lead delete");
-    return bulkDeleteLeads(job.data.actor, job.data.leadIds);
+    return bulkDeleteLeads(job.data.actor, job.data.leadIds, job.data.fromDataCalling === true);
   });
 
   await boss.createQueue(BULK_REASSIGN_LEADS_QUEUE);

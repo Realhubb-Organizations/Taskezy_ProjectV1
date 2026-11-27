@@ -237,6 +237,8 @@ export interface Lead {
   assignedAgentId?: string;
   logs: LeadLog[];
   source?: string;
+  /** Removed from the Data Calling list but kept in Leads (migration 065). */
+  removedFromDataCalling?: boolean;
   subSource?: string; // free-text batch label from bulk upload (e.g. "Kashmiri Data") — lets that batch be filtered/reassigned/reshuffled as a group. undefined for every other ingestion path.
   uploadedByName?: string; // which admin ran the bulk upload (migration 036) — undefined for every other ingestion path, and for leads uploaded before this column existed.
   // Data Calling's own, independent field (migration 030) — Connected/
@@ -731,6 +733,8 @@ interface AppActions {
   deactivateTeamMember: (userId: string) => Promise<void>;
   deleteLead: (leadId: string) => void;
   removeLeadsLocally: (leadIds: string[]) => void;
+  /** Hides leads from the Data Calling list here (they stay in Leads). */
+  removeFromDataCallingLocally: (leadIds: string[]) => void;
   editLead: (leadId: string, updatedFields: Partial<Lead>) => void;
   deleteProperty: (propertyId: string) => void;
   editProperty: (propertyId: string, updatedFields: Partial<Property>) => void;
@@ -801,6 +805,7 @@ export function mapApiLeadToFrontendLead(row: ApiLeadRow): Lead {
     logs: row.logs.map(l => ({ message: l.message, timestamp: l.timestamp, user: l.user })),
     source: row.source || undefined,
     subSource: row.sub_source || undefined,
+    removedFromDataCalling: !!row.removed_from_data_calling_at,
     revivedAt: row.revived_at || undefined,
     uploadedByName: row.uploaded_by_name || undefined,
     callStatus:
@@ -2783,6 +2788,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setAllLeads(prev => prev.filter(l => !removed.has(l.id)));
   };
 
+  const removeFromDataCallingLocally = (leadIds: string[]) => {
+    const hidden = new Set(leadIds);
+    setAllLeads(prev => prev.map(l => (hidden.has(l.id) ? { ...l, removedFromDataCalling: true } : l)));
+  };
+
   const editLead = (id: string, updatedFields: Partial<Lead>) => {
     setAllLeads(prev => prev.map(l => l.id === id ? { ...l, ...updatedFields } : l));
     if (isApiSessionActive() && isRealLeadId(id)) {
@@ -2897,7 +2907,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     ),
     [allLeads]
   );
-  const dataCallingLeads = useMemo(() => allLeads.filter(l => !!l.subSource), [allLeads]);
+  // A lead removed from Data Calling but kept in Leads (migration 065) isn't listed here.
+  const dataCallingLeads = useMemo(() => allLeads.filter(l => !!l.subSource && !l.removedFromDataCalling), [allLeads]);
 
   return (
     <AppContext.Provider
@@ -2990,6 +3001,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         deactivateTeamMember,
         deleteLead,
         removeLeadsLocally,
+        removeFromDataCallingLocally,
         editLead,
         deleteProperty,
         editProperty,

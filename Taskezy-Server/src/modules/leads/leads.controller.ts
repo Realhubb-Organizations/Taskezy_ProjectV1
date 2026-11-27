@@ -175,8 +175,9 @@ export async function fixSheetLeadTimestampsHandler(_req: Request, res: Response
 }
 
 export async function deleteLeadHandler(req: Request, res: Response): Promise<void> {
-  await leadsService.deleteLead({ userId: req.user!.sub, name: req.user!.name }, req.params.id);
-  sendOk(res, { deleted: true });
+  // ?from=data-calling: the Data Calling page's Delete (a lead also in Leads stays there).
+  const outcome = await leadsService.deleteLead({ userId: req.user!.sub, name: req.user!.name }, req.params.id, req.query.from === "data-calling");
+  sendOk(res, { deleted: outcome === "deleted", removedFromDataCalling: outcome === "removedFromDataCalling" });
 }
 
 // Queued (see jobs/queue.ts's bulk-delete-leads) — same enqueue/poll shape
@@ -185,7 +186,8 @@ export async function deleteLeadHandler(req: Request, res: Response): Promise<vo
 export async function bulkDeleteLeadsHandler(req: Request, res: Response): Promise<void> {
   const jobId = await boss.send(BULK_DELETE_LEADS_QUEUE, {
     actor: { userId: req.user!.sub, name: req.user!.name },
-    leadIds: req.body.leadIds
+    leadIds: req.body.leadIds,
+    fromDataCalling: req.body.from === "DATA_CALLING"
   });
   if (!jobId) throw ApiError.internal("Could not queue the delete — try again.");
   sendOk(res, { jobId }, 202);

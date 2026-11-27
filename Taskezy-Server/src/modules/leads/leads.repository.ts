@@ -86,6 +86,8 @@ export interface LeadListRow {
   // reassigned, and reshuffled as a group later. null for every other
   // ingestion path (Meta, sheet import, manual Add Lead).
   sub_source: string | null;
+  /** Hidden from the Data Calling list while kept in Leads (migration 065). */
+  removed_from_data_calling_at: string | null;
   // Which admin ran the bulk upload (migration 036) — null for every
   // other ingestion path, and for leads uploaded before this column
   // existed (no audit trail to recover that retroactively).
@@ -249,7 +251,8 @@ function buildLeadWhereClause(filter: LeadFilterConditions): { whereClause: stri
   }
 
   if (filter.dataCallingOnly) {
-    conditions.push(`l.sub_source IS NOT NULL`);
+    // Removed from Data Calling but kept in Leads (migration 065) — not listed here.
+    conditions.push(`l.sub_source IS NOT NULL AND l.removed_from_data_calling_at IS NULL`);
   }
   if (filter.assignedOnly) {
     conditions.push(`l.assigned_agent_id IS NOT NULL`);
@@ -371,7 +374,7 @@ const LIST_SELECT = `
     l.property_id, p.name AS property_name,
     l.data_calling_property_id, dcp.name AS data_calling_property_name,
     l.assigned_at, l.first_response_at, l.created_at,
-    l.source, l.sub_source, l.call_status, l.call_sub_status, l.call_status_at, l.campaign, l.meta_page_name, l.meta_form_id, l.meta_ad_id,
+    l.source, l.sub_source, l.removed_from_data_calling_at, l.call_status, l.call_sub_status, l.call_status_at, l.campaign, l.meta_page_name, l.meta_form_id, l.meta_ad_id,
     (SELECT count(DISTINCT (ca.created_at AT TIME ZONE '${BUSINESS_TIMEZONE}')::date)
      FROM call_attempts ca WHERE ca.lead_id = l.id AND ca.channel = 'CALL') AS dead_lead_call_days,
     ${REACHED_FOLLOWUP_OR_SITE_VISIT_SQL("l")} AS reached_followup_or_site_visit,
@@ -992,6 +995,8 @@ export async function updateCallStatus(
          call_status_at = CASE WHEN call_status IS DISTINCT FROM $1 OR call_sub_status IS DISTINCT FROM $5
                                THEN now() ELSE call_status_at END,
          source = CASE WHEN $6::boolean THEN 'Bulk Upload' ELSE COALESCE($2, source) END,
+         -- Back in Data Calling (no longer qualified): listed there again (migration 065).
+         removed_from_data_calling_at = CASE WHEN $6::boolean THEN NULL ELSE removed_from_data_calling_at END,
          status_code = COALESCE($3, status_code),
          assigned_at = CASE WHEN $2::text IS NOT NULL THEN now() ELSE assigned_at END,
          first_response_at = CASE WHEN $2::text IS NOT NULL THEN NULL ELSE first_response_at END,
@@ -1524,6 +1529,43 @@ export async function detachPreviousAgent(client: PoolClient, userId: string, us
  * false if the lead no longer exists. Errors are rethrown unchanged so the
  * service's FK-violation mapping still applies.
  */
+/**
+ * Of `ids`, the Data Calling leads that are also in Leads (promoted when
+ * Connected + Qualified: no longer "Bulk Upload") — Delete on the Data Calling
+ * page only hides these from that list (migration 065).
+ */
+export async function findDataCallingLeadsInLeads(ids: string[]): Promise<string[]> {
+  if (ids.length === 0) return [];
+  const { rows } = await query<{ id: string }>(
+    `SELECT id FROM leads WHERE id = ANY($1::uuid[]) AND sub_source IS NOT NULL AND source IS DISTINCT FROM 'Bulk Upload'`,
+    [ids]
+  );
+  return rows.map(r => r.id);
+}
+
+/** Hides these leads from the Data Calling list (kept in Leads), with a history line each. Returns the ids hidden. */
+export async function removeFromDataCalling(ids: string[], actor: { userId: string; name: string }): Promise<string[]> {
+  if (ids.length === 0) return [];
+  return withTransaction(async (client) => {
+    const { rows } = await client.query<{ id: string }>(
+      `UPDATE leads SET removed_from_data_calling_at = now()
+       WHERE id = ANY($1::uuid[]) AND sub_source IS NOT NULL AND source IS DISTINCT FROM 'Bulk Upload'
+         AND removed_from_data_calling_at IS NULL
+       RETURNING id`,
+      [ids]
+    );
+    const hidden = rows.map(r => r.id);
+    if (hidden.length > 0) {
+      await client.query(
+        `INSERT INTO lead_logs (lead_id, user_id, user_name_snapshot, message)
+         SELECT id, $2, $3, 'Removed from Data Calling — still in Leads' FROM unnest($1::uuid[]) AS id`,
+        [hidden, actor.userId, actor.name]
+      );
+    }
+    return hidden;
+  });
+}
+
 export async function archiveAndRemove(id: string, actor: { userId: string; name: string }): Promise<boolean> {
   return withTransaction(async (client) => {
     const { rows: leadRows } = await client.query<{ lead: unknown }>(
