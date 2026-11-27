@@ -11,6 +11,7 @@ import { leadIdsLink } from "../notifications/notificationLinks";
 import { findPropertyIdBySheetSource, findPropertyIdByGoogleCampaignName, findById as findPropertyById, getAssignmentPool } from "../properties/properties.repository";
 import { pickAgentForProperty, createPropertyAgentPicker } from "../properties/properties.assignment";
 import { broadcastLeadChanged, broadcastManyLeadsChanged } from "./leads.realtime";
+import { publishToUser } from "../../utils/sseHub";
 import { HANDOVER_NOTE_PREFIX } from "./leads.handover";
 import { normalizeTypedLeadPhone } from "../../utils/validation";
 import { logger } from "../../utils/logger";
@@ -1352,6 +1353,11 @@ export async function assertBulkPropertyChangeAllowed(caller: AccessTokenPayload
 // `note` is required from the API (reassignLeadSchema); automatic internal
 // reassignments (e.g. reassignUnassignedSheetLeads) pass none and only log the event.
 /** Activity line for the previous agent's open follow-ups closed on reassignment (repo.reassign). */
+/** After a reassignment commits: close the call-feedback popup on each affected agent's app. */
+function closeFeedbackPopups(closed: repo.ClosedCallAttempt[]): void {
+  for (const a of closed) publishToUser(a.callerUserId, "call-attempt-resolved", { id: a.id });
+}
+
 const closedFollowupsLog = (n: number) =>
   `${n} open follow-up${n === 1 ? "" : "s"} from the previous agent closed on reassignment.`;
 
@@ -1378,12 +1384,15 @@ export async function reassignLead(caller: AccessTokenPayload, leadId: string, n
   }
   const newAgentName = `${newAgent.first_name}${newAgent.last_name ? " " + newAgent.last_name : ""}`;
 
+  let closedAttempts: repo.ClosedCallAttempt[] = [];
   try {
     await withTransaction(async (client) => {
-      const closedFollowups = await repo.reassign(client, leadId, previousAgentId, newAgentId);
+      const result = await repo.reassign(client, leadId, previousAgentId, newAgentId);
+      closedAttempts = result.closedAttempts;
       if (note) await repo.setNote(client, leadId, note, caller.sub);
       await repo.insertLeadLog(client, leadId, caller.sub, caller.name, note ? `Reassigned to ${newAgentName}. Note: ${note}` : `Reassigned to ${newAgentName}`);
-      if (closedFollowups > 0) await repo.insertLeadLog(client, leadId, caller.sub, caller.name, closedFollowupsLog(closedFollowups));
+      if (result.closedFollowups > 0) await repo.insertLeadLog(client, leadId, caller.sub, caller.name, closedFollowupsLog(result.closedFollowups));
+      for (const a of closedAttempts) await repo.insertLeadLog(client, leadId, caller.sub, caller.name, repo.closedCallFeedbackLog(a.callerName));
     });
   } catch (err) {
     // newAgentId references users(id) — a well-formed but nonexistent UUID
@@ -1393,6 +1402,7 @@ export async function reassignLead(caller: AccessTokenPayload, leadId: string, n
     }
     throw err;
   }
+  closeFeedbackPopups(closedAttempts);
 
   // A lead still on the internal UNASSIGNED sentinel (no real owner yet)
   // graduates to NEW_LEAD now that it has one — the one place this must
@@ -1469,6 +1479,7 @@ export async function bulkReassignLeads(
   for (let i = 0; i < ids.length; i += BULK_REASSIGN_CHUNK_SIZE) {
     const chunk = ids.slice(i, i + BULK_REASSIGN_CHUNK_SIZE);
     const result = await repo.reassignLeadsChunk(chunk, newAgentId, newAgentName, scopedToAgentIds, note, { userId: caller.sub, name: caller.name });
+    closeFeedbackPopups(result.closedAttempts);
     movedIds.push(...result.moved);
     skipped += result.skipped.length;
     result.notFound.forEach((id) => failed.push({ id, reason: "Lead not found" }));
@@ -1524,7 +1535,7 @@ export async function handOverLeadsInTransaction(
   const received = new Map<string, number>();
   for (let i = 0; i < leadIds.length; i++) {
     const target = targets[i % targets.length];
-    const closedFollowups = await repo.reassign(client, leadIds[i], fromUser.id, target.id);
+    const { closedFollowups } = await repo.reassign(client, leadIds[i], fromUser.id, target.id);
     // The lead's visible note names only its own new owner — never the other
     // agents who got the rest of the split (see leads.handover.ts).
     await repo.setNote(client, leadIds[i], `Reassigned from ${fromUser.name} to ${target.name}.`, caller.sub);
