@@ -1714,9 +1714,23 @@ export async function fixSheetLeadTimestamps(): Promise<{ fixed: number; already
   return { fixed, alreadyCorrect, total: leads.length };
 }
 
-export async function deleteLead(actor: { userId: string; name: string }, leadId: string): Promise<void> {
+/**
+ * Deletes a lead. From the Data Calling page (`fromDataCalling`), a lead that
+ * is also in Leads (qualified) is only removed from Data Calling and stays in
+ * Leads (migration 065). Returns which of the two happened.
+ */
+export async function deleteLead(
+  actor: { userId: string; name: string },
+  leadId: string,
+  fromDataCalling = false
+): Promise<"deleted" | "removedFromDataCalling"> {
   const existing = await repo.findById(leadId);
   if (!existing) throw ApiError.notFound("Lead not found");
+  if (fromDataCalling && (await repo.findDataCallingLeadsInLeads([leadId])).length > 0) {
+    await repo.removeFromDataCalling([leadId], actor);
+    broadcastLeadChanged(leadId);
+    return "removedFromDataCalling";
+  }
 
   let removed: boolean;
   try {
@@ -1732,6 +1746,7 @@ export async function deleteLead(actor: { userId: string; name: string }, leadId
   // Lead was removed by someone else between the findById check and the delete.
   if (!removed) throw ApiError.notFound("Lead not found");
   broadcastLeadChanged(leadId);
+  return "deleted";
 }
 
 export interface BulkDeleteLeadsResult {
@@ -1739,6 +1754,8 @@ export interface BulkDeleteLeadsResult {
   deleted: number;
   notFound: number;
   blocked: { id: string; reason: string }[];
+  /** From the Data Calling page: qualified leads only removed from Data Calling, kept in Leads. */
+  removedFromDataCalling: string[];
 }
 
 // Chunked, same philosophy as bulkImportLeads — one transaction per 1000
@@ -1747,8 +1764,23 @@ export interface BulkDeleteLeadsResult {
 // without per-row transactions.
 const BULK_DELETE_CHUNK_SIZE = 1000;
 
-export async function bulkDeleteLeads(actor: { userId: string; name: string }, leadIds: string[]): Promise<BulkDeleteLeadsResult> {
-  const ids = Array.from(new Set(leadIds));
+export async function bulkDeleteLeads(
+  actor: { userId: string; name: string },
+  leadIds: string[],
+  fromDataCalling = false
+): Promise<BulkDeleteLeadsResult> {
+  let ids = Array.from(new Set(leadIds));
+  const requested = ids.length;
+  // From the Data Calling page, leads that are also in Leads stay there —
+  // they're only removed from Data Calling (migration 065).
+  let removedFromDataCalling: string[] = [];
+  if (fromDataCalling) {
+    const inLeads = await repo.findDataCallingLeadsInLeads(ids);
+    removedFromDataCalling = await repo.removeFromDataCalling(inLeads, actor);
+    removedFromDataCalling.forEach(id => broadcastLeadChanged(id));
+    const keep = new Set(inLeads);
+    ids = ids.filter(id => !keep.has(id));
+  }
   let deleted = 0;
   let notFound = 0;
   const blocked: { id: string; reason: string }[] = [];
@@ -1762,7 +1794,7 @@ export async function bulkDeleteLeads(actor: { userId: string; name: string }, l
     result.deleted.forEach(id => broadcastLeadChanged(id));
   }
 
-  return { requested: ids.length, deleted, notFound, blocked };
+  return { requested, deleted, notFound, blocked, removedFromDataCalling };
 }
 
 // KYC verification is ADMIN/FINANCE-only — enforced by requireRole at the

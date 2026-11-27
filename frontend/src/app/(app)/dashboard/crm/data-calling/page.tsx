@@ -159,7 +159,7 @@ export default function DataCallingPage() {
   // needs no other changes.
   const {
     dataCallingLeads: leads, properties, users, currentUser, activeRole, updateLeadStatus, reassignLead,
-    bulkImportLeads, removeLeadsLocally, isDataLoading, recordCallEnded, recordWhatsAppOpened
+    bulkImportLeads, removeLeadsLocally, removeFromDataCallingLocally, isDataLoading, recordCallEnded, recordWhatsAppOpened
   } = useApp();
   const { toast, confirm, prompt: promptDialog } = useDialog();
   // Bulk select + Assign/Reshuffle are an admin-only workflow — a sales
@@ -861,19 +861,31 @@ export default function DataCallingPage() {
     setDeleteError("");
     const ids = deleteTarget.ids;
     try {
+      // A lead that's also in Leads (qualified) is only removed from Data
+      // Calling here — it stays in Leads (the server decides, migration 065).
       let removedIds = ids;
+      let keptInLeads: string[] = [];
       if (ids.length === 1) {
-        await apiDeleteLead(ids[0]);
-        toast(`Deleted lead${deleteTarget.name ? `: ${deleteTarget.name}` : ""}.`, "success");
+        const res = await apiDeleteLead(ids[0], { fromDataCalling: true });
+        const name = deleteTarget.name ? `: ${deleteTarget.name}` : "";
+        if (res.removedFromDataCalling) {
+          keptInLeads = ids;
+          toast(`Removed from Data Calling${name}. It's still in Leads.`, "success");
+        } else {
+          toast(`Deleted lead${name}.`, "success");
+        }
       } else {
-        const res = await apiBulkDeleteLeads(ids);
+        const res = await apiBulkDeleteLeads(ids, { fromDataCalling: true });
+        keptInLeads = res.removedFromDataCalling ?? [];
         removedIds = ids.filter(id => !res.blocked.some(b => b.id === id));
-        toast(
-          `Deleted ${res.deleted} lead${res.deleted === 1 ? "" : "s"}.${res.blocked.length > 0 ? ` ${res.blocked.length} skipped because they have invoices.` : ""}`,
-          res.blocked.length > 0 ? "warning" : "success"
-        );
+        const parts = [`Deleted ${res.deleted} lead${res.deleted === 1 ? "" : "s"}.`];
+        if (keptInLeads.length > 0) parts.push(`${keptInLeads.length} removed from Data Calling only (still in Leads).`);
+        if (res.blocked.length > 0) parts.push(`${res.blocked.length} skipped because they have invoices.`);
+        toast(parts.join(" "), res.blocked.length > 0 ? "warning" : "success");
       }
-      removeLeadsLocally(removedIds);
+      const kept = new Set(keptInLeads);
+      removeLeadsLocally(removedIds.filter(id => !kept.has(id)));
+      removeFromDataCallingLocally(keptInLeads);
       setSelectedIds(prev => {
         const next = new Set(prev);
         removedIds.forEach(id => next.delete(id));
@@ -2478,6 +2490,7 @@ export default function DataCallingPage() {
                     ? `Permanently delete all ${deleteTarget.ids.length} leads currently shown? This cannot be undone.`
                     : `Permanently delete ${deleteTarget.ids.length} selected leads? This cannot be undone.`}
               </p>
+              <p className="text-[11px] text-slate-400">Qualified leads that are already in Leads are only removed from Data Calling — they stay in Leads.</p>
               {deleteTarget.ids.length > 1 && (
                 <p className="text-[11px] text-slate-400">Leads with invoices cannot be deleted and will be skipped.</p>
               )}

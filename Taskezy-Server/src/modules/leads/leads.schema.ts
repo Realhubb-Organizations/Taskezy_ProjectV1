@@ -220,7 +220,9 @@ export const updateLeadNoteSchema = z.object({
 });
 
 export const bulkDeleteLeadsSchema = z.object({
-  leadIds: z.array(z.string().uuid()).min(1).max(50000)
+  leadIds: z.array(z.string().uuid()).min(1).max(50000),
+  // The Data Calling page's Delete: leads also in Leads are only removed from Data Calling.
+  from: z.enum(["DATA_CALLING"]).optional()
 });
 
 export const bulkDeleteJobIdParamSchema = z.object({
