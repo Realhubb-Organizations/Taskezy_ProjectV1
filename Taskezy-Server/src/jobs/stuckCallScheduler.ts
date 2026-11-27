@@ -45,13 +45,14 @@ async function notifyStuckCalls(): Promise<void> {
     `UPDATE call_attempts ca
      SET stuck_notified_at = now()
      FROM users u
-     LEFT JOIN leads l ON l.id = ca.lead_id
      WHERE u.id = ca.caller_user_id
        AND ca.status = 'PENDING_FEEDBACK'
        AND NOT ${isHeldSql("ca")} -- held on its lead: the agent isn't stuck any more
        AND ca.stuck_notified_at IS NULL
        AND ca.created_at <= now() - interval '${STUCK_THRESHOLD_MINUTES} minutes'
-     RETURNING ca.id, ca.lead_id, l.name AS lead_name, ca.caller_user_id,
+     -- The lead's name by subquery: in an UPDATE … FROM, a JOIN can't refer
+     -- to the table being updated (ca) — that made every poll fail.
+     RETURNING ca.id, ca.lead_id, (SELECT l.name FROM leads l WHERE l.id = ca.lead_id) AS lead_name, ca.caller_user_id,
                u.first_name || COALESCE(' ' || u.last_name, '') AS caller_name,
                u.manager_id, ca.channel`
   );

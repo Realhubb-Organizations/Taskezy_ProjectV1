@@ -1,5 +1,6 @@
 import { Capacitor } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
+import { rememberCallLead } from "./callLeadCache";
 
 // Single shared "place a call to this lead" entry point — every tel: site
 // in the app should go through this instead of its own inline
@@ -83,6 +84,8 @@ export function triggerLeadCall(
   opts.toast?.(`Dialing ${lead.name}...`, "info");
 
   if (!opts.isAdmin) {
+    // The feedback popup after the call opens from this copy (callLeadCache.ts).
+    rememberCallLead(lead);
     try {
       localStorage.setItem(PENDING_CALL_KEY, JSON.stringify({ leadId: lead.id, startedAt }));
     } catch {
@@ -161,6 +164,8 @@ export function triggerLeadWhatsApp(
   lead: { id: string; phone: string; name: string; property?: string | null },
   opts: { isAdmin: boolean; senderName?: string | null; onReturn: (leadId: string) => void }
 ): void {
+  // The feedback popup after WhatsApp opens from this copy (callLeadCache.ts).
+  if (!opts.isAdmin) rememberCallLead(lead);
   const formattedPhone = whatsAppNumber(lead.phone);
   const msg = encodeURIComponent(leadWhatsAppMessage(lead.name, opts.senderName, lead.property));
   window.open(`https://wa.me/${formattedPhone}?text=${msg}`, "_blank");

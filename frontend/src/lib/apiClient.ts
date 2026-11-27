@@ -1567,6 +1567,14 @@ export function apiHoldCallAttempt(id: string): Promise<ApiCallAttemptRow> {
   return request<ApiCallAttemptRow>(`/api/v1/call-attempts/${id}/hold`, { method: "POST" });
 }
 
+/** The feedback popup couldn't load its lead: tell the server why (logged only). Never throws. */
+export function apiReportCallLeadLoadError(
+  attemptId: string,
+  details: { stage: string; attempt?: number; status?: number; message?: string; usedSavedCopy?: boolean }
+): void {
+  request(`/api/v1/call-attempts/${attemptId}/client-error`, { method: "POST", body: JSON.stringify(details) }).catch(() => { /* best effort */ });
+}
+
 export interface HeldCallFeedback {
   id: string;
   lead_id: string;
