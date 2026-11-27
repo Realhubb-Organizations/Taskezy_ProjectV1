@@ -36,8 +36,9 @@ export function useCallStatusUpdate() {
 
   // Every Call Status change opens this popup instead of committing straight
   // from the row: a note is always required, Sub-status (Qualified /
-  // Unqualified) is optional and only shown for Connected, and Not
-  // Reachable also needs the next call's date (scheduled via
+  // Unqualified) is optional and only shown for Connected, Not Reachable
+  // also needs the next call's date, and Connected (not Unqualified) may
+  // book one — optional (scheduled via
   // addFollowupCall, same as Follow-up/Call Back elsewhere). Picking a
   // Sub-status from the table opens it too, with Connected preselected.
   const [callUpdate, setCallUpdate] = useState<{ leadId: string; leadName: string; phone?: string; assignedAgent?: string; callStatus: CallStatusValue; subStatus: CallSubStatus | null } | null>(null);
@@ -66,7 +67,11 @@ export function useCallStatusUpdate() {
     if (!callUpdate || callUpdateSaving) return;
     const note = callUpdateNote.trim();
     if (!note) return setPendingActionError("Please write a note.");
-    const needsNextCall = callUpdate.callStatus === "Not Reachable";
+    // Not Reachable must book the next call; Connected may (only when a date
+    // is picked) — not Connected + Unqualified, which is out of the follow-up
+    // workflow (never a task, tasks.routes.ts).
+    const nextCallOptional = callUpdate.callStatus === "Connected" && callUpdate.subStatus !== "Unqualified";
+    const needsNextCall = callUpdate.callStatus === "Not Reachable" || (nextCallOptional && !!rnrDate);
     if (needsNextCall && !rnrDate) return setPendingActionError("Please select the next calling date.");
     let scheduledAtIso: string | null = null;
     if (needsNextCall) {
@@ -178,10 +183,10 @@ export function useCallStatusUpdate() {
               </div>
             )}
 
-            {callUpdate.callStatus === "Not Reachable" && (
+            {(callUpdate.callStatus === "Not Reachable" || (callUpdate.callStatus === "Connected" && callUpdate.subStatus !== "Unqualified")) && (
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="block text-[11px] font-bold text-slate-700">Next Call Date</label>
+                  <label className="block text-[11px] font-bold text-slate-700">Next Call Date{callUpdate.callStatus === "Connected" ? " (optional)" : ""}</label>
                   <DatePicker
                     value={rnrDate}
                     minDate={todayIso()}

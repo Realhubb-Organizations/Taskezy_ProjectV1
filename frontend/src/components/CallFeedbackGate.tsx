@@ -300,6 +300,10 @@ export default function CallFeedbackGate() {
   const nextCallApplicable = !isWhatsApp && (isDataCallingLead
     ? callStatus === "Not Reachable" && callStatusChanged
     : NEEDS_NEXT_CALL.includes(status));
+  // Data Calling, Connected: a next call can be booked, but it's optional —
+  // only booked when a date is picked. Not for Connected + Unqualified: those
+  // leads are out of the follow-up workflow (never a task, tasks.routes.ts).
+  const nextCallOptional = !isWhatsApp && isDataCallingLead && callStatus === "Connected" && nextCallSubStatus !== "Unqualified";
   const isSiteVisitReschedule = !isDataCallingLead && status === "Site Visit Scheduled" && hadSiteVisit;
   const somethingChanged = statusChanged || callStatusChanged;
 
@@ -307,7 +311,7 @@ export default function CallFeedbackGate() {
     e.preventDefault();
     if (submitting) return;
     let scheduledAt: Date | null = null;
-    if (nextCallApplicable) {
+    if (nextCallApplicable || (nextCallOptional && nextDate)) {
       if (!nextDate || !nextTime) return setError("Pick the date and time of the next call.");
       scheduledAt = new Date(`${nextDate}T${nextTime}`);
       if (isNaN(scheduledAt.getTime()) || scheduledAt.getTime() < Date.now()) return setError("The next call must be in the future.");
@@ -501,10 +505,10 @@ export default function CallFeedbackGate() {
                 </select>
               </div>
             )}
-            {nextCallApplicable && (
+            {(nextCallApplicable || nextCallOptional) && (
               <div className="grid grid-cols-2 gap-2">
                 <div className="space-y-1">
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase">Next call date</label>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase">Next call date{nextCallOptional ? " (optional)" : ""}</label>
                   <input type="date" min={todayIso()} value={nextDate} onChange={(e) => setNextDate(e.target.value)} className={inputClass} />
                 </div>
                 <div className="space-y-1">
