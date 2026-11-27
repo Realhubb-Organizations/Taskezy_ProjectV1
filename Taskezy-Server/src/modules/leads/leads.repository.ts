@@ -1325,9 +1325,53 @@ export async function getAssignedAgentId(id: string): Promise<string | undefined
   return rows[0]?.assigned_agent_id;
 }
 
+/** A call whose feedback was still owed when its lead went to another agent. */
+export interface ClosedCallAttempt {
+  id: string;
+  callerUserId: string;
+  callerName: string;
+  leadId: string;
+}
+
+/** History line for a call closed by closeCallFeedbackOnReassign. */
+export const closedCallFeedbackLog = (callerName: string) =>
+  `${callerName}'s call feedback is no longer needed — the lead was reassigned.`;
+
+/**
+ * When leads go to another agent, call feedback the previous owner still owes
+ * on them (an open or held feedback form) is closed: the lead isn't theirs any
+ * more, so they couldn't update it anyway, and the popup would otherwise block
+ * their app. Anyone else's calls (a manager's, the new owner's) are left alone.
+ * Runs inside the reassignment's transaction BEFORE the leads change owner
+ * (it reads the current owner); the caller tells each agent's app
+ * (call-attempt-resolved) after it commits.
+ */
+async function closeCallFeedbackOnReassign(client: PoolClient, leadIds: string[], newAgentId: string): Promise<ClosedCallAttempt[]> {
+  const { rows } = await client.query<{ id: string; caller_user_id: string; caller_name: string; lead_id: string }>(
+    `UPDATE call_attempts ca SET status = 'COMPLETED', outcome = 'Not needed — lead reassigned'
+     FROM leads l, users u
+     WHERE l.id = ca.lead_id AND u.id = ca.caller_user_id
+       AND ca.lead_id = ANY($1::uuid[]) AND ca.status <> 'COMPLETED'
+       AND ca.caller_user_id = l.assigned_agent_id AND l.assigned_agent_id <> $2
+     RETURNING ca.id, ca.caller_user_id, ca.lead_id, u.first_name || COALESCE(' ' || u.last_name, '') AS caller_name`,
+    [leadIds, newAgentId]
+  );
+  return rows.map(r => ({ id: r.id, callerUserId: r.caller_user_id, callerName: r.caller_name, leadId: r.lead_id }));
+}
+
 /** Must run inside the same transaction as insertLeadLog. Restarts the SLA clock, matching the frontend's reassignLead. */
-/** Returns how many of the previous agent's open follow-ups (missed + upcoming) it closed. */
-export async function reassign(client: PoolClient, leadId: string, previousAgentId: string, newAgentId: string): Promise<number> {
+/**
+ * Returns how many of the previous agent's open follow-ups (missed +
+ * upcoming) it closed, and the call feedback it closed (see
+ * closeCallFeedbackOnReassign).
+ */
+export async function reassign(
+  client: PoolClient,
+  leadId: string,
+  previousAgentId: string,
+  newAgentId: string
+): Promise<{ closedFollowups: number; closedAttempts: ClosedCallAttempt[] }> {
+  const closedAttempts = await closeCallFeedbackOnReassign(client, [leadId], newAgentId);
   await client.query(
     // previous_agent_name keeps the previous owner's name on the lead, so
     // "Reassigned From" survives that user being deleted (migration 032).
@@ -1347,7 +1391,7 @@ export async function reassign(client: PoolClient, leadId: string, previousAgent
     `UPDATE followup_calls SET status = 'COMPLETED' WHERE lead_id = $1 AND status <> 'COMPLETED'`,
     [leadId]
   );
-  return closed.rowCount ?? 0;
+  return { closedFollowups: closed.rowCount ?? 0, closedAttempts };
 }
 
 export interface ReassignLeadsChunkResult {
@@ -1355,6 +1399,8 @@ export interface ReassignLeadsChunkResult {
   skipped: string[]; // already assigned to the new agent
   notFound: string[];
   outOfScope: string[]; // exists, but outside a Manager caller's own team — a distinct, named reason, unlike setLeadPropertyChunk's "indistinguishable from not found"
+  /** Call feedback closed because its lead was reassigned (see closeCallFeedbackOnReassign). */
+  closedAttempts: ClosedCallAttempt[];
 }
 
 /**
@@ -1372,7 +1418,7 @@ export async function reassignLeadsChunk(
   note: string | undefined,
   actor: { userId: string; name: string }
 ): Promise<ReassignLeadsChunkResult> {
-  if (ids.length === 0) return { moved: [], skipped: [], notFound: [], outOfScope: [] };
+  if (ids.length === 0) return { moved: [], skipped: [], notFound: [], outOfScope: [], closedAttempts: [] };
 
   return withTransaction(async (client) => {
     const { rows: existingRows } = await client.query<{ id: string; assigned_agent_id: string }>(
@@ -1390,7 +1436,7 @@ export async function reassignLeadsChunk(
       if (row.assigned_agent_id === newAgentId) { skipped.push(row.id); continue; }
       candidateIds.push(row.id);
     }
-    if (candidateIds.length === 0) return { moved: [], skipped, notFound, outOfScope };
+    if (candidateIds.length === 0) return { moved: [], skipped, notFound, outOfScope, closedAttempts: [] };
 
     // Open follow-ups each candidate will close, counted before the UPDATE
     // below changes them — same count the single-lead path's closedFollowupsLog uses.
@@ -1399,6 +1445,8 @@ export async function reassignLeadsChunk(
       [candidateIds]
     );
     const closedCountByLead = new Map(closedCountRows.map(r => [r.lead_id, Number(r.closed)]));
+
+    const closedAttempts = await closeCallFeedbackOnReassign(client, candidateIds, newAgentId);
 
     // All SET expressions below see each row's pre-update values (standard
     // Postgres UPDATE semantics), so previous_agent_id/previous_agent_name
@@ -1442,12 +1490,18 @@ export async function reassignLeadsChunk(
         logMessages.push(`${closed} open follow-up${closed === 1 ? "" : "s"} from the previous agent closed on reassignment.`);
       }
     }
+    for (const a of closedAttempts) {
+      logLeadIds.push(a.leadId);
+      logUserIds.push(actor.userId);
+      logUserNames.push(actor.name);
+      logMessages.push(closedCallFeedbackLog(a.callerName));
+    }
     await client.query(
       `INSERT INTO lead_logs (lead_id, user_id, user_name_snapshot, message) SELECT * FROM unnest($1::uuid[], $2::uuid[], $3::text[], $4::text[])`,
       [logLeadIds, logUserIds, logUserNames, logMessages]
     );
 
-    return { moved: candidateIds, skipped, notFound, outOfScope };
+    return { moved: candidateIds, skipped, notFound, outOfScope, closedAttempts };
   });
 }
 

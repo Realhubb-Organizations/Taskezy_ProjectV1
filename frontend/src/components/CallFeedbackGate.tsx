@@ -6,7 +6,7 @@ import { Capacitor } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
 import { PhoneCall, MessageCircle, Check, X } from "lucide-react";
 import { useApp, LeadStatus, Lead, mapApiLeadToFrontendLead } from "@/context/AppContext";
-import { apiUpdateLeadStatus, apiUpdateCallStatus, apiUpdateLeadNote, apiGetLead, apiGetSiteVisitHistory } from "@/lib/apiClient";
+import { apiUpdateLeadStatus, apiUpdateCallStatus, apiUpdateLeadNote, apiGetLead, apiGetSiteVisitHistory, ApiRequestError } from "@/lib/apiClient";
 import { nextStatusOptions, frontendStatusToDbCode, NO_GOING_BACK_STATUSES } from "@/lib/leadStatusMapping";
 import { CALL_SUB_STATUS_OPTIONS, CallSubStatus, callSubStatusOf } from "@/lib/callSubStatus";
 import { SCHEDULER_REQUIRED_STATUSES } from "@/lib/leadScheduler";
@@ -69,7 +69,9 @@ export default function CallFeedbackGate() {
   // needs `lead`, only a note — but without this the status dropdown would
   // just silently render empty with no explanation, which looks exactly
   // like the stuck state this whole file exists to prevent.
-  const [leadLoadFailed, setLeadLoadFailed] = useState(false);
+  // "moved": the lead isn't this agent's any more (given to someone else
+  // after the call) — the server won't show it to them. "error": anything else.
+  const [leadLoadFailed, setLeadLoadFailed] = useState<false | "moved" | "error">(false);
   useEffect(() => {
     const leadId = pendingCallAttempt?.lead_id;
     if (!leadId) { setLead(null); return; }
@@ -77,7 +79,7 @@ export default function CallFeedbackGate() {
     setLeadLoadFailed(false);
     apiGetLead(leadId)
       .then(row => { if (!cancelled) setLead(mapApiLeadToFrontendLead(row)); })
-      .catch(() => { if (!cancelled) { setLead(null); setLeadLoadFailed(true); } });
+      .catch(err => { if (!cancelled) { setLead(null); setLeadLoadFailed(err instanceof ApiRequestError && err.status === 404 ? "moved" : "error"); } });
     return () => { cancelled = true; };
   }, [pendingCallAttempt?.lead_id]);
   const isDataCallingLead = lead?.source === "Bulk Upload";
@@ -399,7 +401,9 @@ export default function CallFeedbackGate() {
           <form onSubmit={finish} className="space-y-3">
             {leadLoadFailed && (
               <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2">
-                Could not load this lead&apos;s details. You can still add a note below and continue — status/scheduling can be updated later from the lead itself.
+                {leadLoadFailed === "moved"
+                  ? "This lead has been given to another agent since your call, so you can't change its status. Add a note about your call and press Save & Continue."
+                  : <>Could not load this lead&apos;s details. You can still add a note below and continue — status/scheduling can be updated later from the lead itself.</>}
               </p>
             )}
             {isDataCallingLead ? (
@@ -435,7 +439,8 @@ export default function CallFeedbackGate() {
                 </div>
               </div>
             )}
-            {!isDataCallingLead && (
+            {/* Hidden until the lead loads — with no lead there's nothing to pick. */}
+            {!isDataCallingLead && lead && (
               <div className="space-y-1">
                 <label className="block text-[10px] font-bold text-slate-500 uppercase">Lead status</label>
                 <select value={status} onChange={(e) => { setStatus(e.target.value as LeadStatus); setError(""); }} className={inputClass}>
