@@ -298,6 +298,34 @@ async function holdOnLead(attemptId: string, leadId: string, actorId: string, ac
   });
 }
 
+// The feedback popup couldn't load its lead from the phone: the app reports
+// why (status, message, which try), so the cause shows in the server log
+// instead of being guessed. Log only — nothing changes.
+const clientErrorSchema = z.object({
+  stage: z.string().max(40),
+  attempt: z.number().int().min(0).max(20).optional(),
+  status: z.number().int().min(0).max(999).optional(),
+  message: z.string().max(300).optional(),
+  usedSavedCopy: z.boolean().optional()
+});
+callAttemptsRouter.post(
+  "/:id/client-error",
+  validate({ params: idParamSchema, body: clientErrorSchema }),
+  asyncHandler(async (req, res) => {
+    const { rows: found } = await pool.query<{ caller_user_id: string; lead_id: string }>(
+      `SELECT caller_user_id, lead_id FROM call_attempts WHERE id = $1`,
+      [req.params.id]
+    );
+    if (found.length === 0) throw ApiError.notFound("Call attempt not found");
+    if (found[0].caller_user_id !== req.user!.sub) throw ApiError.forbidden("You can only do this for your own call.");
+    logger.warn(
+      { attemptId: req.params.id, leadId: found[0].lead_id, userId: req.user!.sub, userName: req.user!.name, ...req.body },
+      "Call feedback popup: lead didn't load on the phone"
+    );
+    sendOk(res, { logged: true });
+  })
+);
+
 // The agent's own feedback screen stopped responding (CallFeedbackGate's
 // dead-click check): free their app and hold the feedback on the lead.
 callAttemptsRouter.post(

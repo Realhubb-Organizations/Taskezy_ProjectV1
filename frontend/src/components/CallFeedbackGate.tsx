@@ -6,7 +6,8 @@ import { Capacitor } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
 import { PhoneCall, MessageCircle, Check, X } from "lucide-react";
 import { useApp, LeadStatus, Lead, mapApiLeadToFrontendLead } from "@/context/AppContext";
-import { apiUpdateLeadStatus, apiUpdateCallStatus, apiUpdateLeadNote, apiGetLead, apiGetSiteVisitHistory, ApiRequestError } from "@/lib/apiClient";
+import { apiUpdateLeadStatus, apiUpdateCallStatus, apiUpdateLeadNote, apiGetLead, apiGetSiteVisitHistory, apiReportCallLeadLoadError, ApiRequestError } from "@/lib/apiClient";
+import { readCallLead } from "@/lib/callLeadCache";
 import { nextStatusOptions, frontendStatusToDbCode, NO_GOING_BACK_STATUSES } from "@/lib/leadStatusMapping";
 import { CALL_SUB_STATUS_OPTIONS, CallSubStatus, callSubStatusOf } from "@/lib/callSubStatus";
 import { SCHEDULER_REQUIRED_STATUSES } from "@/lib/leadScheduler";
@@ -72,16 +73,68 @@ export default function CallFeedbackGate() {
   // "moved": the lead isn't this agent's any more (given to someone else
   // after the call) — the server won't show it to them. "error": anything else.
   const [leadLoadFailed, setLeadLoadFailed] = useState<false | "moved" | "error">(false);
+  // The popup opens the moment the phone call ends, and loading the lead right
+  // then can fail on the phone. So it opens from the copy saved when the agent
+  // tapped Call / WhatsApp (lib/callLeadCache.ts) and refreshes it in the
+  // background — trying again a few times, and when the phone is back online
+  // or the app back on screen. A lead that isn't theirs any more (404) isn't
+  // retried. Every failure is reported to the server log with its reason.
   useEffect(() => {
     const leadId = pendingCallAttempt?.lead_id;
-    if (!leadId) { setLead(null); return; }
+    const attemptId = pendingCallAttempt?.id;
+    if (!leadId || !attemptId) { setLead(null); return; }
     let cancelled = false;
+    let loaded = false;
+    let moved = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const RETRY_DELAYS_MS = [1500, 4000, 8000];
+
+    const saved = readCallLead(leadId);
+    const savedLead = saved ? ("lead" in saved ? saved.lead : mapApiLeadToFrontendLead(saved.row)) : null;
+    setLead(savedLead);
     setLeadLoadFailed(false);
-    apiGetLead(leadId)
-      .then(row => { if (!cancelled) setLead(mapApiLeadToFrontendLead(row)); })
-      .catch(err => { if (!cancelled) { setLead(null); setLeadLoadFailed(err instanceof ApiRequestError && err.status === 404 ? "moved" : "error"); } });
-    return () => { cancelled = true; };
-  }, [pendingCallAttempt?.lead_id]);
+
+    const report = (attempt: number, err: unknown) => apiReportCallLeadLoadError(attemptId, {
+      stage: "load-lead",
+      attempt,
+      status: err instanceof ApiRequestError ? err.status : undefined,
+      message: err instanceof Error ? `${err.name}: ${err.message}`.slice(0, 300) : String(err).slice(0, 300),
+      usedSavedCopy: !!savedLead
+    });
+
+    const load = (attempt: number) => {
+      if (cancelled || loaded || moved) return;
+      clearTimeout(timer);
+      apiGetLead(leadId)
+        .then(row => { if (cancelled) return; loaded = true; setLead(mapApiLeadToFrontendLead(row)); setLeadLoadFailed(false); })
+        .catch(err => {
+          if (cancelled) return;
+          if (err instanceof ApiRequestError && err.status === 404) {
+            // Not theirs any more — the saved copy mustn't be used either.
+            moved = true;
+            setLead(null);
+            setLeadLoadFailed("moved");
+            return;
+          }
+          // The first failure and the last one, so the log shows the cause
+          // and whether the retries helped.
+          if (attempt === 0 || attempt >= RETRY_DELAYS_MS.length) report(attempt, err);
+          if (attempt < RETRY_DELAYS_MS.length) { timer = setTimeout(() => load(attempt + 1), RETRY_DELAYS_MS[attempt]); return; }
+          // Still failing: with a saved copy the form just keeps using it.
+          if (!savedLead) setLeadLoadFailed("error");
+        });
+    };
+    const retryNow = () => { if (!loaded && !moved && document.visibilityState === "visible") load(RETRY_DELAYS_MS.length); };
+    load(0);
+    window.addEventListener("online", retryNow);
+    document.addEventListener("visibilitychange", retryNow);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      window.removeEventListener("online", retryNow);
+      document.removeEventListener("visibilitychange", retryNow);
+    };
+  }, [pendingCallAttempt?.lead_id, pendingCallAttempt?.id]);
   const isDataCallingLead = lead?.source === "Bulk Upload";
 
   // Regular leads: only what the transition matrix allows from the lead's
